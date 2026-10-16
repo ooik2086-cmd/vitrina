@@ -12,6 +12,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, FastAPI, Header, Request
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -421,9 +422,18 @@ def create_order(body: OrderIn, user: User = Depends(current_user), db: Session 
     return order_out(order)
 
 
+@api.get("/orders")
+def list_orders(role: Literal["buyer", "seller"] = "buyer", user: User = Depends(current_user),
+                db: Session = Depends(get_db)):
+    column = Order.buyer_id if role == "buyer" else Order.seller_id
+    rows = db.scalars(select(Order).where(column == user.id).order_by(Order.id.desc()).limit(100)).all()
+    return {"items": [{**order_out(o), "listing_title": db.get(Listing, o.listing_id).title} for o in rows]}
+
+
 @api.get("/orders/{order_id}")
 def get_order(order_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    return order_out(order_for(db, order_id, user))
+    order = order_for(db, order_id, user)
+    return {**order_out(order), "listing_title": db.get(Listing, order.listing_id).title}
 
 
 @api.post("/orders/{order_id}/pay")
@@ -644,4 +654,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_exception_handler(RequestValidationError, validation_handler)
     app.include_router(api)
     app.include_router(hooks)
+    if settings.cors_origins:
+        app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_methods=["*"],
+                           allow_headers=["Authorization", "Content-Type", "Idempotency-Key"])
     return app

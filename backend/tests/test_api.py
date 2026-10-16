@@ -175,6 +175,15 @@ class OrderFlowTests(ApiTestCase):
                           **{"Idempotency-Key": "new-key"})
         self.assertEqual(other.status_code, 404)  # listing sold out -> no longer published
 
+    def test_order_lists_are_per_party(self):
+        _, order = self.ordered()
+        mine = self.c.get("/api/v1/orders", headers=self.h(self.buyer)).json()["items"]
+        self.assertEqual([o["id"] for o in mine], [order["id"]])
+        self.assertEqual(mine[0]["listing_title"], LISTING["title"])
+        sold = self.c.get("/api/v1/orders?role=seller", headers=self.h(self.seller)).json()["items"]
+        self.assertEqual([o["id"] for o in sold], [order["id"]])
+        self.assertEqual(self.c.get("/api/v1/orders?role=seller", headers=self.h(self.buyer)).json()["items"], [])
+
     def test_cancel_before_payment_restocks(self):
         listing, order = self.ordered()
         self.assertEqual(self.post(f"/orders/{order['id']}/cancel", self.buyer).json()["status"], "CANCELLED")

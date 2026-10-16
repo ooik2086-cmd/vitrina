@@ -24,3 +24,5 @@ class Settings:
     confirm_window: timedelta = timedelta(days=5)
     commission: CommissionRule = field(default_factory=lambda: CommissionRule(version="pilot-2026-10", rate_bp=500))
     min_listing_photos: int = 4
+    # Browser origins allowed to call the API (the Flutter web build during development). Empty = none.
+    cors_origins: list[str] = field(default_factory=lambda: [o for o in os.environ.get("VITRINA_CORS_ORIGINS", "").split(",") if o])
