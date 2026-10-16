@@ -1,0 +1,478 @@
+<title>VITRINA 360° витрина</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=Onest:wght@400;500;600&display=swap">
+<style>
+/* Layout: one phone-width product screen, the shoe on a stage that owns the top half; calm UI, the product is the only loud thing */
+:root {
+  --bg: #F3F2EE;
+  --surface: #FFFFFF;
+  --fg: #18191B;
+  --muted: #66686B;
+  --line: #E1DFD9;
+  --accent: #1F4E5F;
+  --accent-ink: #FFFFFF;
+  --good: #2F7A4A;
+  --warn: #9A6A12;
+  --chip: #ECEAE4;
+  --font-display: "Unbounded", "Arial Black", system-ui, sans-serif;
+  --font-body: "Onest", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111314; --surface: #1A1D1F; --fg: #EDEDEA; --muted: #A3A6A8; --line: #2C3033;
+    --accent: #6FB3C6; --accent-ink: #0D1A1F; --good: #6BC58D; --warn: #E1B35C; --chip: #24282B;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111314; --surface: #1A1D1F; --fg: #EDEDEA; --muted: #A3A6A8; --line: #2C3033;
+  --accent: #6FB3C6; --accent-ink: #0D1A1F; --good: #6BC58D; --warn: #E1B35C; --chip: #24282B;
+  color-scheme: dark;
+}
+html, body { background: var(--bg); color: var(--fg); }
+body { font-family: var(--font-body); font-size: 15px; line-height: 1.45; }
+.app {
+  max-width: 460px; margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 12px 120px;
+  display: grid; gap: 16px;
+}
+.proto-note { font-size: 12px; color: var(--muted); display: flex; gap: 8px; align-items: center; }
+.proto-note b { font-weight: 600; color: var(--warn); letter-spacing: .04em; text-transform: uppercase; font-size: 11px; }
+
+.stage {
+  position: relative; border-radius: 20px; overflow: hidden;
+  aspect-ratio: 4 / 3.4; max-width: 100%;
+  touch-action: pan-y; user-select: none; cursor: grab;
+  transition: background .4s ease;
+}
+.stage:active { cursor: grabbing; }
+.stage[data-style="clean"] { background: radial-gradient(120% 90% at 50% 35%, #FFFFFF 0%, #ECEBE6 100%); }
+.stage[data-style="premium"] { background: radial-gradient(90% 80% at 50% 30%, #3A3F44 0%, #15171A 75%); }
+.stage[data-style="dynamic"] { background: linear-gradient(135deg, #F2C14E 0%, #F08A4B 55%, #D9574A 100%); }
+.stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; transform-origin: 50% 50%; transition: transform .25s ease; }
+.stage.zoomed canvas { transform: scale(2); }
+.stage .hud {
+  position: absolute; left: 12px; right: 12px; bottom: 12px;
+  display: flex; justify-content: space-between; align-items: center; gap: 8px; pointer-events: none;
+}
+.pill {
+  pointer-events: auto; border: 0; border-radius: 999px; padding: 7px 12px;
+  font: 500 12px/1 var(--font-body); background: rgba(255,255,255,.86); color: #18191B;
+  backdrop-filter: blur(6px); display: inline-flex; gap: 6px; align-items: center;
+}
+.stage[data-style="premium"] .pill { background: rgba(0,0,0,.45); color: #F1F1EE; }
+button.pill { cursor: pointer; }
+button:focus-visible, .chip:focus-visible, .seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.loading { position: absolute; top: 12px; left: 12px; }
+.loading[hidden] { display: none; }
+.frame-count { font-variant-numeric: tabular-nums; }
+
+.seg { display: grid; grid-template-columns: repeat(3, 1fr); background: var(--chip); border-radius: 12px; padding: 4px; gap: 4px; }
+.seg button {
+  border: 0; background: transparent; color: var(--muted); border-radius: 9px; padding: 9px 4px;
+  font: 500 13px var(--font-body); cursor: pointer;
+}
+.seg button[aria-pressed="true"] { background: var(--surface); color: var(--fg); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+.hint { font-size: 12px; color: var(--muted); margin-top: -8px; }
+
+h1 { font: 700 22px/1.2 var(--font-display); letter-spacing: -.01em; margin: 0; text-wrap: balance; }
+.brand { font-size: 12px; text-transform: uppercase; letter-spacing: .12em; color: var(--muted); margin: 0 0 6px; }
+.price { font: 500 26px/1 var(--font-display); font-variant-numeric: tabular-nums; margin-top: 10px; }
+
+.facts { background: var(--surface); border-radius: 16px; padding: 4px 16px; display: grid; }
+.fact { display: grid; grid-template-columns: 1fr auto; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line); align-items: center; }
+.fact:last-child { border-bottom: 0; }
+.fact dt { color: var(--muted); font-size: 13px; }
+.fact dd { margin: 0; font-weight: 500; text-align: right; display: flex; flex-wrap: wrap; gap: 2px 6px; align-items: center; justify-content: flex-end; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+.dot.good { background: var(--good); } .dot.warn { background: var(--warn); }
+.fact small { flex-basis: 100%; color: var(--muted); font-size: 12px; font-weight: 400; text-align: right; }
+
+.section-title { font: 600 14px var(--font-body); margin: 0 0 8px; }
+.sizes { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip {
+  border: 1px solid var(--line); background: var(--surface); color: var(--fg); border-radius: 12px;
+  padding: 8px 12px; cursor: pointer; font: 500 14px var(--font-body); display: grid; text-align: left; min-width: 70px;
+}
+.chip span { font-size: 11px; color: var(--muted); font-weight: 400; font-variant-numeric: tabular-nums; }
+.chip[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.chip:disabled { opacity: .4; cursor: not-allowed; text-decoration: line-through; }
+.size-note { font-size: 12px; color: var(--muted); margin-top: 8px; }
+
+.raw { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.raw figure { margin: 0; background: var(--surface); border-radius: 10px; overflow: hidden; }
+.raw canvas { width: 100%; aspect-ratio: 1; display: block; background: #E9E8E3; }
+.raw figcaption { font-size: 11px; color: var(--muted); padding: 4px 6px; font-variant-numeric: tabular-nums; }
+
+.seller { background: var(--surface); border-radius: 16px; padding: 14px 16px; display: flex; gap: 12px; align-items: center; }
+.avatar { width: 40px; height: 40px; border-radius: 50%; background: var(--chip); display: grid; place-items: center; font: 700 14px var(--font-display); color: var(--accent); flex: none; }
+.seller div { min-width: 0; }
+.seller p { margin: 0; font-size: 13px; color: var(--muted); }
+
+.buybar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 5;
+  background: var(--surface); border-top: 1px solid var(--line);
+  padding-block: 12px calc(12px + env(safe-area-inset-bottom, 0px));
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.buybar-inner { max-width: 428px; margin: 0 auto; display: flex; gap: 12px; align-items: center; }
+.buybar .total { font: 500 17px var(--font-display); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.btn {
+  flex: 1; border: 0; border-radius: 14px; padding: 15px 16px; background: var(--accent); color: var(--accent-ink);
+  font: 600 15px var(--font-body); cursor: pointer;
+}
+.btn.secondary { background: var(--chip); color: var(--fg); }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.err { color: #C0392B; font-size: 13px; margin: 0; }
+:root[data-theme="dark"] .err { color: #FF8A7A; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .err { color: #FF8A7A; } }
+
+.sheet-wrap[hidden] { display: none; }
+.sheet-wrap { position: fixed; inset: 0; z-index: 10; background: rgba(0,0,0,.4); display: grid; align-items: end; }
+.sheet {
+  background: var(--surface); border-radius: 22px 22px 0 0; max-width: 460px; width: 100%; margin: 0 auto;
+  padding-block: 20px calc(20px + env(safe-area-inset-bottom, 0px));
+  padding-left: max(20px, env(safe-area-inset-left, 0px));
+  padding-right: max(20px, env(safe-area-inset-right, 0px));
+  display: grid; gap: 14px; max-height: 88vh; overflow: auto;
+}
+.sheet h2 { font: 700 18px var(--font-display); margin: 0; }
+.rows { display: grid; gap: 8px; font-variant-numeric: tabular-nums; }
+.rows div { display: flex; justify-content: space-between; gap: 12px; }
+.rows .sum { border-top: 1px solid var(--line); padding-top: 8px; font-weight: 600; }
+.flow { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; }
+.flow li { display: grid; grid-template-columns: 20px 1fr; gap: 10px; font-size: 13px; padding-bottom: 10px; position: relative; }
+.flow li::before { content: ""; width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--accent); margin-top: 4px; justify-self: center; }
+.flow li:not(:last-child)::after { content: ""; position: absolute; left: 9px; top: 18px; bottom: 0; width: 2px; background: var(--line); }
+.flow b { font-weight: 600; }
+.notice { background: var(--chip); border-radius: 12px; padding: 12px; font-size: 13px; color: var(--fg); }
+@media (prefers-reduced-motion: reduce) { .stage, .stage canvas { transition: none; } }
+</style>
+
+<main class="app">
+  <p class="proto-note"><b>Прототип</b> Аяқкиім 3D-модельден салынған, нақты тауар фотосы емес. Төлем қосылмаған.</p>
+
+  <section aria-label="360° витрина">
+    <div class="stage" id="stage" data-style="clean" role="img" aria-label="Кроссовка, 360° айналдыру. Солға не оңға сүйреңіз немесе көрсеткі пернелерін басыңыз." tabindex="0">
+      <canvas id="view"></canvas>
+      <span class="pill loading" id="loading">Кадрлар жүктелуде · <span id="loaded" class="frame-count">0</span>/36</span>
+      <div class="hud">
+        <span class="pill"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 12a9 9 0 0 1 15.5-6.2L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.5 6.2L3 16"/><path d="M3 21v-5h5"/></svg>360° · <span id="deg" class="frame-count">0°</span></span>
+        <button class="pill" id="zoom" type="button" aria-pressed="false">Жақындату</button>
+      </div>
+    </div>
+  </section>
+
+  <div>
+    <div class="seg" role="group" aria-label="Витрина стилі">
+      <button type="button" data-style="clean" aria-pressed="true">Clean</button>
+      <button type="button" data-style="premium" aria-pressed="false">Premium</button>
+      <button type="button" data-style="dynamic" aria-pressed="false">Dynamic</button>
+    </div>
+  </div>
+  <p class="hint">Стиль тек фон мен жарықты өзгертеді. Аяқкиімнің пішіні мен түсі барлық стильде бірдей.</p>
+
+  <header>
+    <p class="brand">Үлгі бренд · Runner 01</p>
+    <h1>Күнделікті кроссовка, құм түсті</h1>
+    <div class="price">45 000 ₸</div>
+  </header>
+
+  <dl class="facts" aria-label="Тауар деңгейі">
+    <div class="fact"><dt>Баға сегменті</dt><dd>Орта сегмент<small>каталог бағасынан есептелген</small></dd></div>
+    <div class="fact"><dt>Жағдайы</dt><dd><span class="dot good"></span>Өте жақсы, қолданылған</dd></div>
+    <div class="fact"><dt>Түпнұсқалығы</dt><dd><span class="dot warn"></span>Тексерілмеген</dd></div>
+    <div class="fact"><dt>Ақаулар</dt><dd>Табанында аз тозу<small>фото 7/8</small></dd></div>
+  </dl>
+
+  <section>
+    <h2 class="section-title">Өлшем</h2>
+    <div class="sizes" id="sizes">
+      <button class="chip" type="button" aria-pressed="false" data-size="40" data-cm="25,5">EU 40<span>25,5 см</span></button>
+      <button class="chip" type="button" aria-pressed="false" data-size="41" data-cm="26,0">EU 41<span>26,0 см</span></button>
+      <button class="chip" type="button" aria-pressed="false" data-size="42" data-cm="26,5">EU 42<span>26,5 см</span></button>
+      <button class="chip" type="button" disabled data-size="43">EU 43<span>жоқ</span></button>
+    </div>
+    <p class="size-note">Сантиметр — сатушы өлшеген ұлтарақ ұзындығы. EU өлшемі брендке қарай өзгеруі мүмкін.</p>
+  </section>
+
+  <section>
+    <h2 class="section-title">Бастапқы кадрлар</h2>
+    <div class="raw" id="raw"></div>
+  </section>
+
+  <div class="seller">
+    <div class="avatar" aria-hidden="true">QS</div>
+    <div>
+      <strong>Qadam Store</strong>
+      <p>Алматы · 4,8 (32 пікір) · 41 аяқталған мәміле</p>
+    </div>
+  </div>
+</main>
+
+<div class="buybar">
+  <div class="buybar-inner">
+    <div class="total">45 000 ₸</div>
+    <button class="btn" id="buy" type="button">Сатып алу</button>
+  </div>
+</div>
+
+<div class="sheet-wrap" id="sheet" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+    <h2 id="sheet-title">Тапсырыс</h2>
+    <div class="rows">
+      <div><span>Тауар · <span id="sheet-size"></span></span><span>45 000 ₸</span></div>
+      <div><span>Жеткізу, Алматы ішінде</span><span>1 500 ₸</span></div>
+      <div class="sum"><span>Барлығы</span><span>46 500 ₸</span></div>
+    </div>
+    <ol class="flow" aria-label="Ақшаңыз қалай қорғалады">
+      <li><span><b>Төлейсіз.</b> Ақша сатушыға бірден бармайды.</span></li>
+      <li><span><b>Сатушы жібереді</b> трек-нөмірмен.</span></li>
+      <li><span><b>Тауарды тексересіз.</b> Сәйкес болмаса, «Мәселе бар» батырмасы.</span></li>
+      <li><span><b>Қабылдағаннан кейін</b> ғана ақша сатушыға аударылады.</span></li>
+    </ol>
+    <p class="notice">Прототипте төлем жоқ. Нақты нұсқада ақшаны лицензиялы төлем серіктесі ұстайды; бұл шарт әлі келісілмеген.</p>
+    <button class="btn" type="button" disabled>Төлеу (қосылмаған)</button>
+    <button class="btn secondary" id="close" type="button">Жабу</button>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(() => {
+  const FRAMES = 36, W = 720, H = 612;
+  const stage = document.getElementById('stage');
+  const view = document.getElementById('view');
+  const ctx = view.getContext('2d');
+  const frames = new Array(FRAMES).fill(null);
+  let current = 0, loadedCount = 0;
+
+  // --- build the shoe once, render 36 views into offscreen canvases -------------
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+  renderer.setPixelRatio(1);
+  renderer.setSize(W, H);
+  renderer.outputEncoding = THREE.sRGBEncoding;
+  renderer.setClearColor(0x000000, 0);
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(28, W / H, 0.1, 50);
+  camera.position.set(0, 1.55, 6.1);
+  camera.lookAt(0, 0.42, 0);
+
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x8a8478, 0.75));
+  const key = new THREE.DirectionalLight(0xffffff, 0.85); key.position.set(3, 5, 4); scene.add(key);
+  const rim = new THREE.DirectionalLight(0xffffff, 0.35); rim.position.set(-4, 2, -3); scene.add(rim);
+
+  const mat = (c, r = 0.75) => new THREE.MeshStandardMaterial({ color: c, roughness: r, metalness: 0 });
+  const soleMat = mat(0xF4F1EA, 0.9), gumMat = mat(0x9B6B3F, 0.85);
+  const darkMat = mat(0x2A2623, 0.95), laceMat = mat(0xF7F5EF, 0.8);
+
+  const shoe = new THREE.Group();
+
+  const sole = new THREE.Shape();
+  sole.moveTo(-1.35, 0.06); sole.lineTo(1.25, 0.06);
+  sole.quadraticCurveTo(1.5, 0.08, 1.46, 0.2); sole.lineTo(1.4, 0.26);
+  sole.lineTo(-1.3, 0.3); sole.quadraticCurveTo(-1.46, 0.28, -1.43, 0.14);
+  sole.quadraticCurveTo(-1.42, 0.06, -1.35, 0.06);
+  const soleGeo = new THREE.ExtrudeGeometry(sole, { depth: 0.8, bevelEnabled: true, bevelThickness: 0.05, bevelSize: 0.04, bevelSegments: 3, curveSegments: 16 });
+  soleGeo.translate(0, 0, -0.4);
+  shoe.add(new THREE.Mesh(soleGeo, soleMat));
+
+  const out = new THREE.Shape();
+  out.moveTo(-1.36, 0.06); out.lineTo(1.28, 0.06); out.quadraticCurveTo(1.52, 0.07, 1.5, 0.12);
+  out.lineTo(-1.4, 0.12); out.lineTo(-1.36, 0.06);
+  const outGeo = new THREE.ExtrudeGeometry(out, { depth: 0.86, bevelEnabled: false, curveSegments: 12 });
+  outGeo.translate(0, -0.06, -0.43);
+  shoe.add(new THREE.Mesh(outGeo, gumMat));
+
+  // Upper: a sphere deformed into a last shape, so the toe box and heel are rounded.
+  const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+  const topAt = t => 0.44 + 0.56 * (1 - smooth(0.22, 0.92, t)) - 0.06 * smooth(0.0, 0.12, 0.12 - t);
+  const widthAt = t => 0.4 + 0.1 * smooth(0.05, 0.62, t);
+  const roundAt = t => Math.sqrt(Math.max(1 - (2 * t - 1) ** 2, 1e-4));
+  const yTop = t => 0.3 + (topAt(t) - 0.3) * Math.pow(roundAt(t), 0.25);
+  const upGeo = new THREE.SphereGeometry(1, 192, 128);
+  const pos = upGeo.attributes.position, cols = [];
+  const cSand = new THREE.Color(0xD9CBB0), cAcc = new THREE.Color(0x1F4E5F), cToe = new THREE.Color(0xCDBC9C);
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+    const t = (x + 1) / 2, r = roundAt(t), ny = y / r, nz = z / r;
+    const Y = 0.3 + (ny > 0 ? ny * (yTop(t) - 0.3) : ny * 0.03);
+    pos.setXYZ(i, x * 1.4, Y, nz * widthAt(t) * Math.pow(r, 0.5));
+    const c = cSand.clone();
+    const bandY = 0.38 + 0.36 * smooth(0.2, 0.7, t);
+    const band = (1 - smooth(0.035, 0.06, Math.abs(Y - bandY))) * smooth(0.2, 0.3, t) * (1 - smooth(0.66, 0.74, t)) * smooth(0.4, 0.6, Math.abs(nz));
+    const heel = (1 - smooth(0.06, 0.11, t)) * (1 - smooth(0.7, 0.8, Y));
+    const toe = smooth(0.8, 0.86, t) * (1 - smooth(0.44, 0.5, Y));
+    c.lerp(cToe, toe).lerp(cAcc, Math.max(band, heel));
+    cols.push(c.r, c.g, c.b);
+  }
+  upGeo.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
+  upGeo.computeVertexNormals();
+  shoe.add(new THREE.Mesh(upGeo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8 })));
+
+  const collar = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 0.03, 48), darkMat);
+  collar.scale.set(0.34, 1, 0.24); collar.position.set(-0.9, yTop(0.18) - 0.03, 0); collar.rotation.z = 0.1;
+  shoe.add(collar);
+
+  for (let i = 0; i < 6; i++) {
+    const t = 0.36 + i * 0.065, x = t * 2.8 - 1.4, y = yTop(t);
+    const slope = Math.atan2(yTop(t + 0.01) - yTop(t - 0.01), 0.056);
+    const lace = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.03, widthAt(t) * 1.25), laceMat);
+    lace.position.set(x, y - 0.015, 0); lace.rotation.z = slope;
+    shoe.add(lace);
+  }
+
+
+  const stitch = new THREE.Mesh(new THREE.BoxGeometry(2.7, 0.018, 0.86), mat(0xC9B999, 0.9));
+  stitch.position.set(0.02, 0.3, 0); shoe.add(stitch);
+
+  shoe.position.y = 0.06;
+  scene.add(shoe);
+
+  const sh = document.createElement('canvas'); sh.width = sh.height = 128;
+  const sctx = sh.getContext('2d');
+  const g = sctx.createRadialGradient(64, 64, 4, 64, 64, 64);
+  g.addColorStop(0, 'rgba(0,0,0,0.42)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+  sctx.fillStyle = g; sctx.fillRect(0, 0, 128, 128);
+  const shadow = new THREE.Mesh(new THREE.PlaneGeometry(3.6, 1.5), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(sh), transparent: true, depthWrite: false }));
+  shadow.rotation.x = -Math.PI / 2; shadow.position.y = 0.0;
+  scene.add(shadow);
+
+  function renderFrame(i) {
+    shoe.rotation.y = -0.5 + (i / FRAMES) * Math.PI * 2;
+    renderer.render(scene, camera);
+    const c = document.createElement('canvas'); c.width = W; c.height = H;
+    c.getContext('2d').drawImage(renderer.domElement, 0, 0);
+    frames[i] = c;
+    loadedCount++;
+    document.getElementById('loaded').textContent = loadedCount;
+  }
+
+  // Progressive load: 8 key angles first so the viewer works at once, then the rest.
+  const order = [];
+  for (let i = 0; i < FRAMES; i += 4.5) order.push(Math.round(i) % FRAMES);
+  for (let i = 0; i < FRAMES; i++) if (!order.includes(i)) order.push(i);
+
+  function nearestLoaded(i) {
+    for (let d = 0; d < FRAMES; d++) {
+      const a = (i + d) % FRAMES, b = (i - d + FRAMES) % FRAMES;
+      if (frames[a]) return frames[a];
+      if (frames[b]) return frames[b];
+    }
+    return null;
+  }
+
+  function sizeCanvas() {
+    const r = stage.getBoundingClientRect(), dpr = Math.min(window.devicePixelRatio || 1, 2);
+    view.width = Math.round(r.width * dpr); view.height = Math.round(r.height * dpr);
+    draw();
+  }
+
+  function draw() {
+    const f = nearestLoaded(current);
+    ctx.clearRect(0, 0, view.width, view.height);
+    if (!f) return;
+    const s = Math.min(view.width / W, view.height / H);
+    const w = W * s, h = H * s;
+    ctx.drawImage(f, (view.width - w) / 2, (view.height - h) / 2, w, h);
+    document.getElementById('deg').textContent = Math.round(current * 360 / FRAMES) + '°';
+  }
+
+  function step() {
+    const batch = order.splice(0, 3);
+    batch.forEach(renderFrame);
+    draw();
+    if (order.length) requestAnimationFrame(step);
+    else { document.getElementById('loading').hidden = true; renderer.dispose(); buildRaw(); }
+  }
+  order.splice(0, 8).forEach(renderFrame);
+  sizeCanvas();
+  requestAnimationFrame(step);
+  window.addEventListener('resize', sizeCanvas);
+
+  // --- interaction ---------------------------------------------------------------
+  let dragging = false, startX = 0, startFrame = 0;
+  const zoomBtn = document.getElementById('zoom');
+  stage.addEventListener('pointerdown', e => {
+    dragging = true; startX = e.clientX; startFrame = current; stage.setPointerCapture(e.pointerId);
+  });
+  stage.addEventListener('pointermove', e => {
+    if (stage.classList.contains('zoomed')) {
+      const r = stage.getBoundingClientRect();
+      view.style.transformOrigin = `${((e.clientX - r.left) / r.width) * 100}% ${((e.clientY - r.top) / r.height) * 100}%`;
+      return;
+    }
+    if (!dragging) return;
+    const perFrame = stage.clientWidth / 30;
+    const delta = Math.round((e.clientX - startX) / perFrame);
+    current = ((startFrame - delta) % FRAMES + FRAMES) % FRAMES;
+    draw();
+  });
+  ['pointerup', 'pointercancel'].forEach(t => stage.addEventListener(t, () => { dragging = false; }));
+  stage.addEventListener('keydown', e => {
+    if (e.key === 'ArrowLeft') { current = (current + 1) % FRAMES; draw(); e.preventDefault(); }
+    if (e.key === 'ArrowRight') { current = (current - 1 + FRAMES) % FRAMES; draw(); e.preventDefault(); }
+  });
+  zoomBtn.addEventListener('pointerdown', e => e.stopPropagation());
+  zoomBtn.addEventListener('click', () => {
+    const on = stage.classList.toggle('zoomed');
+    zoomBtn.setAttribute('aria-pressed', String(on));
+    zoomBtn.textContent = on ? 'Кішірейту' : 'Жақындату';
+    if (!on) view.style.transformOrigin = '50% 50%';
+  });
+
+  document.querySelectorAll('.seg button').forEach(b => b.addEventListener('click', () => {
+    stage.dataset.style = b.dataset.style;
+    document.querySelectorAll('.seg button').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+  }));
+
+  function buildRaw() {
+    const raw = document.getElementById('raw');
+    for (let k = 0; k < 8; k++) {
+      const i = Math.round(k * 4.5) % FRAMES;
+      const fig = document.createElement('figure');
+      const c = document.createElement('canvas'); c.width = 240; c.height = 240;
+      const cx = c.getContext('2d');
+      cx.fillStyle = '#E9E8E3'; cx.fillRect(0, 0, 240, 240);
+      const s = Math.min(240 / W, 240 / H) * 1.15;
+      cx.drawImage(frames[i], (240 - W * s) / 2, (240 - H * s) / 2, W * s, H * s);
+      const cap = document.createElement('figcaption');
+      cap.textContent = `Кадр ${i + 1} · ${Math.round(i * 10)}°`;
+      fig.append(c, cap);
+      fig.addEventListener('click', () => { current = i; draw(); stage.scrollIntoView({ behavior: 'smooth', block: 'center' }); });
+      raw.append(fig);
+    }
+  }
+
+  // --- size + order sheet ----------------------------------------------------------
+  let size = null;
+  const sizes = document.getElementById('sizes');
+  sizes.addEventListener('click', e => {
+    const b = e.target.closest('.chip'); if (!b || b.disabled) return;
+    size = b; sizes.querySelectorAll('.chip').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+    const er = document.getElementById('size-err'); if (er) er.remove();
+  });
+  const sheet = document.getElementById('sheet');
+  document.getElementById('buy').addEventListener('click', () => {
+    if (!size) {
+      if (!document.getElementById('size-err')) {
+        const p = document.createElement('p'); p.className = 'err'; p.id = 'size-err';
+        p.textContent = 'Алдымен өлшемді таңдаңыз.'; sizes.after(p);
+      }
+      sizes.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
+    document.getElementById('sheet-size').textContent = `EU ${size.dataset.size} (${size.dataset.cm} см)`;
+    sheet.hidden = false; document.getElementById('close').focus();
+  });
+  const close = () => { sheet.hidden = true; document.getElementById('buy').focus(); };
+  document.getElementById('close').addEventListener('click', close);
+  sheet.addEventListener('click', e => { if (e.target === sheet) close(); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && !sheet.hidden) close(); });
+})();
+</script>

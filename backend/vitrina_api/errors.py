@@ -1,0 +1,41 @@
+"""One error shape for every API failure: {code, message_kk, message_ru}."""
+from __future__ import annotations
+
+from fastapi import Request
+from fastapi.responses import JSONResponse
+
+MESSAGES: dict[str, tuple[str, str]] = {
+    "unauthorized": ("Қайта кіріңіз.", "Войдите снова."),
+    "forbidden": ("Бұл әрекетке рұқсат жоқ.", "Нет доступа к этому действию."),
+    "not_found": ("Табылмады.", "Не найдено."),
+    "rate_limited": ("Тым көп сұрау. Кейінірек қайталаңыз.", "Слишком много запросов. Повторите позже."),
+    "otp_invalid": ("Код қате.", "Неверный код."),
+    "otp_expired": ("Кодтың мерзімі өтті. Жаңа код сұраңыз.", "Срок кода истёк. Запросите новый."),
+    "invalid_phone": ("Телефон нөмірін +7XXXXXXXXXX түрінде енгізіңіз.", "Введите номер в формате +7XXXXXXXXXX."),
+    "seller_required": ("Алдымен сатушы режимін қосыңыз.", "Сначала включите режим продавца."),
+    "validation": ("Деректерді тексеріңіз.", "Проверьте данные."),
+    "missing_required_photos": ("Кемінде 4 фото қажет.", "Нужно минимум 4 фото."),
+    "defects_required": ("Тауар жағдайына қарай ақауларды сипаттаңыз.", "Опишите дефекты для этого состояния."),
+    "invalid_status": ("Қазір бұл әрекетті жасау мүмкін емес.", "Сейчас это действие недоступно."),
+    "invalid_transition": ("Тапсырыс күйі бұл әрекетке рұқсат бермейді.", "Статус заказа не позволяет это действие."),
+    "tracking_required": ("Трек-нөмірді енгізіңіз.", "Укажите трек-номер."),
+    "reason_required": ("Себебін жазыңыз.", "Укажите причину."),
+    "out_of_stock": ("Бұл өлшем қалмады.", "Этого размера нет в наличии."),
+    "own_listing": ("Өз тауарыңызды сатып ала алмайсыз.", "Нельзя купить свой товар."),
+    "idempotency_key_required": ("Сұрау кілті жоқ.", "Нет ключа запроса."),
+    "bad_signature": ("Қолтаңба жарамсыз.", "Неверная подпись."),
+    "amount_mismatch": ("Сома тапсырысқа сәйкес емес.", "Сумма не совпадает с заказом."),
+}
+
+
+class ApiError(Exception):
+    def __init__(self, status: int, code: str, detail: str | None = None):
+        self.status, self.code, self.detail = status, code, detail
+
+
+async def api_error_handler(_: Request, exc: ApiError) -> JSONResponse:
+    kk, ru = MESSAGES.get(exc.code, ("Қате.", "Ошибка."))
+    body = {"code": exc.code, "message_kk": kk, "message_ru": ru}
+    if exc.detail:
+        body["detail"] = exc.detail
+    return JSONResponse(status_code=exc.status, content=body)
