@@ -365,6 +365,16 @@ class PopularityTests(ApiTestCase):
         self.assertEqual(self.c.get(url).json()["popularity"], {"sold_30d": 1, "favorites": 3})
 
 
+class DidYouMeanTests(ApiTestCase):
+    def test_an_empty_search_offers_the_nearest_spelling_on_sale(self):
+        self.publish(brand="Nike", model_name="Air Force", title="Nike Air Force кроссовка")
+        find = lambda q: self.c.get("/api/v1/listings", params={"q": q}).json()  # noqa: E731
+        self.assertEqual(find("nkie")["did_you_mean"], "Nike")
+        self.assertEqual(find("nike froce")["did_you_mean"], "Nike force")
+        self.assertNotIn("did_you_mean", find("nike"))  # found something: no hint
+        self.assertIsNone(find("zzzzzz")["did_you_mean"])
+
+
 class CityFilterTests(ApiTestCase):
     def test_catalog_filters_by_the_sellers_city_however_it_is_spelled(self):
         mine = self.publish()["id"]  # Qadam Store, Алматы

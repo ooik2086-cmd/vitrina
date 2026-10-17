@@ -769,4 +769,5 @@ const en = <String, String>{
   'Жіберуі екі күннен ұзаққа созылады': 'Shipping takes more than two days',
   'Сатушы {0} дейін демалыста, жауабы кешігуі мүмкін.': "The seller is away until {0}, so the answer may take longer.",
   'Жіберу парағын жүктеу': 'Download packing slip',
+  '«{0}» деп іздейсіз бе?': 'Search for “{0}”?',
 };

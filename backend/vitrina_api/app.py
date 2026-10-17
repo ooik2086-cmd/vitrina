@@ -916,7 +916,38 @@ def search_listings(q: str | None = None, category: str | None = None, brand: st
     order = {"new": (Listing.id.desc(),), "price_asc": (Listing.price_tiyn, Listing.id.desc()),
              "price_desc": (Listing.price_tiyn.desc(), Listing.id.desc())}[sort]
     rows = db.scalars(stmt.order_by(*order).limit(max(1, min(limit, 50))).offset(max(0, offset))).all()
-    return {"items": [listing_out(db, r) for r in rows]}
+    out = {"items": [listing_out(db, r) for r in rows]}
+    if not rows and q and offset == 0:
+        out["did_you_mean"] = did_you_mean(db, q)
+    return out
+
+
+def did_you_mean(db: Session, q: str) -> str | None:
+    """When a search finds nothing, the nearest spelling that does: 'nkie air' -> 'Nike air'. Words are matched
+    against what is on sale now, so the hint never leads to another empty page."""
+    import difflib
+    vocab: dict[str, str] = {}  # normalized word -> how to show it
+    for text in db.scalars(select(Listing.search_text).where(Listing.status == "published")):
+        for w in text.split():
+            vocab.setdefault(w, w)
+    for brand in db.scalars(select(Listing.brand).where(Listing.status == "published", Listing.brand.is_not(None))):
+        for w in brand.split():
+            vocab[normalize_query(w)] = w  # show brands the way sellers write them
+    words, changed = [], False
+    for w in normalize_query(q).split():
+        if w in vocab or len(w) < 3:
+            words.append(vocab.get(w, w))
+            continue
+        near = difflib.get_close_matches(w, list(vocab), n=1, cutoff=0.75)
+        if not near:
+            return None
+        words.append(vocab[near[0]])
+        changed = True
+    if not changed:
+        return None
+    fixed = " ".join(words)
+    hits = catalog_filter(select(Listing.id).where(Listing.status == "published"), q=fixed).limit(1)
+    return fixed if db.scalar(hits) is not None else None
 
 
 @api.post("/listings/{listing_id}/report", status_code=201)

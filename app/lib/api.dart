@@ -975,8 +975,12 @@ class Api {
       if (sellerId != null) 'seller_id': '$sellerId',
       ...filter.query,
     }) as Map;
+    lastDidYouMean = r['did_you_mean'] as String?;
     return [for (final j in r['items'] as List) Listing.fromJson(j as Map<String, dynamic>)];
   }
+
+  /// After a text search that found nothing: the nearest spelling that finds something, if any.
+  String? lastDidYouMean;
 
   Future<List<Listing>> similar(int id) async {
     final r = await _send('GET', '/listings/$id/similar') as Map;

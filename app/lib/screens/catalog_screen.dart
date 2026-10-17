@@ -389,8 +389,24 @@ class _CatalogScreenState extends State<CatalogScreen> {
               final items = [...snap.data!, ..._more];
               if (snap.data!.length < _page) _hasMore = false;
               if (items.isEmpty) {
+                final hint = _query.text.trim().isEmpty ? null : SessionScope.of(context).api.lastDidYouMean;
                 return SliverFillRemaining(
-                    hasScrollBody: false, child: _Empty(icon: Icons.search_off_rounded, text: tr('Ештеңе табылмады.')));
+                    hasScrollBody: false,
+                    child: _Empty(
+                      icon: Icons.search_off_rounded,
+                      text: tr('Ештеңе табылмады.'),
+                      action: hint == null
+                          ? null
+                          : Padding(
+                              padding: const EdgeInsets.only(top: 8),
+                              child: ActionChip(
+                                key: const Key('did-you-mean'),
+                                avatar: const Icon(Icons.auto_fix_high_rounded, size: 18),
+                                label: Text(trf('«{0}» деп іздейсіз бе?', [hint])),
+                                onPressed: () => _searchFor(hint),
+                              ),
+                            ),
+                    ));
               }
               return SliverPadding(
                 padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),

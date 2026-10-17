@@ -1849,6 +1849,31 @@ void main() {
     expect(find.byKey(const Key('recent-searches')), findsOneWidget);
   });
 
+  testWidgets('an empty search offers the nearest spelling, and a tap searches it', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    await restoreRecentSearches();
+    final searched = <String?>[];
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async {
+          final q = req.url.queryParameters['q'];
+          if (req.url.path != '/api/v1/listings') return jsonResponse({'items': []});
+          searched.add(q);
+          return jsonResponse(q == 'nkie' ? {'items': [], 'did_you_mean': 'Nike'} : {'items': []});
+        }));
+    await tester.pumpWidget(
+        SessionScope(session: Session(api), child: const MaterialApp(home: Scaffold(body: CatalogScreen()))));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('search-field')), 'nkie');
+    await tester.testTextInput.receiveAction(TextInputAction.search);
+    await tester.pumpAndSettle();
+    expect(find.text('«Nike» деп іздейсіз бе?'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('did-you-mean')));
+    await tester.pumpAndSettle();
+    expect(searched.last, 'Nike');
+    expect(find.byKey(const Key('did-you-mean')), findsNothing);
+  });
+
   testWidgets('deleting the account asks first, then signs out', (tester) async {
     SharedPreferences.setMockInitialValues({});
     final calls = <String>[];
