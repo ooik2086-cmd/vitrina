@@ -20,6 +20,7 @@ import 'package:vitrina/screens/image_search_screen.dart';
 import 'package:vitrina/screens/listing_editor_screen.dart';
 import 'package:vitrina/screens/listing_screen.dart';
 import 'package:vitrina/screens/manage_listing_screen.dart';
+import 'package:vitrina/screens/my_listings_screen.dart';
 import 'package:vitrina/screens/notification_settings_screen.dart';
 import 'package:vitrina/screens/offers_screen.dart';
 import 'package:vitrina/screens/order_screen.dart';
@@ -480,6 +481,24 @@ void main() {
       },
       'offer_id': 11,
     });
+  });
+
+  test('seller listing filter: status, low stock and text across title, brand and model', () {
+    Listing make(String status, int qty, {String title = 'Nike Air Force 1'}) => Listing.fromJson({
+          ...listingJson(),
+          'status': status,
+          'title': title,
+          'sizes': [
+            {'id': 1, 'label': '42', 'insole_cm': '27,0', 'available': qty > 0, 'quantity': qty},
+          ],
+        });
+    final onSale = make('published', 3), last = make('published', 1), sold = make('sold', 0);
+    final other = make('published', 4, title: 'Жеңіл кроссовка');
+    expect([onSale, last, sold, other].where((l) => listingMatches(l, status: 'low', query: '')), [last]);
+    expect([onSale, last, sold].where((l) => listingMatches(l, status: 'sold', query: '')), [sold]);
+    expect(listingMatches(other, status: 'all', query: 'af1'), isTrue); // the model name, not the title
+    expect(listingMatches(other, status: 'all', query: 'adidas'), isFalse);
+    expect(listingMatches(onSale, status: 'all', query: 'AIR'), isTrue);
   });
 
   test('order summary lists the price with its promo and says it is not a fiscal receipt', () {
