@@ -4,6 +4,7 @@ import '../api.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import 'login_screen.dart';
 import 'seller_reviews_screen.dart';
 import '../i18n.dart';
 
@@ -20,6 +21,8 @@ class ShopScreen extends StatefulWidget {
 
 class _ShopScreenState extends State<ShopScreen> {
   Future<(Shop, List<Listing>)>? _data;
+  (bool, int)? _follow; // what the last follow tap returned, ahead of a reload
+  bool _busy = false;
 
   @override
   void didChangeDependencies() {
@@ -33,9 +36,33 @@ class _ShopScreenState extends State<ShopScreen> {
     return (shop, items);
   }
 
+  Future<void> _toggleFollow(Shop shop) async {
+    final session = SessionScope.of(context);
+    if (!session.signedIn) {
+      await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LoginScreen()));
+      if (!mounted || !session.signedIn) return;
+    }
+    final now = _follow?.$1 ?? shop.following;
+    setState(() => _busy = true);
+    try {
+      final result = await session.api.setFollowing(shop.id, !now);
+      if (!mounted) return;
+      setState(() => _follow = result);
+      if (result.$1) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(tr('Жазылдыңыз. Дүкен жаңа тауар қойғанда хабарлаймыз.'))));
+      }
+    } catch (e) {
+      if (mounted) showError(context, e);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final me = SessionScope.of(context).me;
     return Scaffold(
       appBar: AppBar(title: Text(tr('Дүкен'))),
       body: FutureBuilder<(Shop, List<Listing>)>(
@@ -72,7 +99,31 @@ class _ShopScreenState extends State<ShopScreen> {
                       ]),
                     ),
                   ]),
-                  const SizedBox(height: 20),
+                  const SizedBox(height: 16),
+                  Row(children: [
+                    Icon(Icons.people_outline, size: 18, color: theme.colorScheme.onSurfaceVariant),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(trf('{0} жазылушы', [_follow?.$2 ?? shop.followers]),
+                          key: const Key('followers'),
+                          style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+                    ),
+                    if (me?.id != shop.id)
+                      (_follow?.$1 ?? shop.following)
+                          ? OutlinedButton.icon(
+                              key: const Key('unfollow'),
+                              onPressed: _busy ? null : () => _toggleFollow(shop),
+                              icon: const Icon(Icons.check_rounded, size: 18),
+                              label: Text(tr('Жазылдыңыз')),
+                            )
+                          : FilledButton.icon(
+                              key: const Key('follow'),
+                              onPressed: _busy ? null : () => _toggleFollow(shop),
+                              icon: const Icon(Icons.add_rounded, size: 18),
+                              label: Text(tr('Жазылу')),
+                            ),
+                  ]),
+                  const SizedBox(height: 16),
                   Row(children: [
                     _Fact(
                       value: shop.rating?.toStringAsFixed(1) ?? '—',

@@ -278,6 +278,39 @@ void main() {
     expect(find.text('Тапсырыс беру'), findsOneWidget);
   });
 
+  testWidgets('buyer follows a shop from its page', (tester) async {
+    final calls = <String>[];
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async {
+          if (req.url.path == '/api/v1/sellers/3/follow') {
+            calls.add(req.method);
+            final on = req.method == 'PUT';
+            return jsonResponse({'following': on, 'followers': on ? 13 : 12});
+          }
+          if (req.url.path == '/api/v1/sellers/3') {
+            return jsonResponse({
+              'id': 3, 'shop_name': 'Sneaker Lab', 'city': 'Алматы', 'since': '2026-01-10',
+              'completed_sales': 4, 'listings': 0, 'rating': 4.8, 'reviews': 5, 'away_until': null,
+              'followers': 12, 'following': false,
+            });
+          }
+          return jsonResponse({'items': [], 'next_cursor': null});
+        }))
+      ..token = 'tok';
+    await tester.pumpWidget(SessionScope(session: Session(api), child: const MaterialApp(home: ShopScreen(sellerId: 3))));
+    await tester.pumpAndSettle();
+    expect(find.text('12 жазылушы'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('follow')));
+    await tester.pumpAndSettle();
+    expect(find.text('13 жазылушы'), findsOneWidget);
+    expect(find.byKey(const Key('unfollow')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('unfollow')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('follow')), findsOneWidget);
+    expect(calls, ['PUT', 'DELETE']);
+  });
+
   testWidgets('buyer offers a price from the product page and sees it waiting', (tester) async {
     Map<String, dynamic>? sent;
     final api = Api(

@@ -171,7 +171,9 @@ class Shop {
         completedSales = j['completed_sales'] as int,
         listings = j['listings'] as int,
         rating = (j['rating'] as num?)?.toDouble(),
-        reviews = j['reviews'] as int;
+        reviews = j['reviews'] as int,
+        followers = j['followers'] as int? ?? 0,
+        following = j['following'] as bool? ?? false;
   final int id;
   final String shopName;
   final String? city;
@@ -180,6 +182,25 @@ class Shop {
   final int listings;
   final double? rating;
   final int reviews;
+  final int followers;
+  final bool following;
+}
+
+/// A shop the user follows, as listed on «Жазылымдар».
+class FollowedShop {
+  FollowedShop.fromJson(Map<String, dynamic> j)
+      : id = j['id'] as int,
+        shopName = j['shop_name'] as String? ?? tr('Сатушы'),
+        city = j['city'] as String?,
+        listings = j['listings'] as int,
+        rating = (j['rating'] as num?)?.toDouble(),
+        awayUntil = j['away_until'] == null ? null : DateTime.parse(j['away_until'] as String);
+  final int id;
+  final String shopName;
+  final String? city;
+  final int listings;
+  final double? rating;
+  final DateTime? awayUntil;
 }
 
 class DayStats {
@@ -317,8 +338,7 @@ class Listing {
         sellerReviews = ((j['seller'] as Map)['reviews'] as int?) ?? 0,
         stats = j['stats'] == null ? null : ListingStats.fromJson(j['stats'] as Map<String, dynamic>),
         promo = j['promo'] == null ? null : Promo.fromJson(j['promo'] as Map<String, dynamic>),
-        moderation =
-            j['moderation'] == null ? null : Moderation.fromJson(j['moderation'] as Map<String, dynamic>);
+        moderation = j['moderation'] == null ? null : Moderation.fromJson(j['moderation'] as Map<String, dynamic>);
 
   final int id;
   final String status;
@@ -666,8 +686,8 @@ class Api {
           as Map<String, dynamic>);
 
   Future<List<Offer>> offers({String role = 'buyer', int? listingId}) async {
-    final r = await _send('GET', '/offers',
-        query: {'role': role, if (listingId != null) 'listing_id': '$listingId'}) as Map;
+    final r =
+        await _send('GET', '/offers', query: {'role': role, if (listingId != null) 'listing_id': '$listingId'}) as Map;
     return [for (final j in r['items'] as List) Offer.fromJson(j as Map<String, dynamic>)];
   }
 
@@ -721,7 +741,8 @@ class Api {
       ..headers.addAll({'Accept': 'application/json', if (token != null) 'Authorization': 'Bearer $token'})
       ..fields['caption'] = caption
       ..files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
-    return ChatMessage.fromJson(_decode(await http.Response.fromStream(await _client.send(req))) as Map<String, dynamic>);
+    return ChatMessage.fromJson(
+        _decode(await http.Response.fromStream(await _client.send(req))) as Map<String, dynamic>);
   }
 
   // reviews
@@ -744,6 +765,17 @@ class Api {
 
   Future<Shop> shop(int sellerId) async =>
       Shop.fromJson(await _send('GET', '/sellers/$sellerId') as Map<String, dynamic>);
+
+  /// Follows or unfollows a shop; returns whether the user follows it now and its follower count.
+  Future<(bool, int)> setFollowing(int sellerId, bool follow) async {
+    final r = await _send(follow ? 'PUT' : 'DELETE', '/sellers/$sellerId/follow') as Map;
+    return (r['following'] as bool, r['followers'] as int);
+  }
+
+  Future<List<FollowedShop>> following() async {
+    final r = await _send('GET', '/me/following') as Map;
+    return [for (final j in r['items'] as List) FollowedShop.fromJson(j as Map<String, dynamic>)];
+  }
 
   Future<Review> replyToReview(int reviewId, String text) async =>
       Review.fromJson(await _send('POST', '/reviews/$reviewId/reply', body: {'text': text}) as Map<String, dynamic>);

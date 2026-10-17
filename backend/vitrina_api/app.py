@@ -37,7 +37,7 @@ from .deps import current_user, get_db, get_settings, get_storage, now_utc, opti
 from .errors import ApiError, api_error_handler
 from .share import router as share_router
 from .social import router as social_router, seller_rating
-from .models import (AuditLog, SavedSearch, ListingDailyViews, ListingEmbedding, ListingReport, AuthToken, Favorite, IdempotencyRecord, Listing, ListingSize, Media, Order, OrderEvent,
+from .models import (AuditLog, Follow, SavedSearch, ListingDailyViews, ListingEmbedding, ListingReport, AuthToken, Favorite, IdempotencyRecord, Listing, ListingSize, Media, Order, OrderEvent,
                      OtpCode, Review, User, WebhookEvent, make_session_factory)
 from .storage import MAX_UPLOAD_BYTES, LocalStorage, normalize_image
 
@@ -699,12 +699,21 @@ def report_listing(listing_id: int, body: ReportIn, user: User = Depends(current
     return {"reported": True}
 
 
-@api.get("/sellers/{seller_id}")
-def seller_profile(seller_id: int, db: Session = Depends(get_db)):
-    """Public shop card. Counts come from the platform's own records, not from what the seller typed."""
+def public_seller(db: Session, seller_id: int) -> User:
     seller = db.get(User, seller_id)
     if seller is None or not seller.is_seller or seller.is_blocked:
         raise ApiError(404, "not_found")
+    return seller
+
+
+def followers(db: Session, seller_id: int) -> int:
+    return int(db.scalar(select(func.count(Follow.id)).where(Follow.seller_id == seller_id)) or 0)
+
+
+@api.get("/sellers/{seller_id}")
+def seller_profile(seller_id: int, user: User | None = Depends(optional_user), db: Session = Depends(get_db)):
+    """Public shop card. Counts come from the platform's own records, not from what the seller typed."""
+    seller = public_seller(db, seller_id)
     sales = db.scalar(select(func.count(Order.id)).where(Order.seller_id == seller.id,
                                                          Order.status == S.COMPLETED.value))
     live = db.scalar(select(func.count(Listing.id)).where(Listing.seller_id == seller.id,
@@ -712,7 +721,46 @@ def seller_profile(seller_id: int, db: Session = Depends(get_db)):
     return {"id": seller.id, "shop_name": seller.shop_name, "city": seller.city,
             "since": services.aware(seller.created_at).date().isoformat(),
             "completed_sales": int(sales or 0), "listings": int(live or 0), "away_until": away_out(seller),
+            "followers": followers(db, seller.id),
+            "following": user is not None and db.scalar(select(Follow.id).where(
+                Follow.user_id == user.id, Follow.seller_id == seller.id)) is not None,
             **seller_rating(db, seller.id)}
+
+
+@api.put("/sellers/{seller_id}/follow")
+def follow_seller(seller_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    seller = public_seller(db, seller_id)
+    if seller.id == user.id:
+        raise ApiError(409, "own_shop")
+    if db.scalar(select(Follow.id).where(Follow.user_id == user.id, Follow.seller_id == seller.id)) is None:
+        db.add(Follow(user_id=user.id, seller_id=seller.id))
+        try:
+            db.commit()
+        except IntegrityError:  # a double tap; the follow is there either way
+            db.rollback()
+    return {"following": True, "followers": followers(db, seller.id)}
+
+
+@api.delete("/sellers/{seller_id}/follow")
+def unfollow_seller(seller_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    for f in db.scalars(select(Follow).where(Follow.user_id == user.id, Follow.seller_id == seller_id)).all():
+        db.delete(f)
+    db.commit()
+    return {"following": False, "followers": followers(db, seller_id)}
+
+
+@api.get("/me/following")
+def my_following(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """Shops the user follows, newest first, with how many listings each has on sale now."""
+    rows = db.execute(select(User, Follow.created_at).join(Follow, Follow.seller_id == User.id).where(
+        Follow.user_id == user.id, User.is_blocked.is_(False)).order_by(Follow.id.desc())).all()
+    items = []
+    for seller, _ in rows:
+        live = db.scalar(select(func.count(Listing.id)).where(Listing.seller_id == seller.id,
+                                                              Listing.status == "published"))
+        items.append({"id": seller.id, "shop_name": seller.shop_name, "city": seller.city,
+                      "listings": int(live or 0), "away_until": away_out(seller), **seller_rating(db, seller.id)})
+    return {"items": items}
 
 
 class SlidingWindowLimiter:
@@ -939,13 +987,21 @@ def saved_search_out(s: SavedSearch) -> dict:
 
 
 def announce(db: Session, listing: Listing) -> None:
-    """Tell buyers whose saved searches match a listing, once, when it first goes on sale."""
+    """Tell the shop's followers and buyers whose saved searches match a listing, once, when it first goes on sale."""
     if listing.announced_at is not None:
         return
     listing.announced_at = now_utc()
     db.flush()
     told: set[int] = {listing.seller_id}
     price = promo.format_tenge(listing.price_tiyn)
+    seller = db.get(User, listing.seller_id)
+    shop = seller.shop_name or "VITRINA"
+    for follower in db.scalars(select(Follow.user_id).join(User, User.id == Follow.user_id).where(
+            Follow.seller_id == listing.seller_id, User.is_blocked.is_(False)).order_by(Follow.id)).all():
+        if follower not in told:
+            told.add(follower)  # a follower who also has a matching saved search hears about it once
+            services.notify(db, follower, "followed_shop", f"«{shop}» жаңа тауар қойды: «{listing.title}», {price}",
+                            f"«{shop}» выставил новый товар: «{listing.title}», {price}", listing_id=listing.id)
     for saved in db.scalars(select(SavedSearch).join(User, User.id == SavedSearch.user_id).where(
             User.is_blocked.is_(False)).order_by(SavedSearch.id)).all():
         if saved.user_id in told:

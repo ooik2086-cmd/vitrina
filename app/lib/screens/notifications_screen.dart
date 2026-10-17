@@ -45,12 +45,12 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     final route = n.kind == 'offer'
         ? MaterialPageRoute(builder: (_) => const OffersScreen())
         : n.conversationId != null
-        ? MaterialPageRoute(builder: (_) => ChatScreen(conversationId: n.conversationId!))
-        : n.orderId != null
-            ? MaterialPageRoute(builder: (_) => OrderScreen(orderId: n.orderId!))
-            : n.listingId != null
-                ? MaterialPageRoute(builder: (_) => ListingScreen(listingId: n.listingId!))
-                : null;
+            ? MaterialPageRoute(builder: (_) => ChatScreen(conversationId: n.conversationId!))
+            : n.orderId != null
+                ? MaterialPageRoute(builder: (_) => OrderScreen(orderId: n.orderId!))
+                : n.listingId != null
+                    ? MaterialPageRoute(builder: (_) => ListingScreen(listingId: n.listingId!))
+                    : null;
     if (route != null) Navigator.of(context).push(route);
   }
 
@@ -77,6 +77,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                 'price_drop' => Icons.trending_down_rounded,
                 'offer' || 'offer_reply' => Icons.local_offer_outlined,
                 'saved_search' => Icons.notifications_active_outlined,
+                'followed_shop' => Icons.storefront_outlined,
                 'moderation' => Icons.fact_check_outlined,
                 'listing_hidden' || 'report_closed' => Icons.flag_outlined,
                 _ => Icons.local_shipping_outlined,

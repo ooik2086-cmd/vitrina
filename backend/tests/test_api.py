@@ -901,6 +901,37 @@ class AwayTests(ApiTestCase):
         self.assertIsNone(self.c.get(f"/api/v1/listings/{listing['id']}").json()["seller"]["away_until"])
 
 
+class FollowTests(ApiTestCase):
+    def test_followers_hear_about_each_new_listing_once(self):
+        first = self.publish()
+        seller_id = self.c.get(f"/api/v1/listings/{first['id']}").json()["seller"]["id"]
+        url = f"/api/v1/sellers/{seller_id}/follow"
+        self.assertEqual(self.c.put(url, headers=self.h(self.seller)).json()["code"], "own_shop")
+        self.assertEqual(self.c.put(url, headers=self.h(self.buyer)).json(), {"following": True, "followers": 1})
+        self.assertEqual(self.c.put(url, headers=self.h(self.buyer)).json()["followers"], 1)  # a second tap
+        shop = self.c.get(f"/api/v1/sellers/{seller_id}", headers=self.h(self.buyer)).json()
+        self.assertEqual((shop["followers"], shop["following"]), (1, True))
+        self.assertFalse(self.c.get(f"/api/v1/sellers/{seller_id}").json()["following"])
+        mine = self.c.get("/api/v1/me/following", headers=self.h(self.buyer)).json()["items"]
+        self.assertEqual([(m["id"], m["listings"]) for m in mine], [(seller_id, 1)])
+        self.assertEqual(self.c.get("/api/v1/notifications", headers=self.h(self.buyer)).json()["items"], [])
+        second = self.publish()
+        notes = self.c.get("/api/v1/notifications", headers=self.h(self.buyer)).json()["items"]
+        self.assertEqual([(n["kind"], n["listing_id"]) for n in notes], [("followed_shop", second["id"])])
+        self.assertEqual(self.c.delete(url, headers=self.h(self.buyer)).json(), {"following": False, "followers": 0})
+        self.publish()
+        self.assertEqual(len(self.c.get("/api/v1/notifications", headers=self.h(self.buyer)).json()["items"]), 1)
+
+    def test_a_follower_with_a_matching_saved_search_is_told_once(self):
+        first = self.publish()
+        seller_id = self.c.get(f"/api/v1/listings/{first['id']}").json()["seller"]["id"]
+        self.c.put(f"/api/v1/sellers/{seller_id}/follow", headers=self.h(self.buyer))
+        self.c.post("/api/v1/saved-searches", json={"category": first["category"]}, headers=self.h(self.buyer))
+        self.publish()
+        kinds = [n["kind"] for n in self.c.get("/api/v1/notifications", headers=self.h(self.buyer)).json()["items"]]
+        self.assertEqual(kinds, ["followed_shop"])
+
+
 class AdminTests(ApiTestCase):
     def test_support_console_page_is_served(self):
         r = self.c.get("/admin/")

@@ -5,6 +5,7 @@ import '../session.dart';
 import '../widgets/common.dart';
 import 'analytics_screen.dart';
 import 'earnings_screen.dart';
+import 'following_screen.dart';
 import 'my_listings_screen.dart';
 import 'offers_screen.dart';
 import 'shop_screen.dart';
@@ -20,8 +21,8 @@ class ProfileScreen extends StatelessWidget {
     if (!session.signedIn) {
       return Scaffold(
         body: SignInPrompt(text: tr('Профиль мен сатушы режимі үшін кіріңіз.')),
-        bottomNavigationBar: const SafeArea(
-            child: Padding(padding: EdgeInsets.all(16), child: Center(child: LanguageSwitch()))),
+        bottomNavigationBar:
+            const SafeArea(child: Padding(padding: EdgeInsets.all(16), child: Center(child: LanguageSwitch()))),
       );
     }
     return Scaffold(
@@ -61,10 +62,19 @@ class ProfileScreen extends StatelessWidget {
                 key: const Key('offers'),
                 leading: const Icon(Icons.local_offer_outlined),
                 title: Text(tr('Баға ұсыныстары')),
-                subtitle: Text(me.isSeller ? tr('Сатып алушылардың ұсыныстарына жауап беру') : tr('Сіздің ұсыныстарыңыз')),
+                subtitle:
+                    Text(me.isSeller ? tr('Сатып алушылардың ұсыныстарына жауап беру') : tr('Сіздің ұсыныстарыңыз')),
                 trailing: const Icon(Icons.chevron_right),
-                onTap: () => Navigator.of(context)
-                    .push(MaterialPageRoute(builder: (_) => OffersScreen(seller: me.isSeller))),
+                onTap: () =>
+                    Navigator.of(context).push(MaterialPageRoute(builder: (_) => OffersScreen(seller: me.isSeller))),
+              ),
+              ListTile(
+                key: const Key('following'),
+                leading: const Icon(Icons.storefront_outlined),
+                title: Text(tr('Жазылымдар')),
+                subtitle: Text(tr('Жаңа тауарын хабарлайтын дүкендер')),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const FollowingScreen())),
               ),
               if (me.isSeller)
                 ListTile(

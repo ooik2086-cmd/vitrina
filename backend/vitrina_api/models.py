@@ -282,6 +282,16 @@ class SavedSearch(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class Follow(Base):
+    """A buyer following a shop: each new listing from it sends them a notification."""
+    __tablename__ = "follows"
+    __table_args__ = (UniqueConstraint("user_id", "seller_id"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    seller_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class Offer(Base):
     """A buyer's price offer on one size of a listing. The seller accepts, declines or names their own price;
     an accepted offer lets that buyer order at that price for a limited time."""
