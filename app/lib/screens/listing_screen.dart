@@ -8,6 +8,7 @@ import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/delivery_sheet.dart';
 import '../widgets/questions.dart';
+import '../widgets/size_guide.dart';
 import '../widgets/spin_viewer.dart';
 import 'chat_screen.dart';
 import 'login_screen.dart';
@@ -337,8 +338,14 @@ class _ListingScreenState extends State<ListingScreen> {
               const SizedBox(height: 24),
               Row(children: [
                 Expanded(child: Text(tr('Өлшем'), style: theme.textTheme.titleMedium)),
-                Text(tr('ұлтарақ ұзындығы'),
-                    style: theme.textTheme.labelMedium?.copyWith(color: scheme.onSurfaceVariant)),
+                TextButton.icon(
+                  key: const Key('size-guide'),
+                  onPressed: () async {
+                    if (await showSizeGuide(context) != null && mounted) setState(() {});
+                  },
+                  icon: const Icon(Icons.straighten, size: 18),
+                  label: Text(tr('Өлшем кестесі')),
+                ),
               ]),
               const SizedBox(height: 12),
               Wrap(spacing: 8, runSpacing: 8, children: [

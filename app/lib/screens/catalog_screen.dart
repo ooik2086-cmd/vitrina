@@ -9,6 +9,7 @@ import '../session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/filter_sheet.dart';
+import '../widgets/size_guide.dart';
 import 'image_search_screen.dart';
 import 'listing_screen.dart';
 import 'notifications_screen.dart';
@@ -470,7 +471,19 @@ class _SizeSheet extends StatelessWidget {
               ActionChip(label: Text(trf('{0} см', [cm])), onPressed: () => Navigator.pop(context, cm)),
           ]),
           const SizedBox(height: 12),
-          TextButton(onPressed: () => Navigator.pop(context, ''), child: Text(tr('Өлшемді алып тастау'))),
+          Row(children: [
+            TextButton.icon(
+              key: const Key('size-guide'),
+              onPressed: () async {
+                final cm = await showSizeGuide(context);
+                if (cm != null && context.mounted) Navigator.pop(context, cm);
+              },
+              icon: const Icon(Icons.straighten, size: 18),
+              label: Text(tr('EU, US, UK кестесі')),
+            ),
+            const Spacer(),
+            TextButton(onPressed: () => Navigator.pop(context, ''), child: Text(tr('Өлшемді алып тастау'))),
+          ]),
         ]),
       ),
     );

@@ -32,6 +32,7 @@ import 'package:vitrina/session.dart';
 import 'package:vitrina/widgets/common.dart';
 import 'package:vitrina/widgets/delivery_sheet.dart';
 import 'package:vitrina/widgets/questions.dart';
+import 'package:vitrina/widgets/size_guide.dart';
 import 'package:vitrina/widgets/filter_sheet.dart';
 import 'package:vitrina/widgets/spin_viewer.dart';
 
@@ -478,6 +479,30 @@ void main() {
       },
       'offer_id': 11,
     });
+  });
+
+  testWidgets('size guide converts and remembers the picked size', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    await setMySize(null);
+    addTearDown(() => setMySize(null)); // other tests expect no remembered size
+    tester.view.physicalSize = const Size(400, 1800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    String? picked;
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: Builder(
+                builder: (context) => TextButton(
+                    onPressed: () async => picked = await showSizeGuide(context), child: const Text('open'))))));
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    final row = find.byKey(const Key('size-row-27'));
+    expect(find.descendant(of: row, matching: find.text('42')), findsOneWidget); // EU
+    expect(find.descendant(of: row, matching: find.text('8,5')), findsOneWidget); // US men
+    await tester.tap(row);
+    await tester.pumpAndSettle();
+    expect(picked, '27');
+    expect(mySize.value, '27');
   });
 
   testWidgets('a promo code shows the new price and goes with the order', (tester) async {
