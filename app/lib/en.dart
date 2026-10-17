@@ -646,4 +646,5 @@ const en = <String, String>{
       'All {0} listings on sale get cheaper. The old price shows crossed out, and people who saved them are notified.',
   'Жеңілдік {0} тауарға қосылды.': 'Sale applied to {0} listings.',
   'Бұрынғы баға {0} тауарға қайтарылды.': 'Old price restored on {0} listings.',
+  'Сатып алушыға жазу': 'Message buyer',
 };

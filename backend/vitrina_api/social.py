@@ -105,6 +105,22 @@ def open_conversation(body: ConversationIn, user: User = Depends(current_user), 
     return conversation_out(db, conv, user)
 
 
+@router.post("/orders/{order_id}/conversation")
+def order_conversation(order_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """The chat about an order, from either side, even after the listing sold out or was taken down."""
+    order = db.get(Order, order_id)
+    if order is None or user.id not in (order.buyer_id, order.seller_id):
+        raise ApiError(404, "not_found")
+    services.ensure_not_blocked(db, order.buyer_id, order.seller_id)
+    conv = db.scalar(select(Conversation).where(Conversation.listing_id == order.listing_id,
+                                                Conversation.buyer_id == order.buyer_id))
+    if conv is None:
+        conv = Conversation(listing_id=order.listing_id, buyer_id=order.buyer_id, seller_id=order.seller_id)
+        db.add(conv)
+        db.commit()
+    return conversation_out(db, conv, user)
+
+
 @router.get("/conversations")
 def list_conversations(user: User = Depends(current_user), db: Session = Depends(get_db)):
     # Threads with someone this user blocked drop out of the list; the blocked side still sees theirs.

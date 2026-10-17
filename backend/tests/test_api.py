@@ -993,6 +993,20 @@ class AwayTests(ApiTestCase):
         back = self.c.get(f"/api/v1/listings/{a['id']}").json()
         self.assertEqual((back["price_tiyn"], back["was_price_tiyn"]), (4_500_000, None))
 
+    def test_either_side_of_an_order_opens_the_same_chat(self):
+        listing = self.publish()
+        r = self.post("/orders", self.buyer, {"listing_id": listing["id"], "size_id": listing["sizes"][0]["id"]},
+                      **{"Idempotency-Key": "a"})
+        order = r.json()
+        from_seller = self.post(f"/orders/{order['id']}/conversation", self.seller).json()
+        self.assertEqual((from_seller["role"], from_seller["listing_id"]), ("seller", listing["id"]))
+        from_buyer = self.post(f"/orders/{order['id']}/conversation", self.buyer).json()
+        self.assertEqual((from_buyer["id"], from_buyer["role"]), (from_seller["id"], "buyer"))
+        stranger = self.login("+77010000005")
+        self.assertEqual(self.post(f"/orders/{order['id']}/conversation", stranger).status_code, 404)
+        self.post(f"/conversations/{from_buyer['id']}/block", self.buyer)
+        self.assertEqual(self.post(f"/orders/{order['id']}/conversation", self.seller).json()["code"], "blocked")
+
 class FollowTests(ApiTestCase):
     def test_followers_hear_about_each_new_listing_once(self):
         first = self.publish()

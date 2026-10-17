@@ -626,6 +626,38 @@ void main() {
     expect(salePrice(1299000, 15), 1104200);
   });
 
+  testWidgets('order page opens the chat with the other side, and says when that is blocked', (tester) async {
+    final posts = <String>[];
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async {
+          if (req.method == 'POST') {
+            posts.add(req.url.path);
+            return jsonResponse({
+              'code': 'blocked',
+              'message_kk': 'Бұл пайдаланушымен байланысу мүмкін емес.',
+            }, 403);
+          }
+          return jsonResponse({
+            'id': 5,
+            'status': 'PAID',
+            'listing_id': 7,
+            'buyer_id': 2,
+            'seller_id': 1,
+            'total_tiyn': 4650000,
+            'history': [],
+          });
+        }));
+    final session = Session(api)..update(Me.fromJson({'id': 1, 'phone': '+77010000001', 'is_seller': true}));
+    await tester.pumpWidget(SessionScope(session: session, child: const MaterialApp(home: OrderScreen(orderId: 5))));
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Сатып алушыға жазу'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('order-chat')));
+    await tester.pumpAndSettle();
+    expect(posts, ['/api/v1/orders/5/conversation']);
+    expect(find.text('Бұл пайдаланушымен байланысу мүмкін емес.'), findsOneWidget);
+  });
+
   test('order summary lists the price with its promo and says it is not a fiscal receipt', () {
     final o = OrderInfo.fromJson({
       'id': 1006,

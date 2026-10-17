@@ -949,6 +949,10 @@ class Api {
   Future<Conversation> openConversation(int listingId) async => Conversation.fromJson(
       await _send('POST', '/conversations', body: {'listing_id': listingId}) as Map<String, dynamic>);
 
+  /// The chat about an order, opened from either side.
+  Future<Conversation> orderConversation(int orderId) async =>
+      Conversation.fromJson(await _send('POST', '/orders/$orderId/conversation') as Map<String, dynamic>);
+
   Future<List<Conversation>> conversations() async {
     final r = await _send('GET', '/conversations') as Map;
     return [for (final j in r['items'] as List) Conversation.fromJson(j as Map<String, dynamic>)];

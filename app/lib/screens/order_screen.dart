@@ -7,6 +7,7 @@ import '../session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import '../i18n.dart';
+import 'chat_screen.dart';
 import 'listing_screen.dart';
 
 /// An action the current user may offer on an order. The server still checks every move.
@@ -120,12 +121,29 @@ class _OrderScreenState extends State<OrderScreen> {
     }
   }
 
+  Future<void> _chat() async {
+    try {
+      final c = await _api.orderConversation(widget.orderId);
+      if (!mounted) return;
+      await Navigator.of(context).push(MaterialPageRoute(builder: (_) => ChatScreen(conversationId: c.id)));
+    } catch (e) {
+      if (mounted) showError(context, e);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final me = SessionScope.of(context).me;
     final o = _order;
     return Scaffold(
       appBar: AppBar(title: Text(trf('Тапсырыс №{0}', [widget.orderId])), actions: [
+        if (o != null && me != null && (me.id == o.buyerId || me.id == o.sellerId))
+          IconButton(
+            key: const Key('order-chat'),
+            tooltip: me.id == o.buyerId ? tr('Сатушыға жазу') : tr('Сатып алушыға жазу'),
+            icon: const Icon(Icons.chat_bubble_outline_rounded),
+            onPressed: _chat,
+          ),
         if (o != null)
           IconButton(
             key: const Key('share-order'),
