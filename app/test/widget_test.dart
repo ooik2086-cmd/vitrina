@@ -78,7 +78,7 @@ void main() {
   testWidgets('spin viewer steps through real frames on drag', (tester) async {
     final urls = [for (var i = 0; i < 12; i++) 'http://x/f$i.jpg'];
     await tester.pumpWidget(MaterialApp(
-        home: SizedBox(width: 300, height: 300, child: SpinViewer(frameUrls: urls, pixelsPerFrame: 10))));
+        home: SizedBox(width: 300, height: 300, child: SpinViewer(frameUrls: urls, pixelsPerFrame: 10, introSpin: false))));
     Image current() => tester.widget<Image>(find.byType(Image));
     expect((current().image as NetworkImage).url, urls[0]);
     await tester.drag(find.byType(SpinViewer), const Offset(-35, 0));
@@ -107,9 +107,9 @@ void main() {
     expect(find.text('Тексерілмеген'), findsOneWidget);
     expect(find.textContaining('сызат'), findsOneWidget);
     expect(find.text('Өлшемді таңдаңыз'), findsOneWidget);
-    await tester.tap(find.text('42 · 27,0 см'));
+    await tester.tap(find.text('42'));
     await tester.pump();
-    expect(find.textContaining('Тапсырыс беру'), findsOneWidget);
+    expect(find.text('Тапсырыс беру'), findsOneWidget);
   });
 
   test('photo upload is multipart with the token and returns the stored url', () async {

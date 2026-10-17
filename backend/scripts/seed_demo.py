@@ -1,8 +1,9 @@
 """Fill a running development server with demo listings through the public API.
 
-    python3 scripts/seed_demo.py --frames ./demo-frames
+    python3 scripts/seed_demo.py                      # uses demo/frames next to this script
+    python3 scripts/seed_demo.py --api http://127.0.0.1:8000/api/v1
 
---frames is a local folder with an ordered photo sequence taken around a shoe (any .jpg/.png names, sorted).
+Each folder in demo/frames is one shoe: an ordered 360° sequence (see demo/ATTRIBUTION.md for the source).
 Photos go through the normal upload endpoint, so they are cleaned and stored like a seller's.
 Needs VITRINA_DEBUG_OTP=1 on the server, because sign-in reads the code from the response.
 """
@@ -13,6 +14,31 @@ from pathlib import Path
 
 import httpx
 
+DEMO = Path(__file__).resolve().parent.parent / "demo" / "frames"
+SIZES = [("39", "25"), ("40", "25,5"), ("41", "26,5"), ("42", "27"), ("43", "27,5"), ("44", "28,5")]
+
+# Listings per frame folder. Facts stay separate: condition, defects and price are the seller's claims.
+LISTINGS = {
+    "street": [
+        {"title": "Жеңіл жүгіру кроссовкасы, қара", "color": "қара, маржан жолақ", "condition": "new_with_box",
+         "price_tiyn": 3_290_000, "delivery_price_tiyn": 150_000, "showcase_style": "premium",
+         "description": "Тор матадан жеңіл кроссовка, көбік табан. Қорабы мен жапсырмасы бар."},
+        {"title": "Жеңіл кроссовка, қара, киілген", "color": "қара", "condition": "used_good",
+         "defects": "Оң аяқтың табанында аздап сарғаю, тор мата бүтін.", "price_tiyn": 1_490_000,
+         "showcase_style": "clean", "sizes": [("42", "27", 1)]},
+    ],
+    "midnight": [
+        {"title": "Жеңіл жүгіру кроссовкасы, көк", "color": "көк", "condition": "new_no_box",
+         "price_tiyn": 2_990_000, "delivery_price_tiyn": 0, "showcase_style": "dynamic",
+         "description": "Күнделікті және жүгіруге. Қорабы жоқ, киілмеген."},
+    ],
+    "beach": [
+        {"title": "Жеңіл кроссовка, ақшыл қызғылт", "color": "қызғылт", "condition": "unworn_stored",
+         "price_tiyn": 2_490_000, "delivery_price_tiyn": 120_000, "showcase_style": "clean",
+         "description": "Бір рет өлшеп көрілген, сақтауда тұрған."},
+    ],
+}
+
 
 def login(c: httpx.Client, phone: str) -> dict:
     code = c.post("/auth/otp", json={"phone": phone}).raise_for_status().json().get("dev_code")
@@ -22,41 +48,39 @@ def login(c: httpx.Client, phone: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
 
 
+def upload(c: httpx.Client, auth: dict, path: Path) -> str:
+    return c.post("/media", files={"file": (path.name, path.read_bytes())}, headers=auth).raise_for_status().json()["url"]
+
+
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--api", default="http://127.0.0.1:8000/api/v1")
-    p.add_argument("--frames", required=True, type=Path, help="folder with the ordered frame photos")
+    p.add_argument("--frames", type=Path, default=DEMO, help="folder with one sub-folder of ordered frames per shoe")
     args = p.parse_args()
-    files = sorted(f for f in args.frames.iterdir() if f.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp"))
-    if len(files) < 8:
-        raise SystemExit("need at least 8 frames")
 
-    with httpx.Client(base_url=args.api, timeout=10) as c:
+    with httpx.Client(base_url=args.api, timeout=30) as c:
         seller = login(c, "+77010000001")
         c.post("/me/seller", json={"shop_name": "Qadam Store", "city": "Алматы"}, headers=seller)
-        urls = [c.post("/media", files={"file": (f.name, f.read_bytes())}, headers=seller).raise_for_status().json()["url"]
-                for f in files]
-        q = len(urls) // 4
-        frames = [{"url": u, "angle": "frame"} for u in urls]
-        shots = [{"url": urls[i * q], "angle": a} for i, a in enumerate(("outer", "front", "inner", "back"))]
-        demos = [
-            {"title": "Qadam Runner, құмды түсті", "category": "sneakers", "brand": "Qadam", "color": "құм",
-             "condition": "new_with_box", "price_tiyn": 3_490_000, "delivery_price_tiyn": 150_000,
-             "showcase_style": "clean", "description": "Күнделікті киюге арналған жеңіл кроссовка.",
-             "sizes": [{"label": "41", "insole_cm": "26,5", "quantity": 2},
-                       {"label": "42", "insole_cm": "27", "quantity": 1},
-                       {"label": "43", "insole_cm": "27,5", "quantity": 0}],
-             "photos": shots + frames},
-            {"title": "Qadam Runner, киілген", "category": "sneakers", "brand": "Qadam", "color": "құм",
-             "condition": "used_good", "defects": "Сол аяқтың тұмсығында 1 см сызат, суретте көрсетілген.",
-             "price_tiyn": 1_890_000, "showcase_style": "premium",
-             "sizes": [{"label": "42", "insole_cm": "27", "quantity": 1}],
-             "photos": shots + [{"url": urls[q // 2], "angle": "defect"}] + frames},
-        ]
-        for body in demos:
-            r = c.post("/listings", json=body, headers=seller).raise_for_status().json()
-            c.post(f"/listings/{r['id']}/publish", headers=seller).raise_for_status()
-            print("published", r["id"], body["title"])
+        for folder, listings in LISTINGS.items():
+            files = sorted((args.frames / folder).glob("*.jpg"))
+            if len(files) < 8:
+                raise SystemExit(f"{folder}: need at least 8 frames")
+            urls = [upload(c, seller, f) for f in files]
+            q = len(urls) // 4
+            # The four required angles are frames from the same turn: outer side, toe, inner side, heel.
+            shots = [{"url": urls[(i * q) % len(urls)], "angle": a}
+                     for i, a in enumerate(("outer", "front", "inner", "back"))]
+            frames = [{"url": u, "angle": "frame"} for u in urls]
+            for spec in listings:
+                spec = dict(spec)
+                sizes = spec.pop("sizes", [(label, cm, 2) for label, cm in SIZES])
+                body = {"category": "sneakers", **spec,
+                        "sizes": [{"label": s, "insole_cm": cm, "quantity": n} for s, cm, n in sizes],
+                        "photos": shots + ([{"url": urls[q // 2], "angle": "defect"}] if spec.get("defects") else [])
+                                  + frames}
+                r = c.post("/listings", json=body, headers=seller).raise_for_status().json()
+                c.post(f"/listings/{r['id']}/publish", headers=seller).raise_for_status()
+                print("published", r["id"], body["title"])
 
 
 if __name__ == "__main__":

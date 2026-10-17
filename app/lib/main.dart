@@ -6,6 +6,7 @@ import 'screens/favorites_screen.dart';
 import 'screens/orders_screen.dart';
 import 'screens/profile_screen.dart';
 import 'session.dart';
+import 'theme.dart';
 
 void main() {
   final session = Session(Api())..restore();
@@ -23,8 +24,8 @@ class VitrinaApp extends StatelessWidget {
       child: MaterialApp(
         title: 'VITRINA',
         debugShowCheckedModeBanner: false,
-        theme: ThemeData(colorSchemeSeed: const Color(0xFF1F5EFF), useMaterial3: true),
-        darkTheme: ThemeData(colorSchemeSeed: const Color(0xFF1F5EFF), brightness: Brightness.dark, useMaterial3: true),
+        theme: buildTheme(Brightness.light),
+        darkTheme: buildTheme(Brightness.dark),
         home: const HomeShell(),
       ),
     );
@@ -54,10 +55,12 @@ class _HomeShellState extends State<HomeShell> {
         selectedIndex: _tab,
         onDestinationSelected: (i) => setState(() => _tab = i),
         destinations: const [
-          NavigationDestination(icon: Icon(Icons.storefront_outlined), label: 'Каталог'),
-          NavigationDestination(icon: Icon(Icons.favorite_border), label: 'Таңдаулы'),
-          NavigationDestination(icon: Icon(Icons.receipt_long_outlined), label: 'Тапсырыс'),
-          NavigationDestination(icon: Icon(Icons.person_outline), label: 'Профиль'),
+          NavigationDestination(
+              icon: Icon(Icons.storefront_outlined), selectedIcon: Icon(Icons.storefront), label: 'Каталог'),
+          NavigationDestination(icon: Icon(Icons.favorite_border), selectedIcon: Icon(Icons.favorite), label: 'Таңдаулы'),
+          NavigationDestination(
+              icon: Icon(Icons.receipt_long_outlined), selectedIcon: Icon(Icons.receipt_long), label: 'Тапсырыс'),
+          NavigationDestination(icon: Icon(Icons.person_outline), selectedIcon: Icon(Icons.person), label: 'Профиль'),
         ],
       ),
     );

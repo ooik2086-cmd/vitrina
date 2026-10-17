@@ -4,6 +4,7 @@ import '../api.dart';
 import '../labels.dart';
 import '../screens/listing_screen.dart';
 import '../screens/login_screen.dart';
+import '../theme.dart';
 
 void showError(BuildContext context, Object error) {
   final text = error is ApiException ? error.messageKk : 'Байланыс жоқ. Қайта көріңіз.';
@@ -41,43 +42,76 @@ class ListingTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final cover = listing.coverUrl;
-    return InkWell(
+    return GestureDetector(
       onTap: () => Navigator.of(context)
           .push(MaterialPageRoute(builder: (_) => ListingScreen(listingId: listing.id))),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         AspectRatio(
           aspectRatio: 1,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(12),
+          child: Hero(
+            tag: 'listing-${listing.id}',
             child: Container(
-              color: theme.colorScheme.surfaceContainerHighest,
-              child: cover == null
-                  ? const Icon(Icons.image_outlined)
-                  : Image.network(cover,
-                      fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Icon(Icons.broken_image_outlined)),
+              clipBehavior: Clip.antiAlias,
+              decoration: BoxDecoration(color: Brand.studio, borderRadius: BorderRadius.circular(Brand.radius)),
+              child: Stack(fit: StackFit.expand, children: [
+                if (cover == null)
+                  const Icon(Icons.image_outlined, color: Colors.black26)
+                else
+                  Image.network(cover,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => const Icon(Icons.broken_image_outlined, color: Colors.black26)),
+                if (listing.frames.isNotEmpty) const Positioned(left: 10, top: 10, child: Badge360()),
+              ]),
             ),
           ),
         ),
-        const SizedBox(height: 6),
-        Text(formatTenge(listing.priceTiyn), style: theme.textTheme.titleMedium),
-        Text(listing.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: theme.textTheme.bodySmall),
+        const SizedBox(height: 10),
+        Text(formatTenge(listing.priceTiyn), style: weight(theme.textTheme.titleMedium!, 750)),
+        const SizedBox(height: 2),
+        Text(listing.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: theme.textTheme.bodyMedium),
+        const SizedBox(height: 2),
         Text(label(conditions, listing.condition),
-            style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.outline)),
+            style: theme.textTheme.labelMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
       ]),
     );
   }
 }
 
+class Badge360 extends StatelessWidget {
+  const Badge360({super.key, this.dark = false});
+  final bool dark;
+
+  @override
+  Widget build(BuildContext context) {
+    final fg = dark ? Colors.white : Brand.ink;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: dark ? Colors.black.withValues(alpha: 0.55) : Colors.white.withValues(alpha: 0.9),
+        borderRadius: BorderRadius.circular(99),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(Icons.threesixty, size: 14, color: fg),
+          const SizedBox(width: 4),
+          Text('360°', style: weight(Theme.of(context).textTheme.labelSmall!, 700).copyWith(color: fg)),
+        ]),
+      ),
+    );
+  }
+}
+
 class ListingGrid extends StatelessWidget {
-  const ListingGrid({super.key, required this.items});
+  const ListingGrid({super.key, required this.items, this.padding = const EdgeInsets.all(16)});
   final List<Listing> items;
+  final EdgeInsets padding;
 
   @override
   Widget build(BuildContext context) {
     return GridView.builder(
-      padding: const EdgeInsets.all(16),
+      padding: padding,
       gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-          maxCrossAxisExtent: 220, mainAxisSpacing: 16, crossAxisSpacing: 12, childAspectRatio: 0.62),
+          maxCrossAxisExtent: 240, mainAxisSpacing: 20, crossAxisSpacing: 14, childAspectRatio: 0.64),
       itemCount: items.length,
       itemBuilder: (_, i) => ListingTile(listing: items[i]),
     );

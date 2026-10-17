@@ -1,0 +1,56 @@
+<!doctype html><html><head><meta charset="utf-8">
+<script type="importmap">{"imports":{"three":"./three160/build/three.module.js","three/addons/":"./three160/examples/jsm/"}}</script>
+</head><body style="margin:0">
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+const W = 1200, H = 1200;
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setSize(W, H); renderer.setPixelRatio(1);
+renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.0;
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xf3f2ef);
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(renderer), 0.04).texture;
+const key = new THREE.DirectionalLight(0xffffff, 1.2); key.position.set(2, 6, 3); key.castShadow = true;
+key.shadow.mapSize.set(2048, 2048); key.shadow.radius = 8; key.shadow.camera.near = 0.1; key.shadow.camera.far = 20;
+scene.add(key);
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(20, 20), new THREE.ShadowMaterial({ opacity: 0.18 }));
+ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
+const camera = new THREE.PerspectiveCamera(30, W / H, 0.01, 100);
+const gltf = await new GLTFLoader().loadAsync('./shoe.glb');
+const parser = gltf.parser, json = parser.json;
+const variants = json.extensions.KHR_materials_variants.variants.map(v => v.name);
+const model = gltf.scene;
+const meshes = [];
+model.traverse(o => { if (o.isMesh) { o.castShadow = true; meshes.push(o); } });
+// fit: put the sole on the ground and centre it
+const box = new THREE.Box3().setFromObject(model);
+const size = box.getSize(new THREE.Vector3()), center = box.getCenter(new THREE.Vector3());
+model.position.sub(new THREE.Vector3(center.x, box.min.y, center.z));
+const pivot = new THREE.Group(); pivot.add(model); scene.add(pivot);
+const r = Math.max(size.x, size.z);
+const dist = r * 2.05;
+camera.position.set(0, size.y * 1.9, dist); camera.lookAt(0, size.y * 0.42, 0);
+key.shadow.camera.left = -r; key.shadow.camera.right = r; key.shadow.camera.top = r; key.shadow.camera.bottom = -r;
+async function setVariant(idx) {
+  for (const m of meshes) {
+    const a = parser.associations.get(m); if (!a || a.meshes === undefined) continue;
+    const prim = json.meshes[a.meshes].primitives[a.primitives];
+    const maps = prim.extensions?.KHR_materials_variants?.mappings || [];
+    const hit = maps.find(x => x.variants.includes(idx));
+    if (hit) m.material = await parser.getDependency('material', hit.material);
+  }
+}
+window.info = { variants, size: size.toArray() };
+window.frame = async (variant, i, n) => {
+  await setVariant(variant);
+  pivot.rotation.y = -i * 2 * Math.PI / n;
+  renderer.render(scene, camera);
+  return renderer.domElement.toDataURL('image/jpeg', 0.9);
+};
+window.ready = true;
+</script></body></html>
