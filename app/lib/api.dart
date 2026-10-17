@@ -297,6 +297,7 @@ class Listing {
         brand = j['brand'] as String?,
         color = j['color'] as String,
         priceTiyn = j['price_tiyn'] as int,
+        wasPriceTiyn = j['was_price_tiyn'] as int?,
         deliveryPriceTiyn = j['delivery_price_tiyn'] as int,
         segment = j['segment'] as String?,
         condition = j['condition'] as String,
@@ -323,6 +324,9 @@ class Listing {
   final String? brand;
   final String color;
   final int priceTiyn;
+
+  /// The price before the seller's recent cut, shown crossed out; null when there is no sale.
+  final int? wasPriceTiyn;
   final int deliveryPriceTiyn;
   final String? segment;
   final String condition;
@@ -593,9 +597,11 @@ class Api {
       String? category,
       CatalogFilter filter = const CatalogFilter(),
       int? sellerId,
+      bool sale = false,
       int offset = 0,
       int limit = 20}) async {
     final r = await _send('GET', '/listings', query: {
+      if (sale) 'sale': 'true',
       if (offset > 0) 'offset': '$offset',
       if (limit != 20) 'limit': '$limit',
       if (q != null && q.isNotEmpty) 'q': q,

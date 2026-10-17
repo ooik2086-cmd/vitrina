@@ -243,7 +243,7 @@ class _ListingScreenState extends State<ListingScreen> {
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(l.title, style: theme.textTheme.headlineSmall),
               const SizedBox(height: 6),
-              Text(formatTenge(l.priceTiyn), style: weight(theme.textTheme.headlineSmall!, 800)),
+              PriceLine(listing: l, style: weight(theme.textTheme.headlineSmall!, 800)),
               const SizedBox(height: 4),
               Text(
                 l.deliveryPriceTiyn == 0 ? tr('Жеткізу тегін') : trf('Жеткізу {0}', [formatTenge(l.deliveryPriceTiyn)]),

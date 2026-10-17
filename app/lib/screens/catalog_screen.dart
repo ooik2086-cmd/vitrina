@@ -28,6 +28,7 @@ class _CatalogScreenState extends State<CatalogScreen> {
   String? _sizeCm = mySize.value;
   String? _category;
   CatalogFilter _filter = const CatalogFilter();
+  bool _sale = false; // only listings whose price was really cut
   Future<List<Listing>>? _results;
   static const _page = 20;
   final List<Listing> _more = [];
@@ -68,7 +69,8 @@ class _CatalogScreenState extends State<CatalogScreen> {
 
   Future<List<Listing>> _load({int offset = 0}) => SessionScope.of(context)
       .api
-      .search(q: _query.text.trim(), sizeCm: _sizeCm, category: _category, filter: _filter, offset: offset);
+      .search(
+          q: _query.text.trim(), sizeCm: _sizeCm, category: _category, filter: _filter, sale: _sale, offset: offset);
 
   void _search() => setState(() {
         _more.clear();
@@ -259,6 +261,23 @@ class _CatalogScreenState extends State<CatalogScreen> {
                         label: Text(_filter.sort == 'new' ? tr('Сүзгі') : tr(sortLabels[_filter.sort]!)),
                         onPressed: _pickFilter,
                       ),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: FilterChip(
+                      key: const Key('sale'),
+                      avatar: Icon(Icons.local_fire_department_rounded,
+                          size: 18, color: _sale ? Colors.white : Brand.accent),
+                      label: Text(tr('Жеңілдік')),
+                      selected: _sale,
+                      showCheckmark: false,
+                      selectedColor: Brand.accent,
+                      labelStyle: TextStyle(color: _sale ? Colors.white : null, fontWeight: FontWeight.w600),
+                      onSelected: (v) {
+                        _sale = v;
+                        _search();
+                      },
                     ),
                   ),
                   for (final e in {null: tr('Барлығы'), ...categories}.entries)

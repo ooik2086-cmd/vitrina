@@ -465,6 +465,18 @@ void main() {
     expect(find.byType(InteractiveViewer), findsOneWidget);
   });
 
+  testWidgets('a cut price shows the old one crossed out with the percent', (tester) async {
+    final l = Listing.fromJson({...listingJson(), 'price_tiyn': 3600000, 'was_price_tiyn': 4500000});
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(body: SizedBox(width: 220, height: 400, child: ListingTile(listing: l)))));
+    expect(find.text('−20%'), findsOneWidget);
+    expect(tester.widget<Text>(find.byKey(const Key('was-price'))).data, formatTenge(4500000));
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: SizedBox(width: 220, height: 400, child: ListingTile(listing: Listing.fromJson(listingJson()))))));
+    expect(find.byKey(const Key('was-price')), findsNothing);
+  });
+
   test('photo upload is multipart with the token and returns the stored url', () async {
     late http.BaseRequest seen;
     final api = Api(

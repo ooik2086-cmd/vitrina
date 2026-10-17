@@ -183,7 +183,8 @@ def listing_out(db: Session, listing: Listing, *, owner: bool = False) -> dict:
     return {
         "id": listing.id, "status": listing.status, "title": listing.title, "category": listing.category,
         "brand": listing.brand, "model_name": listing.model_name, "color": listing.color,
-        "price_tiyn": listing.price_tiyn, "delivery_price_tiyn": listing.delivery_price_tiyn,
+        "price_tiyn": listing.price_tiyn, "was_price_tiyn": was_price(listing),
+        "delivery_price_tiyn": listing.delivery_price_tiyn,
         # Three separate facts, never merged into one "quality" label.
         "segment": segment_for(db, listing), "condition": listing.condition, "authenticity": listing.authenticity,
         "defects": listing.defects, "description": listing.description, "showcase_style": listing.showcase_style,
@@ -197,6 +198,27 @@ def listing_out(db: Session, listing: Listing, *, owner: bool = False) -> dict:
             "promo": {"state": listing.promo_state, "url": listing.promo_url},
             "moderation": moderation_out(listing)} if owner else {}),
     }
+
+
+SALE_DAYS = 14  # how long a cut price is shown against the old one
+
+
+def mark_price_change(listing: Listing, new_price: int) -> None:
+    """Keep the highest price of the current sale as the crossed-out one; a cut of under 5% is not a sale."""
+    now = now_utc()
+    live = listing.was_price_tiyn if listing.was_until and services.aware(listing.was_until) > now else None
+    was = max(live or 0, listing.price_tiyn)
+    if new_price <= was * 0.95:
+        listing.was_price_tiyn, listing.was_until = was, now + timedelta(days=SALE_DAYS)
+    elif new_price >= was or live is None:
+        listing.was_price_tiyn, listing.was_until = None, None
+
+
+def was_price(listing: Listing) -> int | None:
+    if listing.was_price_tiyn and listing.was_until and services.aware(listing.was_until) > now_utc() \
+            and listing.was_price_tiyn > listing.price_tiyn:
+        return listing.was_price_tiyn
+    return None
 
 
 def moderation_out(listing: Listing) -> dict:
@@ -509,6 +531,7 @@ def edit_listing(listing_id: int, body: ListingPatch, user: User = Depends(curre
             listing.promo_state, listing.promo_url = None, None  # the video shows the old price
         if body.price_tiyn < listing.price_tiyn and listing.status == "published":
             notify_price_drop(db, listing, listing.price_tiyn, body.price_tiyn)
+        mark_price_change(listing, body.price_tiyn)
         listing.price_tiyn = body.price_tiyn
     if body.delivery_price_tiyn is not None:
         listing.delivery_price_tiyn = body.delivery_price_tiyn
@@ -605,12 +628,14 @@ def search_listings(q: str | None = None, category: str | None = None, brand: st
                     condition: str | None = None, min_price_tiyn: int | None = None,
                     max_price_tiyn: int | None = None, size_cm: str | None = None,
                     sort: Literal["new", "price_asc", "price_desc"] = "new", seller_id: int | None = None,
-                    limit: int = 20, offset: int = 0, db: Session = Depends(get_db)):
+                    sale: bool = False, limit: int = 20, offset: int = 0, db: Session = Depends(get_db)):
     stmt = catalog_filter(select(Listing).where(Listing.status == "published"), q=q, category=category,
                           brand=brand, condition=condition, min_price_tiyn=min_price_tiyn,
                           max_price_tiyn=max_price_tiyn, size_cm=size_cm)
     if seller_id is not None:
         stmt = stmt.where(Listing.seller_id == seller_id)
+    if sale:
+        stmt = stmt.where(Listing.was_price_tiyn > Listing.price_tiyn, Listing.was_until > now_utc())
     order = {"new": (Listing.id.desc(),), "price_asc": (Listing.price_tiyn, Listing.id.desc()),
              "price_desc": (Listing.price_tiyn.desc(), Listing.id.desc())}[sort]
     rows = db.scalars(stmt.order_by(*order).limit(max(1, min(limit, 50))).offset(max(0, offset))).all()

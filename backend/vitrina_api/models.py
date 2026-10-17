@@ -79,6 +79,9 @@ class Listing(Base):
     moderation_flags: Mapped[str | None] = mapped_column(String(200))
     moderation_cleared: Mapped[str | None] = mapped_column(String(200))
     moderation_note: Mapped[str | None] = mapped_column(Text)
+    # The price before the seller's last cut, shown crossed out for a while. Only a price the listing really had.
+    was_price_tiyn: Mapped[int | None] = mapped_column(BigInteger)
+    was_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     announced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # saved-search alerts sent
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     sizes: Mapped[list[ListingSize]] = relationship(cascade="all, delete-orphan", order_by="ListingSize.id")

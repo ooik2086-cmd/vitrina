@@ -96,13 +96,16 @@ def informative(h: str) -> bool:
 
 
 def reused_photo(db: Session, listing: Listing) -> bool:
-    mine = [m.phash for m in listing.media if m.phash and informative(m.phash)]
+    """A photo that matches one another seller uploaded earlier. Only the later copy is flagged, so a seller
+    whose pictures were taken is never held back by the copy."""
+    mine = [(m.id, m.phash) for m in listing.media if m.phash and informative(m.phash)]
     if not mine:
         return False
-    others = db.scalars(select(Media.phash).join(Listing, Listing.id == Media.listing_id).where(
-        Listing.seller_id != listing.seller_id, Media.phash.is_not(None),
+    others = db.execute(select(Media.id, Media.phash).join(Listing, Listing.id == Media.listing_id).where(
+        Listing.seller_id != listing.seller_id, Media.phash.is_not(None), Media.id < max(i for i, _ in mine),
         Listing.status.in_(("published", "sold", "moderation", "paused")))).all()
-    return any(distance(a, b) <= PHASH_DISTANCE for a in mine for b in others if informative(b))
+    return any(oid < mid and informative(b) and distance(a, b) <= PHASH_DISTANCE
+               for mid, a in mine for oid, b in others)
 
 
 def check(db: Session, storage, listing: Listing) -> list[str]:

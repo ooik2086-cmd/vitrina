@@ -102,12 +102,14 @@ class ListingTile extends StatelessWidget {
                       fit: BoxFit.cover,
                       errorBuilder: (_, __, ___) => const Icon(Icons.broken_image_outlined, color: Colors.black26)),
                 if (listing.frames.isNotEmpty) const Positioned(left: 10, top: 10, child: Badge360()),
+                if (listing.wasPriceTiyn != null)
+                  Positioned(right: 10, top: 10, child: SaleBadge(listing: listing)),
               ]),
             ),
           ),
         ),
         const SizedBox(height: 10),
-        Text(formatTenge(listing.priceTiyn), style: weight(theme.textTheme.titleMedium!, 750)),
+        PriceLine(listing: listing, style: weight(theme.textTheme.titleMedium!, 750)),
         const SizedBox(height: 2),
         Text(listing.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: theme.textTheme.bodyMedium),
         const SizedBox(height: 2),
@@ -115,6 +117,49 @@ class ListingTile extends StatelessWidget {
             style: theme.textTheme.labelMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
       ]),
     );
+  }
+}
+
+int salePercent(Listing l) => ((1 - l.priceTiyn / l.wasPriceTiyn!) * 100).round();
+
+/// "−20%" on an accent pill, for listings whose price was really cut.
+class SaleBadge extends StatelessWidget {
+  const SaleBadge({super.key, required this.listing});
+  final Listing listing;
+
+  @override
+  Widget build(BuildContext context) => DecoratedBox(
+        decoration: BoxDecoration(color: Brand.accent, borderRadius: BorderRadius.circular(99)),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+          child: Text('−${salePercent(listing)}%',
+              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 12)),
+        ),
+      );
+}
+
+/// The price, and during a sale the old one crossed out beside it.
+class PriceLine extends StatelessWidget {
+  const PriceLine({super.key, required this.listing, required this.style});
+  final Listing listing;
+  final TextStyle style;
+
+  @override
+  Widget build(BuildContext context) {
+    final was = listing.wasPriceTiyn;
+    return Wrap(crossAxisAlignment: WrapCrossAlignment.end, spacing: 8, children: [
+      Text(formatTenge(listing.priceTiyn), style: was == null ? style : style.copyWith(color: Brand.accent)),
+      if (was != null)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 2),
+          child: Text(formatTenge(was),
+              key: const Key('was-price'),
+              style: TextStyle(
+                  fontSize: (style.fontSize ?? 16) * 0.7,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  decoration: TextDecoration.lineThrough)),
+        ),
+    ]);
   }
 }
 

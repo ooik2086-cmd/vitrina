@@ -718,8 +718,11 @@ class ModerationPhotoTests(ApiTestCase):
         self.assertEqual(self.listing(other, (5, 6, 7, 8))["status"], "published")
         stolen = self.listing(other, (9, 10, 11, 2))  # one photo is the first seller's, re-uploaded
         self.assertEqual(stolen["moderation"]["flags"], ["reused_photo"])
-        # Reusing your own photos is fine.
+        # Reusing your own photos is fine, and the seller whose photo was copied is never held back.
         self.assertEqual(self.listing(self.seller, (1, 12, 13, 14))["status"], "published")
+        mine = self.c.get("/api/v1/me/listings", headers=self.h(self.seller)).json()["items"][-1]
+        r = self.c.patch(f"/api/v1/listings/{mine['id']}", json={"price_tiyn": 4_000_000}, headers=self.h(self.seller))
+        self.assertEqual(r.json()["status"], "published")
 
 
 class OfferTests(ApiTestCase):
@@ -836,6 +839,33 @@ class SavedSearchTests(ApiTestCase):
         self.assertEqual(self.c.delete(f"/api/v1/saved-searches/{ids[0]}", headers=self.h(self.buyer)).status_code, 204)
         items = self.get("/saved-searches", self.buyer).json()["items"]
         self.assertEqual((len(items), items[0]["q"]), (9, "model 9"))
+
+
+class SaleTests(ApiTestCase):
+    def patch(self, lid, price):
+        r = self.c.patch(f"/api/v1/listings/{lid}", json={"price_tiyn": price}, headers=self.h(self.seller))
+        self.assertEqual(r.status_code, 200, r.text)
+        return r.json()
+
+    def test_cut_price_shows_the_real_old_price_for_two_weeks(self):
+        listing = self.publish()  # 45 000
+        self.assertIsNone(listing["was_price_tiyn"])
+        self.assertIsNone(self.patch(listing["id"], 4_400_000)["was_price_tiyn"])  # 2% is not a sale
+        self.assertEqual(self.patch(listing["id"], 3_600_000)["was_price_tiyn"], 4_400_000)
+        self.assertEqual(self.patch(listing["id"], 3_200_000)["was_price_tiyn"], 4_400_000)  # still the top
+        sale = self.c.get("/api/v1/listings?sale=true").json()["items"]
+        self.assertEqual([i["id"] for i in sale], [listing["id"]])
+        with self.db() as db:
+            from vitrina_api.models import Listing
+            db.get(Listing, listing["id"]).was_until = datetime.now(timezone.utc) - timedelta(minutes=1)
+            db.commit()
+        self.assertIsNone(self.c.get(f"/api/v1/listings/{listing['id']}").json()["was_price_tiyn"])
+        self.assertEqual(self.c.get("/api/v1/listings?sale=true").json()["items"], [])
+
+    def test_raising_the_price_ends_the_sale(self):
+        listing = self.publish()
+        self.patch(listing["id"], 3_000_000)
+        self.assertIsNone(self.patch(listing["id"], 4_600_000)["was_price_tiyn"])
 
 
 class AdminTests(ApiTestCase):
