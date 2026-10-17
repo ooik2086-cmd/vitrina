@@ -4,6 +4,7 @@ import 'api.dart';
 import 'screens/catalog_screen.dart';
 import 'screens/chat_screen.dart';
 import 'screens/listing_screen.dart';
+import 'screens/onboarding_screen.dart';
 import 'screens/favorites_screen.dart';
 import 'screens/orders_screen.dart';
 import 'screens/profile_screen.dart';
@@ -21,6 +22,7 @@ Future<void> main() async {
   await restoreRecent();
   await restoreRecentSearches();
   await restoreQuickReplies();
+  await restoreOnboarded();
   final session = Session(Api())..restore();
   runApp(VitrinaApp(session: session));
 }
@@ -50,7 +52,10 @@ class VitrinaApp extends StatelessWidget {
           debugShowCheckedModeBanner: false,
           theme: buildTheme(Brightness.light),
           darkTheme: buildTheme(Brightness.dark),
-          home: const HomeShell(),
+          home: ValueListenableBuilder<bool>(
+            valueListenable: onboarded,
+            builder: (context, done, _) => done ? const HomeShell() : const OnboardingScreen(),
+          ),
           // vitrina://open/listing/7 from a shared link's "open in app" button.
           onGenerateRoute: (settings) {
             final m = RegExp(r'^/listing/(\d+)$').firstMatch(settings.name ?? '');

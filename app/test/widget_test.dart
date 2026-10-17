@@ -23,6 +23,7 @@ import 'package:vitrina/screens/listing_screen.dart';
 import 'package:vitrina/screens/manage_listing_screen.dart';
 import 'package:vitrina/screens/my_listings_screen.dart';
 import 'package:vitrina/screens/notification_settings_screen.dart';
+import 'package:vitrina/screens/onboarding_screen.dart';
 import 'package:vitrina/screens/offers_screen.dart';
 import 'package:vitrina/screens/order_screen.dart';
 import 'package:vitrina/screens/profile_screen.dart';
@@ -533,6 +534,33 @@ void main() {
     await tester.tap(find.byKey(const Key('compare-pick-1')));
     await tester.pump();
     expect(find.text('Салыстыру үшін кемінде екі тауар таңдаңыз.'), findsOneWidget);
+  });
+
+  testWidgets('intro shows once: three pages, then it is remembered', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    await restoreOnboarded();
+    expect(onboarded.value, isFalse);
+    addTearDown(() => onboarded.value = true);
+    await tester.pumpWidget(MaterialApp(
+        home: ValueListenableBuilder<bool>(
+      valueListenable: onboarded,
+      builder: (_, done, __) => done ? const Text('home') : const OnboardingScreen(),
+    )));
+    expect(find.text('Аяқкиімді 360° айналдырып көріңіз'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('onboarding-next')));
+    await tester.pumpAndSettle();
+    expect(find.text('Ақшаңыз қорғалған'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('onboarding-next')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('onboarding-size')), findsOneWidget);
+    expect(find.text('Бастау'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('onboarding-next')));
+    await tester.pumpAndSettle();
+    expect(find.text('home'), findsOneWidget);
+    expect((await SharedPreferences.getInstance()).getBool('vitrina_onboarded'), isTrue);
+    onboarded.value = false;
+    await restoreOnboarded();
+    expect(onboarded.value, isTrue);
   });
 
   test('order summary lists the price with its promo and says it is not a fiscal receipt', () {
