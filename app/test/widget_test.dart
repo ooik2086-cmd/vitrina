@@ -1138,6 +1138,28 @@ void main() {
     expect(result!.sort, 'price_asc');
   });
 
+  test('sales export asks for the chosen period and hands back the file, or the server\'s error', () async {
+    Uri? asked;
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async {
+          asked = req.url;
+          expect(req.headers['Authorization'], 'Bearer tok');
+          return http.Response.bytes(utf8.encode('\ufeffТапсырыс;Күні\r\n'), 200);
+        }))
+      ..token = 'tok';
+    final bytes = await api.salesCsv(days: 30);
+    expect(asked?.path, '/api/v1/me/sales.csv');
+    expect(asked?.queryParameters, {'days': '30'});
+    expect(bytes.take(3), [0xEF, 0xBB, 0xBF]); // the BOM Excel needs is passed through untouched
+    expect(utf8.decode(bytes), startsWith('Тапсырыс'));
+    final refused = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async =>
+            jsonResponse({'code': 'seller_required', 'message_kk': 'Алдымен сатушы режимін қосыңыз.'}, 403)));
+    expect(refused.salesCsv(), throwsA(isA<ApiException>().having((e) => e.code, 'code', 'seller_required')));
+  });
+
   testWidgets('earnings shows owed, held and commission from the ledger', (tester) async {
     final api = Api(
         base: 'http://x/api/v1',

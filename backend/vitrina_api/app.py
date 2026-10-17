@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import collections
+import csv
 import hashlib
 import hmac
 import io
@@ -19,6 +20,7 @@ from typing import Literal
 from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, File, Header, Query, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 from pydantic import BaseModel, Field
@@ -483,6 +485,57 @@ def my_earnings(user: User = Depends(current_user), db: Session = Depends(get_db
                      .where(LedgerEntry.account == PLATFORM_FEE, LedgerTx.order_id.in_(orders or [0])))
     return {"held_tiyn": held, "payable_tiyn": services.balance(db, seller_payable(str(user.id))),
             "fees_tiyn": int(fees or 0), "items": items}
+
+
+STATUS_KK = {
+    "CREATED": "Жасалды", "PAYMENT_PENDING": "Төлем күтілуде", "PAID": "Төленді", "SELLER_ACCEPTED": "Қабылданды",
+    "PREPARING": "Дайындалуда", "SHIPPED": "Жіберілді", "IN_TRANSIT": "Жолда",
+    "DELIVERED_PENDING_CONFIRMATION": "Жеткізілді", "COMPLETED": "Аяқталды", "DISPUTED": "Дау",
+    "RETURN_REQUESTED": "Қайтару сұралды", "REFUND_PENDING": "Ақша қайтарылуда", "REFUNDED": "Ақша қайтарылды",
+    "CANCELLED": "Бас тартылды",
+}
+
+
+def tenge(tiyn: int | None) -> str:
+    """Tenge for a spreadsheet in Kazakhstan: decimal comma, no thousands separator."""
+    if tiyn is None:
+        return ""
+    whole, part = divmod(abs(tiyn), 100)
+    return ("-" if tiyn < 0 else "") + (f"{whole},{part:02d}" if part else str(whole))
+
+
+@api.get("/me/sales.csv")
+def sales_csv(days: int = Query(default=90, ge=1, le=366), user: User = Depends(current_user),
+              db: Session = Depends(get_db)):
+    """The seller's orders for a spreadsheet or an accountant: price, promo, commission and what was paid out.
+    Semicolons and a byte-order mark so Excel opens it right in a Russian or Kazakh locale."""
+    if not user.is_seller:
+        raise ApiError(403, "seller_required")
+    from vitrina_core.money import PLATFORM_FEE, seller_payable
+    from .models import LedgerTx
+    since = now_utc() - timedelta(days=days)
+    orders = db.scalars(select(Order).where(Order.seller_id == user.id, Order.created_at >= since)
+                        .order_by(Order.id)).all()
+    mine = seller_payable(str(user.id))
+    out = io.StringIO()
+    w = csv.writer(out, delimiter=";", lineterminator="\r\n")
+    w.writerow(["Тапсырыс", "Күні", "Күйі", "Тауар", "Өлшем", "Тауар бағасы, ₸", "Промокод", "Жеңілдік, ₸",
+                "Жеткізу, ₸", "Комиссия, ₸", "Сізге, ₸", "Алушы қаласы"])
+    for o in orders:
+        settled = db.scalars(select(LedgerTx).where(LedgerTx.order_id == o.id,
+                                                    LedgerTx.idempotency_key.like("settle:%"))).all()
+        fee = sum(e.credit - e.debit for tx in settled for e in tx.entries if e.account == PLATFORM_FEE)
+        net = sum(e.credit - e.debit for tx in settled for e in tx.entries if e.account == mine)
+        size = db.get(ListingSize, o.size_id)
+        paid = o.status not in ADDRESS_HIDDEN_UNTIL_PAID  # the buyer's city only once they have paid
+        w.writerow([o.id, services.aware(o.created_at).astimezone(ALMATY).strftime("%d.%m.%Y %H:%M"),
+                    STATUS_KK.get(o.status, o.status), db.get(Listing, o.listing_id).title, size.label if size else "",
+                    tenge(o.item_price_tiyn), o.promo_code or "", tenge(o.promo_discount_tiyn) if o.promo_code else "",
+                    tenge(o.delivery_price_tiyn), tenge(fee) if settled else "", tenge(net) if settled else "",
+                    (o.delivery_city or "") if paid else ""])
+    name = f"vitrina-sales-{now_utc().astimezone(ALMATY):%Y-%m-%d}.csv"
+    return Response(content="\ufeff" + out.getvalue(), media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
 # Labels and defect close-ups stay as taken: their surroundings are part of what they prove.

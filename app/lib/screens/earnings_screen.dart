@@ -1,9 +1,13 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../api.dart';
 import '../labels.dart';
 import '../session.dart';
 import '../theme.dart';
+import '../widgets/common.dart';
 import '../i18n.dart';
 
 const _kinds = {
@@ -21,6 +25,36 @@ class EarningsScreen extends StatefulWidget {
 }
 
 class _EarningsScreenState extends State<EarningsScreen> {
+  Future<void> _export() async {
+    final days = await showDialog<int>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: Text(tr('Қай кезеңнің сатылымы?')),
+        children: [
+          for (final d in const [30, 90, 365])
+            SimpleDialogOption(
+              key: Key('export-$d'),
+              onPressed: () => Navigator.pop(context, d),
+              child: Text(trf('Соңғы {0} күн', [d])),
+            ),
+        ],
+      ),
+    );
+    if (days == null || !mounted) return;
+    try {
+      final bytes = await SessionScope.of(context).api.salesCsv(days: days);
+      final name = 'vitrina-sales-${DateTime.now().toIso8601String().substring(0, 10)}.csv';
+      // On a phone this opens the share sheet (Drive, Telegram, email); in a browser it downloads the file.
+      await SharePlus.instance.share(ShareParams(
+        files: [XFile.fromData(Uint8List.fromList(bytes), mimeType: 'text/csv', name: name)],
+        fileNameOverrides: [name],
+        downloadFallbackEnabled: true,
+      ));
+    } catch (e) {
+      if (mounted) showError(context, e);
+    }
+  }
+
   Future<Earnings>? _data;
 
   @override
@@ -39,7 +73,14 @@ class _EarningsScreenState extends State<EarningsScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
-      appBar: AppBar(title: Text(tr('Табыс'))),
+      appBar: AppBar(title: Text(tr('Табыс')), actions: [
+        IconButton(
+          key: const Key('export-sales'),
+          tooltip: tr('Сатылымды Excel-ге жүктеу'),
+          icon: const Icon(Icons.file_download_outlined),
+          onPressed: _export,
+        ),
+      ]),
       body: FutureBuilder<Earnings>(
         future: _data,
         builder: (context, snap) {
@@ -75,8 +116,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
               Text(tr('Есеп айырысулар'), style: theme.textTheme.titleMedium),
               const SizedBox(height: 4),
               if (e.items.isEmpty)
-                Padding(
-                    padding: EdgeInsets.symmetric(vertical: 24), child: Text(tr('Әзірге аяқталған сатылым жоқ.'))),
+                Padding(padding: EdgeInsets.symmetric(vertical: 24), child: Text(tr('Әзірге аяқталған сатылым жоқ.'))),
               for (final i in e.items)
                 ListTile(
                   contentPadding: EdgeInsets.zero,

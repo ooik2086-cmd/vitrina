@@ -1287,6 +1287,38 @@ class QuestionTests(ApiTestCase):
         self.assertEqual(self.post(url, self.buyer, {"text": "Тағы бір сұрақ"}).status_code, 201)
 
 
+class SalesExportTests(ApiTestCase):
+    def test_seller_downloads_orders_with_promo_commission_and_payout(self):
+        self.assertEqual(self.c.get("/api/v1/me/sales.csv", headers=self.h(self.buyer)).status_code, 403)
+        self.post("/me/promo-codes", self.seller, {"code": "QADAM10", "percent": 10})
+        listing = self.publish(sizes=[{"label": "EU 42", "insole_cm": "26,5", "quantity": 3}])
+        r = self.post("/orders", self.buyer, {"listing_id": listing["id"], "size_id": listing["sizes"][0]["id"],
+                                              "promo_code": "QADAM10"}, **{"Idempotency-Key": "s1"})
+        order = r.json()
+        self.post(f"/orders/{order['id']}/pay", self.buyer)
+        self.pay(order)
+        self.post(f"/orders/{order['id']}/accept", self.seller)
+        self.post(f"/orders/{order['id']}/ship", self.seller, {"tracking_number": "KZ9"})
+        self.deliver("KZ9")
+        self.assertEqual(self.post(f"/orders/{order['id']}/confirm", self.buyer).status_code, 200)
+        other = self.login("+77010000003")
+        unpaid = self.post("/orders", other, {"listing_id": listing["id"], "size_id": listing["sizes"][0]["id"],
+                                              "delivery": {**ADDRESS, "city": "Шымкент"}},
+                           **{"Idempotency-Key": "s2"}).json()
+        r = self.c.get("/api/v1/me/sales.csv", headers=self.h(self.seller))
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("attachment", r.headers["content-disposition"])
+        self.assertTrue(r.content.startswith("\ufeff".encode()))
+        rows = [line.split(";") for line in r.text.lstrip("\ufeff").strip().split("\r\n")]
+        self.assertEqual(rows[0][0], "Тапсырыс")
+        done, waiting = rows[1], rows[2]
+        self.assertEqual((done[0], done[2], done[5], done[6], done[7], done[8]),
+                         (str(order["id"]), "Аяқталды", "40500", "QADAM10", "4500", "1500"))
+        self.assertEqual(int(done[9]) + int(done[10]), 40500 + 1500)  # commission and payout split what was paid
+        self.assertEqual(done[11], "Алматы")
+        self.assertEqual((waiting[0], waiting[9], waiting[10], waiting[11]), (str(unpaid["id"]), "", "", ""))
+
+
 class AdminTests(ApiTestCase):
     def test_support_console_page_is_served(self):
         r = self.c.get("/admin/")

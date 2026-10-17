@@ -979,6 +979,14 @@ class Api {
 
   Future<void> endPromoCode(int id) => _send('DELETE', '/me/promo-codes/$id');
 
+  /// The seller's orders of the last [days] days as a spreadsheet file (semicolon CSV with a BOM).
+  Future<List<int>> salesCsv({int days = 90}) async {
+    final uri = Uri.parse('$base/me/sales.csv').replace(queryParameters: {'days': '$days'});
+    final res = await _client.get(uri, headers: {if (token != null) 'Authorization': 'Bearer $token'});
+    if (res.statusCode >= 400) _decode(res); // throws the server's error
+    return res.bodyBytes;
+  }
+
   Future<Proofs> proofs(int listingId) async =>
       Proofs.fromJson(await _send('GET', '/listings/$listingId/proofs') as Map<String, dynamic>);
 
