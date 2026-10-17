@@ -298,6 +298,18 @@ class DeliveryEstimateTests(ApiTestCase):
         e = self.c.get(url, headers=self.h(self.buyer)).json()["estimate"]
         self.assertEqual(date.fromisoformat(e["earliest"]), back + timedelta(days=2))
 
+    def test_shop_page_says_how_soon_it_ships_once_there_are_three_orders(self):
+        shop = f"/api/v1/sellers/{self.publish()['seller']['id']}"
+        for i in range(3):
+            self.assertIsNone(self.c.get(shop).json()["ship_time"])
+            _, order = self.ordered(f"s{i}")
+            self.post(f"/orders/{order['id']}/pay", self.buyer)
+            self.pay(order, event_id=f"evt_s{i}")
+            self.post(f"/orders/{order['id']}/accept", self.seller)
+            self.post(f"/orders/{order['id']}/ship", self.seller, {"tracking_number": f"KZS{i}"})
+        t = self.c.get(shop).json()["ship_time"]
+        self.assertEqual((t["orders"], t["bucket"], t["hours"]), (3, "day", 0))
+
 
 class PopularityTests(ApiTestCase):
     def test_only_real_demand_is_shown(self):

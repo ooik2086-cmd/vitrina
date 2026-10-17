@@ -764,4 +764,7 @@ const en = <String, String>{
   'Кез келген қала': 'Any city',
   'Өз қалаңыздан алсаңыз, тезірек әрі арзанырақ жетеді.':
       'From your own city it arrives sooner and costs less to send.',
+  'Әдетте төлемнен кейін бір күнде жібереді': 'Usually ships within a day of payment',
+  'Әдетте төлемнен кейін екі күнде жібереді': 'Usually ships within two days of payment',
+  'Жіберуі екі күннен ұзаққа созылады': 'Shipping takes more than two days',
 };

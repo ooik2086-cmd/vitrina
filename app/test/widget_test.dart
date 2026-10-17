@@ -419,6 +419,7 @@ void main() {
               'reviews': 5,
               'away_until': null,
               'reply_time': {'minutes': 40, 'bucket': 'hour'},
+              'ship_time': {'hours': 20, 'orders': 4, 'bucket': 'day'},
               'followers': 12,
               'following': false,
             });
@@ -431,6 +432,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('12 жазылушы'), findsOneWidget);
     expect(find.text('Әдетте бір сағат ішінде жауап береді'), findsOneWidget);
+    expect(find.text('Әдетте төлемнен кейін бір күнде жібереді'), findsOneWidget);
     await tester.tap(find.byKey(const Key('follow')));
     await tester.pumpAndSettle();
     expect(find.text('13 жазылушы'), findsOneWidget);

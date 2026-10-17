@@ -965,6 +965,7 @@ def seller_profile(seller_id: int, user: User | None = Depends(optional_user), d
             "completed_sales": int(sales or 0), "listings": int(live or 0), "away_until": away_out(seller),
             "about": seller.shop_about,
             "followers": followers(db, seller.id), "reply_time": reply_time(db, seller.id),
+            "ship_time": delivery_eta.ship_time(db, seller.id),
             "following": user is not None and db.scalar(select(Follow.id).where(
                 Follow.user_id == user.id, Follow.seller_id == seller.id)) is not None,
             **seller_rating(db, seller.id)}

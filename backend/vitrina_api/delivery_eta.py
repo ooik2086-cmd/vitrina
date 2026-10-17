@@ -74,7 +74,11 @@ def transit_days(origin: str, dest: str) -> tuple[int, int]:
     return low, low + 2
 
 
-def handling_days(db: Session, seller_id: int) -> int:
+SHIP_MIN_SAMPLES = 3  # fewer shipped orders than this say little about a shop's habits
+
+
+def ship_hours(db: Session, seller_id: int) -> list[float]:
+    """Hours from payment to shipping on the seller's latest shipped orders."""
     orders = db.scalars(select(Order.id).where(Order.seller_id == seller_id, Order.tracking_number.is_not(None))
                         .order_by(Order.id.desc()).limit(HISTORY)).all()
     hours = []
@@ -83,9 +87,24 @@ def handling_days(db: Session, seller_id: int) -> int:
             select(OrderEvent).where(OrderEvent.order_id == oid, OrderEvent.to_status.in_(("PAID", "SHIPPED"))))}
         if "PAID" in events and "SHIPPED" in events:
             hours.append((events["SHIPPED"] - events["PAID"]).total_seconds() / 3600)
+    return hours
+
+
+def handling_days(db: Session, seller_id: int) -> int:
+    hours = ship_hours(db, seller_id)
     if not hours:
         return DEFAULT_HANDLING_DAYS
     return round(statistics.median(hours) / 24)  # a few hours is shipping the same day
+
+
+def ship_time(db: Session, seller_id: int) -> dict | None:
+    """For the shop page: how soon this seller usually ships after payment, once there are enough orders."""
+    hours = ship_hours(db, seller_id)
+    if len(hours) < SHIP_MIN_SAMPLES:
+        return None
+    median = statistics.median(hours)
+    bucket = "day" if median <= 24 else "two_days" if median <= 48 else "longer"
+    return {"hours": round(median), "orders": len(hours), "bucket": bucket}
 
 
 def estimate(db: Session, listing: Listing, dest: str, *, today: date) -> dict | None:

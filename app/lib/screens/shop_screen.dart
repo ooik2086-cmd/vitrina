@@ -136,6 +136,25 @@ class _ShopScreenState extends State<ShopScreen> {
                       ),
                     ]),
                   ],
+                  if (shop.shipBucket != null) ...[
+                    const SizedBox(height: 8),
+                    Row(key: const Key('ship-time'), children: [
+                      Icon(Icons.local_shipping_outlined,
+                          size: 18,
+                          color: shop.shipBucket == 'day' ? const Color(0xFF2E9E6A) : scheme.onSurfaceVariant),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          tr(switch (shop.shipBucket) {
+                            'day' => 'Әдетте төлемнен кейін бір күнде жібереді',
+                            'two_days' => 'Әдетте төлемнен кейін екі күнде жібереді',
+                            _ => 'Жіберуі екі күннен ұзаққа созылады',
+                          }),
+                          style: theme.textTheme.bodyMedium,
+                        ),
+                      ),
+                    ]),
+                  ],
                   if (shop.about != null) ...[
                     const SizedBox(height: 14),
                     Container(

@@ -184,6 +184,7 @@ class Shop {
         followers = j['followers'] as int? ?? 0,
         following = j['following'] as bool? ?? false,
         replyBucket = (j['reply_time'] as Map?)?['bucket'] as String?,
+        shipBucket = (j['ship_time'] as Map?)?['bucket'] as String?,
         about = j['about'] as String?;
   final int id;
   final String shopName;
@@ -201,6 +202,9 @@ class Shop {
 
   /// How fast the seller usually answers in chat: "hour", "hours", "day" or "days"; null while there is too little to say.
   final String? replyBucket;
+
+  /// How soon the shop usually ships after payment: day | two_days | longer; null until there are 3 orders.
+  final String? shipBucket;
 }
 
 /// A shop the user follows, as listed on «Жазылымдар».
