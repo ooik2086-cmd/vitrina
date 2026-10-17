@@ -689,4 +689,5 @@ const en = <String, String>{
   'Түпнұсқа екенін қалай білемін?': 'How do I know it’s genuine?',
   '360° витрина деген не?': 'What is the 360° showcase?',
   'Неге чаттан шықпау керек?': 'Why stay in the app’s chat?',
+  'Сызылған баға: соңғы 30 күндегі ең төмен баға.': 'Crossed-out price: the lowest of the last 30 days.',
 };

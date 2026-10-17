@@ -276,6 +276,13 @@ class _ListingScreenState extends State<ListingScreen> {
               Text(l.title, style: theme.textTheme.headlineSmall),
               const SizedBox(height: 6),
               PriceLine(listing: l, style: weight(theme.textTheme.headlineSmall!, 800)),
+              if (l.wasPriceTiyn != null)
+                Padding(
+                  key: const Key('sale-honest'),
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Text(tr('Сызылған баға: соңғы 30 күндегі ең төмен баға.'),
+                      style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
+                ),
               const SizedBox(height: 4),
               Text(
                 l.deliveryPriceTiyn == 0 ? tr('Жеткізу тегін') : trf('Жеткізу {0}', [formatTenge(l.deliveryPriceTiyn)]),

@@ -42,7 +42,7 @@ from .deps import current_user, get_db, get_settings, get_storage, now_utc, opti
 from .errors import ApiError, api_error_handler
 from .share import router as share_router
 from .social import CONTACT_RE, reply_time, router as social_router, seller_rating, size_fit
-from .models import (AuditLog, AuthToken, Block, Follow, Notification, Offer, SavedSearch, StockAlert, ListingDailyViews, ListingEmbedding, ListingReport, AuthToken, Favorite, IdempotencyRecord, Listing, ListingSize, Media, Order, OrderEvent,
+from .models import (AuditLog, PriceChange, AuthToken, Block, Follow, Notification, Offer, SavedSearch, StockAlert, ListingDailyViews, ListingEmbedding, ListingReport, AuthToken, Favorite, IdempotencyRecord, Listing, ListingSize, Media, Order, OrderEvent,
                      OtpCode, Review, User, WebhookEvent, make_session_factory)
 from .storage import MAX_UPLOAD_BYTES, Storage, make_storage, normalize_image
 
@@ -218,15 +218,31 @@ def listing_out(db: Session, listing: Listing, *, owner: bool = False) -> dict:
 SALE_DAYS = 14  # how long a cut price is shown against the old one
 
 
-def mark_price_change(listing: Listing, new_price: int) -> None:
-    """Keep the highest price of the current sale as the crossed-out one; a cut of under 5% is not a sale."""
+PRICE_LOOKBACK = timedelta(days=30)
+
+
+def lowest_recent_price(db: Session, listing: Listing, now: datetime) -> int:
+    """The lowest price the listing had at any moment of the last 30 days, the current one included."""
+    since = now - PRICE_LOOKBACK
+    before = db.scalar(select(PriceChange.price_tiyn).where(PriceChange.listing_id == listing.id,
+                                                            PriceChange.at <= since)
+                       .order_by(PriceChange.at.desc(), PriceChange.id.desc()).limit(1))
+    during = db.scalars(select(PriceChange.price_tiyn).where(PriceChange.listing_id == listing.id,
+                                                             PriceChange.at > since)).all()
+    return min([listing.price_tiyn, *during, *([before] if before is not None else [])])
+
+
+def mark_price_change(db: Session, listing: Listing, new_price: int) -> None:
+    """The crossed-out price is the lowest price of the last 30 days, so a price raised only to be cut shows no
+    sale. Further cuts during a sale keep its first reference. A cut of under 5% is not a sale."""
     now = now_utc()
     live = listing.was_price_tiyn if listing.was_until and services.aware(listing.was_until) > now else None
-    was = max(live or 0, listing.price_tiyn)
-    if new_price <= was * 0.95:
-        listing.was_price_tiyn, listing.was_until = was, now + timedelta(days=SALE_DAYS)
-    elif new_price >= was or live is None:
+    reference = live or lowest_recent_price(db, listing, now)
+    if new_price <= reference * 0.95:
+        listing.was_price_tiyn, listing.was_until = reference, now + timedelta(days=SALE_DAYS)
+    elif new_price >= reference or live is None:
         listing.was_price_tiyn, listing.was_until = None, None
+    db.add(PriceChange(listing_id=listing.id, price_tiyn=new_price, at=now))
 
 
 def was_price(listing: Listing) -> int | None:
@@ -674,6 +690,8 @@ def create_listing(body: ListingIn, request: Request, background: BackgroundTask
         media=[Media(original_url=p.url, angle=p.angle, position=i) for i, p in enumerate(body.photos)],
     )
     db.add(listing)
+    db.flush()
+    db.add(PriceChange(listing_id=listing.id, price_tiyn=listing.price_tiyn))
     db.commit()
     background.add_task(prepare_listing_media, request.app.state, listing.id)
     return listing_out(db, listing, owner=True)
@@ -801,7 +819,7 @@ def set_price(db: Session, listing: Listing, new: int) -> None:
         listing.promo_state, listing.promo_url = None, None  # the video shows the old price
     if new < listing.price_tiyn and listing.status == "published":
         notify_price_drop(db, listing, listing.price_tiyn, new)
-    mark_price_change(listing, new)
+    mark_price_change(db, listing, new)
     listing.price_tiyn = new
 
 

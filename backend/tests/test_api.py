@@ -1006,6 +1006,30 @@ class SaleTests(ApiTestCase):
         self.assertIsNone(self.c.get(f"/api/v1/listings/{listing['id']}").json()["was_price_tiyn"])
         self.assertEqual(self.c.get("/api/v1/listings?sale=true").json()["items"], [])
 
+    def test_a_price_raised_only_to_be_cut_shows_no_sale(self):
+        listing = self.publish()  # 45 000
+        self.assertIsNone(self.patch(listing["id"], 6_000_000)["was_price_tiyn"])
+        self.assertIsNone(self.patch(listing["id"], 5_000_000)["was_price_tiyn"])  # still above 45 000
+        cut = self.patch(listing["id"], 4_000_000)
+        self.assertEqual(cut["was_price_tiyn"], 4_500_000)  # the lowest of the month, not the inflated 60 000
+        with self.db() as db:
+            from vitrina_api.models import PriceChange
+            prices = [p.price_tiyn for p in db.query(PriceChange).filter_by(listing_id=listing["id"]).order_by(PriceChange.id)]
+        self.assertEqual(prices, [4_500_000, 6_000_000, 5_000_000, 4_000_000])
+
+    def test_prices_older_than_a_month_do_not_count(self):
+        listing = self.publish()  # 45 000
+        self.patch(listing["id"], 3_000_000)
+        with self.db() as db:
+            from vitrina_api.models import Listing, PriceChange
+            for p in db.query(PriceChange).filter_by(listing_id=listing["id"]):
+                p.at = p.at.replace(tzinfo=timezone.utc) - timedelta(days=40) if p.at.tzinfo is None else p.at - timedelta(days=40)
+            db.get(Listing, listing["id"]).was_until = None
+            db.commit()
+        self.patch(listing["id"], 5_000_000)
+        # The month before this cut held 30 000 (until the raise) and 50 000: the lowest is 30 000, so no sale.
+        self.assertIsNone(self.patch(listing["id"], 4_500_000)["was_price_tiyn"])
+
     def test_raising_the_price_ends_the_sale(self):
         listing = self.publish()
         self.patch(listing["id"], 3_000_000)

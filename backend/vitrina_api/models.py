@@ -152,6 +152,16 @@ class Order(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class PriceChange(Base):
+    """Every price a listing has had, from when it was set. The crossed-out price on a sale is the lowest of the
+    last 30 days, so raising a price just to cut it shows no discount."""
+    __tablename__ = "price_changes"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    listing_id: Mapped[int] = mapped_column(ForeignKey("listings.id"), index=True)
+    price_tiyn: Mapped[int] = mapped_column(BigInteger)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class ListingDailyViews(Base):
     """Product page opens by others, per listing and Almaty calendar day, for the seller's charts."""
     __tablename__ = "listing_daily_views"
