@@ -24,6 +24,8 @@ class Settings:
     confirm_window: timedelta = timedelta(days=5)
     commission: CommissionRule = field(default_factory=lambda: CommissionRule(version="pilot-2026-10", rate_bp=500))
     min_listing_photos: int = 4
+    # Development and tests create tables directly. Production sets this to 0 and runs `alembic upgrade head`.
+    auto_create_schema: bool = field(default_factory=lambda: os.environ.get("VITRINA_AUTO_CREATE_SCHEMA", "1") == "1")
     # Uploaded photos. Local disk in development; production replaces LocalStorage with an S3-compatible bucket.
     media_dir: str = field(default_factory=lambda: os.environ.get("VITRINA_MEDIA_DIR", "./media-dev"))
     public_media_url: str = field(default_factory=lambda: os.environ.get("VITRINA_PUBLIC_MEDIA_URL", "http://127.0.0.1:8000/media"))

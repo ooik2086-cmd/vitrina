@@ -9,10 +9,11 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
 from PIL import Image
+from sqlalchemy import create_engine
 
 from vitrina_api.app import create_app
 from vitrina_api.config import Settings
-from vitrina_api.models import User
+from vitrina_api.models import Base, User
 from vitrina_api.services import balance, run_auto_complete
 from vitrina_core.money import PLATFORM_FEE, buyer_refund, escrow, seller_payable
 from vitrina_core.webhooks import sign
@@ -31,7 +32,12 @@ class ApiTestCase(unittest.TestCase):
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.cfg = Settings(database_url=f"sqlite:///{os.path.join(self.tmp.name, 't.db')}", debug_otp=True,
+        url = os.environ.get("VITRINA_TEST_DATABASE_URL")  # e.g. PostgreSQL in CI; each test starts empty
+        if url:
+            engine = create_engine(url)
+            Base.metadata.drop_all(engine)
+            engine.dispose()
+        self.cfg = Settings(database_url=url or f"sqlite:///{os.path.join(self.tmp.name, 't.db')}", debug_otp=True,
                             media_dir=os.path.join(self.tmp.name, "media"), public_media_url="http://test/media",
                             allow_external_media=self.external_media)
         self.app = create_app(self.cfg)

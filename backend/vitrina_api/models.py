@@ -233,8 +233,9 @@ class Notification(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
 
 
-def make_session_factory(database_url: str):
+def make_session_factory(database_url: str, *, create_schema: bool = True):
     kwargs = {"connect_args": {"check_same_thread": False}} if database_url.startswith("sqlite") else {}
     engine = create_engine(database_url, **kwargs)
-    Base.metadata.create_all(engine)
+    if create_schema:
+        Base.metadata.create_all(engine)
     return sessionmaker(bind=engine, expire_on_commit=False)

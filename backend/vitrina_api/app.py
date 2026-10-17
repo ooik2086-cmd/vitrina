@@ -641,7 +641,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings()
     app = FastAPI(title="VITRINA API", version="0.1.0")
     app.state.settings = settings
-    app.state.sessions = make_session_factory(settings.database_url)
+    app.state.sessions = make_session_factory(settings.database_url, create_schema=settings.auto_create_schema)
     app.state.storage = LocalStorage(settings.media_dir, settings.public_media_url)
     app.add_exception_handler(ApiError, api_error_handler)
 
