@@ -66,6 +66,18 @@ class Promo {
   final String? url;
 }
 
+/// Brand, model and category read off look-alike listings already on VITRINA. Any field may be null.
+class Suggestion {
+  Suggestion.fromJson(Map<String, dynamic> j)
+      : category = j['category'] as String?,
+        brand = j['brand'] as String?,
+        modelName = j['model_name'] as String?;
+  final String? category;
+  final String? brand;
+  final String? modelName;
+  bool get isEmpty => category == null && brand == null && modelName == null;
+}
+
 class Shop {
   Shop.fromJson(Map<String, dynamic> j)
       : id = j['id'] as int,
@@ -417,6 +429,9 @@ class Api {
             for (final e in stock.entries) {'id': e.key, 'quantity': e.value}
           ],
       }) as Map<String, dynamic>);
+
+  Future<Suggestion> suggestDetails(String photoUrl) async => Suggestion.fromJson(
+      await _send('POST', '/listings/suggest', body: {'photo_url': photoUrl}) as Map<String, dynamic>);
 
   /// Starts rendering the promo video; poll [listing] until promo.state is no longer "rendering".
   Future<Listing> makePromo(int id, String lang) async =>

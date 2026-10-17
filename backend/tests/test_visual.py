@@ -24,6 +24,13 @@ def colour_only_embedder(data: bytes):
     return combine(np.ones(8, np.float32), color_histogram(img, None, np), np)
 
 
+def colour_as_shape_embedder(data: bytes):
+    """Stand-in whose "shape" part is the colour too, so tests can make look-alikes by colour."""
+    img = Image.open(io.BytesIO(data)).convert("RGB")
+    hist = color_histogram(img, None, np)
+    return combine(hist + 1e-3, hist, np)
+
+
 class ColourFeatureTests(unittest.TestCase):
     def hist(self, colour):
         return color_histogram(Image.open(io.BytesIO(shoe_photo(colour))).convert("RGB"), None, np)
@@ -85,6 +92,24 @@ class ImageSearchApiTests(ApiTestCase):
         codes = [self.search((200, 30, 30)).status_code for _ in range(IMAGE_SEARCH_PER_MINUTE + 1)]
         self.assertEqual(codes[:-1], [200] * IMAGE_SEARCH_PER_MINUTE)
         self.assertEqual(codes[-1], 429)
+
+    def test_seller_is_offered_brand_model_and_category_from_look_alikes(self):
+        self.app.state.embedder = colour_as_shape_embedder
+        self.listing_with_photo((200, 30, 30), brand="Nike", model_name="Air Force 1", category="sneakers")
+        self.listing_with_photo((195, 35, 30), brand="Nike", model_name="Air Force 1", category="sneakers")
+        self.listing_with_photo((20, 30, 200), brand="Adidas", model_name="Samba", category="classic")
+        upload = lambda colour: self.c.post(  # noqa: E731
+            "/api/v1/media", files={"file": ("p.jpg", shoe_photo(colour), "image/jpeg")},
+            headers=self.h(self.seller)).json()["url"]
+        r = self.post("/listings/suggest", self.seller, {"photo_url": upload((205, 32, 28))})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual((r.json()["brand"], r.json()["model_name"], r.json()["category"]),
+                         ("Nike", "Air Force 1", "sneakers"))
+        nothing_alike = self.post("/listings/suggest", self.seller, {"photo_url": upload((30, 200, 40))}).json()
+        self.assertEqual((nothing_alike["brand"], nothing_alike["based_on"]), (None, 0))
+        self.assertEqual(self.post("/listings/suggest", self.buyer, {"photo_url": upload((1, 1, 1))}).status_code, 403)
+        self.assertEqual(self.post("/listings/suggest", self.seller, {"photo_url": "http://evil/x.jpg"}).json()["code"],
+                         "foreign_media")
 
     def test_without_model_search_by_photo_is_unavailable(self):
         self.app.state.embedder = None

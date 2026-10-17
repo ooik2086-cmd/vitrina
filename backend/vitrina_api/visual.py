@@ -23,6 +23,7 @@ log = logging.getLogger(__name__)
 
 MODEL_NAME = "mobilenetv2-12+hsv1"
 COLOR_WEIGHT = 0.5  # share of the colour part in the final cosine score
+COLOR_BINS = 39  # the colour part is the last COLOR_BINS numbers of a vector
 
 
 def _flatten_on_white(img: Image.Image) -> tuple[Image.Image, Image.Image | None]:
@@ -44,7 +45,7 @@ def color_histogram(img: Image.Image, mask: Image.Image | None, np):
     if mask is None:  # no cut-out: ignore near-white backdrop pixels
         keep &= rgb.min(axis=2) < 0.92
     h, s, v = hsv[..., 0][keep], hsv[..., 1][keep], hsv[..., 2][keep]
-    hist = np.zeros(39, np.float32)
+    hist = np.zeros(COLOR_BINS, np.float32)
     if h.size == 0:
         return hist
     grey = s < 0.2

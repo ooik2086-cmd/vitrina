@@ -152,6 +152,27 @@ void main() {
     expect(listingShareUrl(7, base: 'http://10.0.2.2:8000/api/v1/'), 'http://10.0.2.2:8000/l/7');
   });
 
+  test('suggestions come back field by field and empty when nothing looks alike', () async {
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async {
+          final url = (jsonDecode(req.body) as Map)['photo_url'];
+          final known = url == 'http://x/media/1/a.jpg';
+          return http.Response(
+              jsonEncode({
+                'category': known ? 'sneakers' : null,
+                'brand': known ? 'Nike' : null,
+                'model_name': null,
+                'based_on': known ? 2 : 0,
+              }),
+              200,
+              headers: {'content-type': 'application/json; charset=utf-8'});
+        }));
+    final s = await api.suggestDetails('http://x/media/1/a.jpg');
+    expect((s.brand, s.modelName, s.category, s.isEmpty), ('Nike', null, 'sneakers', false));
+    expect((await api.suggestDetails('http://x/media/1/b.jpg')).isEmpty, isTrue);
+  });
+
   test('order creation sends the idempotency key', () async {
     String? key;
     final api = Api(

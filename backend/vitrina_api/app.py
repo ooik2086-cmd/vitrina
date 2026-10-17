@@ -655,6 +655,64 @@ async def search_by_image(request: Request, file: UploadFile = File(...), catego
     return {"items": [{**listing_out(db, listing), "similarity": round(score, 3)} for score, listing in scored]}
 
 
+SUGGEST_MIN_SHAPE = 0.70  # shape-only cosine; same model in another colour scores ~0.8, unrelated objects ~0.4
+SUGGEST_NEIGHBOURS = 5
+
+
+class SuggestIn(BaseModel):
+    photo_url: str = Field(max_length=500)
+
+
+@api.post("/listings/suggest")
+def suggest_details(body: SuggestIn, request: Request, user: User = Depends(current_user),
+                    db: Session = Depends(get_db), storage: LocalStorage = Depends(get_storage)):
+    """Brand, model and category to offer the seller, read off look-alike listings already on VITRINA.
+
+    Only shape counts (the colour part is dropped), since the same model comes in many colours.
+    Each field is offered only when the neighbours agree on it; the seller decides whether to use it."""
+    embed = request.app.state.embedder
+    if not user.is_seller:
+        raise ApiError(403, "seller_required")
+    if embed is None:
+        raise ApiError(503, "image_search_off")
+    if not storage.owns(body.photo_url):
+        raise ApiError(422, "foreign_media")
+    import numpy as np
+    full = embed(storage.read(body.photo_url))
+    shape_dims = full.size - visual.COLOR_BINS
+    query = full[:shape_dims] / (np.linalg.norm(full[:shape_dims]) + 1e-8)
+    rows = db.execute(select(Listing, ListingEmbedding.vector)
+                      .join(ListingEmbedding, ListingEmbedding.listing_id == Listing.id)
+                      .where(Listing.status.in_(("published", "sold")), ListingEmbedding.model == visual.MODEL_NAME))
+    scored = []
+    for listing, vec in rows:
+        shape = np.frombuffer(vec, np.float32)[:shape_dims]
+        score = float(shape @ query) / (float(np.linalg.norm(shape)) + 1e-8)
+        if score >= SUGGEST_MIN_SHAPE:
+            scored.append((score, listing))
+    near = sorted(scored, key=lambda t: -t[0])[:SUGGEST_NEIGHBOURS]
+
+    def vote(get):
+        tally: dict[str, float] = collections.defaultdict(float)
+        for score, listing in near:
+            value = (get(listing) or "").strip()
+            if value:
+                tally[value] += score
+        if not tally:
+            return None
+        value, weight = max(tally.items(), key=lambda kv: kv[1])
+        return value if weight >= 0.6 * sum(tally.values()) else None  # a clear majority, or nothing
+
+    brand = vote(lambda l: l.brand)
+    return {
+        "category": vote(lambda l: l.category),
+        "brand": brand,
+        "model_name": vote(lambda l: l.model_name if l.brand == brand else None) if brand else None,
+        "based_on": len(near),
+        "best_similarity": round(near[0][0], 3) if near else None,
+    }
+
+
 @api.get("/listings/{listing_id}/similar")
 def similar_listings(listing_id: int, limit: int = 10, db: Session = Depends(get_db)):
     """Look-alike listings, ranked with the stored photo vectors.

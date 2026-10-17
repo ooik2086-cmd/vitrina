@@ -4,6 +4,7 @@ import 'package:image_picker/image_picker.dart';
 import '../api.dart';
 import '../labels.dart';
 import '../session.dart';
+import '../theme.dart';
 import '../widgets/common.dart';
 import 'spin_capture_screen.dart';
 import '../i18n.dart';
@@ -58,6 +59,9 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
   List<_Upload> _frames = [];
   bool _saving = false;
   final _picker = ImagePicker();
+  Suggestion? _suggestion;
+  bool _suggestAsked = false;
+  String? _modelName;
 
   Api get _api => SessionScope.of(context).api;
 
@@ -107,7 +111,37 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
 
   Future<void> _pickAngle(String angle) async {
     final file = await _pick();
-    if (file != null) setState(() => _photos[angle] = _startUpload(file));
+    if (file == null) return;
+    final upload = _startUpload(file);
+    setState(() => _photos[angle] = upload);
+    if (!_suggestAsked && (angle == 'outer' || angle == 'front')) {
+      _suggestAsked = true;
+      _suggestFrom(upload);
+    }
+  }
+
+  /// Offers brand, model and category from look-alikes once the first side photo is uploaded.
+  /// Quietly does nothing when photo search is off or nothing on VITRINA looks alike.
+  Future<void> _suggestFrom(_Upload upload) async {
+    try {
+      final s = await _api.suggestDetails(await upload.future);
+      if (mounted && !s.isEmpty) setState(() => _suggestion = s);
+    } catch (_) {
+      _suggestAsked = false; // try again with the next side photo
+    }
+  }
+
+  void _applySuggestion() {
+    final s = _suggestion!;
+    setState(() {
+      if (s.category != null && categories.containsKey(s.category)) _category = s.category!;
+      if (s.brand != null && _brand.text.trim().isEmpty) _brand.text = s.brand!;
+      _modelName = s.modelName;
+      if (_title.text.trim().isEmpty) {
+        _title.text = [s.brand, s.modelName].whereType<String>().join(' ');
+      }
+      _suggestion = null;
+    });
   }
 
   Future<void> _addDefect() async {
@@ -126,7 +160,8 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
     if (files.isEmpty) return;
     if (files.length < spinMinFrames) {
       if (mounted) {
-        showError(context, ApiException(422, 'too_few_frames', trf('360° үшін кемінде {0} кадр керек.', [spinMinFrames])));
+        showError(
+            context, ApiException(422, 'too_few_frames', trf('360° үшін кемінде {0} кадр керек.', [spinMinFrames])));
       }
       return;
     }
@@ -142,7 +177,8 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
     if (!_form.currentState!.validate()) return;
     final missing = requiredAngles.keys.where((a) => _photos[a] == null).map((a) => tr(requiredAngles[a]!)).toList();
     if (missing.isNotEmpty) {
-      showError(context, ApiException(422, 'missing_required_photos', trf('Фото жетіспейді: {0}.', [missing.join(', ')])));
+      showError(
+          context, ApiException(422, 'missing_required_photos', trf('Фото жетіспейді: {0}.', [missing.join(', ')])));
       return;
     }
     if (_condition == 'defective' && _defectPhotos.isEmpty) {
@@ -160,6 +196,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
         'title': _title.text.trim(),
         'category': _category,
         if (_brand.text.trim().isNotEmpty) 'brand': _brand.text.trim(),
+        if (_modelName != null) 'model_name': _modelName,
         'color': _color.text.trim(),
         'condition': _condition,
         if (_defects.text.trim().isNotEmpty) 'defects': _defects.text.trim(),
@@ -223,11 +260,13 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
                 ]),
                 const SizedBox(height: 4),
                 Text(
-                  trf('Міндетті емес, бірақ сатып алушы тауарды жан-жағынан көреді. Аяқкиімді аздап бұрып, {0} шақты кадр түсіріңіз.', [spinTargetFrames]),
+                  trf('Міндетті емес, бірақ сатып алушы тауарды жан-жағынан көреді. Аяқкиімді аздап бұрып, {0} шақты кадр түсіріңіз.',
+                      [spinTargetFrames]),
                   style: theme.textTheme.bodySmall,
                 ),
                 if (_frames.any((f) => f.error != null))
-                  Text(tr('Кейбір кадрлар жүктелмеді. Қайта түсіріңіз.'), style: TextStyle(color: theme.colorScheme.error)),
+                  Text(tr('Кейбір кадрлар жүктелмеді. Қайта түсіріңіз.'),
+                      style: TextStyle(color: theme.colorScheme.error)),
                 const SizedBox(height: 8),
                 Wrap(spacing: 8, children: [
                   FilledButton.tonalIcon(
@@ -243,12 +282,18 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
             ),
           ),
           const SizedBox(height: 16),
+          if (_suggestion != null)
+            _SuggestionCard(
+                suggestion: _suggestion!,
+                onApply: _applySuggestion,
+                onDismiss: () => setState(() => _suggestion = null)),
           TextFormField(
               controller: _title,
               decoration: InputDecoration(labelText: tr('Атауы')),
               validator: _required,
               maxLength: 120),
           DropdownButtonFormField<String>(
+            key: ValueKey('category-$_category'), // a suggestion can change it from outside
             initialValue: _category,
             decoration: InputDecoration(labelText: tr('Санаты')),
             items: [for (final e in categories.entries) DropdownMenuItem(value: e.key, child: Text(tr(e.value)))],
@@ -307,9 +352,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
             Row(children: [
               Expanded(
                   child: TextFormField(
-                      controller: s.label,
-                      decoration: InputDecoration(labelText: tr('Өлшем')),
-                      validator: _required)),
+                      controller: s.label, decoration: InputDecoration(labelText: tr('Өлшем')), validator: _required)),
               const SizedBox(width: 8),
               Expanded(
                 child: TextFormField(
@@ -412,6 +455,46 @@ class _PhotoSlot extends StatelessWidget {
               width: 96,
               child: Text(label + (required ? ' *' : ''),
                   textAlign: TextAlign.center, style: Theme.of(context).textTheme.labelSmall)),
+        ]),
+      ),
+    );
+  }
+}
+
+class _SuggestionCard extends StatelessWidget {
+  const _SuggestionCard({required this.suggestion, required this.onApply, required this.onDismiss});
+  final Suggestion suggestion;
+  final VoidCallback onApply;
+  final VoidCallback onDismiss;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final s = suggestion;
+    final parts = [
+      s.brand,
+      s.modelName,
+      if (s.category != null) tr(categories[s.category] ?? s.category!),
+    ].whereType<String>();
+    return Card(
+      key: const Key('suggestion'),
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 8, 8),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Icon(Icons.auto_awesome_outlined, size: 20, color: Brand.accent),
+            const SizedBox(width: 8),
+            Expanded(child: Text(tr('Ұқсас тауарларға қарағанда'), style: theme.textTheme.labelLarge)),
+          ]),
+          const SizedBox(height: 6),
+          Text(parts.join(' · '), style: weight(theme.textTheme.titleMedium!, 700)),
+          Text(tr('Тексеріп, дұрыс болса ғана қолданыңыз.'),
+              style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+          Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+            TextButton(onPressed: onDismiss, child: Text(tr('Жоқ'))),
+            FilledButton(key: const Key('apply-suggestion'), onPressed: onApply, child: Text(tr('Қолдану'))),
+          ]),
         ]),
       ),
     );
