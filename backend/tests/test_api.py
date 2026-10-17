@@ -358,6 +358,28 @@ class SocialTests(ApiTestCase):
         self.assertEqual(self.get("/notifications", self.buyer).json()["unread"], 0)
 
 
+class AdminTests(ApiTestCase):
+    def test_support_console_page_is_served(self):
+        r = self.c.get("/admin/")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("/api/v1", r.text)
+
+    def test_admin_views_are_staff_only_and_show_dispute_reasons(self):
+        _, order = self.delivered()
+        self.post(f"/orders/{order['id']}/dispute", self.buyer, {"reason": "Өлшемі сәйкес емес"})
+        for path in ("/admin/overview", "/admin/orders", "/admin/listings", "/admin/audit"):
+            self.assertEqual(self.c.get(f"/api/v1{path}", headers=self.h(self.buyer)).status_code, 403, path)
+        staff = self.make_staff()
+        disputes = self.c.get("/api/v1/admin/orders?status=DISPUTED", headers=self.h(staff)).json()["items"]
+        self.assertEqual([d["id"] for d in disputes], [order["id"]])
+        self.assertEqual(disputes[0]["history"][-1]["reason"], "Өлшемі сәйкес емес")
+        overview = self.c.get("/api/v1/admin/overview", headers=self.h(staff)).json()
+        self.assertEqual(overview["orders"], {"DISPUTED": 1})
+        self.post(f"/admin/orders/{order['id']}/resolve", staff, {"refund_tiyn": 0, "reason": "Өлшем кестесіне сай"})
+        audit = self.c.get("/api/v1/admin/audit", headers=self.h(staff)).json()["items"]
+        self.assertEqual(audit[0]["action"], "resolve_dispute")
+
+
 class WebhookSecurityTests(ApiTestCase):
     def test_scenario_e_duplicate_and_forged_payments(self):
         _, order = self.ordered()

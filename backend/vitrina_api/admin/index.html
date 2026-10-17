@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="kk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VITRINA әкімші</title>
+<style>
+  :root { --ink:#0e0e10; --canvas:#f5f4f1; --surface:#fff; --line:#e4e2dd; --muted:#6b6a66; --accent:#ff5a36; --bad:#b3261e; --ok:#1d7a46; }
+  @media (prefers-color-scheme: dark) { :root { --ink:#f3f2ef; --canvas:#0c0c0e; --surface:#151518; --line:#2a2a2f; --muted:#a3a29e; } }
+  * { box-sizing: border-box; }
+  body { margin:0; font: 15px/1.45 Inter, system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--canvas); color: var(--ink); }
+  header { display:flex; align-items:center; gap:24px; padding:16px 24px; border-bottom:1px solid var(--line); background:var(--surface); position:sticky; top:0; }
+  header b { letter-spacing:3px; }
+  nav { display:flex; gap:4px; flex-wrap:wrap; }
+  nav button { border:0; background:none; padding:8px 14px; border-radius:99px; font:inherit; color:var(--muted); cursor:pointer; }
+  nav button[aria-current="true"] { background:var(--ink); color:var(--canvas); }
+  main { max-width:1100px; margin:0 auto; padding:24px; }
+  .card { background:var(--surface); border:1px solid var(--line); border-radius:20px; padding:20px; margin-bottom:16px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:12px; }
+  .stat .n { font-size:28px; font-weight:750; letter-spacing:-.5px; }
+  .stat .l { color:var(--muted); font-size:13px; }
+  .row { display:flex; gap:16px; align-items:flex-start; }
+  .row img { width:72px; height:72px; object-fit:cover; border-radius:14px; background:#f3f2ef; flex:none; }
+  .muted { color:var(--muted); font-size:13px; }
+  .pill { display:inline-block; padding:2px 10px; border-radius:99px; background:var(--canvas); border:1px solid var(--line); font-size:12px; }
+  input, textarea { font:inherit; color:inherit; background:var(--canvas); border:1px solid var(--line); border-radius:12px; padding:10px 12px; width:100%; }
+  button.primary, button.ghost { font:inherit; font-weight:600; border-radius:12px; padding:10px 16px; cursor:pointer; }
+  button.primary { background:var(--ink); color:var(--canvas); border:0; }
+  button.ghost { background:none; border:1px solid var(--line); color:inherit; }
+  button.danger { color:var(--bad); }
+  form.inline { display:grid; grid-template-columns:160px 1fr auto; gap:8px; margin-top:12px; }
+  ol.hist { margin:8px 0 0; padding-left:18px; color:var(--muted); font-size:13px; }
+  .login { max-width:360px; margin:10vh auto; display:grid; gap:10px; }
+  .err { color:var(--bad); min-height:1.4em; }
+  table { width:100%; border-collapse:collapse; }
+  td, th { text-align:left; padding:8px; border-bottom:1px solid var(--line); font-size:14px; }
+  @media (max-width:640px) { form.inline { grid-template-columns:1fr; } header { flex-direction:column; align-items:flex-start; gap:8px; } }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+const API = location.origin + '/api/v1';
+const STATUS = { CREATED:'Жасалды', PAYMENT_PENDING:'Төлем күтілуде', PAID:'Төленді', SELLER_ACCEPTED:'Қабылданды', PREPARING:'Дайындалуда',
+  SHIPPED:'Жіберілді', IN_TRANSIT:'Жолда', DELIVERED_PENDING_CONFIRMATION:'Жеткізілді', COMPLETED:'Аяқталды', DISPUTED:'Дау',
+  RETURN_REQUESTED:'Қайтару сұралды', REFUND_PENDING:'Қайтарылуда', REFUNDED:'Қайтарылды', CANCELLED:'Жойылды' };
+const ACTOR = { buyer:'сатып алушы', seller:'сатушы', system:'жүйе', support:'қолдау' };
+const actor = (a) => ACTOR[String(a).split(':')[0]] || a;
+let token = sessionStorage.getItem('vitrina_admin') || '';
+let tab = 'overview';
+const $ = (h) => { const t = document.createElement('template'); t.innerHTML = h.trim(); return t.content; };
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const tenge = (t) => Math.floor(t / 100).toLocaleString('ru-RU').replace(/,/g, ' ') + ' ₸';
+const when = (iso) => new Date(iso).toLocaleString('ru-RU', { dateStyle:'short', timeStyle:'short' });
+
+async function call(method, path, body) {
+  const r = await fetch(API + path, { method, headers: { 'Content-Type':'application/json', ...(token ? { Authorization:'Bearer ' + token } : {}) },
+    body: body ? JSON.stringify(body) : undefined });
+  const data = r.status === 204 ? null : await r.json().catch(() => null);
+  if (!r.ok) { if (r.status === 401) { token = ''; sessionStorage.removeItem('vitrina_admin'); }
+    throw new Error(data?.message_kk || 'Қате ' + r.status); }
+  return data;
+}
+
+function render(node) { const app = document.getElementById('app'); app.replaceChildren(node); }
+
+function loginView() {
+  const n = $(`<form class="login card"><b style="letter-spacing:3px">VITRINA · әкімші</b>
+    <input name="phone" placeholder="+7XXXXXXXXXX" autocomplete="tel" required>
+    <input name="code" placeholder="SMS коды" inputmode="numeric" hidden>
+    <button class="primary">Код алу</button><div class="err"></div></form>`);
+  const f = n.querySelector('form'), err = f.querySelector('.err'), code = f.code, btn = f.querySelector('button');
+  f.onsubmit = async (e) => {
+    e.preventDefault(); err.textContent = '';
+    try {
+      if (code.hidden) {
+        const r = await call('POST', '/auth/otp', { phone: f.phone.value.trim() });
+        code.hidden = false; btn.textContent = 'Кіру';
+        if (r.dev_code) code.placeholder = 'Сынақ коды: ' + r.dev_code;
+        code.focus();
+      } else {
+        const r = await call('POST', '/auth/verify', { phone: f.phone.value.trim(), code: code.value.trim() });
+        if (!['support', 'admin'].includes(r.user.role)) throw new Error('Бұл аккаунтта қолдау қызметінің рұқсаты жоқ.');
+        token = r.token; sessionStorage.setItem('vitrina_admin', token); show();
+      }
+    } catch (x) { err.textContent = x.message; }
+  };
+  render(n);
+}
+
+function shell(content) {
+  const tabs = [['overview','Шолу'],['disputes','Даулар'],['orders','Тапсырыстар'],['listings','Тауарлар'],['audit','Аудит']];
+  const n = $(`<div><header><b>VITRINA</b><nav>${tabs.map(([k, l]) =>
+    `<button data-k="${k}" aria-current="${k === tab}">${l}</button>`).join('')}</nav>
+    <span style="flex:1"></span><button class="ghost" id="out">Шығу</button></header><main></main></div>`);
+  n.querySelectorAll('nav button').forEach(b => b.onclick = () => { tab = b.dataset.k; show(); });
+  n.querySelector('#out').onclick = () => { token = ''; sessionStorage.removeItem('vitrina_admin'); loginView(); };
+  n.querySelector('main').append(content);
+  render(n);
+}
+
+function orderCard(o, withResolve) {
+  const n = $(`<div class="card"><div class="row">
+      ${o.listing_cover ? `<img src="${esc(o.listing_cover)}" alt="">` : ''}
+      <div style="flex:1"><b>№${o.id} · ${esc(o.listing_title)}</b> <span class="pill">${esc(STATUS[o.status] || o.status)}</span>
+      <div class="muted">Өлшем ${esc(o.size_label)} (${esc(o.size_cm)} см) · ${tenge(o.total_tiyn)} · сатып алушы #${o.buyer_id} · сатушы #${o.seller_id}</div>
+      <ol class="hist">${o.history.map(h => `<li>${when(h.at)} · ${esc(STATUS[h.status] || h.status)} · ${esc(actor(h.actor))}${h.reason ? ' — «' + esc(h.reason) + '»' : ''}</li>`).join('')}</ol>
+      </div></div></div>`);
+  if (withResolve) {
+    const f = $(`<form class="inline"><input name="refund" type="number" min="0" step="1" placeholder="Қайтару, ₸">
+      <input name="reason" placeholder="Шешімнің себебі (міндетті)" required><button class="primary">Шешу</button>
+      <div class="err" style="grid-column:1/-1"></div></form>`).querySelector('form');
+    f.onsubmit = async (e) => {
+      e.preventDefault();
+      const refund = Math.round(Number(f.refund.value || 0) * 100);
+      if (!confirm(refund ? `№${o.id}: сатып алушыға ${tenge(refund)} қайтару?` : `№${o.id}: ақшаны сатушыға беру?`)) return;
+      try { await call('POST', `/admin/orders/${o.id}/resolve`, { refund_tiyn: refund, reason: f.reason.value.trim() }); show(); }
+      catch (x) { f.querySelector('.err').textContent = x.message; }
+    };
+    n.querySelector('.card > .row > div').append(f);
+  }
+  return n;
+}
+
+async function show() {
+  if (!token) return loginView();
+  const box = document.createElement('div');
+  try {
+    if (tab === 'overview') {
+      const o = await call('GET', '/admin/overview');
+      const stat = (n, l) => `<div class="card stat"><div class="n">${n}</div><div class="l">${l}</div></div>`;
+      box.append($(`<div class="grid">${stat(o.users, 'Пайдаланушы')}${stat(o.sellers, 'Сатушы')}
+        ${stat(o.listings.published || 0, 'Сатылымдағы тауар')}${stat(o.orders.DISPUTED || 0, 'Ашық дау')}
+        ${stat(tenge(o.completed_item_value_tiyn), 'Аяқталған сатылым')}</div>
+        <div class="card"><b>Тапсырыстар күйі бойынша</b><table>${Object.entries(o.orders).map(([k, v]) =>
+          `<tr><td>${esc(STATUS[k] || k)}</td><td>${v}</td></tr>`).join('') || '<tr><td class="muted">Әзірге жоқ</td></tr>'}</table></div>`));
+    } else if (tab === 'disputes' || tab === 'orders') {
+      const r = await call('GET', '/admin/orders' + (tab === 'disputes' ? '?status=DISPUTED' : ''));
+      if (!r.items.length) box.append($(`<div class="card muted">${tab === 'disputes' ? 'Ашық дау жоқ.' : 'Тапсырыс жоқ.'}</div>`));
+      r.items.forEach(o => box.append(orderCard(o, tab === 'disputes')));
+    } else if (tab === 'listings') {
+      const r = await call('GET', '/admin/listings?status=published');
+      r.items.forEach(l => {
+        const cover = (l.media.find(m => m.angle !== 'frame') || l.media[0] || {}).original_url;
+        const n = $(`<div class="card"><div class="row">${cover ? `<img src="${esc(cover)}" alt="">` : ''}<div style="flex:1">
+          <b>#${l.id} · ${esc(l.title)}</b><div class="muted">${tenge(l.price_tiyn)} · ${esc(l.seller.shop_name)} · ${l.media.filter(m => m.angle === 'frame').length} кадр 360°</div>
+          ${l.defects ? `<div class="muted">Ақау: ${esc(l.defects)}</div>` : ''}
+          <form class="inline"><input name="reason" placeholder="Жасыру себебі" required style="grid-column:1/3"><button class="ghost danger">Жасыру</button></form></div></div></div>`);
+        const f = n.querySelector('form');
+        f.onsubmit = async (e) => { e.preventDefault(); await call('POST', `/admin/listings/${l.id}/hide`, { reason: f.reason.value.trim() }); show(); };
+        box.append(n);
+      });
+      if (!r.items.length) box.append($(`<div class="card muted">Сатылымда тауар жоқ.</div>`));
+    } else if (tab === 'audit') {
+      const r = await call('GET', '/admin/audit');
+      box.append($(`<div class="card"><table><tr><th>Уақыт</th><th>Кім</th><th>Әрекет</th><th>Нысан</th><th>Себеп</th></tr>${r.items.map(a =>
+        `<tr><td>${when(a.at)}</td><td>#${a.actor_user_id}</td><td>${esc(a.action)}</td><td>${esc(a.target)}</td><td>${esc(a.reason)}</td></tr>`).join('')}</table></div>`));
+    }
+  } catch (x) {
+    if (!token) return loginView();
+    box.append($(`<div class="card err">${esc(x.message)}</div>`));
+  }
+  shell(box);
+}
+show();
+</script>
+</body>
+</html>

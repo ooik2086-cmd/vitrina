@@ -8,6 +8,7 @@ import re
 import secrets
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, Depends, FastAPI, File, Header, Request, UploadFile
@@ -28,8 +29,8 @@ from .config import Settings
 from .deps import current_user, get_db, get_settings, get_storage, now_utc, optional_user, sha256, staff_user
 from .errors import ApiError, api_error_handler
 from .social import router as social_router, seller_rating
-from .models import (AuthToken, Favorite, IdempotencyRecord, Listing, ListingSize, Media, Order, OrderEvent, OtpCode,
-                     Review, User, WebhookEvent, make_session_factory)
+from .models import (AuditLog, AuthToken, Favorite, IdempotencyRecord, Listing, ListingSize, Media, Order, OrderEvent,
+                     OtpCode, Review, User, WebhookEvent, make_session_factory)
 from .storage import MAX_UPLOAD_BYTES, LocalStorage, normalize_image
 
 CATEGORIES = ("sneakers", "sport", "casual", "classic", "boots_winter", "sandals", "kids", "other")
@@ -554,6 +555,45 @@ def hide_listing(listing_id: int, body: ReasonIn, staff: User = Depends(staff_us
     return {"id": listing.id, "status": listing.status}
 
 
+@api.get("/admin/overview")
+def admin_overview(staff: User = Depends(staff_user), db: Session = Depends(get_db)):
+    orders = dict(db.execute(select(Order.status, func.count(Order.id)).group_by(Order.status)).all())
+    listings = dict(db.execute(select(Listing.status, func.count(Listing.id)).group_by(Listing.status)).all())
+    gmv = db.scalar(select(func.coalesce(func.sum(Order.item_price_tiyn), 0)).where(Order.status == S.COMPLETED.value))
+    return {"orders": orders, "listings": listings, "completed_item_value_tiyn": int(gmv or 0),
+            "users": db.scalar(select(func.count(User.id))), "sellers": db.scalar(
+                select(func.count(User.id)).where(User.is_seller.is_(True)))}
+
+
+@api.get("/admin/orders")
+def admin_orders(status: str | None = None, staff: User = Depends(staff_user), db: Session = Depends(get_db)):
+    stmt = select(Order).order_by(Order.id.desc()).limit(200)
+    if status:
+        stmt = stmt.where(Order.status == status)
+    items = []
+    for o in db.scalars(stmt).all():
+        events = db.scalars(select(OrderEvent).where(OrderEvent.order_id == o.id).order_by(OrderEvent.id)).all()
+        items.append({**order_summary(db, o), "history": [
+            {"status": e.to_status, "actor": e.actor, "reason": e.reason, "at": services.aware(e.at).isoformat()}
+            for e in events]})
+    return {"items": items}
+
+
+@api.get("/admin/listings")
+def admin_listings(status: str | None = None, staff: User = Depends(staff_user), db: Session = Depends(get_db)):
+    stmt = select(Listing).order_by(Listing.id.desc()).limit(200)
+    if status:
+        stmt = stmt.where(Listing.status == status)
+    return {"items": [listing_out(db, r) for r in db.scalars(stmt).all()]}
+
+
+@api.get("/admin/audit")
+def admin_audit(staff: User = Depends(staff_user), db: Session = Depends(get_db)):
+    rows = db.scalars(select(AuditLog).order_by(AuditLog.id.desc()).limit(100)).all()
+    return {"items": [{"actor_user_id": r.actor_user_id, "action": r.action, "target": r.target, "reason": r.reason,
+                       "at": services.aware(r.at).isoformat()} for r in rows]}
+
+
 @api.get("/admin/orders/{order_id}/ledger")
 def order_ledger(order_id: int, staff: User = Depends(staff_user), db: Session = Depends(get_db)):
     from .models import LedgerTx
@@ -654,6 +694,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(social_router)
     # Development only: serve uploaded photos from disk. Production serves them from the bucket/CDN.
     app.mount("/media", StaticFiles(directory=settings.media_dir), name="media")
+    # Support console: a static page that talks to the same staff-only API; the page itself holds no data.
+    app.mount("/admin", StaticFiles(directory=Path(__file__).parent / "admin", html=True), name="admin")
     if settings.cors_origins:
         app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_methods=["*"],
                            allow_headers=["Authorization", "Content-Type", "Idempotency-Key"])
