@@ -1,18 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../api.dart';
-import '../labels.dart';
 import '../session.dart';
 import 'listing_editor_screen.dart';
-import 'listing_screen.dart';
-
-const _listingStatuses = {
-  'draft': 'Жоба',
-  'moderation': 'Тексерілуде',
-  'published': 'Сатылымда',
-  'sold': 'Сатылды',
-  'hidden': 'Жасырылған',
-};
+import 'manage_listing_screen.dart';
 
 class MyListingsScreen extends StatefulWidget {
   const MyListingsScreen({super.key});
@@ -76,10 +67,14 @@ class _MyListingsScreenState extends State<MyListingsScreen> {
                                   errorBuilder: (_, __, ___) => const Icon(Icons.broken_image_outlined)),
                         ),
                         title: Text(l.title),
-                        subtitle: Text('${_listingStatuses[l.status] ?? l.status} · ${formatTenge(l.priceTiyn)}'
+                        subtitle: Text('${listingStatuses[l.status] ?? l.status} · ${stockSummary(l)}'
                             '${l.frames.isNotEmpty ? ' · 360°' : ''}'),
-                        onTap: () => Navigator.of(context)
-                            .push(MaterialPageRoute(builder: (_) => ListingScreen(listingId: l.id))),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () async {
+                          final changed = await Navigator.of(context)
+                              .push<bool>(MaterialPageRoute(builder: (_) => ManageListingScreen(listing: l)));
+                          if (changed == true) _reload();
+                        },
                       );
                     },
                   ),

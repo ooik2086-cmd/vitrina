@@ -166,6 +166,41 @@ class ListingTests(ApiTestCase):
         self.assertEqual(self.c.get(f"/api/v1/listings/{lid}", headers=self.h(self.seller)).status_code, 200)
 
 
+class SellerEditTests(ApiTestCase):
+    def patch(self, lid, body, token=None):
+        return self.c.patch(f"/api/v1/listings/{lid}", json=body, headers=self.h(token or self.seller))
+
+    def test_seller_changes_price_and_stock_and_pauses(self):
+        listing = self.publish(condition="used_good", defects="Табанында кішкене сызат")
+        lid, size_id = listing["id"], listing["sizes"][0]["id"]
+        self.assertEqual(self.patch(lid, {"price_tiyn": 4_000_000}, self.buyer).status_code, 404)
+        r = self.patch(lid, {"price_tiyn": 4_000_000, "sizes": [{"id": size_id, "quantity": 3}]})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["price_tiyn"], 4_000_000)
+        self.assertEqual(r.json()["sizes"][0]["quantity"], 3)
+        self.assertNotIn("quantity", self.c.get(f"/api/v1/listings/{lid}").json()["sizes"][0])
+        self.assertEqual(self.patch(lid, {"defects": " "}).json()["code"], "defects_required")
+        self.assertEqual(self.post(f"/listings/{lid}/pause", self.seller).json()["status"], "paused")
+        self.assertEqual(self.c.get(f"/api/v1/listings/{lid}").status_code, 404)
+        r = self.post("/orders", self.buyer, {"listing_id": lid, "size_id": size_id}, **{"Idempotency-Key": "p"})
+        self.assertEqual(r.status_code, 404)
+        self.assertEqual(self.post(f"/listings/{lid}/publish", self.seller).json()["status"], "published")
+
+    def test_stock_drives_sold_and_restock(self):
+        listing = self.publish()
+        lid, size_id = listing["id"], listing["sizes"][0]["id"]
+        self.assertEqual(self.patch(lid, {"sizes": [{"id": size_id, "quantity": 0}]}).json()["status"], "sold")
+        self.assertEqual(self.patch(lid, {"sizes": [{"id": size_id, "quantity": 2}]}).json()["status"], "paused")
+        self.assertEqual(self.patch(lid, {"sizes": [{"id": 9999, "quantity": 2}]}).status_code, 422)
+
+    def test_seller_cannot_lift_moderation_hide(self):
+        lid = self.publish()["id"]
+        staff = self.make_staff()
+        self.post(f"/admin/listings/{lid}/hide", staff, {"reason": "fake brand"})
+        self.assertEqual(self.post(f"/listings/{lid}/publish", self.seller).status_code, 409)
+        self.assertEqual(self.patch(lid, {"price_tiyn": 1_000_000}).status_code, 409)
+
+
 class OrderFlowTests(ApiTestCase):
     def test_scenario_a_happy_path_and_settlement(self):
         _, order = self.delivered()

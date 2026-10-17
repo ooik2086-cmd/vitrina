@@ -24,11 +24,15 @@ class ShoeSize {
       : id = j['id'] as int,
         label = j['label'] as String,
         insoleCm = j['insole_cm'] as String,
-        available = j['available'] as bool;
+        available = j['available'] as bool,
+        quantity = j['quantity'] as int?;
   final int id;
   final String label;
   final String insoleCm;
   final bool available;
+
+  /// Stock count; only present on the seller's own listings.
+  final int? quantity;
 }
 
 class MediaItem {
@@ -277,6 +281,19 @@ class Api {
 
   Future<Listing> publishListing(int id) async =>
       Listing.fromJson(await _send('POST', '/listings/$id/publish') as Map<String, dynamic>);
+
+  Future<Listing> editListing(int id,
+          {int? priceTiyn, int? deliveryPriceTiyn, String? description, String? defects, Map<int, int>? stock}) async =>
+      Listing.fromJson(await _send('PATCH', '/listings/$id', body: {
+        if (priceTiyn != null) 'price_tiyn': priceTiyn,
+        if (deliveryPriceTiyn != null) 'delivery_price_tiyn': deliveryPriceTiyn,
+        if (description != null) 'description': description,
+        if (defects != null) 'defects': defects,
+        if (stock != null) 'sizes': [for (final e in stock.entries) {'id': e.key, 'quantity': e.value}],
+      }) as Map<String, dynamic>);
+
+  Future<Listing> pauseListing(int id) async =>
+      Listing.fromJson(await _send('POST', '/listings/$id/pause') as Map<String, dynamic>);
 
   Future<List<Listing>> myListings() async {
     final r = await _send('GET', '/me/listings') as Map;

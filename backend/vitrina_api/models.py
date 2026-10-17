@@ -57,7 +57,7 @@ class Listing(Base):
     __tablename__ = "listings"
     id: Mapped[int] = mapped_column(primary_key=True)
     seller_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
-    status: Mapped[str] = mapped_column(String(20), default="draft", index=True)  # draft|moderation|published|sold|hidden|rejected|archived
+    status: Mapped[str] = mapped_column(String(20), default="draft", index=True)  # draft|moderation|published|paused|sold|hidden|rejected|archived
     title: Mapped[str] = mapped_column(String(120))
     category: Mapped[str] = mapped_column(String(30), index=True)
     brand: Mapped[str | None] = mapped_column(String(60), index=True)

@@ -86,6 +86,21 @@ class ListingIn(BaseModel):
     photos: list[PhotoIn] = Field(default_factory=list, max_length=60)
 
 
+class StockIn(BaseModel):
+    id: int
+    quantity: int = Field(ge=0, le=999)
+
+
+class ListingPatch(BaseModel):
+    """What a seller may change after creating a listing. Photos, title and condition stay fixed so that
+    buyers who saved or ordered the item see the same thing they chose."""
+    price_tiyn: int | None = Field(default=None, gt=0, le=10**12)
+    delivery_price_tiyn: int | None = Field(default=None, ge=0, le=10**10)
+    description: str | None = Field(default=None, max_length=4000)
+    defects: str | None = Field(default=None, max_length=2000)
+    sizes: list[StockIn] | None = Field(default=None, max_length=30)
+
+
 class OrderIn(BaseModel):
     listing_id: int
     size_id: int
@@ -126,7 +141,8 @@ def segment_for(db: Session, listing: Listing) -> str | None:
     return bounds.segment_for(listing.price_tiyn).value if bounds else None
 
 
-def listing_out(db: Session, listing: Listing) -> dict:
+def listing_out(db: Session, listing: Listing, *, owner: bool = False) -> dict:
+    """owner=True adds stock counts, which only the seller sees."""
     seller = db.get(User, listing.seller_id)
     return {
         "id": listing.id, "status": listing.status, "title": listing.title, "category": listing.category,
@@ -135,8 +151,8 @@ def listing_out(db: Session, listing: Listing) -> dict:
         # Three separate facts, never merged into one "quality" label.
         "segment": segment_for(db, listing), "condition": listing.condition, "authenticity": listing.authenticity,
         "defects": listing.defects, "description": listing.description, "showcase_style": listing.showcase_style,
-        "sizes": [{"id": s.id, "label": s.label, "insole_cm": mm_to_cm(s.insole_mm), "available": s.quantity > 0}
-                  for s in listing.sizes],
+        "sizes": [{"id": s.id, "label": s.label, "insole_cm": mm_to_cm(s.insole_mm), "available": s.quantity > 0,
+                   **({"quantity": s.quantity} if owner else {})} for s in listing.sizes],
         "media": [{"original_url": m.original_url, "processed_url": m.processed_url, "angle": m.angle}
                   for m in listing.media],
         "seller": {"id": seller.id, "shop_name": seller.shop_name, "city": seller.city,  # never the phone
@@ -255,7 +271,7 @@ async def upload_photo(file: UploadFile = File(...), user: User = Depends(curren
 @api.get("/me/listings")
 def my_listings(user: User = Depends(current_user), db: Session = Depends(get_db)):
     rows = db.scalars(select(Listing).where(Listing.seller_id == user.id).order_by(Listing.id.desc()).limit(200)).all()
-    return {"items": [listing_out(db, r) for r in rows]}
+    return {"items": [listing_out(db, r, owner=True) for r in rows]}
 
 
 @api.post("/listings", status_code=201)
@@ -279,7 +295,7 @@ def create_listing(body: ListingIn, user: User = Depends(current_user), db: Sess
     )
     db.add(listing)
     db.commit()
-    return listing_out(db, listing)
+    return listing_out(db, listing, owner=True)
 
 
 def own_listing(db: Session, listing_id: int, user: User) -> Listing:
@@ -293,7 +309,8 @@ def own_listing(db: Session, listing_id: int, user: User) -> Listing:
 def publish_listing(listing_id: int, user: User = Depends(current_user), db: Session = Depends(get_db),
                     cfg: Settings = Depends(get_settings)):
     listing = own_listing(db, listing_id, user)
-    if listing.status not in ("draft", "hidden"):
+    # "hidden" is a moderation decision; only staff can lift it.
+    if listing.status not in ("draft", "paused"):
         raise ApiError(409, "invalid_status")
     if len(listing.media) < cfg.min_listing_photos:
         raise ApiError(422, "missing_required_photos")
@@ -306,7 +323,48 @@ def publish_listing(listing_id: int, user: User = Depends(current_user), db: Ses
     # TODO(moderation): route to "moderation" when automated checks flag the listing.
     listing.status = "published"
     db.commit()
-    return listing_out(db, listing)
+    return listing_out(db, listing, owner=True)
+
+
+@api.patch("/listings/{listing_id}")
+def edit_listing(listing_id: int, body: ListingPatch, user: User = Depends(current_user),
+                 db: Session = Depends(get_db)):
+    listing = own_listing(db, listing_id, user)
+    if listing.status == "hidden":
+        raise ApiError(409, "invalid_status")
+    if body.price_tiyn is not None:
+        listing.price_tiyn = body.price_tiyn
+    if body.delivery_price_tiyn is not None:
+        listing.delivery_price_tiyn = body.delivery_price_tiyn
+    if body.description is not None:
+        listing.description = body.description.strip() or None
+    if body.defects is not None:
+        if listing.condition in DEFECT_REQUIRED and not body.defects.strip():
+            raise ApiError(422, "defects_required")
+        listing.defects = body.defects.strip() or None
+    if body.sizes is not None:
+        by_id = {s.id: s for s in listing.sizes}
+        for item in body.sizes:
+            if item.id not in by_id:
+                raise ApiError(422, "validation", f"unknown size {item.id}")
+            by_id[item.id].quantity = item.quantity
+        in_stock = any(s.quantity > 0 for s in listing.sizes)
+        if listing.status == "published" and not in_stock:
+            listing.status = "sold"
+        elif listing.status == "sold" and in_stock:
+            listing.status = "paused"  # restocked; the seller republishes when ready
+    db.commit()
+    return listing_out(db, listing, owner=True)
+
+
+@api.post("/listings/{listing_id}/pause")
+def pause_listing(listing_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    listing = own_listing(db, listing_id, user)
+    if listing.status != "published":
+        raise ApiError(409, "invalid_status")
+    listing.status = "paused"
+    db.commit()
+    return listing_out(db, listing, owner=True)
 
 
 @api.get("/listings")

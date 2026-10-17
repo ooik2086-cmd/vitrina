@@ -9,6 +9,7 @@ import 'package:vitrina/labels.dart';
 import 'package:vitrina/screens/chat_screen.dart';
 import 'package:vitrina/screens/listing_editor_screen.dart';
 import 'package:vitrina/screens/listing_screen.dart';
+import 'package:vitrina/screens/manage_listing_screen.dart';
 import 'package:vitrina/screens/spin_capture_screen.dart';
 import 'package:vitrina/session.dart';
 import 'package:vitrina/widgets/spin_viewer.dart';
@@ -237,5 +238,39 @@ void main() {
     expect(find.text('Бар, +7 701 123 45 67'), findsOneWidget);
     expect(find.textContaining('Төлемді тек VITRINA арқылы'), findsOneWidget);
     await tester.pumpWidget(const SizedBox()); // stop polling
+  });
+
+  testWidgets('seller changes price and stock and the edit is sent as one patch', (tester) async {
+    Map<String, dynamic>? sent;
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async {
+          expect(req.method, 'PATCH');
+          expect(req.url.path, '/api/v1/listings/7');
+          sent = jsonDecode(req.body) as Map<String, dynamic>;
+          return http.Response(jsonEncode({...listingJson(), 'price_tiyn': 4000000}), 200,
+              headers: {'content-type': 'application/json; charset=utf-8'});
+        }));
+    final own = listingJson();
+    own['sizes'] = [
+      {'id': 1, 'label': '42', 'insole_cm': '27,0', 'available': true, 'quantity': 2},
+    ];
+    tester.view.physicalSize = const Size(400, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(SessionScope(
+        session: Session(api), child: MaterialApp(home: ManageListingScreen(listing: Listing.fromJson(own)))));
+    expect(find.text('Сатылымда'), findsOneWidget);
+    expect(find.text('2'), findsOneWidget);
+    await tester.enterText(find.byKey(const Key('price')), '40000');
+    await tester.tap(find.byTooltip('Көбейту'));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('save')));
+    await tester.pumpAndSettle();
+    expect(sent!['price_tiyn'], 4000000);
+    expect(sent!['sizes'], [
+      {'id': 1, 'quantity': 3}
+    ]);
+    expect(find.text('Сақталды'), findsOneWidget);
   });
 }
