@@ -316,6 +316,21 @@ class PopularityTests(ApiTestCase):
         self.assertEqual(self.c.get(url).json()["popularity"], {"sold_30d": 1, "favorites": 3})
 
 
+class CityFilterTests(ApiTestCase):
+    def test_catalog_filters_by_the_sellers_city_however_it_is_spelled(self):
+        mine = self.publish()["id"]  # Qadam Store, Алматы
+        other = self.login("+77010000005")
+        self.post("/me/seller", other, {"shop_name": "Astana Kicks", "city": "Nur-Sultan"})
+        r = self.c.post("/api/v1/listings", json=LISTING, headers=self.h(other))
+        theirs = r.json()["id"]
+        self.post(f"/listings/{theirs}/publish", other)
+        ids = lambda city: [i["id"] for i in self.c.get("/api/v1/listings", params={"city": city}).json()["items"]]  # noqa: E731
+        self.assertEqual(ids("almaty"), [mine])
+        self.assertEqual(ids("Астана"), [theirs])
+        self.assertEqual(ids("Москва"), [])
+        self.assertEqual(sorted(i["id"] for i in self.c.get("/api/v1/listings").json()["items"]), [mine, theirs])
+
+
 class ReportTests(ApiTestCase):
     def report(self, lid, token, reason="fake", text=None):
         return self.post(f"/listings/{lid}/report", token, {"reason": reason, "text": text})

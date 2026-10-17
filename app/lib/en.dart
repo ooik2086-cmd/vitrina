@@ -760,4 +760,8 @@ const en = <String, String>{
   'шамамен {0}': 'about {0}',
   '30 күнде {0} жұп сатып алынды': '{0} bought in the last 30 days',
   '{0} адам таңдаулыға қосты': '{0} people saved it',
+  'Сатушының қаласы': "Seller's city",
+  'Кез келген қала': 'Any city',
+  'Өз қалаңыздан алсаңыз, тезірек әрі арзанырақ жетеді.':
+      'From your own city it arrives sooner and costs less to send.',
 };

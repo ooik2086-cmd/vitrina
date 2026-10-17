@@ -4,6 +4,31 @@ import '../api.dart';
 import '../i18n.dart';
 import '../session.dart';
 
+/// Cities the server can place, the same list it returns with an estimate.
+const kzCities = [
+  'Алматы',
+  'Астана',
+  'Шымкент',
+  'Қарағанды',
+  'Ақтөбе',
+  'Тараз',
+  'Павлодар',
+  'Өскемен',
+  'Семей',
+  'Атырау',
+  'Қостанай',
+  'Қызылорда',
+  'Орал',
+  'Петропавл',
+  'Ақтау',
+  'Түркістан',
+  'Көкшетау',
+  'Талдықорған',
+  'Екібастұз',
+  'Жезқазған',
+  'Қонаев',
+];
+
 const _months = ['қаң', 'ақп', 'нау', 'сәу', 'мам', 'мау', 'шіл', 'там', 'қыр', 'қаз', 'қар', 'жел'];
 
 /// The city picked on a product page, kept while the app is open so every page shows the same one.

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../api.dart';
 import '../labels.dart';
 import '../i18n.dart';
+import 'delivery_eta.dart';
 
 const sortLabels = {'new': 'Жаңалары', 'price_asc': 'Арзанырақ', 'price_desc': 'Қымбатырақ'};
 
@@ -17,6 +18,7 @@ class FilterSheet extends StatefulWidget {
 
 class _FilterSheetState extends State<FilterSheet> {
   late String _sort = widget.initial.sort;
+  late String? _city = widget.initial.city;
   late final Set<String> _conditions = {...widget.initial.conditions};
   late final _min = TextEditingController(text: _tenge(widget.initial.minPriceTiyn));
   late final _max = TextEditingController(text: _tenge(widget.initial.maxPriceTiyn));
@@ -38,7 +40,8 @@ class _FilterSheetState extends State<FilterSheet> {
   void _apply() {
     var min = _tiyn(_min.text), max = _tiyn(_max.text);
     if (min != null && max != null && min > max) (min, max) = (max, min);
-    Navigator.pop(context, CatalogFilter(sort: _sort, conditions: _conditions, minPriceTiyn: min, maxPriceTiyn: max));
+    Navigator.pop(context,
+        CatalogFilter(sort: _sort, conditions: _conditions, minPriceTiyn: min, maxPriceTiyn: max, city: _city));
   }
 
   @override
@@ -56,7 +59,9 @@ class _FilterSheetState extends State<FilterSheet> {
             Wrap(spacing: 8, children: [
               for (final e in sortLabels.entries)
                 ChoiceChip(
-                    label: Text(tr(e.value)), selected: _sort == e.key, onSelected: (_) => setState(() => _sort = e.key)),
+                    label: Text(tr(e.value)),
+                    selected: _sort == e.key,
+                    onSelected: (_) => setState(() => _sort = e.key)),
             ]),
             const SizedBox(height: 20),
             Text(tr('Баға, ₸'), style: theme.textTheme.titleSmall),
@@ -89,6 +94,24 @@ class _FilterSheetState extends State<FilterSheet> {
                   onSelected: (on) => setState(() => on ? _conditions.add(e.key) : _conditions.remove(e.key)),
                 ),
             ]),
+            const SizedBox(height: 20),
+            Text(tr('Сатушының қаласы'), style: theme.textTheme.titleSmall),
+            const SizedBox(height: 8),
+            DropdownButtonFormField<String?>(
+              key: const Key('filter-city'),
+              initialValue: _city,
+              isExpanded: true,
+              items: [
+                DropdownMenuItem(value: null, child: Text(tr('Кез келген қала'))),
+                for (final c in kzCities) DropdownMenuItem(value: c, child: Text(tr(c))),
+              ],
+              onChanged: (c) => setState(() => _city = c),
+            ),
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(tr('Өз қалаңыздан алсаңыз, тезірек әрі арзанырақ жетеді.'),
+                  style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+            ),
             const SizedBox(height: 24),
             Row(children: [
               Expanded(

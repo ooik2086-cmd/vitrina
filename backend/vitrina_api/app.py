@@ -888,12 +888,22 @@ def catalog_filter(stmt, *, q: str | None = None, category: str | None = None, b
     return stmt
 
 
+def sellers_in(db: Session, city: str) -> list[int]:
+    """Sellers whose city is `city`, however they spelled it (Алматы, Almaty, Алма-Ата)."""
+    want = delivery_eta.known_city(city)
+    if want is None:
+        return []
+    rows = db.execute(select(User.id, User.city).where(User.is_seller.is_(True), User.city.is_not(None))).all()
+    return [uid for uid, c in rows if delivery_eta.known_city(c) == want]
+
+
 @api.get("/listings")
 def search_listings(q: str | None = None, category: str | None = None, brand: str | None = None,
                     condition: str | None = None, min_price_tiyn: int | None = None,
                     max_price_tiyn: int | None = None, size_cm: str | None = None,
                     sort: Literal["new", "price_asc", "price_desc"] = "new", seller_id: int | None = None,
-                    sale: bool = False, limit: int = 20, offset: int = 0, db: Session = Depends(get_db)):
+                    sale: bool = False, city: str | None = Query(default=None, max_length=60), limit: int = 20,
+                    offset: int = 0, db: Session = Depends(get_db)):
     stmt = catalog_filter(select(Listing).where(Listing.status == "published"), q=q, category=category,
                           brand=brand, condition=condition, min_price_tiyn=min_price_tiyn,
                           max_price_tiyn=max_price_tiyn, size_cm=size_cm)
@@ -901,6 +911,8 @@ def search_listings(q: str | None = None, category: str | None = None, brand: st
         stmt = stmt.where(Listing.seller_id == seller_id)
     if sale:
         stmt = stmt.where(Listing.was_price_tiyn > Listing.price_tiyn, Listing.was_until > now_utc())
+    if city:
+        stmt = stmt.where(Listing.seller_id.in_(sellers_in(db, city)))
     order = {"new": (Listing.id.desc(),), "price_asc": (Listing.price_tiyn, Listing.id.desc()),
              "price_desc": (Listing.price_tiyn.desc(), Listing.id.desc())}[sort]
     rows = db.scalars(stmt.order_by(*order).limit(max(1, min(limit, 50))).offset(max(0, offset))).all()

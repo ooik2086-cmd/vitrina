@@ -351,8 +351,9 @@ class DeliveryEstimate {
 
 /// Catalog refinements beyond text, size and category.
 class CatalogFilter {
-  const CatalogFilter({this.sort = 'new', this.conditions = const {}, this.minPriceTiyn, this.maxPriceTiyn});
+  const CatalogFilter({this.sort = 'new', this.conditions = const {}, this.minPriceTiyn, this.maxPriceTiyn, this.city});
   final String sort; // new | price_asc | price_desc
+  final String? city; // the seller's city: nearby pairs come sooner and cost less to send
   final Set<String> conditions;
   final int? minPriceTiyn;
   final int? maxPriceTiyn;
@@ -361,13 +362,15 @@ class CatalogFilter {
   int get active =>
       (sort != 'new' ? 1 : 0) +
       (conditions.isNotEmpty ? 1 : 0) +
-      (minPriceTiyn != null || maxPriceTiyn != null ? 1 : 0);
+      (minPriceTiyn != null || maxPriceTiyn != null ? 1 : 0) +
+      (city != null ? 1 : 0);
 
   Map<String, String> get query => {
         if (sort != 'new') 'sort': sort,
         if (conditions.isNotEmpty) 'condition': conditions.join(','),
         if (minPriceTiyn != null) 'min_price_tiyn': '$minPriceTiyn',
         if (maxPriceTiyn != null) 'max_price_tiyn': '$maxPriceTiyn',
+        if (city != null) 'city': city!,
       };
 }
 

@@ -1539,6 +1539,8 @@ void main() {
         sort: 'price_asc', conditions: {'new_with_box', 'new_no_box'}, minPriceTiyn: 1000000, maxPriceTiyn: null);
     expect(f.active, 3);
     expect(f.query, {'sort': 'price_asc', 'condition': 'new_with_box,new_no_box', 'min_price_tiyn': '1000000'});
+    expect(const CatalogFilter(city: 'Шымкент').query, {'city': 'Шымкент'});
+    expect(const CatalogFilter(city: 'Шымкент').active, 1);
     expect(const CatalogFilter().query, isEmpty);
   });
 
@@ -1559,11 +1561,37 @@ void main() {
     await tester.enterText(find.byKey(const Key('max-price')), '20000');
     await tester.tap(find.text('Арзанырақ'));
     await tester.pump();
+    await tester.ensureVisible(find.byKey(const Key('apply-filter')));
     await tester.tap(find.byKey(const Key('apply-filter')));
     await tester.pumpAndSettle();
     expect(result!.minPriceTiyn, 2000000);
     expect(result!.maxPriceTiyn, 5000000);
     expect(result!.sort, 'price_asc');
+    expect(result!.city, isNull);
+  });
+
+  testWidgets('filter sheet narrows the catalog to one seller city', (tester) async {
+    CatalogFilter? result;
+    await tester.pumpWidget(MaterialApp(
+      home: Builder(
+        builder: (context) => TextButton(
+          onPressed: () async => result = await showModalBottomSheet<CatalogFilter>(
+              context: context, isScrollControlled: true, builder: (_) => const FilterSheet(initial: CatalogFilter())),
+          child: const Text('open'),
+        ),
+      ),
+    ));
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const Key('filter-city')));
+    await tester.tap(find.byKey(const Key('filter-city')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Шымкент').last);
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const Key('apply-filter')));
+    await tester.tap(find.byKey(const Key('apply-filter')));
+    await tester.pumpAndSettle();
+    expect(result!.city, 'Шымкент');
   });
 
   test('sales export asks for the chosen period and hands back the file, or the server\'s error', () async {
