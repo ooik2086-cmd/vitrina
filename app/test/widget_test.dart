@@ -10,6 +10,7 @@ import 'package:vitrina/api.dart';
 import 'package:vitrina/i18n.dart';
 import 'package:vitrina/labels.dart';
 import 'package:vitrina/my_size.dart';
+import 'package:vitrina/recent.dart';
 import 'package:vitrina/screens/catalog_screen.dart';
 import 'package:vitrina/screens/chat_screen.dart';
 import 'package:vitrina/screens/earnings_screen.dart';
@@ -171,6 +172,23 @@ void main() {
     final s = await api.suggestDetails('http://x/media/1/a.jpg');
     expect((s.brand, s.modelName, s.category, s.isEmpty), ('Nike', null, 'sneakers', false));
     expect((await api.suggestDetails('http://x/media/1/b.jpg')).isEmpty, isTrue);
+  });
+
+  test('recently viewed keeps the newest first, without repeats, up to the limit', () async {
+    SharedPreferences.setMockInitialValues({});
+    await forgetRecent();
+    for (var i = 1; i <= recentLimit + 3; i++) {
+      await rememberViewed(Listing.fromJson({...listingJson(), 'id': i, 'title': 'Shoe $i'}));
+    }
+    await rememberViewed(Listing.fromJson({...listingJson(), 'id': 5, 'title': 'Shoe 5'}));
+    expect(recentlyViewed.value.length, recentLimit);
+    expect(recentlyViewed.value.first.id, 5);
+    expect(recentlyViewed.value.where((r) => r.id == 5).length, 1);
+    recentlyViewed.value = const [];
+    await restoreRecent(); // survives an app restart
+    expect(recentlyViewed.value.first.title, 'Shoe 5');
+    await forgetRecent();
+    expect(recentlyViewed.value, isEmpty);
   });
 
   test('order creation sends the idempotency key', () async {

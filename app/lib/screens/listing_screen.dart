@@ -14,6 +14,7 @@ import 'seller_reviews_screen.dart';
 import 'shop_screen.dart';
 import '../i18n.dart';
 import '../my_size.dart';
+import '../recent.dart';
 
 const _minSpinFrames = 8;
 
@@ -40,6 +41,9 @@ class _ListingScreenState extends State<ListingScreen> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     _listing = SessionScope.of(context).api.listing(widget.listingId);
+    _listing.then((l) {
+      if (l.status == 'published') rememberViewed(l);
+    }, onError: (_) {});
     _similar ??= SessionScope.of(context).api.similar(widget.listingId).catchError((_) => <Listing>[]);
   }
 

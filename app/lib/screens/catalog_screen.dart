@@ -7,9 +7,11 @@ import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/filter_sheet.dart';
 import 'image_search_screen.dart';
+import 'listing_screen.dart';
 import 'notifications_screen.dart';
 import '../i18n.dart';
 import '../my_size.dart';
+import '../recent.dart';
 
 class CatalogScreen extends StatefulWidget {
   const CatalogScreen({super.key});
@@ -227,6 +229,12 @@ class _CatalogScreenState extends State<CatalogScreen> {
               ),
             ),
           ),
+          ValueListenableBuilder<List<RecentItem>>(
+            valueListenable: recentlyViewed,
+            builder: (context, recent, _) => recent.isEmpty || _query.text.trim().isNotEmpty || _category != null
+                ? const SliverToBoxAdapter(child: SizedBox.shrink())
+                : SliverToBoxAdapter(child: _RecentRow(items: recent)),
+          ),
           FutureBuilder<List<Listing>>(
             future: _results,
             builder: (context, snap) {
@@ -330,6 +338,60 @@ class _SizeSheet extends StatelessWidget {
         ]),
       ),
     );
+  }
+}
+
+/// Listings opened lately, so a shoe seen yesterday is one tap away.
+class _RecentRow extends StatelessWidget {
+  const _RecentRow({required this.items});
+  final List<RecentItem> items;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(20, 4, 8, 0),
+        child: Row(children: [
+          Expanded(child: Text(tr('Жуырда қаралғандар'), style: theme.textTheme.titleMedium)),
+          TextButton(onPressed: forgetRecent, child: Text(tr('Тазарту'))),
+        ]),
+      ),
+      SizedBox(
+        height: 166,
+        child: ListView.separated(
+          key: const Key('recent'),
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          itemCount: items.length,
+          separatorBuilder: (_, __) => const SizedBox(width: 12),
+          itemBuilder: (context, i) {
+            final r = items[i];
+            return GestureDetector(
+              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => ListingScreen(listingId: r.id))),
+              child: SizedBox(
+                width: 104,
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Container(
+                    width: 104,
+                    height: 92,
+                    clipBehavior: Clip.antiAlias,
+                    decoration: BoxDecoration(color: Brand.studio, borderRadius: BorderRadius.circular(16)),
+                    child: r.coverUrl == null
+                        ? const Icon(Icons.image_outlined)
+                        : Image.network(r.coverUrl!,
+                            fit: BoxFit.contain, errorBuilder: (_, __, ___) => const Icon(Icons.image_outlined)),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(formatTenge(r.priceTiyn), style: weight(theme.textTheme.labelLarge!, 700)),
+                  Text(r.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.labelSmall),
+                ]),
+              ),
+            );
+          },
+        ),
+      ),
+    ]);
   }
 }
 
