@@ -36,7 +36,9 @@ class _ChatsScreenState extends State<ChatsScreen> {
 
   Future<void> _reload() async {
     final f = SessionScope.of(context).api.conversations();
-    setState(() => _items = f);
+    setState(() {
+      _items = f;
+    });
     await f;
   }
 
@@ -177,6 +179,33 @@ class _ChatScreenState extends State<ChatScreen> {
         }
       });
 
+  Future<void> _block(Conversation conv) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(trf('{0}: бұғаттау керек пе?', [conv.otherName])),
+        content: Text(tr(
+            'Екеуіңіз бір-біріңізге жаза алмайсыз, баға ұсынысы, сұрақ пен тапсырыс та жабылады. Профильдегі «Бұғатталғандар» бөлімінен қайтаруға болады.')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Жабу'))),
+          FilledButton(
+              key: const Key('confirm-block'),
+              onPressed: () => Navigator.pop(context, true),
+              child: Text(tr('Бұғаттау'))),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      await _api.blockInChat(conv.id);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(trf('{0}: бұғатталды.', [conv.otherName]))));
+      Navigator.of(context).pop();
+    } catch (e) {
+      if (mounted) showError(context, e);
+    }
+  }
+
   /// A ready answer goes into the field, not straight to the buyer, so the seller can add the details.
   void _useReply(String text) {
     _input.value = TextEditingValue(text: text, selection: TextSelection.collapsed(offset: text.length));
@@ -228,6 +257,16 @@ class _ChatScreenState extends State<ChatScreen> {
     final conv = _conversation;
     return Scaffold(
       appBar: AppBar(
+        actions: [
+          if (conv != null)
+            PopupMenuButton<String>(
+              key: const Key('chat-menu'),
+              onSelected: (_) => _block(conv),
+              itemBuilder: (_) => [
+                PopupMenuItem(value: 'block', key: const Key('block-user'), child: Text(tr('Бұғаттау'))),
+              ],
+            ),
+        ],
         title: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(conv?.otherName ?? '', style: theme.textTheme.titleMedium),
           if (conv != null)

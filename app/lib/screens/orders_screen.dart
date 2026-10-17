@@ -53,7 +53,9 @@ class _OrderListState extends State<_OrderList> {
 
   Future<void> _reload() async {
     final f = _load();
-    setState(() => _orders = f);
+    setState(() {
+      _orders = f;
+    });
     await f;
   }
 
@@ -88,7 +90,8 @@ class _OrderListState extends State<_OrderList> {
                                   fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Icon(Icons.image_outlined)),
                         ),
                       ),
-                      title: Text(o.listingTitle ?? trf('Тапсырыс №{0}', [o.id]), maxLines: 1, overflow: TextOverflow.ellipsis),
+                      title: Text(o.listingTitle ?? trf('Тапсырыс №{0}', [o.id]),
+                          maxLines: 1, overflow: TextOverflow.ellipsis),
                       subtitle: Text(label(orderStatuses, o.status)),
                       trailing: Text(formatTenge(o.totalTiyn), style: const TextStyle(fontWeight: FontWeight.w700)),
                       onTap: () async {

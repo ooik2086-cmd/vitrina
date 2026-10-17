@@ -68,6 +68,7 @@ def ask(listing_id: int, body: QuestionIn, user: User = Depends(current_user), d
     listing = visible_listing(db, listing_id)
     if listing.seller_id == user.id:
         raise ApiError(409, "own_listing")
+    services.ensure_not_blocked(db, user.id, listing.seller_id)
     text = clean(body.text)
     waiting = db.scalar(select(func.count(Question.id)).where(
         Question.listing_id == listing.id, Question.asker_id == user.id, Question.answer.is_(None),

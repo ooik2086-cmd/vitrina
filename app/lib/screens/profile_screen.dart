@@ -4,6 +4,7 @@ import '../labels.dart';
 import '../session.dart';
 import '../widgets/common.dart';
 import 'analytics_screen.dart';
+import 'blocked_screen.dart';
 import 'earnings_screen.dart';
 import 'following_screen.dart';
 import 'my_listings_screen.dart';
@@ -118,6 +119,13 @@ class ProfileScreen extends StatelessWidget {
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () =>
                     Navigator.of(context).push(MaterialPageRoute(builder: (_) => const NotificationSettingsScreen())),
+              ),
+              ListTile(
+                key: const Key('blocked'),
+                leading: const Icon(Icons.block),
+                title: Text(tr('Бұғатталғандар')),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const BlockedScreen())),
               ),
               ListTile(
                 leading: const Icon(Icons.translate),

@@ -9,7 +9,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 from pydantic import BaseModel, Field
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from vitrina_core.orders import OrderStatus
@@ -18,7 +18,7 @@ from . import services
 from .deps import current_user, get_db, get_storage, now_utc
 from .errors import ApiError
 from .storage import MAX_UPLOAD_BYTES, LocalStorage, normalize_image
-from .models import Conversation, Listing, Message, Notification, Order, Review, User
+from .models import Block, Conversation, Listing, Message, Notification, Order, Review, User
 
 router = APIRouter(prefix="/api/v1")
 
@@ -95,6 +95,7 @@ def open_conversation(body: ConversationIn, user: User = Depends(current_user), 
         raise ApiError(404, "not_found")
     if listing.seller_id == user.id:
         raise ApiError(409, "own_listing")
+    services.ensure_not_blocked(db, user.id, listing.seller_id)
     conv = db.scalar(select(Conversation).where(Conversation.listing_id == listing.id,
                                                 Conversation.buyer_id == user.id))
     if conv is None:
@@ -106,7 +107,11 @@ def open_conversation(body: ConversationIn, user: User = Depends(current_user), 
 
 @router.get("/conversations")
 def list_conversations(user: User = Depends(current_user), db: Session = Depends(get_db)):
-    rows = db.scalars(select(Conversation).where(or_(Conversation.buyer_id == user.id, Conversation.seller_id == user.id))
+    # Threads with someone this user blocked drop out of the list; the blocked side still sees theirs.
+    mine = select(Block.blocked_id).where(Block.user_id == user.id)
+    rows = db.scalars(select(Conversation).where(
+        or_(and_(Conversation.buyer_id == user.id, Conversation.seller_id.not_in(mine)),
+            and_(Conversation.seller_id == user.id, Conversation.buyer_id.not_in(mine))))
                       .order_by(Conversation.last_message_at.desc()).limit(100)).all()
     return {"items": [conversation_out(db, c, user) for c in rows]}
 
@@ -150,6 +155,39 @@ async def send_photo(conversation_id: int, file: UploadFile = File(...), caption
     return post_message(db, conv, user, caption.strip(), url)
 
 
+@router.post("/conversations/{conversation_id}/block")
+def block_from_chat(conversation_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """Blocks the other side of this chat: no more messages, offers, questions or orders between the two."""
+    conv = conversation_for(db, conversation_id, user)
+    other = conv.seller_id if user.id == conv.buyer_id else conv.buyer_id
+    if not db.scalar(select(Block.id).where(Block.user_id == user.id, Block.blocked_id == other)):
+        db.add(Block(user_id=user.id, blocked_id=other))
+        db.commit()
+    return {"blocked": True}
+
+
+def block_name(db: Session, block: Block) -> str:
+    other = db.get(User, block.blocked_id)
+    return other.shop_name or other.display_name or "Пайдаланушы"
+
+
+@router.get("/me/blocks")
+def list_blocks(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    rows = db.scalars(select(Block).where(Block.user_id == user.id).order_by(Block.id.desc())).all()
+    return {"items": [{"user_id": b.blocked_id, "name": block_name(db, b),
+                       "since": services.aware(b.created_at).isoformat()} for b in rows]}
+
+
+@router.delete("/me/blocks/{user_id}")
+def unblock(user_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    block = db.scalar(select(Block).where(Block.user_id == user.id, Block.blocked_id == user_id))
+    if block is None:
+        raise ApiError(404, "not_found")
+    db.delete(block)
+    db.commit()
+    return {"blocked": False}
+
+
 def check_rate(db: Session, user: User) -> None:
     recent = db.scalar(select(func.count(Message.id)).where(
         Message.sender_id == user.id, Message.created_at >= now_utc() - timedelta(minutes=1)))
@@ -158,6 +196,7 @@ def check_rate(db: Session, user: User) -> None:
 
 
 def post_message(db: Session, conv: Conversation, user: User, text: str, photo_url: str | None) -> dict:
+    services.ensure_not_blocked(db, conv.buyer_id, conv.seller_id)
     check_rate(db, user)
     msg = Message(conversation_id=conv.id, sender_id=user.id, body=text, photo_url=photo_url,
                   contact_warning=bool(CONTACT_RE.search(text)))

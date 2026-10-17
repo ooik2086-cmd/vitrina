@@ -345,6 +345,17 @@ class Question(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class Block(Base):
+    """One user stops another from writing, offering, asking or ordering from them. Works both ways for
+    contact; only the blocker can lift it."""
+    __tablename__ = "blocks"
+    __table_args__ = (UniqueConstraint("user_id", "blocked_id"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    blocked_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class StockAlert(Base):
     """A buyer waiting for a sold-out size: told once when it can be ordered again, then the alert is gone."""
     __tablename__ = "stock_alerts"

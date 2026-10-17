@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from vitrina_core.money import (PROVIDER_CLEARING, CommissionRule, Entry, escrow, settlement_entries,
@@ -11,7 +11,7 @@ from vitrina_core.money import (PROVIDER_CLEARING, CommissionRule, Entry, escrow
 from vitrina_core.orders import Actor, Order as CoreOrder, OrderStatus, TransitionError, transition
 
 from .errors import ApiError
-from .models import (AuditLog, LedgerEntry, LedgerTx, Listing, ListingSize, Notification, Order, OrderEvent,
+from .models import (AuditLog, Block, LedgerEntry, LedgerTx, Listing, ListingSize, Notification, Order, OrderEvent,
                      StockAlert, User)
 
 
@@ -53,6 +53,17 @@ OPTIONAL_KINDS = ("price_drop", "saved_search", "followed_shop", "back_in_stock"
 
 def muted(user: User | None) -> set[str]:
     return set((user.muted_kinds or "").split(",")) - {""} if user else set()
+
+
+def blocked_between(db: Session, a: int, b: int) -> bool:
+    return db.scalar(select(Block.id).where(or_(and_(Block.user_id == a, Block.blocked_id == b),
+                                                and_(Block.user_id == b, Block.blocked_id == a))).limit(1)) is not None
+
+
+def ensure_not_blocked(db: Session, a: int, b: int) -> None:
+    """The same answer whichever side blocked, so nobody learns they were blocked by probing."""
+    if blocked_between(db, a, b):
+        raise ApiError(403, "blocked")
 
 
 def notify(db: Session, user_id: int, kind: str, text: str, text_ru: str, *, order_id: int | None = None,

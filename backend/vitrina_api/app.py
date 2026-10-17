@@ -40,7 +40,7 @@ from .deps import current_user, get_db, get_settings, get_storage, now_utc, opti
 from .errors import ApiError, api_error_handler
 from .share import router as share_router
 from .social import reply_time, router as social_router, seller_rating, size_fit
-from .models import (AuditLog, AuthToken, Follow, Notification, Offer, SavedSearch, StockAlert, ListingDailyViews, ListingEmbedding, ListingReport, AuthToken, Favorite, IdempotencyRecord, Listing, ListingSize, Media, Order, OrderEvent,
+from .models import (AuditLog, AuthToken, Block, Follow, Notification, Offer, SavedSearch, StockAlert, ListingDailyViews, ListingEmbedding, ListingReport, AuthToken, Favorite, IdempotencyRecord, Listing, ListingSize, Media, Order, OrderEvent,
                      OtpCode, Review, User, WebhookEvent, make_session_factory)
 from .storage import MAX_UPLOAD_BYTES, LocalStorage, normalize_image
 
@@ -381,7 +381,7 @@ def delete_me(user: User = Depends(current_user), db: Session = Depends(get_db))
     now = now_utc()
     for model, column in ((Favorite, Favorite.user_id), (SavedSearch, SavedSearch.user_id),
                           (Follow, Follow.user_id), (Follow, Follow.seller_id), (StockAlert, StockAlert.user_id),
-                          (Notification, Notification.user_id)):
+                          (Notification, Notification.user_id), (Block, Block.user_id), (Block, Block.blocked_id)):
         db.execute(delete(model).where(column == user.id))
     db.execute(update(AuthToken).where(AuthToken.user_id == user.id).values(revoked=True))
     db.execute(update(Offer).where(or_(Offer.buyer_id == user.id, Offer.seller_id == user.id),
@@ -1321,6 +1321,7 @@ def create_order(body: OrderIn, user: User = Depends(current_user), db: Session 
         raise ApiError(409, "own_listing")
     if away_until(db.get(User, listing.seller_id)):
         raise ApiError(409, "seller_away")
+    services.ensure_not_blocked(db, user.id, listing.seller_id)
     delivery = clean_delivery(body.delivery)
     offer = offers.offer_for_order(db, body.offer_id, user, listing, body.size_id) if body.offer_id else None
     size = db.scalar(select(ListingSize).where(ListingSize.id == body.size_id,

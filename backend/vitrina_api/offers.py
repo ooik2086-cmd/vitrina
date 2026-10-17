@@ -71,6 +71,7 @@ def make_offer(listing_id: int, body: OfferIn, user: User = Depends(current_user
         raise ApiError(404, "not_found")
     if listing.seller_id == user.id:
         raise ApiError(409, "own_listing")
+    services.ensure_not_blocked(db, user.id, listing.seller_id)
     seller = db.get(User, listing.seller_id)
     if seller.away_until and seller.away_until >= now_utc().astimezone(ALMATY).date():
         raise ApiError(409, "seller_away")

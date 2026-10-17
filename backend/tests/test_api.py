@@ -1319,6 +1319,40 @@ class SalesExportTests(ApiTestCase):
         self.assertEqual((waiting[0], waiting[9], waiting[10], waiting[11]), (str(unpaid["id"]), "", "", ""))
 
 
+class BlockTests(ApiTestCase):
+    def get(self, path, token):
+        return self.c.get(f"/api/v1{path}", headers=self.h(token))
+
+    def test_a_blocked_buyer_cannot_write_offer_ask_or_order_until_unblocked(self):
+        listing = self.publish(sizes=[{"label": "EU 42", "insole_cm": "26,5", "quantity": 3}])
+        conv = self.post("/conversations", self.buyer, {"listing_id": listing["id"]}).json()
+        self.post(f"/conversations/{conv['id']}/messages", self.buyer, {"body": "Сәлем"})
+        other = self.login("+77010000003")
+        self.assertEqual(self.post(f"/conversations/{conv['id']}/block", other).status_code, 404)  # not their chat
+        self.assertEqual(self.post(f"/conversations/{conv['id']}/block", self.seller).status_code, 200)
+        self.assertEqual(self.get("/conversations", self.seller).json()["items"], [])  # gone from the seller's list
+        self.assertEqual(len(self.get("/conversations", self.buyer).json()["items"]), 1)
+        size = listing["sizes"][0]["id"]
+        for path, body in ((f"/conversations/{conv['id']}/messages", {"body": "Неге?"}),
+                           ("/conversations", {"listing_id": listing["id"]}),
+                           (f"/listings/{listing['id']}/offers", {"size_id": size, "amount_tiyn": 4_000_000}),
+                           (f"/listings/{listing['id']}/questions", {"text": "Өлшемі сай ма?"})):
+            r = self.post(path, self.buyer, body)
+            self.assertEqual((r.status_code, r.json()["code"]), (403, "blocked"), path)
+        r = self.post("/orders", self.buyer, {"listing_id": listing["id"], "size_id": size}, **{"Idempotency-Key": "b1"})
+        self.assertEqual(r.json()["code"], "blocked")
+        r = self.post(f"/conversations/{conv['id']}/messages", self.seller, {"body": "Кешіріңіз"})
+        self.assertEqual(r.json()["code"], "blocked")  # the blocker cannot write either while it lasts
+        blocks = self.get("/me/blocks", self.seller).json()["items"]
+        self.assertEqual(len(blocks), 1)
+        self.assertEqual(self.c.delete(f"/api/v1/me/blocks/{blocks[0]['user_id']}", headers=self.h(self.buyer))
+                         .status_code, 404)  # only the blocker lifts it
+        self.c.delete(f"/api/v1/me/blocks/{blocks[0]['user_id']}", headers=self.h(self.seller))
+        self.assertEqual(self.post(f"/conversations/{conv['id']}/messages", self.buyer, {"body": "Рақмет"}).status_code,
+                         201)
+        self.assertEqual(len(self.get("/conversations", self.seller).json()["items"]), 1)
+
+
 class AdminTests(ApiTestCase):
     def test_support_console_page_is_served(self):
         r = self.c.get("/admin/")

@@ -423,6 +423,17 @@ class Delivery {
 }
 
 /// A listing's proof of authenticity as its seller sees it; the photos are never shown to buyers.
+/// Someone this user blocked.
+class BlockedUser {
+  BlockedUser.fromJson(Map<String, dynamic> j)
+      : userId = j['user_id'] as int,
+        name = j['name'] as String,
+        since = DateTime.parse(j['since'] as String).toLocal();
+  final int userId;
+  final String name;
+  final DateTime since;
+}
+
 /// A public question on a listing and the seller's answer.
 class Question {
   Question.fromJson(Map<String, dynamic> j)
@@ -965,6 +976,16 @@ class Api {
       Question.fromJson(await _send('POST', '/questions/$id/answer', body: {'text': text}) as Map<String, dynamic>);
 
   Future<void> hideQuestion(int id) => _send('DELETE', '/questions/$id');
+
+  /// Blocks the other side of a chat: no messages, offers, questions or orders between the two.
+  Future<void> blockInChat(int conversationId) => _send('POST', '/conversations/$conversationId/block');
+
+  Future<List<BlockedUser>> blockedUsers() async {
+    final r = await _send('GET', '/me/blocks') as Map;
+    return [for (final j in r['items'] as List) BlockedUser.fromJson(j as Map<String, dynamic>)];
+  }
+
+  Future<void> unblock(int userId) => _send('DELETE', '/me/blocks/$userId');
 
   Future<PromoPreview> checkPromo(int listingId, String code) async => PromoPreview.fromJson(
       await _send('GET', '/listings/$listingId/promo', query: {'code': code}) as Map<String, dynamic>);

@@ -876,6 +876,51 @@ void main() {
     await tester.pumpWidget(const SizedBox()); // stop polling
   });
 
+  testWidgets('blocking from the chat menu asks first, then closes the chat', (tester) async {
+    final calls = <String>[];
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async {
+          calls.add('${req.method} ${req.url.path}');
+          if (req.method == 'POST') return jsonResponse({'blocked': true});
+          return jsonResponse({
+            'conversation': {
+              'id': 9,
+              'listing_id': 7,
+              'listing_title': 'Кроссовка',
+              'listing_cover': null,
+              'price_tiyn': 2490000,
+              'role': 'buyer',
+              'other_name': 'Qadam Store',
+              'last_message': null,
+              'unread': 0,
+            },
+            'items': [],
+          });
+        }));
+    await tester.pumpWidget(SessionScope(
+        session: Session(api),
+        child: MaterialApp(
+            home: Scaffold(
+                body: Builder(
+                    builder: (context) => TextButton(
+                        onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                            builder: (_) => const ChatScreen(conversationId: 9, pollEvery: Duration(hours: 1)))),
+                        child: const Text('open')))))));
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('chat-menu')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('block-user')));
+    await tester.pumpAndSettle();
+    expect(calls.where((c) => c.startsWith('POST')), isEmpty); // nothing happens before the confirmation
+    await tester.tap(find.byKey(const Key('confirm-block')));
+    await tester.pumpAndSettle();
+    expect(calls, contains('POST /api/v1/conversations/9/block'));
+    expect(find.byType(ChatScreen), findsNothing);
+    expect(find.text('Qadam Store: бұғатталды.'), findsOneWidget);
+  });
+
   testWidgets('seller puts a ready answer in the field and can edit the list', (tester) async {
     SharedPreferences.setMockInitialValues({});
     await restoreQuickReplies();
