@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:vitrina/api.dart';
 import 'package:vitrina/i18n.dart';
 import 'package:vitrina/labels.dart';
+import 'package:vitrina/my_size.dart';
 import 'package:vitrina/screens/catalog_screen.dart';
 import 'package:vitrina/screens/chat_screen.dart';
 import 'package:vitrina/screens/earnings_screen.dart';
@@ -127,6 +128,23 @@ void main() {
     expect(seen.headers['Authorization'], 'Bearer t');
     expect(body, contains('name="caption"'));
     expect(m.photoUrl, 'http://x/media/2/a.jpg');
+  });
+
+  test('saved size picks the closest available size within half a centimetre', () async {
+    SharedPreferences.setMockInitialValues({});
+    final sizes = [
+      for (final s in (listingJson()['sizes'] as List)) ShoeSize.fromJson(s as Map<String, dynamic>),
+    ]; // 42 = 27,0 cm available; 43 = 27,5 cm sold out
+    expect(bestFit(sizes, '27')?.label, '42');
+    expect(bestFit(sizes, '27,5')?.label, '42'); // 43 fits better but is sold out
+    expect(bestFit(sizes, '28,5'), isNull);
+    expect(bestFit(sizes, null), isNull);
+    await setMySize('26,5');
+    await restoreMySize();
+    expect(mySize.value, '26,5');
+    expect((await SharedPreferences.getInstance()).getString('vitrina_size_cm'), '26,5');
+    await setMySize(null);
+    expect(mySize.value, isNull);
   });
 
   test('order creation sends the idempotency key', () async {

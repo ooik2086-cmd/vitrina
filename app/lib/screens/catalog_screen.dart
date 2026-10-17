@@ -9,6 +9,7 @@ import '../widgets/filter_sheet.dart';
 import 'image_search_screen.dart';
 import 'notifications_screen.dart';
 import '../i18n.dart';
+import '../my_size.dart';
 
 class CatalogScreen extends StatefulWidget {
   const CatalogScreen({super.key});
@@ -19,7 +20,7 @@ class CatalogScreen extends StatefulWidget {
 
 class _CatalogScreenState extends State<CatalogScreen> {
   final _query = TextEditingController();
-  String? _sizeCm;
+  String? _sizeCm = mySize.value;
   String? _category;
   CatalogFilter _filter = const CatalogFilter();
   Future<List<Listing>>? _results;
@@ -100,6 +101,7 @@ class _CatalogScreenState extends State<CatalogScreen> {
     );
     if (picked == null) return;
     _sizeCm = picked.isEmpty ? null : picked;
+    setMySize(_sizeCm); // remembered for the next visit and for product pages
     _search();
   }
 
@@ -317,7 +319,7 @@ class _SizeSheet extends StatelessWidget {
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(tr('Ұлтарақ ұзындығы'), style: theme.textTheme.titleLarge),
           const SizedBox(height: 4),
-          Text(tr('Өкшеден бас бармақтың ұшына дейін өлшеңіз. ±0,5 см аралығы көрсетіледі.'),
+          Text(tr('Өкшеден бас бармақтың ұшына дейін өлшеңіз. ±0,5 см аралығы көрсетіледі. Өлшеміңіз телефонда сақталады.'),
               style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
           const SizedBox(height: 16),
           Wrap(spacing: 8, runSpacing: 8, children: [

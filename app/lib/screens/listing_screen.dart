@@ -12,6 +12,7 @@ import 'order_screen.dart';
 import 'seller_reviews_screen.dart';
 import 'shop_screen.dart';
 import '../i18n.dart';
+import '../my_size.dart';
 
 const _minSpinFrames = 8;
 
@@ -27,6 +28,7 @@ class _ListingScreenState extends State<ListingScreen> {
   late Future<Listing> _listing;
   Future<List<Listing>>? _similar;
   int? _sizeId;
+  bool _fitChecked = false;
   bool _favorite = false;
   bool _ordering = false;
   bool _showPhotos = false;
@@ -132,6 +134,11 @@ class _ListingScreenState extends State<ListingScreen> {
     final scheme = theme.colorScheme;
     final frames = l.frames;
     final hasSpin = frames.length >= _minSpinFrames;
+    final fit = bestFit(l.sizes, mySize.value);
+    if (!_fitChecked) {
+      _fitChecked = true; // pick the buyer's saved size once; after that their taps decide
+      _sizeId ??= fit?.id;
+    }
     final selected = l.sizes.where((s) => s.id == _sizeId).firstOrNull;
     return Column(children: [
       Expanded(
@@ -226,6 +233,22 @@ class _ListingScreenState extends State<ListingScreen> {
                 for (final s in l.sizes)
                   _SizeTile(size: s, selected: _sizeId == s.id, onTap: () => setState(() => _sizeId = s.id)),
               ]),
+              if (mySize.value != null) ...[
+                const SizedBox(height: 10),
+                Row(children: [
+                  Icon(fit == null ? Icons.info_outline : Icons.check_circle_outline,
+                      size: 18, color: fit == null ? scheme.onSurfaceVariant : Brand.accent),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      fit == null
+                          ? trf('Сіздің өлшеміңізге ({0} см) сай өлшем жоқ', [mySize.value])
+                          : trf('Сіздің өлшеміңізге ({0} см) сай: {1}', [mySize.value, fit.label]),
+                      style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+                    ),
+                  ),
+                ]),
+              ],
               if ((l.description ?? '').isNotEmpty) ...[
                 const SizedBox(height: 24),
                 Text(tr('Сипаттама'), style: theme.textTheme.titleMedium),
@@ -398,7 +421,7 @@ class _SizeTile extends StatelessWidget {
       button: true,
       selected: selected,
       enabled: size.available,
-      label: trf('Өлшем {0}, {1} см{2}', [size.label, size.insoleCm, size.available ? '' : ', қалмады']),
+      label: trf('Өлшем {0}, {1} см{2}', [size.label, size.insoleCm, size.available ? '' : tr(', қалмады')]),
       child: Material(
         color: selected ? scheme.primary : scheme.surface,
         shape: RoundedRectangleBorder(

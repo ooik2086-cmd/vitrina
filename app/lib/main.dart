@@ -9,10 +9,12 @@ import 'screens/profile_screen.dart';
 import 'session.dart';
 import 'theme.dart';
 import 'i18n.dart';
+import 'my_size.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await restoreLanguage(_deviceLanguage());
+  await restoreMySize();
   final session = Session(Api())..restore();
   runApp(VitrinaApp(session: session));
 }
