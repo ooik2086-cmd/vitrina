@@ -166,6 +166,21 @@ class ListingTests(ApiTestCase):
         self.assertEqual(self.c.get(f"/api/v1/listings/{lid}", headers=self.h(self.seller)).status_code, 200)
 
 
+class CatalogFilterTests(ApiTestCase):
+    def test_sort_and_condition_list(self):
+        a = self.publish(price_tiyn=3_000_000, condition="new_with_box")["id"]
+        b = self.publish(price_tiyn=1_000_000, condition="used_excellent")["id"]
+        c = self.publish(price_tiyn=2_000_000, condition="used_good", defects="Сызат")["id"]
+        ids = lambda **q: [i["id"] for i in self.c.get("/api/v1/listings", params=q).json()["items"]]
+        self.assertEqual(ids(), [c, b, a])
+        self.assertEqual(ids(sort="price_asc"), [b, c, a])
+        self.assertEqual(ids(sort="price_desc"), [a, c, b])
+        self.assertEqual(ids(condition="new_with_box,used_excellent", sort="price_asc"), [b, a])
+        self.assertEqual(ids(min_price_tiyn=1_500_000, max_price_tiyn=2_500_000), [c])
+        self.assertEqual(ids(limit=1, offset=1), [b])
+        self.assertEqual(self.c.get("/api/v1/listings", params={"sort": "cheap"}).status_code, 422)
+
+
 class SellerEditTests(ApiTestCase):
     def patch(self, lid, body, token=None):
         return self.c.patch(f"/api/v1/listings/{lid}", json=body, headers=self.h(token or self.seller))

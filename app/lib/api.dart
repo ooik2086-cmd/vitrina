@@ -35,6 +35,28 @@ class ShoeSize {
   final int? quantity;
 }
 
+/// Catalog refinements beyond text, size and category.
+class CatalogFilter {
+  const CatalogFilter({this.sort = 'new', this.conditions = const {}, this.minPriceTiyn, this.maxPriceTiyn});
+  final String sort; // new | price_asc | price_desc
+  final Set<String> conditions;
+  final int? minPriceTiyn;
+  final int? maxPriceTiyn;
+
+  /// How many refinements differ from the default, for the badge on the filter button.
+  int get active =>
+      (sort != 'new' ? 1 : 0) +
+      (conditions.isNotEmpty ? 1 : 0) +
+      (minPriceTiyn != null || maxPriceTiyn != null ? 1 : 0);
+
+  Map<String, String> get query => {
+        if (sort != 'new') 'sort': sort,
+        if (conditions.isNotEmpty) 'condition': conditions.join(','),
+        if (minPriceTiyn != null) 'min_price_tiyn': '$minPriceTiyn',
+        if (maxPriceTiyn != null) 'max_price_tiyn': '$maxPriceTiyn',
+      };
+}
+
 class MediaItem {
   MediaItem.fromJson(Map<String, dynamic> j)
       : originalUrl = j['original_url'] as String,
@@ -301,11 +323,13 @@ class Api {
   }
 
   // catalog
-  Future<List<Listing>> search({String? q, String? sizeCm, String? category}) async {
+  Future<List<Listing>> search(
+      {String? q, String? sizeCm, String? category, CatalogFilter filter = const CatalogFilter()}) async {
     final r = await _send('GET', '/listings', query: {
       if (q != null && q.isNotEmpty) 'q': q,
       if (sizeCm != null && sizeCm.isNotEmpty) 'size_cm': sizeCm,
       if (category != null) 'category': category,
+      ...filter.query,
     }) as Map;
     return [for (final j in r['items'] as List) Listing.fromJson(j as Map<String, dynamic>)];
   }

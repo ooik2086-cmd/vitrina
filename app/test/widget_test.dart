@@ -12,6 +12,7 @@ import 'package:vitrina/screens/listing_screen.dart';
 import 'package:vitrina/screens/manage_listing_screen.dart';
 import 'package:vitrina/screens/spin_capture_screen.dart';
 import 'package:vitrina/session.dart';
+import 'package:vitrina/widgets/filter_sheet.dart';
 import 'package:vitrina/widgets/spin_viewer.dart';
 
 Map<String, dynamic> listingJson({List<Map<String, dynamic>>? media}) => {
@@ -272,5 +273,39 @@ void main() {
       {'id': 1, 'quantity': 3}
     ]);
     expect(find.text('Сақталды'), findsOneWidget);
+  });
+
+  test('catalog filter builds the query and counts what differs from default', () {
+    const f = CatalogFilter(
+        sort: 'price_asc', conditions: {'new_with_box', 'new_no_box'}, minPriceTiyn: 1000000, maxPriceTiyn: null);
+    expect(f.active, 3);
+    expect(f.query, {'sort': 'price_asc', 'condition': 'new_with_box,new_no_box', 'min_price_tiyn': '1000000'});
+    expect(const CatalogFilter().query, isEmpty);
+  });
+
+  testWidgets('filter sheet swaps a reversed price range', (tester) async {
+    CatalogFilter? result;
+    await tester.pumpWidget(MaterialApp(
+      home: Builder(
+        builder: (context) => TextButton(
+          onPressed: () async => result = await showModalBottomSheet<CatalogFilter>(
+              context: context,
+              isScrollControlled: true,
+              builder: (_) => const FilterSheet(initial: CatalogFilter())),
+          child: const Text('open'),
+        ),
+      ),
+    ));
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('min-price')), '50000');
+    await tester.enterText(find.byKey(const Key('max-price')), '20000');
+    await tester.tap(find.text('Арзанырақ'));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('apply-filter')));
+    await tester.pumpAndSettle();
+    expect(result!.minPriceTiyn, 2000000);
+    expect(result!.maxPriceTiyn, 5000000);
+    expect(result!.sort, 'price_asc');
   });
 }

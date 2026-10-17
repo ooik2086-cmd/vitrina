@@ -5,6 +5,7 @@ import '../labels.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import '../widgets/filter_sheet.dart';
 import 'notifications_screen.dart';
 
 class CatalogScreen extends StatefulWidget {
@@ -18,6 +19,7 @@ class _CatalogScreenState extends State<CatalogScreen> {
   final _query = TextEditingController();
   String? _sizeCm;
   String? _category;
+  CatalogFilter _filter = const CatalogFilter();
   Future<List<Listing>>? _results;
 
   int _unread = 0;
@@ -51,7 +53,7 @@ class _CatalogScreenState extends State<CatalogScreen> {
   }
 
   Future<List<Listing>> _load() =>
-      SessionScope.of(context).api.search(q: _query.text.trim(), sizeCm: _sizeCm, category: _category);
+      SessionScope.of(context).api.search(q: _query.text.trim(), sizeCm: _sizeCm, category: _category, filter: _filter);
 
   void _search() => setState(() => _results = _load());
 
@@ -68,6 +70,17 @@ class _CatalogScreenState extends State<CatalogScreen> {
     );
     if (picked == null) return;
     _sizeCm = picked.isEmpty ? null : picked;
+    _search();
+  }
+
+  Future<void> _pickFilter() async {
+    final picked = await showModalBottomSheet<CatalogFilter>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => FilterSheet(initial: _filter),
+    );
+    if (picked == null) return;
+    _filter = picked;
     _search();
   }
 
@@ -138,6 +151,20 @@ class _CatalogScreenState extends State<CatalogScreen> {
                 scrollDirection: Axis.horizontal,
                 padding: const EdgeInsets.fromLTRB(20, 12, 12, 8),
                 children: [
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: Badge(
+                      isLabelVisible: _filter.active > 0,
+                      backgroundColor: Brand.accent,
+                      label: Text('${_filter.active}'),
+                      child: ActionChip(
+                        tooltip: 'Сүзгі',
+                        avatar: const Icon(Icons.tune_rounded, size: 18),
+                        label: Text(_filter.sort == 'new' ? 'Сүзгі' : sortLabels[_filter.sort]!),
+                        onPressed: _pickFilter,
+                      ),
+                    ),
+                  ),
                   for (final e in {null: 'Барлығы', ...categories}.entries)
                     Padding(
                       padding: const EdgeInsets.only(right: 8),

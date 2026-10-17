@@ -371,6 +371,7 @@ def pause_listing(listing_id: int, user: User = Depends(current_user), db: Sessi
 def search_listings(q: str | None = None, category: str | None = None, brand: str | None = None,
                     condition: str | None = None, min_price_tiyn: int | None = None,
                     max_price_tiyn: int | None = None, size_cm: str | None = None,
+                    sort: Literal["new", "price_asc", "price_desc"] = "new",
                     limit: int = 20, offset: int = 0, db: Session = Depends(get_db)):
     stmt = select(Listing).where(Listing.status == "published")
     if q:
@@ -380,8 +381,8 @@ def search_listings(q: str | None = None, category: str | None = None, brand: st
         stmt = stmt.where(Listing.category == category)
     if brand:
         stmt = stmt.where(Listing.search_text.contains(normalize_query(brand)))
-    if condition:
-        stmt = stmt.where(Listing.condition == condition)
+    if condition:  # one value or a comma-separated list
+        stmt = stmt.where(Listing.condition.in_([c for c in condition.split(",") if c]))
     if min_price_tiyn is not None:
         stmt = stmt.where(Listing.price_tiyn >= min_price_tiyn)
     if max_price_tiyn is not None:
@@ -390,7 +391,9 @@ def search_listings(q: str | None = None, category: str | None = None, brand: st
         mm = cm_to_mm(size_cm)
         stmt = stmt.where(Listing.id.in_(select(ListingSize.listing_id).where(
             ListingSize.quantity > 0, ListingSize.insole_mm.between(mm - 5, mm + 5))))
-    rows = db.scalars(stmt.order_by(Listing.id.desc()).limit(min(limit, 50)).offset(offset)).all()
+    order = {"new": (Listing.id.desc(),), "price_asc": (Listing.price_tiyn, Listing.id.desc()),
+             "price_desc": (Listing.price_tiyn.desc(), Listing.id.desc())}[sort]
+    rows = db.scalars(stmt.order_by(*order).limit(max(1, min(limit, 50))).offset(max(0, offset))).all()
     return {"items": [listing_out(db, r) for r in rows]}
 
 
