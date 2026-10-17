@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'api.dart';
 import 'appearance.dart';
+import 'demo.dart';
 import 'screens/catalog_screen.dart';
 import 'screens/chat_screen.dart';
 import 'screens/listing_screen.dart';
@@ -25,7 +26,13 @@ Future<void> main() async {
   await restoreQuickReplies();
   await restoreOnboarded();
   await restoreThemeMode();
-  final session = Session(Api())..restore();
+  final Session session;
+  if (demoMode) {
+    session = Session(Api(client: await DemoClient.load()))..api.token = demoToken;
+    session.update(await session.api.me());
+  } else {
+    session = Session(Api())..restore();
+  }
   runApp(VitrinaApp(session: session));
 }
 

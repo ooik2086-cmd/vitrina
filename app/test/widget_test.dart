@@ -8,6 +8,7 @@ import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:vitrina/api.dart';
 import 'package:vitrina/appearance.dart';
+import 'package:vitrina/demo.dart';
 import 'package:vitrina/i18n.dart';
 import 'package:vitrina/labels.dart';
 import 'package:vitrina/my_size.dart';
@@ -688,6 +689,23 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Shoe 3'), findsOneWidget);
     expect(find.text('Shoe 1'), findsNothing);
+  });
+
+  test('demo answers from recorded data, filters the catalog, and refuses real-money actions', () async {
+    final api = Api(base: 'http://demo/api/v1', client: await DemoClient.load())..token = demoToken;
+    final me = await api.me();
+    expect(me.isSeller, isTrue);
+    final all = await api.search();
+    expect(all, isNotEmpty);
+    final sale = await api.search(sale: true);
+    expect(sale.every((l) => l.wasPriceTiyn != null), isTrue);
+    expect(sale.length, lessThan(all.length));
+    final cheap = await api.search(filter: const CatalogFilter(sort: 'price_asc'));
+    expect(cheap.first.priceTiyn, all.map((l) => l.priceTiyn).reduce((a, b) => a < b ? a : b));
+    expect((await api.listing(all.first.id)).id, all.first.id);
+    await api.setFavorite(all.last.id, true);
+    expect((await api.favorites()).first.id, all.last.id);
+    await expectLater(api.startPayment(1), throwsA(isA<ApiException>().having((e) => e.code, 'code', 'demo')));
   });
 
   test('order summary lists the price with its promo and says it is not a fiscal receipt', () {
