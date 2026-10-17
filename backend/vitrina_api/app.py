@@ -1704,6 +1704,7 @@ async def payment_webhook(request: Request, db: Session = Depends(get_db), cfg: 
             return {"result": "duplicate"}
         services.record_payment(db, order, event_id)
         services.move(db, order, S.PAID, Actor.SYSTEM)
+        services.notify_sold_out(db, order)
     elif kind == "refund.succeeded":
         if order.status != S.REFUND_PENDING.value or amount != order.pending_refund_tiyn:
             db.rollback()

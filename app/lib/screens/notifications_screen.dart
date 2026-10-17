@@ -5,9 +5,11 @@ import '../session.dart';
 import '../theme.dart';
 import 'chat_screen.dart';
 import 'listing_screen.dart';
+import 'manage_listing_screen.dart';
 import 'notification_settings_screen.dart';
 import 'offers_screen.dart';
 import 'order_screen.dart';
+import '../widgets/common.dart';
 import '../widgets/questions.dart';
 import '../i18n.dart';
 
@@ -44,6 +46,10 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   }
 
   void _open(AppNotification n) {
+    if (n.kind == 'sold_out' && n.listingId != null) {
+      _openOwnListing(n.listingId!);
+      return;
+    }
     final route = n.kind == 'offer'
         ? MaterialPageRoute(builder: (_) => const OffersScreen())
         : n.kind == 'question' && n.listingId != null
@@ -56,6 +62,17 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                         ? MaterialPageRoute(builder: (_) => ListingScreen(listingId: n.listingId!))
                         : null;
     if (route != null) Navigator.of(context).push(route);
+  }
+
+  /// A sold-out size is fixed where the stock is edited, so the seller lands on the listing's own page.
+  Future<void> _openOwnListing(int id) async {
+    try {
+      final listing = await SessionScope.of(context).api.listing(id);
+      if (!mounted) return;
+      await Navigator.of(context).push(MaterialPageRoute(builder: (_) => ManageListingScreen(listing: listing)));
+    } catch (e) {
+      if (mounted) showError(context, e);
+    }
   }
 
   @override
@@ -91,6 +108,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                 'saved_search' => Icons.notifications_active_outlined,
                 'followed_shop' => Icons.storefront_outlined,
                 'back_in_stock' => Icons.inventory_outlined,
+                'sold_out' => Icons.production_quantity_limits_rounded,
+                'question' || 'question_answered' => Icons.help_outline_rounded,
                 'moderation' => Icons.fact_check_outlined,
                 'listing_hidden' || 'report_closed' => Icons.flag_outlined,
                 _ => Icons.local_shipping_outlined,

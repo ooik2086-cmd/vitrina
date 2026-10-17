@@ -943,6 +943,33 @@ class AwayTests(ApiTestCase):
         self.assertIsNone(self.put("/me/shop-about", self.seller, {"text": "   "}).json()["shop_about"])
         self.assertIsNone(self.c.get(f"/api/v1/sellers/{seller_id}").json()["about"])
 
+    def test_seller_hears_when_a_paid_order_takes_the_last_pair(self):
+        sizes = [{"label": "EU 42", "insole_cm": "26,5", "quantity": 1},
+                 {"label": "EU 43", "insole_cm": "27,0", "quantity": 2}]
+        listing = self.publish(sizes=sizes)
+        by_label = {s["label"]: s["id"] for s in listing["sizes"]}
+
+        def buy(label, key):
+            r = self.post("/orders", self.buyer, {"listing_id": listing["id"], "size_id": by_label[label]},
+                          **{"Idempotency-Key": key})
+            self.assertEqual(r.status_code, 201, r.text)
+            self.post(f"/orders/{r.json()['id']}/pay", self.buyer)
+            return r.json()
+
+        def sold_out():
+            items = self.c.get("/api/v1/notifications", headers=self.h(self.seller)).json()["items"]
+            return [n["text"] for n in items if n["kind"] == "sold_out"]
+
+        first = buy("EU 42", "a")
+        self.assertEqual(sold_out(), [])  # not paid yet: it may still be cancelled
+        self.assertEqual(self.pay(first, "p1").status_code, 200)
+        self.assertEqual(len(sold_out()), 1)
+        self.assertIn("EU 42", sold_out()[0])
+        self.assertEqual(self.pay(buy("EU 43", "b"), "p2").status_code, 200)
+        self.assertEqual(len(sold_out()), 1)  # one pair of 43 is left
+        self.assertEqual(self.pay(buy("EU 43", "c"), "p3").status_code, 200)
+        self.assertIn("толық сатылды", sold_out()[0])
+
 class FollowTests(ApiTestCase):
     def test_followers_hear_about_each_new_listing_once(self):
         first = self.publish()

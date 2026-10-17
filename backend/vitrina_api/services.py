@@ -110,6 +110,22 @@ def move(db: Session, order: Order, to: OrderStatus, actor: Actor, *, user_id: i
     notify_status(db, order, user_id)
 
 
+def notify_sold_out(db: Session, order: Order) -> None:
+    """Once a paid order takes the last pair of a size, the seller hears it, so a pair still on the shelf is
+    put back on sale. An unpaid order is not news: it may be cancelled and give the pair back."""
+    size = db.get(ListingSize, order.size_id)
+    if size is None or size.quantity > 0:
+        return
+    listing = db.get(Listing, order.listing_id)
+    if any(s.quantity > 0 for s in listing.sizes):
+        text = f"«{listing.title}»: {size.label} өлшемі таусылды. Тағы болса, қалдықты жаңартыңыз."
+        text_ru = f"«{listing.title}»: размер {size.label} закончился. Если есть ещё, обновите остаток."
+    else:
+        text = f"«{listing.title}» толық сатылды. Тағы болса, қалдықты жаңартып, қайта сатылымға қойыңыз."
+        text_ru = f"«{listing.title}» распродан. Если есть ещё, обновите остаток и верните в продажу."
+    notify(db, order.seller_id, "sold_out", text, text_ru, listing_id=listing.id)
+
+
 def post_tx(db: Session, *, key: str, order_id: int | None, kind: str, entries: list[Entry], actor: str,
             reason: str | None = None) -> LedgerTx:
     existing = db.scalar(select(LedgerTx).where(LedgerTx.idempotency_key == key))
