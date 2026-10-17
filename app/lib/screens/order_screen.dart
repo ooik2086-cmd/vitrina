@@ -8,6 +8,7 @@ import '../labels.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import '../widgets/listing_contents.dart' show photoAngles;
 import '../i18n.dart';
 import 'chat_screen.dart';
 import 'help_screen.dart';
@@ -306,6 +307,10 @@ class _OrderScreenState extends State<OrderScreen> {
                 ],
                 _PriceCard(order: o),
                 const SizedBox(height: 16),
+                if (o.orderedPhotos.isNotEmpty) ...[
+                  _OrderedPhotos(photos: o.orderedPhotos),
+                  const SizedBox(height: 16),
+                ],
                 _Timeline(order: o),
                 const SizedBox(height: 16),
                 const _ProtectionNote(),
@@ -371,6 +376,81 @@ String orderSummaryText(OrderInfo o) {
     tr('Бұл фискалдық чек емес.'),
   ];
   return lines.join('\n');
+}
+
+/// The photos the buyer ordered from, kept with the order: the listing page itself may have changed since.
+class _OrderedPhotos extends StatelessWidget {
+  const _OrderedPhotos({required this.photos});
+  final List<({String url, String angle})> photos;
+
+  void _open(BuildContext context, String url) => showDialog<void>(
+        context: context,
+        builder: (context) => Dialog(
+          backgroundColor: Brand.studio,
+          insetPadding: const EdgeInsets.all(16),
+          child: Stack(children: [
+            InteractiveViewer(child: Image.network(url, fit: BoxFit.contain)),
+            Positioned(
+              top: 4,
+              right: 4,
+              child: IconButton(
+                  tooltip: tr('Жабу'),
+                  icon: const Icon(Icons.close, color: Colors.black87),
+                  onPressed: () => Navigator.pop(context)),
+            ),
+          ]),
+        ),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final stills = photos.where((p) => p.angle != 'frame').toList();
+    final frames = photos.length - stills.length;
+    return Card(
+      key: const Key('ordered-photos'),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(tr('Тапсырыс берген кездегі фото'), style: theme.textTheme.titleSmall),
+          const SizedBox(height: 2),
+          Text(tr('Сатушы тауар бетін кейін өзгертсе де, бұл фотолар өзгермейді.'), style: theme.textTheme.bodySmall),
+          const SizedBox(height: 10),
+          SizedBox(
+            height: 72,
+            child: ListView(scrollDirection: Axis.horizontal, children: [
+              for (final p in stills)
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(12),
+                    onTap: () => _open(context, p.url),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: ColoredBox(
+                        color: Brand.studio,
+                        child: Image.network(p.url,
+                            width: 72,
+                            height: 72,
+                            cacheWidth: 216,
+                            fit: BoxFit.cover,
+                            semanticLabel: tr(photoAngles[p.angle] ?? 'Фото'),
+                            errorBuilder: (_, __, ___) => const SizedBox(
+                                width: 72, height: 72, child: Icon(Icons.image_outlined, color: Colors.black54))),
+                      ),
+                    ),
+                  ),
+                ),
+            ]),
+          ),
+          if (frames > 0) ...[
+            const SizedBox(height: 8),
+            Text(trf('360° көрініс: {0} кадр', [frames]), style: theme.textTheme.bodySmall),
+          ],
+        ]),
+      ),
+    );
+  }
 }
 
 class _PriceCard extends StatelessWidget {

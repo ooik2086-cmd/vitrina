@@ -143,6 +143,10 @@ class Order(Base):
     # What the buyer ordered, as shown at that moment: the seller may later improve the listing's name or photos.
     listing_title: Mapped[str | None] = mapped_column(String(120))
     listing_cover: Mapped[str | None] = mapped_column(String(500))
+    # JSON list of {"url", "angle"}: every photo and 360° frame the listing had when the order was placed. The seller
+    # may replace photos later; this is what the buyer chose, shown to both sides and to support in a dispute.
+    # Uploaded files are never deleted, so these addresses keep working.
+    listing_photos: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(40), index=True)
     item_price_tiyn: Mapped[int] = mapped_column(BigInteger)
     delivery_price_tiyn: Mapped[int] = mapped_column(BigInteger)

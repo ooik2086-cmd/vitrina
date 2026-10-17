@@ -2226,6 +2226,29 @@ void main() {
     expect(find.byKey(const Key('retry')), findsNothing);
   });
 
+  testWidgets('an order shows the photos it was placed on, whatever the listing shows now', (tester) async {
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async => jsonResponse({
+              ...orderJson('PAID'),
+              'listing_photos': [
+                {'url': 'https://cdn/a.jpg', 'angle': 'front'},
+                {'url': 'https://cdn/b.jpg', 'angle': 'outer'},
+                for (var i = 0; i < 8; i++) {'url': 'https://cdn/f$i.jpg', 'angle': 'frame'},
+              ],
+            })))
+      ..token = 't';
+    final session = Session(api)..update(Me.fromJson({'id': 2, 'phone': '+77010000002', 'is_seller': false}));
+    await tester.pumpWidget(SessionScope(session: session, child: const MaterialApp(home: OrderScreen(orderId: 5))));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.byKey(const Key('ordered-photos')), 200,
+        scrollable: find.byType(Scrollable).first);
+    expect(find.text('Тапсырыс берген кездегі фото'), findsOneWidget);
+    expect(
+        find.descendant(of: find.byKey(const Key('ordered-photos')), matching: find.byType(InkWell)), findsNWidgets(2));
+    expect(find.text('360° көрініс: 8 кадр'), findsOneWidget);
+  });
+
   testWidgets('confirming receipt asks first and says where the money goes', (tester) async {
     final posts = await pumpOrder(tester, 'DELIVERED_PENDING_CONFIRMATION', meId: 2);
     await tester.tap(find.text('Алдым, бәрі дұрыс'));
@@ -2581,6 +2604,29 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('source-camera')), findsOneWidget);
       expect(find.byKey(const Key('source-gallery')), findsOneWidget);
+    });
+
+    testWidgets('after sale a photo can be replaced while the page keeps four, and the 360° view removed',
+        (tester) async {
+      final five = [
+        for (final (i, a) in ['front', 'outer', 'inner', 'back', 'sole'].indexed)
+          {'original_url': 'https://cdn/p$i.jpg', 'processed_url': null, 'angle': a},
+      ];
+      final frames = [
+        for (var i = 0; i < 8; i++) {'original_url': 'https://cdn/f$i.jpg', 'processed_url': null, 'angle': 'frame'}
+      ];
+      final sent = await show(tester, {
+        ...listingJson(media: [...five, ...frames]),
+        'ever_on_sale': true
+      });
+      expect(find.byKey(const Key('remove-photo-0')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('remove-spin')));
+      await tester.pumpAndSettle();
+      expect(find.text('360° көріністі өшіру керек пе?'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('confirm-action')));
+      await tester.pumpAndSettle();
+      expect((sent.single['photos'] as List).length, 5);
+      expect((sent.single['photos'] as List).any((p) => (p as Map)['angle'] == 'frame'), isFalse);
     });
 
     testWidgets('a listing with a 360° view offers no second one', (tester) async {

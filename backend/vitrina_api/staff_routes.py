@@ -15,7 +15,7 @@ from .errors import ApiError
 from .models import AuditLog, ListingReport, Listing, Order, OrderEvent, User
 from .api_common import api
 from .schemas import ReasonIn, ReportCloseIn, ResolveIn
-from .serializers import listing_out, moderation_out, order_out, order_summary
+from .serializers import listing_out, moderation_out, order_out, order_summary, ordered_photos
 from .saved_search_routes import announce
 from .listing_routes import split_codes
 from .order_routes import order_for
@@ -243,6 +243,7 @@ def order_evidence(order_id: int, staff: User = Depends(staff_user), db: Session
     services.audit(db, staff.id, "view_evidence", f"order:{order.id}")
     db.commit()
     return {"tracking_number": order.tracking_number, "dispute_reason": order.dispute_reason,
+            "listing_title": order.listing_title, "listing_photos": ordered_photos(order),
             "delivery_city": order.delivery_city,
             "delivered_at": services.aware(order.delivered_at).isoformat() if order.delivered_at else None,
             "statements": [{"actor": e.actor, "status": e.to_status, "reason": e.reason,

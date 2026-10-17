@@ -168,6 +168,16 @@ def listing_cover(listing: Listing) -> str | None:
     return next((m.processed_url or m.original_url for m in listing.media if m.angle != "frame"), None)
 
 
+def photo_snapshot(listing: Listing) -> str:
+    return json.dumps([{"url": m.processed_url or m.original_url, "original_url": m.original_url, "angle": m.angle}
+                       for m in sorted(listing.media, key=lambda m: m.position)], ensure_ascii=False)
+
+
+def ordered_photos(order: Order) -> list[dict] | None:
+    """The photos the buyer saw when ordering; None for orders placed before snapshots were kept."""
+    return json.loads(order.listing_photos) if order.listing_photos else None
+
+
 def order_summary(db: Session, order: Order) -> dict:
     """Order plus what a list row needs to be recognisable: the item's title, size and photo."""
     listing = db.get(Listing, order.listing_id)

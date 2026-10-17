@@ -632,6 +632,10 @@ class OrderInfo {
         sizeCm = j['size_cm'] as String?,
         delivery = j['delivery'] == null ? null : Delivery.fromJson(j['delivery'] as Map<String, dynamic>),
         deadline = j['deadline'] == null ? null : DateTime.parse(j['deadline'] as String).toLocal(),
+        orderedPhotos = [
+          for (final p in (j['listing_photos'] as List?) ?? const [])
+            (url: (p as Map)['url'] as String, angle: p['angle'] as String),
+        ],
         history = [
           for (final h in (j['history'] as List?) ?? const [])
             (status: (h as Map)['status'] as String, at: DateTime.parse(h['at'] as String).toLocal()),
@@ -657,6 +661,10 @@ class OrderInfo {
 
   /// Null for the seller until the order is paid.
   final Delivery? delivery;
+
+  /// Every photo and 360° frame the listing had when the order was placed; the seller may change the listing later.
+  /// Empty in lists and for orders placed before these copies were kept.
+  final List<({String url, String angle})> orderedPhotos;
 
   /// When the order cancels itself (unpaid) or refunds itself (seller silent), if nobody acts first.
   final DateTime? deadline;

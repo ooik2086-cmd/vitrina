@@ -870,10 +870,6 @@ const en = <String, String>{
   'Ақау, жақыннан': 'Defect, close up',
   '«{0}» фотосын өшіру керек пе?': 'Delete the “{0}” photo?',
   'Атауы мен сипаты': 'Name and details',
-  'Сатып алушылар көрген фото өзгермейді. Жаңа фото, 360° және өлшем қосуға болады.':
-      'Photos buyers have seen stay as they are. You can add new photos, a 360° view and sizes.',
-  'Сатып алушылар таңдаған бренд, модель, санат және фото өзгермейді. Күйін тек нашарлатып белгілеуге болады.':
-      'The brand, model, category and photos buyers chose stay fixed. The condition can only be marked worse.',
   'Түсін жазыңыз': 'Enter the colour',
   'Фото бар': 'Photo added',
   'Фото, 360° және өлшемдер': 'Photos, 360° and sizes',
@@ -881,4 +877,14 @@ const en = <String, String>{
   'Өшіру: {0}': 'Delete: {0}',
   'Кодты қайта жіберу': 'Send the code again',
   'Кодты қайта жіберу: {0} сек': 'Send again in {0} s',
+  '360° көрініс өшірілді': '360° view deleted',
+  '360° көріністі өшіру керек пе?': 'Delete the 360° view?',
+  '360° өшіру': 'Delete 360°',
+  'Сатушы тауар бетін кейін өзгертсе де, бұл фотолар өзгермейді.':
+      'Even if the seller changes the listing later, these photos stay as they were.',
+  'Сатып алушылар таңдаған бренд, модель және санат өзгермейді. Күйін тек нашарлатып белгілеуге болады.':
+      'The brand, model and category buyers chose stay fixed. The condition can only be marked worse.',
+  'Тапсырыс берген кездегі фото': 'Photos when ordered',
+  'Фотоны ауыстыруға болады. Бұрын тапсырыс бергендер өздері көрген фотоны тапсырыс ішінен көреді.':
+      'You can replace photos. Buyers who already ordered see the photos they ordered from in their order.',
 };

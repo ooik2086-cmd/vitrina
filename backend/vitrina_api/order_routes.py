@@ -20,7 +20,8 @@ from .errors import ApiError
 from .models import IdempotencyRecord, Listing, ListingSize, Order, OrderEvent, Review, User
 from .api_common import DECLINABLE, IN_DELIVERY, PHONE_RE, api
 from .schemas import DeliveryIn, OrderIn, ReasonIn, ShipIn
-from .serializers import away_until, delivery_out, listing_cover, order_out, order_summary
+from .serializers import (away_until, delivery_out, listing_cover, order_out, order_summary, ordered_photos,
+                          photo_snapshot)
 
 
 def order_for(db: Session, order_id: int, user: User, *, role: str | None = None, lock: bool = False) -> Order:
@@ -91,7 +92,8 @@ def create_order(body: OrderIn, user: User = Depends(current_user), db: Session 
                   delivery_price_tiyn=listing.delivery_price_tiyn, commission_version=cfg.commission.version,
                   recipient_name=delivery["recipient_name"], recipient_phone=delivery["recipient_phone"],
                   delivery_city=delivery["city"], delivery_address=delivery["address"],
-                  delivery_note=delivery["note"], listing_title=listing.title, listing_cover=listing_cover(listing))
+                  delivery_note=delivery["note"], listing_title=listing.title, listing_cover=listing_cover(listing),
+                  listing_photos=photo_snapshot(listing))
     user.last_delivery = json.dumps(delivery, ensure_ascii=False)
     db.add(order)
     db.flush()
@@ -128,7 +130,7 @@ def get_order(order_id: int, user: User = Depends(current_user), db: Session = D
     events = db.scalars(select(OrderEvent).where(OrderEvent.order_id == order.id).order_by(OrderEvent.id)).all()
     act_by = services.deadline(db, order, cfg.confirm_window)
     return {**order_summary(db, order), "reviewed": reviewed, "delivery": delivery_out(order, user),
-            "deadline": act_by.isoformat() if act_by else None,
+            "deadline": act_by.isoformat() if act_by else None, "listing_photos": ordered_photos(order),
             "history": [{"status": e.to_status, "at": services.aware(e.at).isoformat()} for e in events]}
 
 

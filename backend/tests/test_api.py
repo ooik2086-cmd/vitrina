@@ -2109,7 +2109,7 @@ class ListingEditTests(ApiTestCase):
     def test_a_listing_on_sale_keeps_its_shoe_but_gains_photos_a_spin_and_sizes(self):
         listing = self.publish()
         lid = listing["id"]
-        for locked in ({"condition": "new_with_box"}, {"category": "casual"}, {"photos": PHOTOS[:5]}):
+        for locked in ({"condition": "new_with_box"}, {"category": "casual"}):
             self.assertEqual(self.patch(lid, locked).json()["code"], "listing_locked")
         few = [{"url": f"https://cdn.example/f{i}.jpg", "angle": "frame"} for i in range(5)]
         self.assertEqual(self.patch(lid, {"add_photos": few}).json()["code"], "too_few_frames")
@@ -2162,7 +2162,7 @@ class ListingEditTests(ApiTestCase):
         staff = self.make_staff()
         self.assertEqual(self.post(f"/admin/moderation/{lid}/reject", staff, {"reason": "Телефон жазылған"})
                          .json()["status"], "rejected")
-        for locked in ({"brand": "Adidas"}, {"category": "casual"}, {"photos": PHOTOS[:5]}):
+        for locked in ({"brand": "Adidas"}, {"category": "casual"}):
             self.assertEqual(self.patch(lid, locked).json()["code"], "listing_locked")
         got = self.patch(lid, {"title": "Күнделікті кроссовка"}).json()
         self.assertEqual(got["status"], "rejected")  # a clean edit goes back through publish, not straight on sale
@@ -2200,6 +2200,22 @@ class ListingEditTests(ApiTestCase):
         self.patch(listing["id"], {"title": "Жаңа атау, басқа аяқ киім"})
         got = self.c.get(f"/api/v1/orders/{order['id']}", headers=self.h(self.buyer)).json()
         self.assertEqual(got["listing_title"], listing["title"])
+
+    def test_the_seller_may_replace_photos_but_each_order_keeps_what_the_buyer_saw(self):
+        listing, order = self.ordered()
+        lid = listing["id"]
+        new = [{"url": f"https://cdn.example/new{i}.jpg", "angle": a}
+               for i, a in enumerate(["front", "outer", "inner", "back"])]
+        self.assertEqual(self.patch(lid, {"photos": new[:3]}).json()["code"], "missing_required_photos")
+        got = self.patch(lid, {"photos": new})
+        self.assertEqual(got.status_code, 200, got.text)
+        self.assertEqual([m["original_url"] for m in got.json()["media"]], [p["url"] for p in new])
+        for token in (self.buyer, self.seller):
+            seen = self.c.get(f"/api/v1/orders/{order['id']}", headers=self.h(token)).json()["listing_photos"]
+            self.assertEqual([p["original_url"] for p in seen], [p["url"] for p in PHOTOS])
+        staff = self.make_staff()
+        evidence = self.c.get(f"/api/v1/admin/orders/{order['id']}/evidence", headers=self.h(staff)).json()
+        self.assertEqual(len(evidence["listing_photos"]), len(PHOTOS))
 
     def test_others_files_cannot_be_added(self):
         lid = self.publish()["id"]

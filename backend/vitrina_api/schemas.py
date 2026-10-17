@@ -64,9 +64,9 @@ class StockIn(BaseModel):
 class ListingPatch(BaseModel):
     """What a seller may change after creating a listing.
     Before it ever sells (draft, rejected) everything can change. Once it is or was on sale, the shoe itself is
-    fixed for buyers who saved, asked about or ordered it: category, condition and the photos already shown stay,
-    but the seller may add photos, a 360° view, sizes, and improve the name. Every change a buyer sees is checked
-    again before it is shown."""
+    fixed for buyers who saved, asked about or ordered it: brand, model and category stay and the condition may only
+    get worse. Photos and the 360° view may be replaced: each order keeps a copy of the photos it was placed on.
+    Every change a buyer sees is checked again before it is shown."""
     price_tiyn: int | None = Field(default=None, gt=0, le=10**12)
     delivery_price_tiyn: int | None = Field(default=None, ge=0, le=10**10)
     description: str | None = Field(default=None, max_length=4000)
@@ -78,7 +78,7 @@ class ListingPatch(BaseModel):
     color: str | None = Field(default=None, min_length=2, max_length=40)
     category: Literal[CATEGORIES] | None = None  # type: ignore[valid-type]
     condition: Condition | None = None
-    photos: list[PhotoIn] | None = Field(default=None, max_length=60)  # the whole set; only before it sells
+    photos: list[PhotoIn] | None = Field(default=None, max_length=60)  # the whole set, replacing the current one
     add_photos: list[PhotoIn] | None = Field(default=None, max_length=60)
     add_sizes: list[SizeIn] | None = Field(default=None, max_length=30)
 

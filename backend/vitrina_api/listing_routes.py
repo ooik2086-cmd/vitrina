@@ -276,7 +276,6 @@ def edit_contents(db: Session, cfg: Settings, storage: Storage, listing: Listing
     """Name, photos and sizes. Returns which kinds of content buyers see actually changed."""
     fresh = listing.announced_at is None  # never on sale, whatever its status says now
     if not fresh and (body.category is not None and body.category != listing.category
-                      or body.photos is not None
                       or body.brand is not None and (body.brand.strip() or None) != listing.brand
                       or body.model_name is not None and (body.model_name.strip() or None) != listing.model_name):
         raise ApiError(409, "listing_locked")
@@ -315,6 +314,9 @@ def edit_contents(db: Session, cfg: Settings, storage: Storage, listing: Listing
         if 0 < frames < MIN_SPIN_FRAMES:
             raise ApiError(422, "too_few_frames")
         if [(m.original_url, m.angle) for m in listing.media] != [(p.url, p.angle) for p in body.photos]:
+            # A listing that was on sale stays complete: orders keep their own copy of the photos they were placed on.
+            if not fresh and sum(p.angle != "frame" for p in body.photos) < cfg.min_listing_photos:
+                raise ApiError(422, "missing_required_photos")
             replace_photos(listing, body.photos)
             changed.add("photos")
     if added:

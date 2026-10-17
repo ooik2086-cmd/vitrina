@@ -10,6 +10,9 @@ import '../session.dart';
 import '../theme.dart';
 import 'common.dart';
 
+/// The server's own minimum (Settings.min_listing_photos) for a listing that is or was on sale.
+const _minPhotosOnSale = 4;
+
 const photoAngles = {...requiredAngles, ...optionalAngles, 'defect': 'Ақау, жақыннан'};
 
 /// The listing's name fields, owned by the manage page so its one Save button sends them with everything else.
@@ -52,7 +55,7 @@ class ListingNameFields extends StatelessWidget {
         fresh
             ? tr('Тауар әлі сатылымға шықпаған, сондықтан бәрін өзгертуге болады.')
             : tr(
-                'Сатып алушылар таңдаған бренд, модель, санат және фото өзгермейді. Күйін тек нашарлатып белгілеуге болады.'),
+                'Сатып алушылар таңдаған бренд, модель және санат өзгермейді. Күйін тек нашарлатып белгілеуге болады.'),
         style: theme.textTheme.bodySmall,
       ),
       const SizedBox(height: 12),
@@ -223,6 +226,17 @@ class _ListingContentsCardState extends State<ListingContentsCard> {
     await _run((api) => api.editListing(_l.id, photos: keep), tr('Фото өшірілді'));
   }
 
+  Future<void> _removeSpin() async {
+    final sure = await confirmAction(context,
+        title: tr('360° көріністі өшіру керек пе?'), action: tr('Өшіру'), destructive: true);
+    if (!sure || !mounted) return;
+    final keep = [
+      for (final m in _l.media)
+        if (m.angle != 'frame') {'url': m.originalUrl, 'angle': m.angle}
+    ];
+    await _run((api) => api.editListing(_l.id, photos: keep), tr('360° көрініс өшірілді'));
+  }
+
   Future<void> _addSize() async {
     final size = await showDialog<Map<String, Object>>(context: context, builder: (_) => const _NewSizeDialog());
     if (size != null) await _run((api) => api.editListing(_l.id, addSizes: [size]), tr('Өлшем қосылды'));
@@ -236,13 +250,14 @@ class _ListingContentsCardState extends State<ListingContentsCard> {
         if (_l.media[i].angle != 'frame') i
     ];
     final frames = _l.media.where((m) => m.angle == 'frame').length;
-    final removable = !_l.everOnSale && photos.length > 1;
+    // A listing on sale keeps at least the photos publishing needs; orders keep their own copy of what was shown.
+    final removable = photos.length > (_l.everOnSale ? _minPhotosOnSale : 1);
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Text(tr('Фото, 360° және өлшемдер'), style: theme.textTheme.titleMedium),
       const SizedBox(height: 4),
       Text(
         _l.everOnSale
-            ? tr('Сатып алушылар көрген фото өзгермейді. Жаңа фото, 360° және өлшем қосуға болады.')
+            ? tr('Фотоны ауыстыруға болады. Бұрын тапсырыс бергендер өздері көрген фотоны тапсырыс ішінен көреді.')
             : tr('Қосқан әр фото мен өлшем бірден сақталады.'),
         style: theme.textTheme.bodySmall,
       ),
@@ -321,7 +336,15 @@ class _ListingContentsCardState extends State<ListingContentsCard> {
       ]),
       if (_hasSpin) ...[
         const SizedBox(height: 8),
-        Text(trf('360° көрініс: {0} кадр', [frames]), style: theme.textTheme.bodySmall),
+        Row(children: [
+          Expanded(child: Text(trf('360° көрініс: {0} кадр', [frames]), style: theme.textTheme.bodySmall)),
+          TextButton.icon(
+            key: const Key('remove-spin'),
+            onPressed: _busy ? null : _removeSpin,
+            icon: const Icon(Icons.delete_outline),
+            label: Text(tr('360° өшіру')),
+          ),
+        ]),
       ],
       if (_busy) const Padding(padding: EdgeInsets.only(top: 8), child: LinearProgressIndicator()),
     ]);
