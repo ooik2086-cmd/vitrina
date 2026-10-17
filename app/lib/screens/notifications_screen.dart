@@ -5,6 +5,7 @@ import '../session.dart';
 import '../theme.dart';
 import 'chat_screen.dart';
 import 'listing_screen.dart';
+import 'notification_settings_screen.dart';
 import 'offers_screen.dart';
 import 'order_screen.dart';
 import '../i18n.dart';
@@ -58,7 +59,15 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
-      appBar: AppBar(title: Text(tr('Хабарландырулар'))),
+      appBar: AppBar(title: Text(tr('Хабарландырулар')), actions: [
+        IconButton(
+          key: const Key('alert-settings'),
+          tooltip: tr('Хабарлама баптаулары'),
+          icon: const Icon(Icons.tune),
+          onPressed: () =>
+              Navigator.of(context).push(MaterialPageRoute(builder: (_) => const NotificationSettingsScreen())),
+        ),
+      ]),
       body: FutureBuilder<List<AppNotification>>(
         future: _items,
         builder: (context, snap) {

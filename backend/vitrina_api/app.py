@@ -340,6 +340,31 @@ def get_me(user: User = Depends(current_user)):
     return me_out(user)
 
 
+def notification_settings(user: User) -> dict:
+    off = services.muted(user)
+    return {"items": [{"kind": k, "on": k not in off} for k in services.OPTIONAL_KINDS]}
+
+
+@api.get("/me/notification-settings")
+def get_notification_settings(user: User = Depends(current_user)):
+    return notification_settings(user)
+
+
+@api.put("/me/notification-settings")
+def put_notification_settings(body: dict[str, bool], user: User = Depends(current_user),
+                              db: Session = Depends(get_db)):
+    """Turns optional alerts on or off, e.g. {"price_drop": false}. Kinds that always arrive cannot be listed."""
+    unknown = set(body) - set(services.OPTIONAL_KINDS)
+    if unknown:
+        raise ApiError(422, "validation", f"cannot mute {sorted(unknown)}")
+    off = services.muted(user)
+    for kind, on in body.items():
+        (off.discard if on else off.add)(kind)
+    user.muted_kinds = ",".join(sorted(off)) or None
+    db.commit()
+    return notification_settings(user)
+
+
 @api.delete("/me")
 def delete_me(user: User = Depends(current_user), db: Session = Depends(get_db)):
     """Deletes the account: personal data goes, the person is signed out everywhere and their listings leave the

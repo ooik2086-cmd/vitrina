@@ -33,6 +33,7 @@ class User(Base):
     away_until: Mapped[date | None] = mapped_column(Date)  # seller on holiday: no new orders through this day
     last_delivery: Mapped[str | None] = mapped_column(Text)  # JSON of the address last ordered to, to prefill
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # the person deleted the account
+    muted_kinds: Mapped[str | None] = mapped_column(String(200))  # comma-separated optional alerts turned off
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 

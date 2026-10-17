@@ -19,6 +19,7 @@ import 'package:vitrina/screens/image_search_screen.dart';
 import 'package:vitrina/screens/listing_editor_screen.dart';
 import 'package:vitrina/screens/listing_screen.dart';
 import 'package:vitrina/screens/manage_listing_screen.dart';
+import 'package:vitrina/screens/notification_settings_screen.dart';
 import 'package:vitrina/screens/offers_screen.dart';
 import 'package:vitrina/screens/profile_screen.dart';
 import 'package:vitrina/screens/saved_searches_screen.dart';
@@ -271,8 +272,8 @@ void main() {
     tester.view.physicalSize = const Size(400, 1800);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
-    await tester.pumpWidget(
-        SessionScope(session: Session(api), child: const MaterialApp(home: ListingScreen(listingId: 7))));
+    await tester
+        .pumpWidget(SessionScope(session: Session(api), child: const MaterialApp(home: ListingScreen(listingId: 7))));
     await tester.pumpAndSettle();
     expect(find.text('Кішілеу келеді'), findsOneWidget);
     expect(find.text('Жарты өлшем үлкенін алыңыз'), findsOneWidget);
@@ -300,8 +301,8 @@ void main() {
     tester.view.physicalSize = const Size(400, 1800);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
-    await tester.pumpWidget(
-        SessionScope(session: Session(api), child: const MaterialApp(home: ListingScreen(listingId: 7))));
+    await tester
+        .pumpWidget(SessionScope(session: Session(api), child: const MaterialApp(home: ListingScreen(listingId: 7))));
     await tester.pumpAndSettle();
     expect(find.byIcon(Icons.notifications_none_rounded), findsOneWidget);
     await tester.tap(find.text('43'));
@@ -351,16 +352,25 @@ void main() {
           }
           if (req.url.path == '/api/v1/sellers/3') {
             return jsonResponse({
-              'id': 3, 'shop_name': 'Sneaker Lab', 'city': 'Алматы', 'since': '2026-01-10',
-              'completed_sales': 4, 'listings': 0, 'rating': 4.8, 'reviews': 5, 'away_until': null,
+              'id': 3,
+              'shop_name': 'Sneaker Lab',
+              'city': 'Алматы',
+              'since': '2026-01-10',
+              'completed_sales': 4,
+              'listings': 0,
+              'rating': 4.8,
+              'reviews': 5,
+              'away_until': null,
               'reply_time': {'minutes': 40, 'bucket': 'hour'},
-              'followers': 12, 'following': false,
+              'followers': 12,
+              'following': false,
             });
           }
           return jsonResponse({'items': [], 'next_cursor': null});
         }))
       ..token = 'tok';
-    await tester.pumpWidget(SessionScope(session: Session(api), child: const MaterialApp(home: ShopScreen(sellerId: 3))));
+    await tester
+        .pumpWidget(SessionScope(session: Session(api), child: const MaterialApp(home: ShopScreen(sellerId: 3))));
     await tester.pumpAndSettle();
     expect(find.text('12 жазылушы'), findsOneWidget);
     expect(find.text('Әдетте бір сағат ішінде жауап береді'), findsOneWidget);
@@ -391,8 +401,8 @@ void main() {
     tester.view.physicalSize = const Size(400, 1800);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
-    await tester.pumpWidget(
-        SessionScope(session: Session(api), child: const MaterialApp(home: ListingScreen(listingId: 7))));
+    await tester
+        .pumpWidget(SessionScope(session: Session(api), child: const MaterialApp(home: ListingScreen(listingId: 7))));
     await tester.pumpAndSettle();
     expect(find.text('Баға ұсыну үшін өлшемді таңдаңыз'), findsOneWidget);
     await tester.tap(find.text('42'));
@@ -419,7 +429,10 @@ void main() {
         base: 'http://x/api/v1',
         client: MockClient((req) async {
           if (req.url.path == '/api/v1/offers') {
-            return jsonResponse({'items': [offerJson(status: 'accepted')], 'waiting': 0});
+            return jsonResponse({
+              'items': [offerJson(status: 'accepted')],
+              'waiting': 0
+            });
           }
           if (req.url.path == '/api/v1/orders') {
             ordered = jsonDecode(req.body) as Map<String, dynamic>;
@@ -432,8 +445,8 @@ void main() {
     tester.view.physicalSize = const Size(400, 1800);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
-    await tester.pumpWidget(
-        SessionScope(session: Session(api), child: const MaterialApp(home: ListingScreen(listingId: 7))));
+    await tester
+        .pumpWidget(SessionScope(session: Session(api), child: const MaterialApp(home: ListingScreen(listingId: 7))));
     await tester.pumpAndSettle();
     expect(find.textContaining('бағасы қабылданды'), findsOneWidget);
     await tester.tap(find.text('42'));
@@ -525,8 +538,15 @@ void main() {
             case '/api/v1/saved-searches':
               return jsonResponse({
                 'items': [
-                  {'id': 9, 'q': 'adidas', 'category': null, 'size_cm': null, 'condition': null,
-                   'min_price_tiyn': null, 'max_price_tiyn': null}
+                  {
+                    'id': 9,
+                    'q': 'adidas',
+                    'category': null,
+                    'size_cm': null,
+                    'condition': null,
+                    'min_price_tiyn': null,
+                    'max_price_tiyn': null
+                  }
                 ]
               });
             case '/api/v1/notifications':
@@ -537,8 +557,8 @@ void main() {
         }))
       ..token = 'tok';
     mySize.value = null;
-    await tester.pumpWidget(SessionScope(
-        session: Session(api), child: MaterialApp(home: Scaffold(body: const CatalogScreen()))));
+    await tester.pumpWidget(
+        SessionScope(session: Session(api), child: MaterialApp(home: Scaffold(body: const CatalogScreen()))));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('save-search')), findsNothing); // nothing to follow yet
     await tester.enterText(find.byType(TextField), 'nike');
@@ -563,9 +583,14 @@ void main() {
         client: MockClient((req) async => jsonResponse({
               'items': [
                 {
-                  'id': 1, 'order_id': 5, 'rating': 5, 'text': 'Суреттегідей', 'seller_reply': null,
+                  'id': 1,
+                  'order_id': 5,
+                  'rating': 5,
+                  'text': 'Суреттегідей',
+                  'seller_reply': null,
                   'photos': ['http://x/media/2/a.jpg', 'http://x/media/2/b.jpg'],
-                  'buyer_name': 'Аян', 'created_at': '2026-10-17T05:00:00+00:00',
+                  'buyer_name': 'Аян',
+                  'created_at': '2026-10-17T05:00:00+00:00',
                 }
               ]
             })));
@@ -582,8 +607,8 @@ void main() {
 
   testWidgets('a cut price shows the old one crossed out with the percent', (tester) async {
     final l = Listing.fromJson({...listingJson(), 'price_tiyn': 3600000, 'was_price_tiyn': 4500000});
-    await tester.pumpWidget(MaterialApp(
-        home: Scaffold(body: SizedBox(width: 220, height: 400, child: ListingTile(listing: l)))));
+    await tester.pumpWidget(
+        MaterialApp(home: Scaffold(body: SizedBox(width: 220, height: 400, child: ListingTile(listing: l)))));
     expect(find.text('−20%'), findsOneWidget);
     expect(tester.widget<Text>(find.byKey(const Key('was-price'))).data, formatTenge(4500000));
     await tester.pumpWidget(MaterialApp(
@@ -608,14 +633,15 @@ void main() {
     tester.view.physicalSize = const Size(400, 1800);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
-    await tester.pumpWidget(
-        SessionScope(session: Session(api), child: const MaterialApp(home: ListingScreen(listingId: 7))));
+    await tester
+        .pumpWidget(SessionScope(session: Session(api), child: const MaterialApp(home: ListingScreen(listingId: 7))));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('seller-away')), findsOneWidget);
     await tester.tap(find.text('42'));
     await tester.pump();
     expect(find.byKey(const Key('make-offer')), findsNothing);
-    final button = tester.widget<FilledButton>(find.ancestor(of: find.text('25.10 бастап'), matching: find.byType(FilledButton)));
+    final button =
+        tester.widget<FilledButton>(find.ancestor(of: find.text('25.10 бастап'), matching: find.byType(FilledButton)));
     expect(button.onPressed, isNull);
   });
 
@@ -741,8 +767,10 @@ void main() {
     expect(find.text('42 бар ма?'), findsOneWidget);
     expect(find.text('Бар, +7 701 123 45 67'), findsOneWidget);
     expect(find.textContaining('Төлемді тек VITRINA арқылы'), findsOneWidget);
-    expect(find.byWidgetPredicate((w) => w is Image && w.image is NetworkImage
-        && (w.image as NetworkImage).url == 'http://x/media/3/sole.jpg'), findsOneWidget);
+    expect(
+        find.byWidgetPredicate((w) =>
+            w is Image && w.image is NetworkImage && (w.image as NetworkImage).url == 'http://x/media/3/sole.jpg'),
+        findsOneWidget);
     expect(find.byKey(const Key('chat-photo')), findsOneWidget);
     await tester.pumpWidget(const SizedBox()); // stop polling
   });
@@ -819,7 +847,11 @@ void main() {
               jsonEncode({
                 ...listingJson(),
                 'status': 'moderation',
-                'moderation': {'flags': ['contacts'], 'reasons': ['Байланыс тек VITRINA чатында.'], 'note': null},
+                'moderation': {
+                  'flags': ['contacts'],
+                  'reasons': ['Байланыс тек VITRINA чатында.'],
+                  'note': null
+                },
               }),
               200,
               headers: {'content-type': 'application/json; charset=utf-8'});
@@ -853,8 +885,10 @@ void main() {
   testWidgets('seller starts a promo video and the card follows it until it is ready', (tester) async {
     final calls = <String>[];
     var polls = 0;
-    Map<String, dynamic> withPromo(String? state) =>
-        {...listingJson(), 'promo': {'state': state, 'url': state == 'ready' ? 'http://x/media/3/v.mp4' : null}};
+    Map<String, dynamic> withPromo(String? state) => {
+          ...listingJson(),
+          'promo': {'state': state, 'url': state == 'ready' ? 'http://x/media/3/v.mp4' : null}
+        };
     final api = Api(
         base: 'http://x/api/v1',
         client: MockClient((req) async {
@@ -892,7 +926,12 @@ void main() {
   testWidgets('analytics shows totals and a tapped day', (tester) async {
     final days = [
       for (var i = 0; i < 14; i++)
-        {'date': '2026-10-${(4 + i).toString().padLeft(2, '0')}', 'views': i == 10 ? 9 : 2, 'orders': i == 10 ? 1 : 0, 'sold_tiyn': 0}
+        {
+          'date': '2026-10-${(4 + i).toString().padLeft(2, '0')}',
+          'views': i == 10 ? 9 : 2,
+          'orders': i == 10 ? 1 : 0,
+          'sold_tiyn': 0
+        }
     ];
     String? asked;
     final api = Api(
@@ -1036,8 +1075,7 @@ void main() {
           return jsonResponse({'deleted': true});
         }))
       ..token = 'tok';
-    final session = Session(api)
-      ..update(Me.fromJson({'id': 2, 'phone': '+77010000002', 'is_seller': false}));
+    final session = Session(api)..update(Me.fromJson({'id': 2, 'phone': '+77010000002', 'is_seller': false}));
     tester.view.physicalSize = const Size(400, 1200);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -1062,8 +1100,8 @@ void main() {
     tester.view.physicalSize = const Size(400, 3000);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
-    await tester.pumpWidget(SessionScope(
-        session: Session(api), child: MaterialApp(home: ListingEditorScreen(template: template))));
+    await tester.pumpWidget(
+        SessionScope(session: Session(api), child: MaterialApp(home: ListingEditorScreen(template: template))));
     await tester.pumpAndSettle();
     expect(find.text('Ұқсас тауар'), findsOneWidget);
     expect(find.byKey(const Key('template-note')), findsOneWidget);
@@ -1133,6 +1171,43 @@ void main() {
     expect(find.text('9 пікір'), findsOneWidget);
     expect(find.textContaining('қаз 2026'), findsOneWidget);
     expect(find.text('Nike Air Force 1'), findsOneWidget);
+  });
+
+  testWidgets('turning an optional alert off saves it, and a failed save puts the switch back', (tester) async {
+    final sent = <Map<String, dynamic>>[];
+    var on = {'price_drop': true, 'saved_search': true, 'followed_shop': true, 'back_in_stock': true};
+    var fail = false;
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async {
+          expect(req.url.path, '/api/v1/me/notification-settings');
+          if (req.method == 'PUT') {
+            if (fail) return jsonResponse({'detail': 'down'}, 500);
+            final body = jsonDecode(req.body) as Map<String, dynamic>;
+            sent.add(body);
+            on = {...on, ...body.cast<String, bool>()};
+          }
+          return jsonResponse({
+            'items': [
+              for (final e in on.entries) {'kind': e.key, 'on': e.value}
+            ]
+          });
+        }));
+    await tester
+        .pumpWidget(SessionScope(session: Session(api), child: const MaterialApp(home: NotificationSettingsScreen())));
+    await tester.pumpAndSettle();
+    expect(find.byType(SwitchListTile), findsNWidgets(4));
+    bool value(String kind) => tester.widget<SwitchListTile>(find.byKey(Key('alert-$kind'))).value;
+    await tester.tap(find.byKey(const Key('alert-price_drop')));
+    await tester.pumpAndSettle();
+    expect(sent, [
+      {'price_drop': false}
+    ]);
+    expect(value('price_drop'), isFalse);
+    fail = true;
+    await tester.tap(find.byKey(const Key('alert-saved_search')));
+    await tester.pumpAndSettle();
+    expect(value('saved_search'), isTrue);
   });
 
   testWidgets('report sheet needs a reason, and text for "other"', (tester) async {

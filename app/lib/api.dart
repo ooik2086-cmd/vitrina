@@ -667,6 +667,17 @@ class Api {
             : '${until.year}-${until.month.toString().padLeft(2, '0')}-${until.day.toString().padLeft(2, '0')}'
       }) as Map<String, dynamic>);
 
+  /// Optional alert kinds and whether each is on.
+  Future<Map<String, bool>> notificationSettings() async {
+    final r = await _send('GET', '/me/notification-settings') as Map;
+    return {for (final i in r['items'] as List) (i as Map)['kind'] as String: i['on'] as bool};
+  }
+
+  Future<Map<String, bool>> setNotificationSetting(String kind, bool on) async {
+    final r = await _send('PUT', '/me/notification-settings', body: {kind: on}) as Map;
+    return {for (final i in r['items'] as List) (i as Map)['kind'] as String: i['on'] as bool};
+  }
+
   /// Deletes the account for good; refused while an order is still open.
   Future<void> deleteAccount() => _send('DELETE', '/me');
 

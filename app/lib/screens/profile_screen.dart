@@ -7,6 +7,7 @@ import 'analytics_screen.dart';
 import 'earnings_screen.dart';
 import 'following_screen.dart';
 import 'my_listings_screen.dart';
+import 'notification_settings_screen.dart';
 import 'offers_screen.dart';
 import 'shop_screen.dart';
 import '../i18n.dart';
@@ -99,6 +100,15 @@ class ProfileScreen extends StatelessWidget {
                   onTap: () => _becomeSeller(context),
                 ),
               const Divider(),
+              ListTile(
+                key: const Key('notification-settings'),
+                leading: const Icon(Icons.notifications_outlined),
+                title: Text(tr('Хабарлама баптаулары')),
+                subtitle: Text(tr('Қандай хабарлама келетінін таңдаңыз')),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () =>
+                    Navigator.of(context).push(MaterialPageRoute(builder: (_) => const NotificationSettingsScreen())),
+              ),
               ListTile(
                 leading: const Icon(Icons.translate),
                 title: Text(tr('Тіл')),

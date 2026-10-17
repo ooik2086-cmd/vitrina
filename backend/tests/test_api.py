@@ -1142,6 +1142,26 @@ class DeleteAccountTests(ApiTestCase):
         self.assertEqual(self.c.get("/api/v1/listings").json()["items"], [])
 
 
+class NotificationSettingsTests(ApiTestCase):
+    def test_optional_alerts_can_be_turned_off_but_order_news_always_arrives(self):
+        url = "/api/v1/me/notification-settings"
+        start = self.c.get(url, headers=self.h(self.buyer)).json()["items"]
+        self.assertTrue(all(i["on"] for i in start))
+        self.assertEqual(self.c.put(url, json={"order_status": False}, headers=self.h(self.buyer)).status_code, 422)
+        off = self.c.put(url, json={"followed_shop": False}, headers=self.h(self.buyer)).json()["items"]
+        self.assertEqual([i["kind"] for i in off if not i["on"]], ["followed_shop"])
+        first = self.publish()
+        self.c.put(f"/api/v1/sellers/{first['seller']['id']}/follow", headers=self.h(self.buyer))
+        self.publish()  # a new listing from a followed shop, but that alert is off
+        self.assertEqual(self.c.get("/api/v1/notifications", headers=self.h(self.buyer)).json()["items"], [])
+        _, order = self.ordered(key="n1")
+        self.post(f"/orders/{order['id']}/cancel", self.buyer)  # order news cannot be muted
+        kinds = [n["kind"] for n in self.c.get("/api/v1/notifications", headers=self.h(self.seller)).json()["items"]]
+        self.assertIn("order_status", kinds)
+        on = self.c.put(url, json={"followed_shop": True}, headers=self.h(self.buyer)).json()["items"]
+        self.assertTrue(all(i["on"] for i in on))
+
+
 class AdminTests(ApiTestCase):
     def test_support_console_page_is_served(self):
         r = self.c.get("/admin/")
