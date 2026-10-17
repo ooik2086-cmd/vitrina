@@ -868,6 +868,39 @@ class SaleTests(ApiTestCase):
         self.assertIsNone(self.patch(listing["id"], 4_600_000)["was_price_tiyn"])
 
 
+class AwayTests(ApiTestCase):
+    def put(self, path, token, body):
+        return self.c.put(f"/api/v1{path}", json=body, headers=self.h(token))
+
+    def test_holiday_blocks_orders_and_offers_until_the_seller_is_back(self):
+        listing = self.publish()
+        today = datetime.now(timezone(timedelta(hours=5))).date()
+        self.assertEqual(self.put("/me/away", self.buyer, {"until": today.isoformat()}).status_code, 403)
+        too_far = (today + timedelta(days=61)).isoformat()
+        self.assertEqual(self.put("/me/away", self.seller, {"until": too_far}).json()["code"], "validation")
+        back = (today + timedelta(days=7)).isoformat()
+        self.assertEqual(self.put("/me/away", self.seller, {"until": back}).json()["away_until"], back)
+        shown = self.c.get(f"/api/v1/listings/{listing['id']}").json()
+        self.assertEqual(shown["seller"]["away_until"], back)
+        self.assertEqual(self.c.get(f"/api/v1/sellers/{shown['seller']['id']}").json()["away_until"], back)
+        body = {"listing_id": listing["id"], "size_id": listing["sizes"][0]["id"]}
+        self.assertEqual(self.post("/orders", self.buyer, body, **{"Idempotency-Key": "a"}).json()["code"],
+                         "seller_away")
+        offer = {"size_id": listing["sizes"][0]["id"], "amount_tiyn": 4_000_000}
+        self.assertEqual(self.post(f"/listings/{listing['id']}/offers", self.buyer, offer).json()["code"],
+                         "seller_away")
+        self.assertIsNone(self.put("/me/away", self.seller, {"until": None}).json()["away_until"])
+        self.assertEqual(self.post("/orders", self.buyer, body, **{"Idempotency-Key": "b"}).status_code, 201)
+
+    def test_a_past_holiday_no_longer_counts(self):
+        listing = self.publish()
+        with self.db() as db:
+            u = db.query(User).filter_by(phone="+77010000001").one()
+            u.away_until = datetime.now(timezone(timedelta(hours=5))).date() - timedelta(days=1)
+            db.commit()
+        self.assertIsNone(self.c.get(f"/api/v1/listings/{listing['id']}").json()["seller"]["away_until"])
+
+
 class AdminTests(ApiTestCase):
     def test_support_console_page_is_served(self):
         r = self.c.get("/admin/")

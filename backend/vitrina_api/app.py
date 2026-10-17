@@ -11,7 +11,7 @@ import re
 import secrets
 import threading
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Literal
@@ -193,7 +193,7 @@ def listing_out(db: Session, listing: Listing, *, owner: bool = False) -> dict:
         "media": [{"original_url": m.original_url, "processed_url": m.processed_url, "angle": m.angle}
                   for m in listing.media],
         "seller": {"id": seller.id, "shop_name": seller.shop_name, "city": seller.city,  # never the phone
-                   **seller_rating(db, seller.id)},
+                   "away_until": away_out(seller), **seller_rating(db, seller.id)},
         **({"stats": listing_stats(db, listing),
             "promo": {"state": listing.promo_state, "url": listing.promo_url},
             "moderation": moderation_out(listing)} if owner else {}),
@@ -247,9 +247,22 @@ def order_summary(db: Session, order: Order) -> dict:
             "size_label": size.label, "size_cm": mm_to_cm(size.insole_mm)}
 
 
+def away_until(user: User | None):
+    """The last day of a seller's holiday, while it lasts; None otherwise."""
+    if user is None or user.away_until is None:
+        return None
+    return user.away_until if user.away_until >= now_utc().astimezone(ALMATY).date() else None
+
+
+def away_out(user: User | None) -> str | None:
+    day = away_until(user)
+    return day.isoformat() if day else None
+
+
 def me_out(user: User) -> dict:
     return {"id": user.id, "phone": user.phone, "display_name": user.display_name, "city": user.city,
-            "is_seller": user.is_seller, "shop_name": user.shop_name, "role": user.role}
+            "is_seller": user.is_seller, "shop_name": user.shop_name, "role": user.role,
+            "away_until": away_out(user)}
 
 
 # ---------------------------------------------------------------- auth + profile
@@ -308,6 +321,28 @@ def patch_me(body: ProfilePatch, user: User = Depends(current_user), db: Session
     user = db.merge(user)
     for k, v in body.model_dump(exclude_unset=True).items():
         setattr(user, k, v)
+    db.commit()
+    return me_out(user)
+
+
+MAX_AWAY_DAYS = 60
+
+
+class AwayIn(BaseModel):
+    until: date | None = None  # None ends the holiday
+
+
+@api.put("/me/away")
+def set_away(body: AwayIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """Holiday mode: listings stay visible with a note, but nobody can order or make an offer until the seller
+    is back, so no one pays and then waits for a shop that is closed."""
+    if not user.is_seller:
+        raise ApiError(403, "seller_required")
+    today = now_utc().astimezone(ALMATY).date()
+    if body.until is not None and not today <= body.until <= today + timedelta(days=MAX_AWAY_DAYS):
+        raise ApiError(422, "validation", f"until must be within {MAX_AWAY_DAYS} days from today")
+    user = db.merge(user)
+    user.away_until = body.until
     db.commit()
     return me_out(user)
 
@@ -676,7 +711,8 @@ def seller_profile(seller_id: int, db: Session = Depends(get_db)):
                                                           Listing.status == "published"))
     return {"id": seller.id, "shop_name": seller.shop_name, "city": seller.city,
             "since": services.aware(seller.created_at).date().isoformat(),
-            "completed_sales": int(sales or 0), "listings": int(live or 0), **seller_rating(db, seller.id)}
+            "completed_sales": int(sales or 0), "listings": int(live or 0), "away_until": away_out(seller),
+            **seller_rating(db, seller.id)}
 
 
 class SlidingWindowLimiter:
@@ -1009,6 +1045,8 @@ def create_order(body: OrderIn, user: User = Depends(current_user), db: Session 
         raise ApiError(404, "not_found")
     if listing.seller_id == user.id:
         raise ApiError(409, "own_listing")
+    if away_until(db.get(User, listing.seller_id)):
+        raise ApiError(409, "seller_away")
     offer = offers.offer_for_order(db, body.offer_id, user, listing, body.size_id) if body.offer_id else None
     size = db.scalar(select(ListingSize).where(ListingSize.id == body.size_id,
                                                ListingSize.listing_id == listing.id).with_for_update())

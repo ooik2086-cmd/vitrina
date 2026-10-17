@@ -477,6 +477,33 @@ void main() {
     expect(find.byKey(const Key('was-price')), findsNothing);
   });
 
+  testWidgets('a seller on holiday cannot be ordered from or offered to', (tester) async {
+    final json = {
+      ...listingJson(),
+      'seller': {'id': 3, 'shop_name': 'Qadam Store', 'city': 'Алматы', 'away_until': '2026-10-24'},
+    };
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async {
+          if (req.url.path == '/api/v1/offers') return jsonResponse({'items': [], 'waiting': 0});
+          if (req.url.path.endsWith('/similar')) return jsonResponse({'items': []});
+          return jsonResponse(json);
+        }))
+      ..token = 'tok';
+    tester.view.physicalSize = const Size(400, 1800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+        SessionScope(session: Session(api), child: const MaterialApp(home: ListingScreen(listingId: 7))));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('seller-away')), findsOneWidget);
+    await tester.tap(find.text('42'));
+    await tester.pump();
+    expect(find.byKey(const Key('make-offer')), findsNothing);
+    final button = tester.widget<FilledButton>(find.ancestor(of: find.text('25.10 бастап'), matching: find.byType(FilledButton)));
+    expect(button.onPressed, isNull);
+  });
+
   test('photo upload is multipart with the token and returns the stored url', () async {
     late http.BaseRequest seen;
     final api = Api(

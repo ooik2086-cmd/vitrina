@@ -6,7 +6,7 @@ same protected payment as any order. Offers never change the listing's public pr
 from __future__ import annotations
 
 import math
-from datetime import timedelta
+from datetime import timedelta, timezone
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
@@ -25,6 +25,7 @@ ANSWER_WITHIN = timedelta(hours=48)  # a pending or countered offer lapses after
 BUY_WITHIN = timedelta(hours=24)     # an accepted offer can be ordered for this long
 OFFERS_PER_DAY = 3                   # per buyer per listing, so a seller is not haggled to death
 OPEN = ("pending", "countered", "accepted")
+ALMATY = timezone(timedelta(hours=5))
 
 
 class OfferIn(BaseModel):
@@ -70,6 +71,9 @@ def make_offer(listing_id: int, body: OfferIn, user: User = Depends(current_user
         raise ApiError(404, "not_found")
     if listing.seller_id == user.id:
         raise ApiError(409, "own_listing")
+    seller = db.get(User, listing.seller_id)
+    if seller.away_until and seller.away_until >= now_utc().astimezone(ALMATY).date():
+        raise ApiError(409, "seller_away")
     size = db.get(ListingSize, body.size_id)
     if size is None or size.listing_id != listing.id or size.quantity <= 0:
         raise ApiError(409, "out_of_stock")

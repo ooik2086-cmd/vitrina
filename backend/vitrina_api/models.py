@@ -30,6 +30,7 @@ class User(Base):
     is_seller: Mapped[bool] = mapped_column(Boolean, default=False)
     shop_name: Mapped[str | None] = mapped_column(String(80))
     is_blocked: Mapped[bool] = mapped_column(Boolean, default=False)
+    away_until: Mapped[date | None] = mapped_column(Date)  # seller on holiday: no new orders through this day
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 

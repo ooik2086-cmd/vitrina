@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../labels.dart';
 import '../session.dart';
 import '../widgets/common.dart';
 import 'analytics_screen.dart';
@@ -55,6 +56,7 @@ class ProfileScreen extends StatelessWidget {
                   onTap: () =>
                       Navigator.of(context).push(MaterialPageRoute(builder: (_) => ShopScreen(sellerId: me.id))),
                 ),
+              if (me.isSeller) const AwayTile(),
               ListTile(
                 key: const Key('offers'),
                 leading: const Icon(Icons.local_offer_outlined),
@@ -125,5 +127,81 @@ class ProfileScreen extends StatelessWidget {
     } catch (e) {
       if (context.mounted) showError(context, e);
     }
+  }
+}
+
+/// Holiday mode: the shop stays visible, but orders and offers wait until the seller is back.
+class AwayTile extends StatefulWidget {
+  const AwayTile({super.key});
+
+  @override
+  State<AwayTile> createState() => _AwayTileState();
+}
+
+class _AwayTileState extends State<AwayTile> {
+  bool _busy = false;
+
+  Future<void> _set(DateTime? until) async {
+    final session = SessionScope.of(context);
+    setState(() => _busy = true);
+    try {
+      session.update(await session.api.setAway(until));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(until == null
+              ? tr('Демалыс режимі өшірілді. Тапсырыс қабылданады.')
+              : trf('{0} дейін тапсырыс пен баға ұсынысы қабылданбайды.', [formatDay(until)]))));
+    } catch (e) {
+      if (mounted) showError(context, e);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _tap(DateTime? current) async {
+    if (current != null) {
+      final off = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text(tr('Демалыс режимі')),
+          content: Text(trf('{0} дейін қосулы.', [formatDay(current)])),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Күнін өзгерту'))),
+            FilledButton(
+                key: const Key('away-off'),
+                onPressed: () => Navigator.pop(context, true),
+                child: Text(tr('Демалысты аяқтау'))),
+          ],
+        ),
+      );
+      if (off == null || !mounted) return;
+      if (off) return _set(null);
+    }
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final picked = await showDatePicker(
+      context: context,
+      helpText: tr('Қай күнге дейін демаласыз?'),
+      initialDate: current ?? today.add(const Duration(days: 7)),
+      firstDate: today,
+      lastDate: today.add(const Duration(days: 60)),
+    );
+    if (picked != null && mounted) await _set(picked);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final away = SessionScope.of(context).me?.awayUntil;
+    return ListTile(
+      key: const Key('away'),
+      enabled: !_busy,
+      leading: Icon(Icons.beach_access_outlined, color: away == null ? null : Theme.of(context).colorScheme.error),
+      title: Text(tr('Демалыс режимі')),
+      subtitle: Text(away == null
+          ? tr('Өшірулі: тапсырыс қабылданады')
+          : trf('{0} дейін қосулы: тапсырыс қабылданбайды', [formatDay(away)])),
+      trailing: const Icon(Icons.chevron_right),
+      onTap: () => _tap(away),
+    );
   }
 }

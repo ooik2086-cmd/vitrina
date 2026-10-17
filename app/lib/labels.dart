@@ -4,6 +4,9 @@ library;
 import 'i18n.dart';
 
 /// 1 250 000 tiyn -> "12 500 ₸". Amounts stay integers end to end.
+/// A calendar day as 24.10, the way people write it in Kazakhstan.
+String formatDay(DateTime d) => '${d.day.toString().padLeft(2, '0')}.${d.month.toString().padLeft(2, '0')}';
+
 String formatTenge(int tiyn) {
   final tenge = tiyn ~/ 100;
   final rest = tiyn % 100;

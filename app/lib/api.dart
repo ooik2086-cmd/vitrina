@@ -310,6 +310,9 @@ class Listing {
         shopName = (j['seller'] as Map)['shop_name'] as String?,
         sellerCity = (j['seller'] as Map)['city'] as String?,
         sellerId = (j['seller'] as Map)['id'] as int,
+        sellerAwayUntil = (j['seller'] as Map)['away_until'] == null
+            ? null
+            : DateTime.parse((j['seller'] as Map)['away_until'] as String),
         sellerRating = ((j['seller'] as Map)['rating'] as num?)?.toDouble(),
         sellerReviews = ((j['seller'] as Map)['reviews'] as int?) ?? 0,
         stats = j['stats'] == null ? null : ListingStats.fromJson(j['stats'] as Map<String, dynamic>),
@@ -339,6 +342,9 @@ class Listing {
   final String? shopName;
   final String? sellerCity;
   final int sellerId;
+
+  /// Set while the seller is on holiday: no orders or offers until then.
+  final DateTime? sellerAwayUntil;
   final double? sellerRating;
   final int sellerReviews;
 
@@ -393,13 +399,17 @@ class Me {
         displayName = j['display_name'] as String?,
         city = j['city'] as String?,
         isSeller = j['is_seller'] as bool,
-        shopName = j['shop_name'] as String?;
+        shopName = j['shop_name'] as String?,
+        awayUntil = j['away_until'] == null ? null : DateTime.parse(j['away_until'] as String);
   final int id;
   final String phone;
   final String? displayName;
   final String? city;
   final bool isSeller;
   final String? shopName;
+
+  /// Last day of the seller's holiday, while it lasts.
+  final DateTime? awayUntil;
 }
 
 class ChatMessage {
@@ -528,6 +538,12 @@ class Api {
   }
 
   Future<Me> me() async => Me.fromJson(await _send('GET', '/me') as Map<String, dynamic>);
+
+  Future<Me> setAway(DateTime? until) async => Me.fromJson(await _send('PUT', '/me/away', body: {
+        'until': until == null
+            ? null
+            : '${until.year}-${until.month.toString().padLeft(2, '0')}-${until.day.toString().padLeft(2, '0')}'
+      }) as Map<String, dynamic>);
 
   Future<Me> becomeSeller(String shopName, String city) async => Me.fromJson(
       await _send('POST', '/me/seller', body: {'shop_name': shopName, 'city': city}) as Map<String, dynamic>);

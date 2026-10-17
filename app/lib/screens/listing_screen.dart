@@ -199,7 +199,8 @@ class _ListingScreenState extends State<ListingScreen> {
     }
     final selected = l.sizes.where((s) => s.id == _sizeId).firstOrNull;
     final me = SessionScope.of(context).me;
-    final canOffer = l.status == 'published' && me?.id != l.sellerId && !_offerLive;
+    final away = l.sellerAwayUntil;
+    final canOffer = l.status == 'published' && me?.id != l.sellerId && !_offerLive && away == null;
     final deal = _offer?.status == 'accepted' && _offer!.sizeId == selected?.id ? _offer : null;
     final itemPrice = deal == null ? l.priceTiyn : (deal.priceTiyn < l.priceTiyn ? deal.priceTiyn : l.priceTiyn);
     return Column(children: [
@@ -249,6 +250,22 @@ class _ListingScreenState extends State<ListingScreen> {
                 l.deliveryPriceTiyn == 0 ? tr('Жеткізу тегін') : trf('Жеткізу {0}', [formatTenge(l.deliveryPriceTiyn)]),
                 style: theme.textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
               ),
+              if (away != null) ...[
+                const SizedBox(height: 12),
+                Container(
+                  key: const Key('seller-away'),
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(color: Brand.studio, borderRadius: BorderRadius.circular(Brand.radius)),
+                  child: Row(children: [
+                    const Icon(Icons.beach_access_outlined),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(trf('Сатушы {0} дейін демалыста. Тапсырысты ол оралғанда беруге болады, ал қазір таңдаулыға қосып не сатушыға жаза аласыз.',
+                          [formatDay(away)])),
+                    ),
+                  ]),
+                ),
+              ],
               const SizedBox(height: 20),
               Card(
                 child: Padding(
@@ -425,9 +442,13 @@ class _ListingScreenState extends State<ListingScreen> {
               Expanded(
                 child: FilledButton(
                   style: FilledButton.styleFrom(backgroundColor: Brand.accent, foregroundColor: Colors.white),
-                  onPressed: l.status == 'published' && selected != null && !_ordering ? () => _order(l) : null,
+                  onPressed: l.status == 'published' && selected != null && !_ordering && away == null
+                      ? () => _order(l)
+                      : null,
                   child: Text(l.status != 'published'
                       ? tr('Сатылған')
+                      : away != null
+                          ? trf('{0} бастап', [formatDay(away.add(const Duration(days: 1)))])
                       : selected == null
                           ? tr('Өлшемді таңдаңыз')
                           : deal != null
