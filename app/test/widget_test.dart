@@ -28,6 +28,7 @@ import 'package:vitrina/screens/notification_settings_screen.dart';
 import 'package:vitrina/screens/onboarding_screen.dart';
 import 'package:vitrina/screens/offers_screen.dart';
 import 'package:vitrina/screens/order_screen.dart';
+import 'package:vitrina/listing_quality.dart';
 import 'package:vitrina/screens/orders_screen.dart';
 import 'package:vitrina/screens/profile_screen.dart';
 import 'package:vitrina/screens/saved_searches_screen.dart';
@@ -738,6 +739,28 @@ void main() {
     expect(text, endsWith('Бұл фискалдық чек емес.'));
   });
 
+  test('listing quality counts what the page has and puts the biggest gap first', () {
+    final bare = listingQuality(Listing.fromJson(listingJson()));
+    // No 360°, no extra angles, no description, not proven; brand, model, defects and stock are there.
+    expect(bare.score, 100 - 25 - 15 - 15 - 15);
+    expect(bare.tips.first.points, 25);
+    expect(bare.verdict, 'Толықтыруға болады');
+    Map<String, dynamic> m(String angle) =>
+        {'original_url': 'https://x/$angle.jpg', 'processed_url': null, 'angle': angle};
+    final full = listingQuality(Listing.fromJson({
+      ...listingJson(media: [
+        for (var i = 0; i < 12; i++) m('frame'),
+        for (final a in ['front', 'outer', 'inner', 'back', 'sole', 'top', 'label']) m(a),
+      ]),
+      'description':
+          'Түпнұсқа, бір маусым киілді. Материалы былғары, өлшемі дәл келеді. Кішірейіп қалғандықтан сатамын.',
+      'authenticity': 'documented',
+    }));
+    expect(full.score, 100);
+    expect(full.tips, isEmpty);
+    expect(full.verdict, 'Өте жақсы');
+  });
+
   test('order deadline speaks to whoever can still act on it', () {
     OrderInfo order(String status, String? deadline) => OrderInfo.fromJson({
           'id': 7,
@@ -1285,7 +1308,10 @@ void main() {
     expect(find.text('15'), findsOneWidget);
     expect(find.text('қаралым'), findsOneWidget);
     expect(find.text('2'), findsOneWidget);
+    expect(find.byKey(const Key('listing-quality')), findsOneWidget);
     await tester.enterText(find.byKey(const Key('price')), '40000');
+    await tester.ensureVisible(find.byTooltip('Көбейту'));
+    await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Көбейту'));
     await tester.pump();
     await tester.tap(find.byKey(const Key('save')));

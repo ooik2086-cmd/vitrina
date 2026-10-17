@@ -13,6 +13,7 @@ import '../widgets/questions.dart';
 import 'listing_editor_screen.dart';
 import 'listing_screen.dart';
 import '../i18n.dart';
+import '../listing_quality.dart';
 
 const listingStatuses = {
   'draft': 'Жоба',
@@ -177,6 +178,10 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
             if (_l.stats != null) ...[
               const SizedBox(height: 20),
               _StatsRow(stats: _l.stats!),
+            ],
+            if (!locked) ...[
+              const SizedBox(height: 16),
+              QualityCard(quality: listingQuality(_l)),
             ],
             if (_l.status == 'published' || _l.status == 'sold') ...[
               const SizedBox(height: 12),
@@ -686,4 +691,56 @@ String stockSummary(Listing l) {
   final total = l.sizes.fold<int>(0, (n, s) => n + (s.quantity ?? 0));
   final views = l.stats == null ? '' : trf(' · {0} қаралым', [l.stats!.views]);
   return trf('{0} дана · {1}{2}', [total, formatTenge(l.priceTiyn), views]);
+}
+
+/// The page's completeness score and the few things that would raise it most.
+class QualityCard extends StatelessWidget {
+  const QualityCard({super.key, required this.quality});
+  final ListingQuality quality;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final q = quality;
+    final color = q.score >= 85
+        ? const Color(0xFF2E9E6A)
+        : q.score >= 60
+            ? Brand.accent
+            : scheme.error;
+    return Card(
+      key: const Key('listing-quality'),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Expanded(child: Text(tr('Тауар бетінің толықтығы'), style: theme.textTheme.titleSmall)),
+            Text('${q.score}/100', key: const Key('quality-score'), style: weight(theme.textTheme.titleMedium!, 750)),
+          ]),
+          const SizedBox(height: 10),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(99),
+            child: LinearProgressIndicator(
+              value: q.score / 100,
+              minHeight: 8,
+              color: color,
+              backgroundColor: scheme.surfaceContainerHighest,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(q.verdict, style: theme.textTheme.labelMedium?.copyWith(color: color, fontWeight: FontWeight.w700)),
+          for (final t in q.tips.take(3)) ...[
+            const SizedBox(height: 10),
+            Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Icon(Icons.add_circle_outline_rounded, size: 18, color: scheme.onSurfaceVariant),
+              const SizedBox(width: 8),
+              Expanded(child: Text(t.text, style: theme.textTheme.bodyMedium)),
+              const SizedBox(width: 8),
+              Text('+${t.points}', style: theme.textTheme.labelMedium?.copyWith(color: scheme.onSurfaceVariant)),
+            ]),
+          ],
+        ]),
+      ),
+    );
+  }
 }
