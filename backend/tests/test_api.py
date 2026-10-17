@@ -1,4 +1,5 @@
 """End-to-end API tests for scenarios A–E from the Phase 1 doc, plus security cases."""
+import io
 import json
 import os
 import tempfile
@@ -7,6 +8,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
+from PIL import Image
 
 from vitrina_api.app import create_app
 from vitrina_api.config import Settings
@@ -25,9 +27,13 @@ LISTING = {
 
 
 class ApiTestCase(unittest.TestCase):
+    external_media = True
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.cfg = Settings(database_url=f"sqlite:///{os.path.join(self.tmp.name, 't.db')}", debug_otp=True)
+        self.cfg = Settings(database_url=f"sqlite:///{os.path.join(self.tmp.name, 't.db')}", debug_otp=True,
+                            media_dir=os.path.join(self.tmp.name, "media"), public_media_url="http://test/media",
+                            allow_external_media=self.external_media)
         self.app = create_app(self.cfg)
         self.c = TestClient(self.app)
         self.seller = self.login("+77010000001")
@@ -224,6 +230,55 @@ class OrderFlowTests(ApiTestCase):
             self.assertEqual(run_auto_complete(db, now=now + timedelta(days=6), window=self.cfg.confirm_window,
                                                rule=self.cfg.commission), [order["id"]])
         self.assertEqual(self.c.get(f"/api/v1/orders/{order['id']}", headers=self.h(self.buyer)).json()["status"], "COMPLETED")
+
+
+def jpeg(size=(800, 600), orientation=None, gps=False) -> bytes:
+    img = Image.new("RGB", size, (200, 30, 30))
+    exif = Image.Exif()
+    if orientation:
+        exif[0x0112] = orientation
+    if gps:
+        exif[0x8825] = {1: "N", 2: (43.0, 15.0, 0.0)}  # GPSInfo
+    out = io.BytesIO()
+    img.save(out, "JPEG", exif=exif.tobytes())
+    return out.getvalue()
+
+
+class MediaTests(ApiTestCase):
+    external_media = False
+
+    def upload(self, token, data, name="p.jpg", ctype="image/jpeg"):
+        return self.c.post("/api/v1/media", files={"file": (name, data, ctype)}, headers=self.h(token))
+
+    def test_upload_strips_metadata_and_applies_rotation(self):
+        r = self.upload(self.seller, jpeg(orientation=6, gps=True))
+        self.assertEqual(r.status_code, 201, r.text)
+        url = r.json()["url"]
+        self.assertTrue(url.startswith("http://test/media/"))
+        stored = os.path.join(self.cfg.media_dir, url.removeprefix("http://test/media/"))
+        with Image.open(stored) as img:
+            self.assertEqual(img.size, (600, 800))  # orientation 6 = rotate 90°
+            self.assertEqual(len(img.getexif()), 0)  # no GPS, no device data
+            self.assertEqual(img.getpixel((300, 400))[0] > 150, True)  # colour kept
+
+    def test_upload_rejects_non_images_small_images_and_buyers(self):
+        self.assertEqual(self.upload(self.seller, b"%PDF-1.4 nope", "x.pdf", "application/pdf").status_code, 415)
+        self.assertEqual(self.upload(self.seller, jpeg(size=(200, 200))).json()["code"], "image_too_small")
+        self.assertEqual(self.upload(self.buyer, jpeg()).status_code, 403)
+
+    def test_listing_accepts_only_uploaded_photos_and_enough_frames(self):
+        self.assertEqual(self.post("/listings", self.seller, LISTING).json()["code"], "foreign_media")
+        urls = [self.upload(self.seller, jpeg()).json()["url"] for _ in range(4)]
+        photos = [{"url": u, "angle": a} for u, a in zip(urls, ("front", "outer", "inner", "back"))]
+        frames = [{"url": urls[0], "angle": "frame"}] * 3
+        r = self.post("/listings", self.seller, {**LISTING, "photos": photos + frames})
+        self.assertEqual(r.json()["code"], "too_few_frames")
+        r = self.post("/listings", self.seller, {**LISTING, "photos": photos + frames * 3})
+        self.assertEqual(r.status_code, 201, r.text)
+        mine = self.c.get("/api/v1/me/listings", headers=self.h(self.seller)).json()["items"]
+        self.assertEqual([(m["id"], m["status"]) for m in mine], [(r.json()["id"], "draft")])
+        served = self.c.get(urls[0].replace("http://test", ""))
+        self.assertEqual(served.headers["content-type"], "image/jpeg")
 
 
 class WebhookSecurityTests(ApiTestCase):

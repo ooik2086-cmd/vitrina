@@ -10,9 +10,10 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Literal
 
-from fastapi import APIRouter, Depends, FastAPI, Header, Request
+from fastapi import APIRouter, Depends, FastAPI, File, Header, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -25,11 +26,13 @@ from vitrina_core.webhooks import WebhookRejected, verify
 from . import services
 from .config import Settings
 from .errors import ApiError, api_error_handler
+from .storage import MAX_UPLOAD_BYTES, LocalStorage, normalize_image
 from .models import (AuthToken, Favorite, IdempotencyRecord, Listing, ListingSize, Media, Order, OtpCode, User,
                      WebhookEvent, make_session_factory)
 
 CATEGORIES = ("sneakers", "sport", "casual", "classic", "boots_winter", "sandals", "kids", "other")
 PHONE_RE = re.compile(r"^\+7\d{10}$")
+MIN_SPIN_FRAMES = 8  # fewer real frames than this do not read as a rotation
 DEFECT_REQUIRED = {Condition.USED_GOOD.value, Condition.DEFECTIVE.value}
 
 
@@ -52,6 +55,10 @@ def get_db(request: Request):
 
 def get_settings(request: Request) -> Settings:
     return request.app.state.settings
+
+
+def get_storage(request: Request) -> LocalStorage:
+    return request.app.state.storage
 
 
 def current_user(authorization: str | None = Header(default=None), db: Session = Depends(get_db)) -> User:
@@ -270,10 +277,33 @@ def search_text(body: ListingIn) -> str:
     return normalize_query(" ".join(filter(None, [body.title, body.brand, body.model_name, body.color, body.category])))
 
 
-@api.post("/listings", status_code=201)
-def create_listing(body: ListingIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+@api.post("/media", status_code=201)
+async def upload_photo(file: UploadFile = File(...), user: User = Depends(current_user),
+                       storage: LocalStorage = Depends(get_storage)):
     if not user.is_seller:
         raise ApiError(403, "seller_required")
+    data = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise ApiError(413, "file_too_large")
+    return {"url": storage.put(normalize_image(data), owner_id=user.id)}
+
+
+@api.get("/me/listings")
+def my_listings(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    rows = db.scalars(select(Listing).where(Listing.seller_id == user.id).order_by(Listing.id.desc()).limit(200)).all()
+    return {"items": [listing_out(db, r) for r in rows]}
+
+
+@api.post("/listings", status_code=201)
+def create_listing(body: ListingIn, user: User = Depends(current_user), db: Session = Depends(get_db),
+                   cfg: Settings = Depends(get_settings), storage: LocalStorage = Depends(get_storage)):
+    if not user.is_seller:
+        raise ApiError(403, "seller_required")
+    if not cfg.allow_external_media and not all(storage.owns(p.url) for p in body.photos):
+        raise ApiError(422, "foreign_media")
+    frames = sum(p.angle == "frame" for p in body.photos)
+    if 0 < frames < MIN_SPIN_FRAMES:
+        raise ApiError(422, "too_few_frames")
     listing = Listing(
         seller_id=user.id, title=body.title, category=body.category, brand=body.brand, model_name=body.model_name,
         color=body.color, condition=body.condition.value, defects=body.defects, description=body.description,
@@ -646,6 +676,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title="VITRINA API", version="0.1.0")
     app.state.settings = settings
     app.state.sessions = make_session_factory(settings.database_url)
+    app.state.storage = LocalStorage(settings.media_dir, settings.public_media_url)
     app.add_exception_handler(ApiError, api_error_handler)
 
     async def validation_handler(request: Request, exc: RequestValidationError):
@@ -654,6 +685,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_exception_handler(RequestValidationError, validation_handler)
     app.include_router(api)
     app.include_router(hooks)
+    # Development only: serve uploaded photos from disk. Production serves them from the bucket/CDN.
+    app.mount("/media", StaticFiles(directory=settings.media_dir), name="media")
     if settings.cors_origins:
         app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_methods=["*"],
                            allow_headers=["Authorization", "Content-Type", "Idempotency-Key"])
