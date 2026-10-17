@@ -17,7 +17,7 @@ from vitrina_core.orders import OrderStatus
 from . import services
 from .deps import current_user, get_db, get_storage, now_utc
 from .errors import ApiError
-from .storage import MAX_UPLOAD_BYTES, LocalStorage, normalize_image
+from .storage import MAX_UPLOAD_BYTES, Storage, normalize_image
 from .models import Block, Conversation, Listing, Message, Notification, Order, Review, User
 
 router = APIRouter(prefix="/api/v1")
@@ -160,7 +160,7 @@ def send_message(conversation_id: int, body: MessageIn, user: User = Depends(cur
 @router.post("/conversations/{conversation_id}/photos", status_code=201)
 async def send_photo(conversation_id: int, file: UploadFile = File(...), caption: str = Form("", max_length=2000),
                      user: User = Depends(current_user), db: Session = Depends(get_db),
-                     storage: LocalStorage = Depends(get_storage)):
+                     storage: Storage = Depends(get_storage)):
     """A photo in the chat, e.g. a close-up the buyer asked for. Cleaned of metadata like any upload."""
     conv = conversation_for(db, conversation_id, user)
     check_rate(db, user)
@@ -305,7 +305,7 @@ def reviewable_order(db: Session, order_id: int, user: User) -> Order:
 
 @router.post("/orders/{order_id}/review/photos", status_code=201)
 async def upload_review_photo(order_id: int, file: UploadFile = File(...), user: User = Depends(current_user),
-                              db: Session = Depends(get_db), storage: LocalStorage = Depends(get_storage)):
+                              db: Session = Depends(get_db), storage: Storage = Depends(get_storage)):
     """A buyer's photo of the pair that arrived, for their review. Cleaned of metadata like any upload."""
     reviewable_order(db, order_id, user)
     data = await file.read(MAX_UPLOAD_BYTES + 1)
@@ -316,7 +316,7 @@ async def upload_review_photo(order_id: int, file: UploadFile = File(...), user:
 
 @router.post("/orders/{order_id}/review", status_code=201)
 def create_review(order_id: int, body: ReviewIn, user: User = Depends(current_user), db: Session = Depends(get_db),
-                  storage: LocalStorage = Depends(get_storage)):
+                  storage: Storage = Depends(get_storage)):
     order = reviewable_order(db, order_id, user)
     # Only photos this buyer uploaded here: never a link to someone else's picture or another site.
     own = storage.public_base + f"/{user.id}/"

@@ -29,9 +29,16 @@ class Settings:
     jobs_interval_s: int = field(default_factory=lambda: int(os.environ.get("VITRINA_JOBS_INTERVAL", "0")))
     # Development and tests create tables directly. Production sets this to 0 and runs `alembic upgrade head`.
     auto_create_schema: bool = field(default_factory=lambda: os.environ.get("VITRINA_AUTO_CREATE_SCHEMA", "1") == "1")
-    # Uploaded photos. Local disk in development; production replaces LocalStorage with an S3-compatible bucket.
+    # Uploaded photos on local disk, used when no S3 bucket is set (development and tests).
     media_dir: str = field(default_factory=lambda: os.environ.get("VITRINA_MEDIA_DIR", "./media-dev"))
     public_media_url: str = field(default_factory=lambda: os.environ.get("VITRINA_PUBLIC_MEDIA_URL", "http://127.0.0.1:8000/media"))
+    # S3-compatible bucket for photos and videos. Set the bucket to use it; VITRINA_PUBLIC_MEDIA_URL is then the
+    # bucket's public address (or a CDN in front of it). Keys come from the environment, never from the code.
+    s3_endpoint: str = field(default_factory=lambda: os.environ.get("VITRINA_S3_ENDPOINT", ""))
+    s3_bucket: str = field(default_factory=lambda: os.environ.get("VITRINA_S3_BUCKET", ""))
+    s3_region: str = field(default_factory=lambda: os.environ.get("VITRINA_S3_REGION", "us-east-1"))
+    s3_access_key: str = field(default_factory=lambda: os.environ.get("VITRINA_S3_ACCESS_KEY", ""))
+    s3_secret_key: str = field(default_factory=lambda: os.environ.get("VITRINA_S3_SECRET_KEY", ""))
     # Listings may only reference photos uploaded through /media, so sellers cannot embed tracking pixels or hotlinks.
     allow_external_media: bool = field(default_factory=lambda: os.environ.get("VITRINA_ALLOW_EXTERNAL_MEDIA", "0") == "1")
     # Browser origins allowed to call the API (the Flutter web build during development). Empty = none.

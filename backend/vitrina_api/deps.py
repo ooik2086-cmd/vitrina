@@ -12,7 +12,7 @@ from . import services
 from .config import Settings
 from .errors import ApiError
 from .models import AuthToken, User
-from .storage import LocalStorage
+from .storage import Storage
 
 
 def now_utc() -> datetime:
@@ -35,7 +35,7 @@ def get_settings(request: Request) -> Settings:
     return request.app.state.settings
 
 
-def get_storage(request: Request) -> LocalStorage:
+def get_storage(request: Request) -> Storage:
     return request.app.state.storage
 
 

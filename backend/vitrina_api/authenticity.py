@@ -18,7 +18,7 @@ from . import services
 from .deps import current_user, get_db, get_storage, staff_user
 from .errors import ApiError
 from .models import AuthProof, Listing, User
-from .storage import MAX_UPLOAD_BYTES, LocalStorage, normalize_image
+from .storage import MAX_UPLOAD_BYTES, Storage, normalize_image
 
 router = APIRouter(prefix="/api/v1")
 
@@ -51,7 +51,7 @@ def list_proofs(listing_id: int, user: User = Depends(current_user), db: Session
 
 @router.post("/listings/{listing_id}/proofs", status_code=201)
 async def add_proof(listing_id: int, file: UploadFile = File(...), user: User = Depends(current_user),
-                    db: Session = Depends(get_db), storage: LocalStorage = Depends(get_storage)):
+                    db: Session = Depends(get_db), storage: Storage = Depends(get_storage)):
     listing = seller_listing(db, listing_id, user)
     count = len(db.scalars(select(AuthProof.id).where(AuthProof.listing_id == listing.id)).all())
     if count >= MAX_PROOFS:

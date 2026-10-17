@@ -44,7 +44,7 @@ from .share import router as share_router
 from .social import CONTACT_RE, reply_time, router as social_router, seller_rating, size_fit
 from .models import (AuditLog, AuthToken, Block, Follow, Notification, Offer, SavedSearch, StockAlert, ListingDailyViews, ListingEmbedding, ListingReport, AuthToken, Favorite, IdempotencyRecord, Listing, ListingSize, Media, Order, OrderEvent,
                      OtpCode, Review, User, WebhookEvent, make_session_factory)
-from .storage import MAX_UPLOAD_BYTES, LocalStorage, normalize_image
+from .storage import MAX_UPLOAD_BYTES, Storage, make_storage, normalize_image
 
 CATEGORIES = ("sneakers", "sport", "casual", "classic", "boots_winter", "sandals", "kids", "other")
 PHONE_RE = re.compile(r"^\+7\d{10}$")
@@ -468,7 +468,7 @@ def search_text(body: ListingIn) -> str:
 
 @api.post("/media", status_code=201)
 async def upload_photo(file: UploadFile = File(...), user: User = Depends(current_user),
-                       storage: LocalStorage = Depends(get_storage)):
+                       storage: Storage = Depends(get_storage)):
     if not user.is_seller:
         raise ApiError(403, "seller_required")
     data = await file.read(MAX_UPLOAD_BYTES + 1)
@@ -646,7 +646,7 @@ def prepare_listing_media(state, listing_id: int) -> None:
 @api.post("/listings", status_code=201)
 def create_listing(body: ListingIn, request: Request, background: BackgroundTasks,
                    user: User = Depends(current_user), db: Session = Depends(get_db),
-                   cfg: Settings = Depends(get_settings), storage: LocalStorage = Depends(get_storage)):
+                   cfg: Settings = Depends(get_settings), storage: Storage = Depends(get_storage)):
     if not user.is_seller:
         raise ApiError(403, "seller_required")
     if not cfg.allow_external_media and not all(storage.owns(p.url) for p in body.photos):
@@ -678,7 +678,7 @@ def own_listing(db: Session, listing_id: int, user: User) -> Listing:
 
 @api.post("/listings/{listing_id}/publish")
 def publish_listing(listing_id: int, user: User = Depends(current_user), db: Session = Depends(get_db),
-                    cfg: Settings = Depends(get_settings), storage: LocalStorage = Depends(get_storage)):
+                    cfg: Settings = Depends(get_settings), storage: Storage = Depends(get_storage)):
     listing = own_listing(db, listing_id, user)
     # "hidden" is a moderation decision; only staff can lift it. A "rejected" listing is fixed and sent again.
     if listing.status not in ("draft", "paused", "rejected"):
@@ -700,7 +700,7 @@ def split_codes(text: str | None) -> list[str]:
     return [c for c in (text or "").split(",") if c]
 
 
-def route_after_checks(db: Session, storage: LocalStorage, listing: Listing) -> None:
+def route_after_checks(db: Session, storage: Storage, listing: Listing) -> None:
     """Publish, or queue for staff when a check flags something staff have not already cleared."""
     flags = moderation.check(db, storage, listing)
     listing.moderation_flags = ",".join(flags) or None
@@ -715,7 +715,7 @@ def route_after_checks(db: Session, storage: LocalStorage, listing: Listing) -> 
 
 @api.patch("/listings/{listing_id}")
 def edit_listing(listing_id: int, body: ListingPatch, user: User = Depends(current_user),
-                 db: Session = Depends(get_db), storage: LocalStorage = Depends(get_storage)):
+                 db: Session = Depends(get_db), storage: Storage = Depends(get_storage)):
     listing = own_listing(db, listing_id, user)
     if listing.status == "hidden":
         raise ApiError(409, "invalid_status")
@@ -1024,7 +1024,7 @@ class SuggestIn(BaseModel):
 
 @api.post("/listings/suggest")
 def suggest_details(body: SuggestIn, request: Request, user: User = Depends(current_user),
-                    db: Session = Depends(get_db), storage: LocalStorage = Depends(get_storage)):
+                    db: Session = Depends(get_db), storage: Storage = Depends(get_storage)):
     """Brand, model and category to offer the seller, read off look-alike listings already on VITRINA.
 
     Only shape counts (the colour part is dropped), since the same model comes in many colours.
@@ -1807,7 +1807,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title="VITRINA API", version="0.1.0", lifespan=lifespan)
     app.state.settings = settings
     app.state.sessions = make_session_factory(settings.database_url, create_schema=settings.auto_create_schema)
-    app.state.storage = LocalStorage(settings.media_dir, settings.public_media_url)
+    app.state.storage = make_storage(settings)
     app.state.segmenter = cutout.load_segmenter(settings.cutout_model)
     app.state.embedder = visual.load_embedder(settings.search_model)
     app.state.image_search_limiter = SlidingWindowLimiter(IMAGE_SEARCH_PER_MINUTE, 60)
@@ -1825,8 +1825,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(authenticity.router)
     app.include_router(coupons.router)
     app.include_router(qa.router)
-    # Development only: serve uploaded photos from disk. Production serves them from the bucket/CDN.
-    app.mount("/media", StaticFiles(directory=settings.media_dir), name="media")
+    # Without a bucket, serve uploaded photos from disk (development). With one, the bucket or its CDN serves them.
+    if not settings.s3_bucket:
+        app.mount("/media", StaticFiles(directory=settings.media_dir), name="media")
     # Support console: a static page that talks to the same staff-only API; the page itself holds no data.
     app.mount("/admin", StaticFiles(directory=Path(__file__).parent / "admin", html=True), name="admin")
     if settings.cors_origins:
