@@ -79,6 +79,13 @@ class ImageSearchApiTests(ApiTestCase):
         lonely = self.listing_with_photo((30, 40, 200))  # created without a model: no vector yet
         self.assertEqual(self.c.get(f"/api/v1/listings/{lonely}/similar").json()["items"], [])
 
+    def test_photo_search_is_rate_limited_per_client(self):
+        from vitrina_api.app import IMAGE_SEARCH_PER_MINUTE
+        self.app.state.embedder = colour_only_embedder
+        codes = [self.search((200, 30, 30)).status_code for _ in range(IMAGE_SEARCH_PER_MINUTE + 1)]
+        self.assertEqual(codes[:-1], [200] * IMAGE_SEARCH_PER_MINUTE)
+        self.assertEqual(codes[-1], 429)
+
     def test_without_model_search_by_photo_is_unavailable(self):
         self.app.state.embedder = None
         r = self.search((200, 30, 30))

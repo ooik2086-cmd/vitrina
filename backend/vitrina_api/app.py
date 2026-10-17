@@ -1,11 +1,14 @@
 """VITRINA API v1 (modular monolith). Run: uvicorn vitrina_api.app:create_app --factory --reload"""
 from __future__ import annotations
 
+import collections
 import hashlib
 import hmac
 import json
 import re
 import secrets
+import threading
+import time
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -543,6 +546,28 @@ def seller_profile(seller_id: int, db: Session = Depends(get_db)):
             "completed_sales": int(sales or 0), "listings": int(live or 0), **seller_rating(db, seller.id)}
 
 
+class SlidingWindowLimiter:
+    """In-process limit per key. Enough for one API process; several processes need a shared store (Redis)."""
+
+    def __init__(self, limit: int, window_s: float):
+        self.limit, self.window = limit, window_s
+        self._hits: dict[str, collections.deque] = collections.defaultdict(collections.deque)
+        self._lock = threading.Lock()
+
+    def allow(self, key: str, now: float) -> bool:
+        with self._lock:
+            hits = self._hits[key]
+            while hits and hits[0] <= now - self.window:
+                hits.popleft()
+            if len(hits) >= self.limit:
+                return False
+            hits.append(now)
+            return True
+
+
+IMAGE_SEARCH_PER_MINUTE = 20
+
+
 @api.post("/search/image")
 async def search_by_image(request: Request, file: UploadFile = File(...), category: str | None = None,
                           size_cm: str | None = None, limit: int = 20, db: Session = Depends(get_db)):
@@ -550,6 +575,9 @@ async def search_by_image(request: Request, file: UploadFile = File(...), catego
     embed = request.app.state.embedder
     if embed is None:
         raise ApiError(503, "image_search_off")
+    client = request.client.host if request.client else "unknown"
+    if not request.app.state.image_search_limiter.allow(client, time.monotonic()):
+        raise ApiError(429, "rate_limited")
     data = await file.read(MAX_UPLOAD_BYTES + 1)
     if len(data) > MAX_UPLOAD_BYTES:
         raise ApiError(413, "file_too_large")
@@ -982,6 +1010,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.storage = LocalStorage(settings.media_dir, settings.public_media_url)
     app.state.segmenter = cutout.load_segmenter(settings.cutout_model)
     app.state.embedder = visual.load_embedder(settings.search_model)
+    app.state.image_search_limiter = SlidingWindowLimiter(IMAGE_SEARCH_PER_MINUTE, 60)
     app.add_exception_handler(ApiError, api_error_handler)
 
     async def validation_handler(request: Request, exc: RequestValidationError):
