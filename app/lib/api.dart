@@ -405,6 +405,11 @@ class Api {
     return [for (final j in r['items'] as List) Listing.fromJson(j as Map<String, dynamic>)];
   }
 
+  Future<List<Listing>> similar(int id) async {
+    final r = await _send('GET', '/listings/$id/similar') as Map;
+    return [for (final j in r['items'] as List) Listing.fromJson(j as Map<String, dynamic>)];
+  }
+
   Future<Listing> listing(int id) async =>
       Listing.fromJson(await _send('GET', '/listings/$id') as Map<String, dynamic>);
 

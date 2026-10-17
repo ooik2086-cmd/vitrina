@@ -24,6 +24,7 @@ class ListingScreen extends StatefulWidget {
 
 class _ListingScreenState extends State<ListingScreen> {
   late Future<Listing> _listing;
+  Future<List<Listing>>? _similar;
   int? _sizeId;
   bool _favorite = false;
   bool _ordering = false;
@@ -35,6 +36,7 @@ class _ListingScreenState extends State<ListingScreen> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     _listing = SessionScope.of(context).api.listing(widget.listingId);
+    _similar ??= SessionScope.of(context).api.similar(widget.listingId).catchError((_) => <Listing>[]);
   }
 
   Future<bool> _ensureSignedIn() async {
@@ -300,6 +302,7 @@ class _ListingScreenState extends State<ListingScreen> {
                   ),
                 ]),
               ),
+              _SimilarRow(items: _similar),
             ]),
           ),
         ]),
@@ -502,6 +505,38 @@ class _ReportSheetState extends State<ReportSheet> {
           ]),
         ),
       ),
+    );
+  }
+}
+
+/// Look-alike listings found by their photos; hidden when there are none.
+class _SimilarRow extends StatelessWidget {
+  const _SimilarRow({required this.items});
+  final Future<List<Listing>>? items;
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<List<Listing>>(
+      future: items,
+      builder: (context, snap) {
+        final list = snap.data ?? const <Listing>[];
+        if (list.isEmpty) return const SizedBox.shrink();
+        return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const SizedBox(height: 28),
+          Text('Ұқсас тауарлар', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 12),
+          SizedBox(
+            height: 270,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              clipBehavior: Clip.none,
+              itemCount: list.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 12),
+              itemBuilder: (_, i) => SizedBox(width: 160, child: ListingTile(listing: list[i])),
+            ),
+          ),
+        ]);
+      },
     );
   }
 }

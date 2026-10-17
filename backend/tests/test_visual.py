@@ -68,6 +68,17 @@ class ImageSearchApiTests(ApiTestCase):
         self.post(f"/listings/{red}/pause", self.seller)
         self.assertNotIn(red, [i["id"] for i in self.search((210, 40, 30)).json()["items"]])
 
+    def test_similar_listings_exclude_itself_and_rank_by_look(self):
+        self.app.state.embedder = colour_only_embedder
+        red = self.listing_with_photo((200, 30, 30))
+        red2 = self.listing_with_photo((190, 40, 35))
+        black = self.listing_with_photo((20, 20, 20))
+        ids = [i["id"] for i in self.c.get(f"/api/v1/listings/{red}/similar").json()["items"]]
+        self.assertEqual(ids, [red2, black])
+        self.app.state.embedder = None
+        lonely = self.listing_with_photo((30, 40, 200))  # created without a model: no vector yet
+        self.assertEqual(self.c.get(f"/api/v1/listings/{lonely}/similar").json()["items"], [])
+
     def test_without_model_search_by_photo_is_unavailable(self):
         self.app.state.embedder = None
         r = self.search((200, 30, 30))

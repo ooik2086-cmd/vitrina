@@ -553,6 +553,27 @@ async def search_by_image(request: Request, file: UploadFile = File(...), catego
     return {"items": [{**listing_out(db, listing), "similarity": round(score, 3)} for score, listing in scored]}
 
 
+@api.get("/listings/{listing_id}/similar")
+def similar_listings(listing_id: int, limit: int = 10, db: Session = Depends(get_db)):
+    """Look-alike listings, ranked with the stored photo vectors.
+    Empty when the listing has no vector yet (no model, or its photos are still being prepared)."""
+    import numpy as np
+    own = db.get(ListingEmbedding, listing_id)
+    listing = db.get(Listing, listing_id)
+    if listing is None or listing.status != "published":
+        raise ApiError(404, "not_found")
+    if own is None or own.model != visual.MODEL_NAME:
+        return {"items": []}
+    query = np.frombuffer(own.vector, np.float32)
+    rows = db.execute(select(Listing, ListingEmbedding.vector)
+                      .join(ListingEmbedding, ListingEmbedding.listing_id == Listing.id)
+                      .where(Listing.status == "published", Listing.id != listing_id,
+                             ListingEmbedding.model == visual.MODEL_NAME))
+    scored = sorted(((float(np.frombuffer(vec, np.float32) @ query), other) for other, vec in rows),
+                    key=lambda t: -t[0])[:max(1, min(limit, 20))]
+    return {"items": [{**listing_out(db, other), "similarity": round(score, 3)} for score, other in scored]}
+
+
 @api.get("/listings/{listing_id}")
 def get_listing(listing_id: int, user: User | None = Depends(optional_user), db: Session = Depends(get_db)):
     listing = db.get(Listing, listing_id)
