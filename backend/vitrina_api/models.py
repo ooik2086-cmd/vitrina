@@ -392,6 +392,7 @@ class Notification(Base):
     kind: Mapped[str] = mapped_column(String(40))  # order_status | message | review
     text_kk: Mapped[str] = mapped_column(String(300))
     text_ru: Mapped[str | None] = mapped_column(String(300))  # None on notices from before Russian was added
+    text_en: Mapped[str | None] = mapped_column(String(300))  # None on notices from before English was added
     order_id: Mapped[int | None] = mapped_column(Integer)
     conversation_id: Mapped[int | None] = mapped_column(Integer)
     listing_id: Mapped[int | None] = mapped_column(Integer)  # e.g. a price drop on a favourite

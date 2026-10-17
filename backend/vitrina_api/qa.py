@@ -78,7 +78,8 @@ def ask(listing_id: int, body: QuestionIn, user: User = Depends(current_user), d
     q = Question(listing_id=listing.id, asker_id=user.id, text=text)
     db.add(q)
     services.notify(db, listing.seller_id, "question", f"«{listing.title}» туралы сұрақ: {text}",
-                    f"Вопрос о «{listing.title}»: {text}", listing_id=listing.id)
+                    f"Вопрос о «{listing.title}»: {text}", f"Question about “{listing.title}”: {text}",
+                    listing_id=listing.id)
     db.commit()
     return question_out(q, user)
 
@@ -99,7 +100,8 @@ def answer(question_id: int, body: AnswerIn, user: User = Depends(current_user),
     q.answer, q.answered_at = clean(body.text), now_utc()
     if first:
         services.notify(db, q.asker_id, "question_answered", f"Сатушы «{listing.title}» туралы сұрағыңызға жауап берді.",
-                        f"Продавец ответил на ваш вопрос о «{listing.title}».", listing_id=listing.id)
+                        f"Продавец ответил на ваш вопрос о «{listing.title}».",
+                        f"The seller answered your question about “{listing.title}”.", listing_id=listing.id)
     db.commit()
     return question_out(q, user)
 

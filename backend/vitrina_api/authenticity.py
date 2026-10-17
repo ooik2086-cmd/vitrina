@@ -104,10 +104,13 @@ class AuthenticityIn(BaseModel):
 
 DECISION_TEXT = {
     "documented": ("«{t}»: құжаттарыңыз тексерілді, тауарда «Құжаты бар» белгісі тұр.",
-                   "«{t}»: документы проверены, у товара отметка «Есть документы»."),
+                   "«{t}»: документы проверены, у товара отметка «Есть документы».",
+                   "“{t}”: your documents were checked; the listing now shows “Documented”."),
     "verified": ("«{t}»: түпнұсқалығы тексерілді, тауарда «Тексерілген» белгісі тұр.",
-                 "«{t}»: подлинность проверена, у товара отметка «Проверено»."),
-    "unverified": ("«{t}»: дәлел жеткіліксіз. {n}", "«{t}»: доказательств недостаточно. {n}"),
+                 "«{t}»: подлинность проверена, у товара отметка «Проверено».",
+                 "“{t}”: authenticity was checked; the listing now shows “Verified”."),
+    "unverified": ("«{t}»: дәлел жеткіліксіз. {n}", "«{t}»: доказательств недостаточно. {n}",
+                   "“{t}”: not enough proof. {n}"),
 }
 
 
@@ -124,8 +127,9 @@ def set_authenticity(listing_id: int, body: AuthenticityIn, staff: User = Depend
         raise ApiError(409, "invalid_status", "no proof to check")
     listing.authenticity, listing.authenticity_note = body.value, note if body.value == "unverified" else None
     services.audit(db, staff.id, "set_authenticity", f"listing:{listing.id}", f"{body.value}: {note or ''}".strip())
-    kk, ru = DECISION_TEXT[body.value]
+    kk, ru, en = DECISION_TEXT[body.value]
     services.notify(db, listing.seller_id, "authenticity", kk.format(t=listing.title, n=note or ""),
-                    ru.format(t=listing.title, n=note or ""), listing_id=listing.id)
+                    ru.format(t=listing.title, n=note or ""), en.format(t=listing.title, n=note or ""),
+                    listing_id=listing.id)
     db.commit()
     return proofs_out(db, listing)

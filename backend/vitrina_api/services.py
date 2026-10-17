@@ -27,23 +27,33 @@ def total_tiyn(order: Order) -> int:
 
 
 # Who hears about each order status, and what they read. "{id}" and "{tracking}" are filled in.
-STATUS_NOTICES: dict[OrderStatus, tuple[tuple[str, ...], str, str]] = {
+STATUS_NOTICES: dict[OrderStatus, tuple[tuple[str, ...], str, str, str]] = {
     OrderStatus.PAID: (("seller",), "Тапсырыс №{id} төленді. Қабылдаңыз немесе бас тартыңыз.",
-                       "Заказ №{id} оплачен. Примите его или откажитесь."),
-    OrderStatus.SELLER_ACCEPTED: (("buyer",), "Сатушы №{id} тапсырысты қабылдады.", "Продавец принял заказ №{id}."),
+                       "Заказ №{id} оплачен. Примите его или откажитесь.",
+                       "Order No. {id} is paid. Accept or decline it."),
+    OrderStatus.SELLER_ACCEPTED: (("buyer",), "Сатушы №{id} тапсырысты қабылдады.", "Продавец принял заказ №{id}.",
+                                  "The seller accepted order No. {id}."),
     OrderStatus.SHIPPED: (("buyer",), "Тапсырыс №{id} жіберілді. Трек-нөмір: {tracking}.",
-                          "Заказ №{id} отправлен. Трек-номер: {tracking}."),
+                          "Заказ №{id} отправлен. Трек-номер: {tracking}.",
+                          "Order No. {id} has shipped. Tracking number: {tracking}."),
     OrderStatus.DELIVERED_PENDING_CONFIRMATION: (("buyer",), "Тапсырыс №{id} жеткізілді. Тексеріп, растаңыз.",
-                                                 "Заказ №{id} доставлен. Проверьте и подтвердите получение."),
-    OrderStatus.COMPLETED: (("buyer", "seller"), "Тапсырыс №{id} аяқталды.", "Заказ №{id} завершён."),
+                                                 "Заказ №{id} доставлен. Проверьте и подтвердите получение.",
+                                                 "Order No. {id} was delivered. Check it and confirm receipt."),
+    OrderStatus.COMPLETED: (("buyer", "seller"), "Тапсырыс №{id} аяқталды.", "Заказ №{id} завершён.",
+                            "Order No. {id} is complete."),
     OrderStatus.DISPUTED: (("buyer", "seller"), "Тапсырыс №{id} бойынша дау ашылды. Қолдау қызметі қарайды.",
-                           "По заказу №{id} открыт спор. Его рассмотрит поддержка."),
+                           "По заказу №{id} открыт спор. Его рассмотрит поддержка.",
+                           "A dispute was opened on order No. {id}. Support will review it."),
     OrderStatus.RETURN_REQUESTED: (("seller",), "Сатып алушы №{id} тапсырысты қайтаруды сұрады.",
-                                   "Покупатель запросил возврат заказа №{id}."),
+                                   "Покупатель запросил возврат заказа №{id}.",
+                                   "The buyer asked to return order No. {id}."),
     OrderStatus.REFUND_PENDING: (("buyer", "seller"), "Тапсырыс №{id} бойынша ақша қайтарылуда.",
-                                 "По заказу №{id} деньги возвращаются."),
-    OrderStatus.REFUNDED: (("buyer",), "Тапсырыс №{id} бойынша ақша қайтарылды.", "По заказу №{id} деньги возвращены."),
-    OrderStatus.CANCELLED: (("buyer", "seller"), "Тапсырыс №{id} жойылды.", "Заказ №{id} отменён."),
+                                 "По заказу №{id} деньги возвращаются.",
+                                 "The money for order No. {id} is being refunded."),
+    OrderStatus.REFUNDED: (("buyer",), "Тапсырыс №{id} бойынша ақша қайтарылды.", "По заказу №{id} деньги возвращены.",
+                           "The money for order No. {id} was refunded."),
+    OrderStatus.CANCELLED: (("buyer", "seller"), "Тапсырыс №{id} жойылды.", "Заказ №{id} отменён.",
+                            "Order No. {id} was cancelled."),
 }
 
 
@@ -66,11 +76,12 @@ def ensure_not_blocked(db: Session, a: int, b: int) -> None:
         raise ApiError(403, "blocked")
 
 
-def notify(db: Session, user_id: int, kind: str, text: str, text_ru: str, *, order_id: int | None = None,
+def notify(db: Session, user_id: int, kind: str, text: str, text_ru: str, text_en: str, *, order_id: int | None = None,
            conversation_id: int | None = None, listing_id: int | None = None) -> None:
     if kind in OPTIONAL_KINDS and kind in muted(db.get(User, user_id)):
         return
-    db.add(Notification(user_id=user_id, kind=kind, text_kk=text[:300], text_ru=text_ru[:300], order_id=order_id,
+    db.add(Notification(user_id=user_id, kind=kind, text_kk=text[:300], text_ru=text_ru[:300], text_en=text_en[:300],
+                        order_id=order_id,
                         conversation_id=conversation_id, listing_id=listing_id))
 
 
@@ -78,13 +89,13 @@ def notify_status(db: Session, order: Order, actor_user_id: int | None) -> None:
     rule = STATUS_NOTICES.get(OrderStatus(order.status))
     if rule is None:
         return
-    roles, template, template_ru = rule
+    roles, template, template_ru, template_en = rule
     values = {"id": order.id, "tracking": order.tracking_number or "—"}
-    text, text_ru = template.format(**values), template_ru.format(**values)
+    text, text_ru, text_en = template.format(**values), template_ru.format(**values), template_en.format(**values)
     for role in roles:
         user_id = order.buyer_id if role == "buyer" else order.seller_id
         if user_id != actor_user_id:  # nobody is told about their own action
-            notify(db, user_id, "order_status", text, text_ru, order_id=order.id)
+            notify(db, user_id, "order_status", text, text_ru, text_en, order_id=order.id)
 
 
 def move(db: Session, order: Order, to: OrderStatus, actor: Actor, *, user_id: int | None = None,
@@ -120,10 +131,12 @@ def notify_sold_out(db: Session, order: Order) -> None:
     if any(s.quantity > 0 for s in listing.sizes):
         text = f"«{listing.title}»: {size.label} өлшемі таусылды. Тағы болса, қалдықты жаңартыңыз."
         text_ru = f"«{listing.title}»: размер {size.label} закончился. Если есть ещё, обновите остаток."
+        text_en = f"“{listing.title}”: size {size.label} is sold out. If you have more, update the stock."
     else:
         text = f"«{listing.title}» толық сатылды. Тағы болса, қалдықты жаңартып, қайта сатылымға қойыңыз."
         text_ru = f"«{listing.title}» распродан. Если есть ещё, обновите остаток и верните в продажу."
-    notify(db, order.seller_id, "sold_out", text, text_ru, listing_id=listing.id)
+        text_en = f"“{listing.title}” is sold out. If you have more, update the stock and put it back on sale."
+    notify(db, order.seller_id, "sold_out", text, text_ru, text_en, listing_id=listing.id)
 
 
 def post_tx(db: Session, *, key: str, order_id: int | None, kind: str, entries: list[Entry], actor: str,
@@ -181,7 +194,8 @@ def tell_back_in_stock(db: Session, listing: Listing) -> None:
         if alert.size_id in in_stock:
             label = in_stock[alert.size_id]
             notify(db, alert.user_id, "back_in_stock", f"«{listing.title}», {label} өлшемі қайта сатылымда.",
-                   f"«{listing.title}», размер {label} снова в продаже.", listing_id=listing.id)
+                   f"«{listing.title}», размер {label} снова в продаже.",
+                   f"“{listing.title}”, size {label} is back on sale.", listing_id=listing.id)
             db.delete(alert)
 
 

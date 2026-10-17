@@ -11,17 +11,18 @@ const apiBase = String.fromEnvironment('API_BASE', defaultValue: 'http://10.0.2.
 /// Public page for a listing, as sent to friends: messengers show its photo and price, and it opens the app.
 String listingShareUrl(int id, {String base = apiBase}) => '${base.replaceFirst(RegExp(r'/api/v1/?$'), '')}/l/$id';
 
-/// Error as the API returns it: a stable code plus ready messages in Kazakh and Russian.
+/// Error as the API returns it: a stable code plus ready messages in Kazakh, Russian and English.
 class ApiException implements Exception {
-  ApiException(this.status, this.code, this.messageKk, [this.detail, this.messageRu]);
+  ApiException(this.status, this.code, this.messageKk, [this.detail, this.messageRu, this.messageEn]);
   final int status;
   final String code;
   final String messageKk;
   final String? detail;
   final String? messageRu;
+  final String? messageEn;
 
   /// The server's message in the interface language.
-  String get message => appLanguage.value == 'ru' ? (messageRu ?? messageKk) : messageKk;
+  String get message => pick(messageKk, messageRu, messageEn);
 
   @override
   String toString() => message;
@@ -141,13 +142,17 @@ class Moderation {
       : flags = [for (final f in j['flags'] as List) f as String],
         reasonsKk = [for (final r in j['reasons'] as List) r as String],
         reasonsRu = [for (final r in (j['reasons_ru'] as List?) ?? j['reasons'] as List) r as String],
+        reasonsEn = [
+          for (final r in (j['reasons_en'] as List?) ?? (j['reasons_ru'] as List?) ?? j['reasons'] as List) r as String
+        ],
         note = j['note'] as String?;
   final List<String> flags;
   final List<String> reasonsKk;
   final List<String> reasonsRu;
+  final List<String> reasonsEn;
   final String? note;
 
-  List<String> reasons(String lang) => lang == 'ru' ? reasonsRu : reasonsKk;
+  List<String> reasons(String lang) => switch (lang) { 'ru' => reasonsRu, 'en' => reasonsEn, _ => reasonsKk };
 }
 
 /// Brand, model and category read off look-alike listings already on VITRINA. Any field may be null.
@@ -679,6 +684,7 @@ class AppNotification {
         kind = j['kind'] as String,
         text = j['text'] as String,
         textRu = j['text_ru'] as String?,
+        textEn = j['text_en'] as String?,
         orderId = j['order_id'] as int?,
         conversationId = j['conversation_id'] as int?,
         listingId = j['listing_id'] as int?,
@@ -688,9 +694,10 @@ class AppNotification {
   final String kind;
   final String text;
   final String? textRu;
+  final String? textEn;
 
   /// The notice in the interface language.
-  String get shown => appLanguage.value == 'ru' ? (textRu ?? text) : text;
+  String get shown => pick(text, textRu, textEn);
   final int? orderId;
   final int? conversationId;
   final int? listingId;
@@ -723,7 +730,7 @@ class Api {
     if (res.statusCode >= 400) {
       final m = data is Map ? data : const {};
       throw ApiException(res.statusCode, (m['code'] ?? 'error') as String, (m['message_kk'] ?? tr('Қате.')) as String,
-          m['detail'] as String?, m['message_ru'] as String?);
+          m['detail'] as String?, m['message_ru'] as String?, m['message_en'] as String?);
     }
     return data;
   }

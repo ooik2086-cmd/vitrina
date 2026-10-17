@@ -24,7 +24,8 @@ INK, ACCENT, STUDIO = (14, 14, 16), (255, 90, 54), (243, 242, 239)
 SPIN_TURN_SECONDS = 3.0  # one full turn of the 360° frames
 END_CARD_AT = 6.6
 
-CTA = {"kk": "Жан-жағынан VITRINA-да қараңыз", "ru": "Смотрите со всех сторон в VITRINA"}
+CTA = {"kk": "Жан-жағынан VITRINA-да қараңыз", "ru": "Смотрите со всех сторон в VITRINA",
+       "en": "See it from every side on VITRINA"}
 
 
 def format_tenge(tiyn: int) -> str:

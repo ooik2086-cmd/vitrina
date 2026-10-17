@@ -60,7 +60,7 @@ Future<XFile?> pickPhoto(BuildContext context, {String? title, String? subtitle}
   return ImagePicker().pickImage(source: source, maxWidth: 1600, imageQuality: 90);
 }
 
-/// Қазақша / Русский. Every screen is rebuilt in the chosen language.
+/// ҚАЗ / РУС / ENG, with the full name as a tooltip. Every screen is rebuilt in the chosen language.
 class LanguageSwitch extends StatelessWidget {
   const LanguageSwitch({super.key});
 
@@ -69,7 +69,11 @@ class LanguageSwitch extends StatelessWidget {
     return SegmentedButton<String>(
       key: const Key('language'),
       showSelectedIcon: false,
-      segments: [for (final e in languages.entries) ButtonSegment(value: e.key, label: Text(e.value))],
+      style: const ButtonStyle(visualDensity: VisualDensity.compact),
+      segments: [
+        for (final e in languages.entries)
+          ButtonSegment(value: e.key, label: Text(languageShort[e.key]!), tooltip: e.value),
+      ],
       selected: {appLanguage.value},
       onSelectionChanged: (s) => setLanguage(s.first),
     );
@@ -102,8 +106,7 @@ class ListingTile extends StatelessWidget {
                       fit: BoxFit.cover,
                       errorBuilder: (_, __, ___) => const Icon(Icons.broken_image_outlined, color: Colors.black26)),
                 if (listing.frames.isNotEmpty) const Positioned(left: 10, top: 10, child: Badge360()),
-                if (listing.wasPriceTiyn != null)
-                  Positioned(right: 10, top: 10, child: SaleBadge(listing: listing)),
+                if (listing.wasPriceTiyn != null) Positioned(right: 10, top: 10, child: SaleBadge(listing: listing)),
               ]),
             ),
           ),

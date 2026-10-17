@@ -32,6 +32,7 @@ import 'package:vitrina/screens/saved_searches_screen.dart';
 import 'package:vitrina/screens/seller_reviews_screen.dart';
 import 'package:vitrina/screens/shop_screen.dart';
 import 'package:vitrina/screens/spin_capture_screen.dart';
+import 'package:vitrina/en.dart';
 import 'package:vitrina/ru.dart';
 import 'package:vitrina/session.dart';
 import 'package:vitrina/widgets/common.dart';
@@ -87,17 +88,26 @@ http.Response jsonResponse(Object body, [int status = 200]) =>
     http.Response(jsonEncode(body), status, headers: {'content-type': 'application/json; charset=utf-8'});
 
 void main() {
-  test('every Kazakh phrase passed to tr() has a Russian translation', () {
+  test('every Kazakh phrase passed to tr() has a Russian and an English translation', () {
     final call = RegExp(r"\btrf?\('((?:[^'\\]|\\.)*)'");
     final missing = <String>{};
     for (final f in Directory('lib').listSync(recursive: true).whereType<File>()) {
       if (!f.path.endsWith('.dart')) continue;
       for (final m in call.allMatches(f.readAsStringSync())) {
         final key = m.group(1)!.replaceAll(r'\n', '\n').replaceAll(r"\'", "'");
-        if (!ru.containsKey(key)) missing.add(key);
+        if (!ru.containsKey(key)) missing.add('ru: $key');
+        if (!en.containsKey(key)) missing.add('en: $key');
       }
     }
     expect(missing, isEmpty);
+    // The tables are kept in step, so a phrase translated into one language is never left out of the other.
+    expect(en.keys.toSet().difference(ru.keys.toSet()), isEmpty);
+    expect(ru.keys.toSet().difference(en.keys.toSet()), isEmpty);
+    for (final e in en.entries) {
+      for (final p in RegExp(r'\{\d\}').allMatches(e.key)) {
+        expect(e.value, contains(p.group(0)), reason: e.key);
+      }
+    }
   });
 
   testWidgets('switching to Russian rebuilds the screen and server errors follow', (tester) async {
@@ -111,13 +121,21 @@ void main() {
       ),
     ));
     expect(find.text('Арзанырақ'), findsOneWidget);
-    await tester.tap(find.text('Русский'));
+    await tester.tap(find.text('РУС'));
     await tester.pumpAndSettle();
     expect(find.text('Сначала дешевле'), findsOneWidget);
     expect(find.text('Арзанырақ'), findsNothing);
     expect((await SharedPreferences.getInstance()).getString('vitrina_lang'), 'ru');
     expect(ApiException(409, 'out_of_stock', 'Бұл өлшем таусылды.', null, 'Этот размер закончился.').message,
         'Этот размер закончился.');
+    await tester.tap(find.text('ENG'));
+    await tester.pumpAndSettle();
+    expect(find.text('Price: low to high'), findsOneWidget);
+    expect(
+        ApiException(409, 'out_of_stock', 'Бұл өлшем таусылды.', null, 'Этот размер закончился.',
+                'This size is out of stock.')
+            .message,
+        'This size is out of stock.');
   });
 
   test('tenge formatting keeps integer tiyn', () {

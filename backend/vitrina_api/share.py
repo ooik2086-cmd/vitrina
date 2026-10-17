@@ -19,13 +19,14 @@ from .models import Listing, User
 
 router = APIRouter()
 
+LANGS = ("kk", "ru", "en")
 CONDITIONS = {
-    "new_with_box": ("Жаңа, қорабымен", "Новые, с коробкой"),
-    "new_no_box": ("Жаңа, қорабсыз", "Новые, без коробки"),
-    "unworn": ("Киілмеген, сақталған", "Не ношенные, хранились"),
-    "used_excellent": ("Киілген, өте жақсы", "Ношенные, отличное состояние"),
-    "used_good": ("Киілген, жақсы", "Ношенные, хорошее состояние"),
-    "defective": ("Ақауы бар", "Есть дефекты"),
+    "new_with_box": ("Жаңа, қорабымен", "Новые, с коробкой", "New, with box"),
+    "new_no_box": ("Жаңа, қорабсыз", "Новые, без коробки", "New, no box"),
+    "unworn_stored": ("Киілмеген, сақталған", "Не ношенные, хранились", "Unworn, stored"),
+    "used_excellent": ("Киілген, өте жақсы", "Ношенные, отличное состояние", "Worn, excellent"),
+    "used_good": ("Киілген, жақсы", "Ношенные, хорошее состояние", "Worn, good"),
+    "defective": ("Ақауы бар", "Есть дефекты", "Has defects"),
 }
 TEXT = {
     "kk": {"open": "Қосымшада ашу", "drag": "Айналдыру үшін сүйреңіз", "sizes": "Өлшемдер", "delivery": "Жеткізу",
@@ -35,6 +36,9 @@ TEXT = {
            "delivery": "Доставка", "free": "бесплатно",
            "protected": "Деньги хранятся, пока покупатель не получит товар и не подтвердит это.",
            "gone": "Этот товар больше не продаётся.", "seller": "Продавец"},
+    "en": {"open": "Open in the app", "drag": "Drag to turn", "sizes": "Sizes", "delivery": "Delivery", "free": "free",
+           "protected": "The money is held until the buyer receives the item and confirms it.",
+           "gone": "This listing is no longer on sale.", "seller": "Seller"},
 }
 SHOWCASE = ("front", "outer", "inner", "back", "top")
 BACKDROPS = {
@@ -45,7 +49,8 @@ BACKDROPS = {
 
 def pick_lang(request: Request) -> str:
     wanted = request.query_params.get("lang") or request.headers.get("accept-language", "")
-    return "ru" if wanted.lower().startswith("ru") else "kk"
+    wanted = wanted.lower()
+    return next((code for code in ("ru", "en") if wanted.startswith(code)), "kk")
 
 
 def page(title: str, body: str, *, lang: str, meta: str = "", status: int = 200) -> HTMLResponse:
@@ -88,7 +93,7 @@ def shared_listing(listing_id: int, request: Request, db: Session = Depends(get_
     # Previews use the original JPEG: some messengers do not show WebP.
     cover = next((m.original_url for m in showcase), media[0].original_url if media else None)
     price = promo.format_tenge(listing.price_tiyn)
-    condition = CONDITIONS.get(listing.condition, (listing.condition, listing.condition))[lang == "ru"]
+    condition = CONDITIONS.get(listing.condition, (listing.condition,) * 3)[LANGS.index(lang)]
     city = seller.city if seller else None
     description = " · ".join(x for x in (condition, seller.shop_name if seller else None, city) if x)
     url = str(request.url.replace(query=""))

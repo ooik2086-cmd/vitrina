@@ -459,6 +459,9 @@ class ShareTests(ApiTestCase):
         self.assertNotIn("<b>", page.split("<body>")[1])  # seller text is escaped
         self.assertNotIn("+7701", page)  # never the seller's phone
         self.assertIn("Открыть в приложении", self.c.get(f"/l/{listing['id']}", headers={"Accept-Language": "ru-RU"}).text)
+        english = self.c.get(f"/l/{listing['id']}", headers={"Accept-Language": "en-US,en;q=0.9"}).text
+        self.assertIn("Open in the app", english)
+        self.assertIn("Worn, excellent", english)
         self.post(f"/listings/{listing['id']}/pause", self.seller)
         self.assertEqual(self.c.get(f"/l/{listing['id']}").status_code, 404)
         self.assertEqual(self.c.get("/l/99999").status_code, 404)
@@ -962,6 +965,8 @@ class AwayTests(ApiTestCase):
 
         first = buy("EU 42", "a")
         self.assertEqual(sold_out(), [])  # not paid yet: it may still be cancelled
+        self.assertEqual(self.post("/orders", self.buyer, {"listing_id": listing["id"], "size_id": by_label["EU 42"]},
+                                   **{"Idempotency-Key": "z"}).json()["message_en"], "This size is out of stock.")
         self.assertEqual(self.pay(first, "p1").status_code, 200)
         self.assertEqual(len(sold_out()), 1)
         self.assertIn("EU 42", sold_out()[0])
@@ -969,6 +974,8 @@ class AwayTests(ApiTestCase):
         self.assertEqual(len(sold_out()), 1)  # one pair of 43 is left
         self.assertEqual(self.pay(buy("EU 43", "c"), "p3").status_code, 200)
         self.assertIn("толық сатылды", sold_out()[0])
+        items = self.c.get("/api/v1/notifications", headers=self.h(self.seller)).json()["items"]
+        self.assertIn("is sold out", next(n for n in items if n["kind"] == "sold_out")["text_en"])
 
 class FollowTests(ApiTestCase):
     def test_followers_hear_about_each_new_listing_once(self):

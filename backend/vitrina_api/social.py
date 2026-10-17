@@ -210,8 +210,9 @@ def post_message(db: Session, conv: Conversation, user: User, text: str, photo_u
     other = conv.seller_id if user.id == conv.buyer_id else conv.buyer_id
     preview_kk = text[:120] if text else "📷 Фото"
     preview_ru = text[:120] if text else "📷 Фото"
+    preview_en = text[:120] if text else "📷 Photo"
     services.notify(db, other, "message", f"Жаңа хабарлама: {preview_kk}",
-                    f"Новое сообщение: {preview_ru}", conversation_id=conv.id)
+                    f"Новое сообщение: {preview_ru}", f"New message: {preview_en}", conversation_id=conv.id)
     db.commit()
     return message_out(msg)
 
@@ -311,6 +312,7 @@ def create_review(order_id: int, body: ReviewIn, user: User = Depends(current_us
     db.add(review)
     services.notify(db, order.seller_id, "review", f"Жаңа пікір: {body.rating}/5, тапсырыс №{order.id}.",
                     f"Новый отзыв: {body.rating}/5, заказ №{order.id}.",
+                    f"New review: {body.rating}/5, order No. {order.id}.",
                     order_id=order.id)
     db.commit()
     return review_out(db, review)
@@ -326,6 +328,7 @@ def reply_review(review_id: int, body: ReplyIn, user: User = Depends(current_use
     review.seller_reply = body.text.strip()
     services.notify(db, review.buyer_id, "review_reply", f"Сатушы пікіріңізге жауап берді: {review.seller_reply[:120]}",
                     f"Продавец ответил на ваш отзыв: {review.seller_reply[:120]}",
+                    f"The seller replied to your review: {review.seller_reply[:120]}",
                     order_id=review.order_id)
     db.commit()
     return review_out(db, review)
@@ -350,7 +353,8 @@ def list_notifications(user: User = Depends(current_user), db: Session = Depends
     unread = db.scalar(select(func.count(Notification.id)).where(Notification.user_id == user.id,
                                                                  Notification.read.is_(False)))
     return {"unread": int(unread or 0), "items": [
-        {"id": n.id, "kind": n.kind, "text": n.text_kk, "text_ru": n.text_ru or n.text_kk, "order_id": n.order_id, "conversation_id": n.conversation_id,
+        {"id": n.id, "kind": n.kind, "text": n.text_kk, "text_ru": n.text_ru or n.text_kk,
+         "text_en": n.text_en or n.text_ru or n.text_kk, "order_id": n.order_id, "conversation_id": n.conversation_id,
          "listing_id": n.listing_id,
          "read": n.read, "created_at": services.aware(n.created_at).isoformat()} for n in rows]}
 

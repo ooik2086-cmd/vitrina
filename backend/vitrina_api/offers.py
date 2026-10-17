@@ -97,7 +97,8 @@ def make_offer(listing_id: int, body: OfferIn, user: User = Depends(current_user
     db.flush()
     amount = promo.format_tenge(body.amount_tiyn)
     services.notify(db, listing.seller_id, "offer", f"«{listing.title}», {size.label}: {amount} ұсынды.",
-                    f"«{listing.title}», {size.label}: предложили {amount}.", listing_id=listing.id)
+                    f"«{listing.title}», {size.label}: предложили {amount}.",
+                    f"“{listing.title}”, {size.label}: offered {amount}.", listing_id=listing.id)
     db.commit()
     return offer_out(db, offer)
 
@@ -129,11 +130,12 @@ def answer(offer: Offer, user: User) -> None:
         raise ApiError(409, "invalid_status")
 
 
-def tell_other(db: Session, offer: Offer, user: User, kk: str, ru: str) -> None:
+def tell_other(db: Session, offer: Offer, user: User, kk: str, ru: str, en: str) -> None:
     listing = db.get(Listing, offer.listing_id)
     other = offer.buyer_id if user.id == offer.seller_id else offer.seller_id
     kind = "offer" if other == offer.seller_id else "offer_reply"  # the app opens the seller's inbox for "offer"
-    services.notify(db, other, kind, f"«{listing.title}»: {kk}", f"«{listing.title}»: {ru}", listing_id=listing.id)
+    services.notify(db, other, kind, f"«{listing.title}»: {kk}", f"«{listing.title}»: {ru}", f"“{listing.title}”: {en}",
+                    listing_id=listing.id)
 
 
 @router.post("/offers/{offer_id}/accept")
@@ -144,10 +146,11 @@ def accept_offer(offer_id: int, user: User = Depends(current_user), db: Session 
     amount = promo.format_tenge(price(offer))
     if user.id == offer.seller_id:
         tell_other(db, offer, user, f"сатушы {amount} бағаны қабылдады. Тәулік ішінде рәсімдеңіз.",
-                   f"продавец принял цену {amount}. Оформите заказ в течение суток.")
+                   f"продавец принял цену {amount}. Оформите заказ в течение суток.",
+                   f"the seller accepted {amount}. Place the order within 24 hours.")
     else:
         tell_other(db, offer, user, f"сатып алушы {amount} бағаңызға келісті.",
-                   f"покупатель согласился на вашу цену {amount}.")
+                   f"покупатель согласился на вашу цену {amount}.", f"the buyer agreed to your price of {amount}.")
     db.commit()
     return offer_out(db, offer)
 
@@ -157,7 +160,7 @@ def decline_offer(offer_id: int, user: User = Depends(current_user), db: Session
     offer = own_offer(db, offer_id, user)
     answer(offer, user)
     offer.status = "declined"
-    tell_other(db, offer, user, "ұсыныс қабылданбады.", "предложение отклонено.")
+    tell_other(db, offer, user, "ұсыныс қабылданбады.", "предложение отклонено.", "the offer was declined.")
     db.commit()
     return offer_out(db, offer)
 
@@ -174,7 +177,8 @@ def counter_offer(offer_id: int, body: CounterIn, user: User = Depends(current_u
         raise ApiError(422, "counter_out_of_range")
     offer.status, offer.counter_tiyn, offer.expires_at = "countered", body.amount_tiyn, now_utc() + ANSWER_WITHIN
     amount = promo.format_tenge(body.amount_tiyn)
-    tell_other(db, offer, user, f"сатушы {amount} баға ұсынды.", f"продавец предлагает {amount}.")
+    tell_other(db, offer, user, f"сатушы {amount} баға ұсынды.", f"продавец предлагает {amount}.",
+               f"the seller offers {amount}.")
     db.commit()
     return offer_out(db, offer)
 

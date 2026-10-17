@@ -238,6 +238,7 @@ def moderation_out(listing: Listing) -> dict:
     flags = [c for c in (listing.moderation_flags or "").split(",") if c]
     return {"flags": flags, "reasons": [moderation.REASONS[c][0] for c in flags if c in moderation.REASONS],
             "reasons_ru": [moderation.REASONS[c][1] for c in flags if c in moderation.REASONS],
+            "reasons_en": [moderation.REASONS[c][2] for c in flags if c in moderation.REASONS],
             "note": listing.moderation_note}
 
 
@@ -751,7 +752,7 @@ def edit_listing(listing_id: int, body: ListingPatch, user: User = Depends(curre
 
 
 class PromoIn(BaseModel):
-    lang: Literal["kk", "ru"] = "kk"
+    lang: Literal["kk", "ru", "en"] = "kk"
 
 
 @api.post("/listings/{listing_id}/promo", status_code=202)
@@ -777,7 +778,8 @@ def notify_price_drop(db: Session, listing: Listing, old: int, new: int) -> None
         if user_id != listing.seller_id:
             services.notify(db, user_id, "price_drop",
                             f"«{listing.title}» арзандады: {old_text} → {new_text}",
-                            f"«{listing.title}» подешевел: {old_text} → {new_text}", listing_id=listing.id)
+                            f"«{listing.title}» подешевел: {old_text} → {new_text}",
+                            f"“{listing.title}” is cheaper: {old_text} → {new_text}", listing_id=listing.id)
 
 
 @api.post("/listings/{listing_id}/pause")
@@ -1230,7 +1232,8 @@ def announce(db: Session, listing: Listing) -> None:
         if follower not in told:
             told.add(follower)  # a follower who also has a matching saved search hears about it once
             services.notify(db, follower, "followed_shop", f"«{shop}» жаңа тауар қойды: «{listing.title}», {price}",
-                            f"«{shop}» выставил новый товар: «{listing.title}», {price}", listing_id=listing.id)
+                            f"«{shop}» выставил новый товар: «{listing.title}», {price}",
+                            f"“{shop}” listed something new: “{listing.title}”, {price}", listing_id=listing.id)
     for saved in db.scalars(select(SavedSearch).join(User, User.id == SavedSearch.user_id).where(
             User.is_blocked.is_(False)).order_by(SavedSearch.id)).all():
         if saved.user_id in told:
@@ -1239,7 +1242,8 @@ def announce(db: Session, listing: Listing) -> None:
         if db.scalar(match) is not None:
             told.add(saved.user_id)
             services.notify(db, saved.user_id, "saved_search", f"Іздеуіңізге сай жаңа тауар: «{listing.title}», {price}",
-                            f"Новый товар по вашему поиску: «{listing.title}», {price}", listing_id=listing.id)
+                            f"Новый товар по вашему поиску: «{listing.title}», {price}",
+                            f"New match for your search: “{listing.title}”, {price}", listing_id=listing.id)
 
 
 @api.post("/saved-searches", status_code=201)
@@ -1582,7 +1586,8 @@ def approve_listing(listing_id: int, staff: User = Depends(staff_user), db: Sess
     announce(db, listing)
     services.audit(db, staff.id, "approve_listing", f"listing:{listing.id}", listing.moderation_flags or "")
     services.notify(db, listing.seller_id, "moderation", f"«{listing.title}» тексеруден өтті және сатылымда.",
-                    f"«{listing.title}» прошёл проверку и уже продаётся.", listing_id=listing.id)
+                    f"«{listing.title}» прошёл проверку и уже продаётся.",
+                    f"“{listing.title}” passed review and is on sale.", listing_id=listing.id)
     db.commit()
     return {"id": listing.id, "status": listing.status}
 
@@ -1595,7 +1600,8 @@ def reject_listing(listing_id: int, body: ModerationRejectIn, staff: User = Depe
     listing.status, listing.moderation_note = "rejected", reason
     services.audit(db, staff.id, "reject_listing", f"listing:{listing.id}", reason)
     services.notify(db, listing.seller_id, "moderation", f"«{listing.title}» қайтарылды: {reason}",
-                    f"«{listing.title}» возвращён: {reason}", listing_id=listing.id)
+                    f"«{listing.title}» возвращён: {reason}",
+                    f"“{listing.title}” was sent back: {reason}", listing_id=listing.id)
     db.commit()
     return {"id": listing.id, "status": listing.status}
 
@@ -1630,13 +1636,16 @@ def close_reports(listing_id: int, body: ReportCloseIn, staff: User = Depends(st
         listing.status = "hidden"
         services.notify(db, listing.seller_id, "listing_hidden",
                         f"«{listing.title}» модератор шешімімен жасырылды: {body.reason}",
-                        f"«{listing.title}» скрыт по решению модератора: {body.reason}")
+                        f"«{listing.title}» скрыт по решению модератора: {body.reason}",
+                        f"“{listing.title}” was hidden by a moderator: {body.reason}")
     for reporter in {r.reporter_id for r in reports}:
         services.notify(db, reporter, "report_closed",
                         f"«{listing.title}» туралы шағымыңыз қаралды: "
                         + ("тауар жасырылды." if body.action == "hide" else "бұзушылық табылмады."),
                         f"Ваша жалоба на «{listing.title}» рассмотрена: "
-                        + ("товар скрыт." if body.action == "hide" else "нарушений не найдено."))
+                        + ("товар скрыт." if body.action == "hide" else "нарушений не найдено."),
+                        f"Your report on “{listing.title}” was reviewed: "
+                        + ("the listing was hidden." if body.action == "hide" else "no violation found."))
     services.audit(db, staff.id, f"reports_{outcome}", f"listing:{listing.id}", body.reason)
     db.commit()
     return {"listing_id": listing.id, "status": listing.status, "closed": len(reports)}
