@@ -30,6 +30,7 @@ import 'package:vitrina/screens/offers_screen.dart';
 import 'package:vitrina/screens/order_screen.dart';
 import 'package:vitrina/listing_quality.dart';
 import 'package:vitrina/screens/help_screen.dart';
+import 'package:vitrina/main.dart';
 import 'package:vitrina/widgets/todo_card.dart';
 import 'package:vitrina/widgets/delivery_eta.dart';
 import 'package:vitrina/screens/orders_screen.dart';
@@ -1790,6 +1791,24 @@ void main() {
         child: const MaterialApp(home: ChatScreen(conversationId: 9, pollEvery: Duration(hours: 1)))));
     await tester.pumpAndSettle();
     expect(find.text('Сатушы 25.10 дейін демалыста, жауабы кешігуі мүмкін.'), findsOneWidget);
+  });
+
+  testWidgets('chat and orders tabs show what waits on the person', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async => req.url.path.endsWith('/me/todo')
+            ? jsonResponse({'unread_messages': 3, 'to_pay': 1, 'to_confirm': 0, 'to_ship': 1, 'offers_answered': 2})
+            : jsonResponse({'items': [], 'unread': 0})))
+      ..token = 'tok';
+    final session = Session(api)..update(Me.fromJson({'id': 2, 'phone': '+77010000002', 'is_seller': true}));
+    await tester.pumpWidget(SessionScope(session: session, child: const MaterialApp(home: HomeShell())));
+    await tester.pump();
+    await tester.pump();
+    expect(find.descendant(of: find.byKey(const Key('tab-chat')), matching: find.text('3')), findsOneWidget);
+    expect(find.descendant(of: find.byKey(const Key('tab-orders')), matching: find.text('2')), findsOneWidget);
+    expect(ordersWaiting({'to_accept': 2, 'returns': 1, 'unread_messages': 9}), 3);
+    await tester.pumpWidget(const SizedBox()); // stops the polling timer
   });
 
   testWidgets('typing in search suggests models on sale, and a picked search is remembered', (tester) async {

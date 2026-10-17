@@ -62,8 +62,10 @@ for path in ("/me/listings", "/me/earnings", "/me/promo-codes", "/me/payouts", "
 keep("/me/analytics", seller, {"days": "30"})
 keep("/offers", seller, {"role": "seller"})
 # The demo person is both buyer and shop, so the profile's to-do card adds up both sides.
-answers["GET /me/todo"] = {**get("/me/todo", seller), **{k: v for k, v in get("/me/todo", buyer).items()
-                                                        if k in ("to_pay", "to_confirm", "offers_answered")}}
+seller_todo, buyer_todo = get("/me/todo", seller), get("/me/todo", buyer)
+answers["GET /me/todo"] = {**seller_todo, **{k: v for k, v in buyer_todo.items()
+                                             if k in ("to_pay", "to_confirm", "offers_answered")},
+                           "unread_messages": seller_todo["unread_messages"] + buyer_todo["unread_messages"]}
 for o in keep("/orders", seller, {"role": "seller"})["items"]:
     if f"GET /orders/{o['id']}" not in answers:
         keep(f"/orders/{o['id']}", seller)

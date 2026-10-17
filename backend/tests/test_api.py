@@ -1056,6 +1056,14 @@ class OfferTests(ApiTestCase):
         buyer = self.get("/me/todo", self.buyer).json()
         self.assertEqual((buyer["to_pay"], buyer["to_confirm"], buyer["offers_answered"]), (1, 0, 0))
         self.assertNotIn("offers", buyer)  # seller lines only for sellers
+        # Unread chat messages count on each side until that side opens the chat.
+        conv = self.post("/conversations", self.buyer, {"listing_id": listing["id"]}).json()
+        self.post(f"/conversations/{conv['id']}/messages", self.buyer, {"body": "Өлшемі сай ма?"})
+        self.post(f"/conversations/{conv['id']}/messages", self.buyer, {"body": "Тағы бір сұрақ"})
+        todo = lambda t: self.c.get("/api/v1/me/todo", headers=self.h(t)).json()  # noqa: E731
+        self.assertEqual((todo(self.seller)["unread_messages"], todo(self.buyer)["unread_messages"]), (2, 0))
+        self.c.get(f"/api/v1/conversations/{conv['id']}/messages", headers=self.h(self.seller))
+        self.assertEqual(todo(self.seller)["unread_messages"], 0)
 
     def test_offer_bounds_and_daily_limit(self):
         listing = self.publish()  # 45 000 ₸

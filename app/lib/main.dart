@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import 'api.dart';
@@ -96,9 +98,46 @@ int _lastTab = 0;
 
 class _HomeShellState extends State<HomeShell> {
   int _tab = _lastTab;
+  Map<String, int> _counts = const {};
+  Timer? _poll;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_poll == null) {
+      _poll = Timer.periodic(const Duration(minutes: 1), (_) => _refreshBadges());
+      _refreshBadges();
+    }
+  }
+
+  @override
+  void dispose() {
+    _poll?.cancel();
+    super.dispose();
+  }
+
+  /// Unread messages and orders that wait on this person, for the numbers on the Chat and Orders tabs.
+  Future<void> _refreshBadges() async {
+    final session = SessionScope.of(context);
+    if (!session.signedIn) {
+      if (_counts.isNotEmpty) setState(() => _counts = const {});
+      return;
+    }
+    try {
+      final counts = await session.api.todo();
+      if (mounted) setState(() => _counts = counts);
+    } catch (_) {
+      // Badges are a hint; the tabs work without them.
+    }
+  }
+
+  Widget _badged(Widget icon, int count) =>
+      Badge(isLabelVisible: count > 0, label: Text(count > 99 ? '99+' : '$count'), child: icon);
 
   @override
   Widget build(BuildContext context) {
+    final chats = _counts['unread_messages'] ?? 0;
+    final orders = ordersWaiting(_counts);
     return Scaffold(
       body: IndexedStack(index: _tab, children: const [
         CatalogScreen(),
@@ -109,18 +148,25 @@ class _HomeShellState extends State<HomeShell> {
       ]),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _tab,
-        onDestinationSelected: (i) => setState(() => _tab = _lastTab = i),
+        onDestinationSelected: (i) {
+          setState(() => _tab = _lastTab = i);
+          _refreshBadges();
+        },
         destinations: [
           NavigationDestination(
               icon: Icon(Icons.storefront_outlined), selectedIcon: Icon(Icons.storefront), label: tr('Каталог')),
           NavigationDestination(
               icon: Icon(Icons.favorite_border), selectedIcon: Icon(Icons.favorite), label: tr('Таңдаулы')),
           NavigationDestination(
-              icon: Icon(Icons.chat_bubble_outline_rounded),
-              selectedIcon: Icon(Icons.chat_bubble_rounded),
+              key: const Key('tab-chat'),
+              icon: _badged(const Icon(Icons.chat_bubble_outline_rounded), chats),
+              selectedIcon: _badged(const Icon(Icons.chat_bubble_rounded), chats),
               label: tr('Чат')),
           NavigationDestination(
-              icon: Icon(Icons.receipt_long_outlined), selectedIcon: Icon(Icons.receipt_long), label: tr('Тапсырыс')),
+              key: const Key('tab-orders'),
+              icon: _badged(const Icon(Icons.receipt_long_outlined), orders),
+              selectedIcon: _badged(const Icon(Icons.receipt_long), orders),
+              label: tr('Тапсырыс')),
           NavigationDestination(
               icon: Icon(Icons.person_outline), selectedIcon: Icon(Icons.person), label: tr('Профиль')),
         ],
@@ -128,3 +174,12 @@ class _HomeShellState extends State<HomeShell> {
     );
   }
 }
+
+/// Orders where the next step is this person's, from the to-do counts.
+int ordersWaiting(Map<String, int> counts) => [
+      'to_pay',
+      'to_confirm',
+      'to_accept',
+      'to_ship',
+      'returns',
+    ].fold(0, (sum, k) => sum + (counts[k] ?? 0));

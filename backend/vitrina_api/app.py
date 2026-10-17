@@ -26,7 +26,7 @@ from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy import case, delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -1258,6 +1258,16 @@ def count_daily_view(db: Session, listing_id: int) -> None:
         db.execute(bump)
 
 
+def unread_messages(db: Session, user_id: int) -> int:
+    """Messages from the other side this person has not opened yet, across all their chats."""
+    from .models import Conversation, Message
+    last_read = case((Conversation.buyer_id == user_id, Conversation.buyer_last_read_id),
+                     else_=Conversation.seller_last_read_id)
+    return int(db.scalar(select(func.count(Message.id)).join(Conversation, Conversation.id == Message.conversation_id)
+                         .where(or_(Conversation.buyer_id == user_id, Conversation.seller_id == user_id),
+                                Message.sender_id != user_id, Message.id > last_read)) or 0)
+
+
 @api.get("/me/todo")
 def my_todo(user: User = Depends(current_user), db: Session = Depends(get_db)):
     """What waits on this person right now, as counts for the profile's to-do card. Seller lines come only for
@@ -1272,6 +1282,7 @@ def my_todo(user: User = Depends(current_user), db: Session = Depends(get_db)):
         "to_confirm": orders("buyer", S.DELIVERED_PENDING_CONFIRMATION.value),
         "offers_answered": int(db.scalar(select(func.count(Offer.id)).where(
             Offer.buyer_id == user.id, Offer.status.in_(("countered", "accepted")), Offer.expires_at > now)) or 0),
+        "unread_messages": unread_messages(db, user.id),
     }
     if user.is_seller:
         out |= {
