@@ -30,7 +30,7 @@ from .config import Settings
 from .deps import current_user, get_db, get_settings, get_storage, now_utc, optional_user, sha256, staff_user
 from .errors import ApiError, api_error_handler
 from .social import router as social_router, seller_rating
-from .models import (AuditLog, AuthToken, Favorite, IdempotencyRecord, Listing, ListingSize, Media, Order, OrderEvent,
+from .models import (AuditLog, ListingReport, AuthToken, Favorite, IdempotencyRecord, Listing, ListingSize, Media, Order, OrderEvent,
                      OtpCode, Review, User, WebhookEvent, make_session_factory)
 from .storage import MAX_UPLOAD_BYTES, LocalStorage, normalize_image
 
@@ -113,6 +113,16 @@ class ShipIn(BaseModel):
 
 class ReasonIn(BaseModel):
     reason: str = Field(max_length=2000)
+
+
+class ReportIn(BaseModel):
+    reason: Literal["fake", "wrong_photos", "prohibited", "contact_details", "other"]
+    text: str | None = Field(default=None, max_length=1000)
+
+
+class ReportCloseIn(BaseModel):
+    action: Literal["hide", "dismiss"]
+    reason: str = Field(min_length=3, max_length=2000)
 
 
 class ResolveIn(BaseModel):
@@ -452,6 +462,28 @@ def search_listings(q: str | None = None, category: str | None = None, brand: st
     return {"items": [listing_out(db, r) for r in rows]}
 
 
+@api.post("/listings/{listing_id}/report", status_code=201)
+def report_listing(listing_id: int, body: ReportIn, user: User = Depends(current_user),
+                   db: Session = Depends(get_db)):
+    """Reports only queue a listing for a moderator; they never hide it by themselves, so competitors
+    cannot take a listing down by reporting it."""
+    listing = db.get(Listing, listing_id)
+    if listing is None or listing.status != "published":
+        raise ApiError(404, "not_found")
+    if listing.seller_id == user.id:
+        raise ApiError(409, "own_listing")
+    if body.reason == "other" and not (body.text or "").strip():
+        raise ApiError(422, "reason_required")
+    db.add(ListingReport(listing_id=listing.id, reporter_id=user.id, reason=body.reason,
+                         text=(body.text or "").strip() or None))
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise ApiError(409, "already_reported")
+    return {"reported": True}
+
+
 @api.get("/sellers/{seller_id}")
 def seller_profile(seller_id: int, db: Session = Depends(get_db)):
     """Public shop card. Counts come from the platform's own records, not from what the seller typed."""
@@ -716,6 +748,45 @@ def admin_listings(status: str | None = None, staff: User = Depends(staff_user),
     if status:
         stmt = stmt.where(Listing.status == status)
     return {"items": [listing_out(db, r) for r in db.scalars(stmt).all()]}
+
+
+@api.get("/admin/reports")
+def admin_reports(staff: User = Depends(staff_user), db: Session = Depends(get_db)):
+    """Open reports grouped by listing, most-reported first."""
+    rows = db.scalars(select(ListingReport).where(ListingReport.status == "open").order_by(ListingReport.id)).all()
+    by_listing: dict[int, list[ListingReport]] = {}
+    for r in rows:
+        by_listing.setdefault(r.listing_id, []).append(r)
+    items = [{"listing": listing_out(db, db.get(Listing, lid)),
+              "reports": [{"id": r.id, "reason": r.reason, "text": r.text, "reporter_id": r.reporter_id,
+                           "at": services.aware(r.created_at).isoformat()} for r in reports]}
+             for lid, reports in by_listing.items()]
+    items.sort(key=lambda i: -len(i["reports"]))
+    return {"items": items}
+
+
+@api.post("/admin/reports/{listing_id}/close")
+def close_reports(listing_id: int, body: ReportCloseIn, staff: User = Depends(staff_user),
+                  db: Session = Depends(get_db)):
+    listing = db.get(Listing, listing_id)
+    reports = db.scalars(select(ListingReport).where(ListingReport.listing_id == listing_id,
+                                                     ListingReport.status == "open")).all()
+    if listing is None or not reports:
+        raise ApiError(404, "not_found")
+    outcome = "hidden" if body.action == "hide" else "dismissed"
+    for r in reports:
+        r.status = outcome
+    if body.action == "hide":
+        listing.status = "hidden"
+        services.notify(db, listing.seller_id, "listing_hidden",
+                        f"«{listing.title}» модератор шешімімен жасырылды: {body.reason}")
+    for reporter in {r.reporter_id for r in reports}:
+        services.notify(db, reporter, "report_closed",
+                        f"«{listing.title}» туралы шағымыңыз қаралды: "
+                        + ("тауар жасырылды." if body.action == "hide" else "бұзушылық табылмады."))
+    services.audit(db, staff.id, f"reports_{outcome}", f"listing:{listing.id}", body.reason)
+    db.commit()
+    return {"listing_id": listing.id, "status": listing.status, "closed": len(reports)}
 
 
 @api.get("/admin/audit")

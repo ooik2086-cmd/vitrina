@@ -46,6 +46,7 @@ const STATUS = { CREATED:'Жасалды', PAYMENT_PENDING:'Төлем күті�
   RETURN_REQUESTED:'Қайтару сұралды', REFUND_PENDING:'Қайтарылуда', REFUNDED:'Қайтарылды', CANCELLED:'Жойылды' };
 const ACTOR = { buyer:'сатып алушы', seller:'сатушы', system:'жүйе', support:'қолдау' };
 const actor = (a) => ACTOR[String(a).split(':')[0]] || a;
+const REASON = { fake:'Жалған тауар', wrong_photos:'Фото сәйкес емес', prohibited:'Тыйым салынған', contact_details:'Байланыс деректері', other:'Басқа' };
 let token = sessionStorage.getItem('vitrina_admin') || '';
 let tab = 'overview';
 const $ = (h) => { const t = document.createElement('template'); t.innerHTML = h.trim(); return t.content; };
@@ -89,7 +90,7 @@ function loginView() {
 }
 
 function shell(content) {
-  const tabs = [['overview','Шолу'],['disputes','Даулар'],['orders','Тапсырыстар'],['listings','Тауарлар'],['audit','Аудит']];
+  const tabs = [['overview','Шолу'],['disputes','Даулар'],['reports','Шағымдар'],['orders','Тапсырыстар'],['listings','Тауарлар'],['audit','Аудит']];
   const n = $(`<div><header><b>VITRINA</b><nav>${tabs.map(([k, l]) =>
     `<button data-k="${k}" aria-current="${k === tab}">${l}</button>`).join('')}</nav>
     <span style="flex:1"></span><button class="ghost" id="out">Шығу</button></header><main></main></div>`);
@@ -151,6 +152,26 @@ async function show() {
         box.append(n);
       });
       if (!r.items.length) box.append($(`<div class="card muted">Сатылымда тауар жоқ.</div>`));
+    } else if (tab === 'reports') {
+      const r = await call('GET', '/admin/reports');
+      if (!r.items.length) box.append($(`<div class="card muted">Ашық шағым жоқ.</div>`));
+      r.items.forEach(({ listing: l, reports }) => {
+        const cover = (l.media.find(m => m.angle !== 'frame') || l.media[0] || {}).original_url;
+        const n = $(`<div class="card"><div class="row">${cover ? `<img src="${esc(cover)}" alt="">` : ''}<div style="flex:1">
+          <b>#${l.id} · ${esc(l.title)}</b> <span class="pill">${reports.length} шағым</span>
+          <div class="muted">${tenge(l.price_tiyn)} · ${esc(l.seller.shop_name)}</div>
+          <ol class="hist">${reports.map(x => `<li>${when(x.at)} · ${esc(REASON[x.reason] || x.reason)}${x.text ? ' — «' + esc(x.text) + '»' : ''} · #${x.reporter_id}</li>`).join('')}</ol>
+          <form class="inline" style="grid-template-columns:1fr auto auto"><input name="reason" placeholder="Шешімнің себебі (сатушы мен шағымданушылар көреді)" required>
+          <button class="ghost" value="dismiss">Бұзушылық жоқ</button><button class="primary" value="hide">Жасыру</button>
+          <div class="err" style="grid-column:1/-1"></div></form></div></div></div>`);
+        const f = n.querySelector('form');
+        f.onsubmit = async (e) => {
+          e.preventDefault();
+          try { await call('POST', `/admin/reports/${l.id}/close`, { action: e.submitter.value, reason: f.reason.value.trim() }); show(); }
+          catch (x) { f.querySelector('.err').textContent = x.message; }
+        };
+        box.append(n);
+      });
     } else if (tab === 'audit') {
       const r = await call('GET', '/admin/audit');
       box.append($(`<div class="card"><table><tr><th>Уақыт</th><th>Кім</th><th>Әрекет</th><th>Нысан</th><th>Себеп</th></tr>${r.items.map(a =>

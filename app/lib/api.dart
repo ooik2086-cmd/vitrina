@@ -455,6 +455,9 @@ class Api {
       Review.fromJson(await _send('POST', '/orders/$orderId/review',
           body: {'rating': rating, if (text != null && text.isNotEmpty) 'text': text}) as Map<String, dynamic>);
 
+  Future<void> reportListing(int id, String reason, {String? text}) => _send('POST', '/listings/$id/report',
+      body: {'reason': reason, if (text != null && text.isNotEmpty) 'text': text});
+
   Future<Shop> shop(int sellerId) async =>
       Shop.fromJson(await _send('GET', '/sellers/$sellerId') as Map<String, dynamic>);
 

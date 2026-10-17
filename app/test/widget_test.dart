@@ -400,4 +400,27 @@ void main() {
     expect(find.textContaining('қаз 2026'), findsOneWidget);
     expect(find.text('Nike Air Force 1'), findsOneWidget);
   });
+
+  testWidgets('report sheet needs a reason, and text for "other"', (tester) async {
+    Map<String, dynamic>? sent;
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async {
+          expect(req.url.path, '/api/v1/listings/7/report');
+          sent = jsonDecode(req.body) as Map<String, dynamic>;
+          return http.Response('{"reported": true}', 201);
+        }));
+    await tester.pumpWidget(SessionScope(
+        session: Session(api), child: const MaterialApp(home: Scaffold(body: ReportSheet(listingId: 7)))));
+    FilledButton send() => tester.widget<FilledButton>(find.byKey(const Key('send-report')));
+    expect(send().onPressed, isNull);
+    await tester.tap(find.text('Басқа себеп'));
+    await tester.pump();
+    expect(send().onPressed, isNull);
+    await tester.tap(find.text('Телефон не сілтеме жазылған'));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('send-report')));
+    await tester.pumpAndSettle();
+    expect(sent, {'reason': 'contact_details'});
+  });
 }

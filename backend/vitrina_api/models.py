@@ -183,6 +183,19 @@ class AuditLog(Base):
     at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class ListingReport(Base):
+    """A buyer's complaint about a listing; one open report per person per listing."""
+    __tablename__ = "listing_reports"
+    __table_args__ = (UniqueConstraint("listing_id", "reporter_id"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    listing_id: Mapped[int] = mapped_column(ForeignKey("listings.id"), index=True)
+    reporter_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    reason: Mapped[str] = mapped_column(String(30))  # fake | wrong_photos | prohibited | contact_details | other
+    text: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(20), default="open", index=True)  # open | hidden | dismissed
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class Conversation(Base):
     """One thread per buyer and listing; the seller is fixed by the listing."""
     __tablename__ = "conversations"

@@ -81,6 +81,19 @@ class _ListingScreenState extends State<ListingScreen> {
     }
   }
 
+  Future<void> _report(Listing listing) async {
+    if (!await _ensureSignedIn() || !mounted) return;
+    final sent = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => ReportSheet(listingId: listing.id),
+    );
+    if (sent == true && mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Шағым жіберілді. Модератор қарап, сізге хабарлайды.')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -241,8 +254,8 @@ class _ListingScreenState extends State<ListingScreen> {
                       ),
                     ]),
                     trailing: const Icon(Icons.chevron_right),
-                    onTap: () => Navigator.of(context)
-                        .push(MaterialPageRoute(builder: (_) => ShopScreen(sellerId: l.sellerId))),
+                    onTap: () =>
+                        Navigator.of(context).push(MaterialPageRoute(builder: (_) => ShopScreen(sellerId: l.sellerId))),
                   ),
                   if (SessionScope.of(context).me?.id != l.sellerId)
                     Padding(
@@ -260,6 +273,16 @@ class _ListingScreenState extends State<ListingScreen> {
                     const SizedBox(height: 8),
                 ]),
               ),
+              if (SessionScope.of(context).me?.id != l.sellerId)
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: () => _report(l),
+                    icon: const Icon(Icons.flag_outlined, size: 18),
+                    label: const Text('Тауар туралы шағымдану'),
+                    style: TextButton.styleFrom(foregroundColor: scheme.onSurfaceVariant),
+                  ),
+                ),
               const SizedBox(height: 12),
               Container(
                 padding: const EdgeInsets.all(16),
@@ -392,6 +415,91 @@ class _SizeTile extends StatelessWidget {
               Text('${size.insoleCm} см', style: theme.textTheme.labelSmall?.copyWith(color: fg)),
             ]),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+const reportReasons = {
+  'fake': 'Жалған немесе көшірме тауар',
+  'wrong_photos': 'Фото тауарға сәйкес емес',
+  'prohibited': 'Сатуға тыйым салынған',
+  'contact_details': 'Телефон не сілтеме жазылған',
+  'other': 'Басқа себеп',
+};
+
+/// Report form. A report only queues the listing for a moderator; it never hides it by itself.
+class ReportSheet extends StatefulWidget {
+  const ReportSheet({super.key, required this.listingId});
+  final int listingId;
+
+  @override
+  State<ReportSheet> createState() => _ReportSheetState();
+}
+
+class _ReportSheetState extends State<ReportSheet> {
+  String? _reason;
+  final _text = TextEditingController();
+  bool _sending = false;
+
+  @override
+  void dispose() {
+    _text.dispose();
+    super.dispose();
+  }
+
+  Future<void> _send() async {
+    setState(() => _sending = true);
+    try {
+      await SessionScope.of(context).api.reportListing(widget.listingId, _reason!, text: _text.text.trim());
+      if (mounted) Navigator.pop(context, true);
+    } catch (e) {
+      if (mounted) showError(context, e);
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final needsText = _reason == 'other' && _text.text.trim().isEmpty;
+    return SafeArea(
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(20, 0, 20, 16 + MediaQuery.viewInsetsOf(context).bottom),
+        child: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('Шағым себебі', style: theme.textTheme.titleLarge),
+            const SizedBox(height: 4),
+            Text('Модератор тексереді. Сатушы шағым кімнен екенін көрмейді.',
+                style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+            const SizedBox(height: 8),
+            RadioGroup<String>(
+              groupValue: _reason,
+              onChanged: (v) => setState(() => _reason = v),
+              child: Column(children: [
+                for (final e in reportReasons.entries)
+                  RadioListTile<String>(contentPadding: EdgeInsets.zero, value: e.key, title: Text(e.value)),
+              ]),
+            ),
+            TextField(
+              controller: _text,
+              maxLines: 3,
+              maxLength: 1000,
+              onChanged: (_) => setState(() {}),
+              decoration: const InputDecoration(labelText: 'Толығырақ (міндетті емес)'),
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                key: const Key('send-report'),
+                onPressed: _reason == null || needsText || _sending ? null : _send,
+                child: const Text('Жіберу'),
+              ),
+            ),
+          ]),
         ),
       ),
     );

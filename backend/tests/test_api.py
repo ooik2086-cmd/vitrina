@@ -183,6 +183,42 @@ class EarningsTests(ApiTestCase):
         self.assertEqual(e["items"][0]["listing_title"], LISTING["title"])
 
 
+class ReportTests(ApiTestCase):
+    def report(self, lid, token, reason="fake", text=None):
+        return self.post(f"/listings/{lid}/report", token, {"reason": reason, "text": text})
+
+    def test_reports_queue_for_moderator_who_hides_and_everyone_is_told(self):
+        lid = self.publish()["id"]
+        other = self.login("+77010000003")
+        self.assertEqual(self.report(lid, self.seller).json()["code"], "own_listing")
+        self.assertEqual(self.report(lid, self.buyer, "other").json()["code"], "reason_required")
+        self.assertEqual(self.report(lid, self.buyer).status_code, 201)
+        self.assertEqual(self.report(lid, self.buyer, "wrong_photos").json()["code"], "already_reported")
+        self.assertEqual(self.report(lid, other, "contact_details", "Телефонын суретке жазған").status_code, 201)
+        # reports alone never hide a listing
+        self.assertEqual(self.c.get(f"/api/v1/listings/{lid}").status_code, 200)
+        staff = self.make_staff()
+        self.assertEqual(self.c.get("/api/v1/admin/reports", headers=self.h(self.buyer)).status_code, 403)
+        queue = self.c.get("/api/v1/admin/reports", headers=self.h(staff)).json()["items"]
+        self.assertEqual([(i["listing"]["id"], len(i["reports"])) for i in queue], [(lid, 2)])
+        r = self.post(f"/admin/reports/{lid}/close", staff, {"action": "hide", "reason": "Брендтің көшірмесі"})
+        self.assertEqual(r.json(), {"listing_id": lid, "status": "hidden", "closed": 2})
+        self.assertEqual(self.c.get(f"/api/v1/listings/{lid}").status_code, 404)
+        self.assertEqual(self.c.get("/api/v1/admin/reports", headers=self.h(staff)).json()["items"], [])
+        for token, kind in ((self.seller, "listing_hidden"), (self.buyer, "report_closed"), (other, "report_closed")):
+            items = self.c.get("/api/v1/notifications", headers=self.h(token)).json()["items"]
+            self.assertIn(kind, [n["kind"] for n in items])
+
+    def test_dismiss_keeps_listing_live(self):
+        lid = self.publish()["id"]
+        self.report(lid, self.buyer)
+        staff = self.make_staff()
+        r = self.post(f"/admin/reports/{lid}/close", staff, {"action": "dismiss", "reason": "Фото шынайы"})
+        self.assertEqual(r.json()["status"], "published")
+        self.assertEqual(self.post(f"/admin/reports/{lid}/close", staff,
+                                   {"action": "dismiss", "reason": "again"}).status_code, 404)
+
+
 class ShopTests(ApiTestCase):
     def test_shop_profile_counts_and_seller_filter(self):
         _, order = self.delivered()
