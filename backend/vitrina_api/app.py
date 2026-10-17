@@ -9,6 +9,7 @@ import hmac
 import io
 import json
 import logging
+import os
 import re
 import secrets
 import threading
@@ -42,13 +43,13 @@ from .deps import current_user, get_db, get_settings, get_storage, now_utc, opti
 from .errors import ApiError, api_error_handler
 from .share import router as share_router
 from .social import CONTACT_RE, reply_time, router as social_router, seller_rating, size_fit
-from .models import (AuditLog, PriceChange, AuthToken, Block, Follow, Notification, Offer, SavedSearch, StockAlert, ListingDailyViews, ListingEmbedding, ListingReport, AuthToken, Favorite, IdempotencyRecord, Listing, ListingSize, Media, Order, OrderEvent,
+from .models import (AuditLog, PriceChange, Block, Follow, Notification, Offer, SavedSearch, StockAlert, ListingDailyViews, ListingEmbedding, ListingReport, AuthToken, Favorite, IdempotencyRecord, Listing, ListingSize, Media, Order, OrderEvent,
                      OtpCode, Question, Review, User, WebhookEvent, make_session_factory)
 from .storage import MAX_UPLOAD_BYTES, Storage, make_storage, normalize_image
 
 CATEGORIES = ("sneakers", "sport", "casual", "classic", "boots_winter", "sandals", "kids", "other")
 PHONE_RE = re.compile(r"^\+7\d{10}$")
-log = logging.getLogger(__name__)
+log = logging.getLogger("vitrina.api")
 
 MIN_SPIN_FRAMES = 8  # fewer real frames than this do not read as a rotation
 DEFECT_REQUIRED = {Condition.USED_GOOD.value, Condition.DEFECTIVE.value}
@@ -170,16 +171,30 @@ def mm_to_cm(mm: int) -> str:
     return f"{mm // 10},{mm % 10}"
 
 
+def per_request(db: Session, name: str, key, make):
+    """A value computed once per request (the session lives exactly one request): a page of 20 listings from the
+    same category or seller asks the same question 20 times."""
+    memo = db.info.setdefault(name, {})
+    if key not in memo:
+        memo[key] = make()
+    return memo[key]
+
+
 def segment_for(db: Session, listing: Listing) -> str | None:
-    prices = db.scalars(select(Listing.price_tiyn).where(Listing.category == listing.category,
-                                                         Listing.status.in_(("published", "sold")))).all()
-    bounds = compute_bounds(listing.category, list(prices))
-    return bounds.segment_for(listing.price_tiyn).value if bounds else None
+    def bounds():
+        prices = db.scalars(select(Listing.price_tiyn).where(Listing.category == listing.category,
+                                                             Listing.status.in_(("published", "sold")))).all()
+        return compute_bounds(listing.category, list(prices))
+    b = per_request(db, "segment_bounds", listing.category, bounds)
+    return b.segment_for(listing.price_tiyn).value if b else None
 
 
 def listing_stats(db: Session, listing: Listing) -> dict:
     """How the listing is doing, for its seller only."""
     from .models import Conversation
+    batch = db.info.get("listing_stats")
+    if batch is not None and listing.id in batch:
+        return {"views": listing.views, **batch[listing.id]}
     count = lambda stmt: int(db.scalar(stmt) or 0)  # noqa: E731
     return {
         "views": listing.views,
@@ -208,7 +223,8 @@ def listing_out(db: Session, listing: Listing, *, owner: bool = False) -> dict:
         "media": [{"original_url": m.original_url, "processed_url": m.processed_url, "angle": m.angle}
                   for m in listing.media],
         "seller": {"id": seller.id, "shop_name": seller.shop_name, "city": seller.city,  # never the phone
-                   "away_until": away_out(seller), **seller_rating(db, seller.id)},
+                   "away_until": away_out(seller),
+                   **per_request(db, "seller_rating", seller.id, lambda: seller_rating(db, seller.id))},
         **({"stats": listing_stats(db, listing),
             "promo": {"state": listing.promo_state, "url": listing.promo_url},
             "moderation": moderation_out(listing)} if owner else {}),
@@ -316,15 +332,27 @@ def me_out(user: User) -> dict:
 
 # ---------------------------------------------------------------- auth + profile
 api = APIRouter(prefix="/api/v1")
+OTP_REQUESTS_PER_ADDRESS_PER_HOUR = 20
+OTP_FAILURES_PER_DAY = 15
+STAFF_TOKEN_TTL = timedelta(hours=12)
 
 
 @api.post("/auth/otp")
-def request_otp(body: OtpRequest, db: Session = Depends(get_db), cfg: Settings = Depends(get_settings)):
+def request_otp(body: OtpRequest, request: Request, db: Session = Depends(get_db),
+                cfg: Settings = Depends(get_settings)):
     if not PHONE_RE.match(body.phone):
         raise ApiError(422, "invalid_phone")
+    # Per address as well as per phone: one script walking through many numbers is what makes SMS bills explode.
+    client = request.client.host if request.client else "unknown"
+    if not request.app.state.otp_limiter.allow(client, time.monotonic()):
+        raise ApiError(429, "rate_limited")
+    now = now_utc()
     recent = db.scalar(select(func.count(OtpCode.id)).where(OtpCode.phone == body.phone,
-                                                            OtpCode.created_at > now_utc() - timedelta(hours=1)))
-    if recent >= cfg.otp_per_phone_per_hour:
+                                                            OtpCode.created_at > now - timedelta(hours=1)))
+    # A fresh code resets the attempt counter, so wrong guesses are also capped per phone per day.
+    failed_today = db.scalar(select(func.coalesce(func.sum(OtpCode.attempts), 0)).where(
+        OtpCode.phone == body.phone, OtpCode.created_at > now - timedelta(days=1)))
+    if recent >= cfg.otp_per_phone_per_hour or failed_today >= OTP_FAILURES_PER_DAY:
         raise ApiError(429, "rate_limited")
     code = f"{secrets.randbelow(10**6):06d}"
     digest = hmac.new(cfg.otp_secret, f"{body.phone}:{code}".encode(), hashlib.sha256).hexdigest()
@@ -342,9 +370,16 @@ def verify_otp(body: OtpVerify, db: Session = Depends(get_db), cfg: Settings = D
         raise ApiError(400, "otp_expired")
     digest = hmac.new(cfg.otp_secret, f"{body.phone}:{body.code}".encode(), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(digest, otp.code_hash):
-        otp.attempts += 1
+        # One atomic step, so parallel guesses cannot all pass the attempts check read above.
+        db.execute(update(OtpCode).where(OtpCode.id == otp.id, OtpCode.attempts < cfg.otp_max_attempts)
+                   .values(attempts=OtpCode.attempts + 1))
         db.commit()
         raise ApiError(400, "otp_invalid")
+    claimed = db.execute(update(OtpCode).where(OtpCode.id == otp.id, OtpCode.used.is_(False),
+                                               OtpCode.attempts < cfg.otp_max_attempts).values(used=True))
+    if claimed.rowcount != 1:  # used or locked by a request that got there first
+        db.rollback()
+        raise ApiError(400, "otp_expired")
     otp.used = True
     user = db.scalar(select(User).where(User.phone == body.phone))
     if user is None:
@@ -355,9 +390,22 @@ def verify_otp(body: OtpVerify, db: Session = Depends(get_db), cfg: Settings = D
         db.commit()
         raise ApiError(403, "forbidden", "account blocked")
     raw = secrets.token_urlsafe(32)
-    db.add(AuthToken(token_hash=sha256(raw), user_id=user.id, expires_at=now_utc() + cfg.token_ttl))
+    # Staff can move money and hide listings, so a leaked staff token is worth far less if it dies within a shift.
+    ttl = STAFF_TOKEN_TTL if user.role in ("support", "admin") else cfg.token_ttl
+    db.add(AuthToken(token_hash=sha256(raw), user_id=user.id, expires_at=now_utc() + ttl))
     db.commit()
     return {"token": raw, "user": me_out(user)}
+
+
+@api.post("/auth/logout")
+def logout(everywhere: bool = False, authorization: str | None = Header(default=None),
+           user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """Ends this session on the server, not only on the phone; with everywhere, every session of the account."""
+    which = (AuthToken.user_id == user.id if everywhere
+             else AuthToken.token_hash == sha256((authorization or "")[7:].strip()))
+    db.execute(update(AuthToken).where(which).values(revoked=True))
+    db.commit()
+    return {"ok": True}
 
 
 @api.get("/health")
@@ -496,11 +544,11 @@ def search_text(body: ListingIn) -> str:
 
 
 @api.post("/media", status_code=201)
-async def upload_photo(file: UploadFile = File(...), user: User = Depends(current_user),
+def upload_photo(file: UploadFile = File(...), user: User = Depends(current_user),
                        storage: Storage = Depends(get_storage)):
     if not user.is_seller:
         raise ApiError(403, "seller_required")
-    data = await file.read(MAX_UPLOAD_BYTES + 1)
+    data = file.file.read(MAX_UPLOAD_BYTES + 1)
     if len(data) > MAX_UPLOAD_BYTES:
         raise ApiError(413, "file_too_large")
     return {"url": storage.put(normalize_image(data), owner_id=user.id)}
@@ -509,7 +557,23 @@ async def upload_photo(file: UploadFile = File(...), user: User = Depends(curren
 @api.get("/me/listings")
 def my_listings(user: User = Depends(current_user), db: Session = Depends(get_db)):
     rows = db.scalars(select(Listing).where(Listing.seller_id == user.id).order_by(Listing.id.desc()).limit(200)).all()
+    preload_stats(db, [r.id for r in rows])
     return {"items": [listing_out(db, r, owner=True) for r in rows]}
+
+
+def preload_stats(db: Session, ids: list[int]) -> None:
+    """listing_stats for many listings in four grouped queries instead of four per listing."""
+    from .models import Conversation
+    if not ids:
+        return
+    def grouped(column, *where):
+        return dict(db.execute(select(column, func.count()).where(column.in_(ids), *where).group_by(column)).all())
+    favs = grouped(Favorite.listing_id)
+    chats = grouped(Conversation.listing_id)
+    orders = grouped(Order.listing_id, Order.status != S.CANCELLED.value)
+    sold = grouped(Order.listing_id, Order.status == S.COMPLETED.value)
+    db.info["listing_stats"] = {i: {"favorites": favs.get(i, 0), "chats": chats.get(i, 0), "orders": orders.get(i, 0),
+                                    "sold": sold.get(i, 0)} for i in ids}
 
 
 @api.get("/me/earnings")
@@ -574,6 +638,11 @@ def sales_csv(days: int = Query(default=90, ge=1, le=366), user: User = Depends(
     mine = seller_payable(str(user.id))
     out = io.StringIO()
     w = csv.writer(out, delimiter=";", lineterminator="\r\n")
+
+    def cell(text: str) -> str:
+        # Text someone else typed must never run as a spreadsheet formula when the seller opens the file.
+        return "'" + text if text[:1] in ("=", "+", "-", "@", "\t", "\r") else text
+
     w.writerow(["Тапсырыс", "Күні", "Күйі", "Тауар", "Өлшем", "Тауар бағасы, ₸", "Промокод", "Жеңілдік, ₸",
                 "Жеткізу, ₸", "Комиссия, ₸", "Сізге, ₸", "Алушы қаласы"])
     for o in orders:
@@ -584,10 +653,11 @@ def sales_csv(days: int = Query(default=90, ge=1, le=366), user: User = Depends(
         size = db.get(ListingSize, o.size_id)
         paid = o.status not in ADDRESS_HIDDEN_UNTIL_PAID  # the buyer's city only once they have paid
         w.writerow([o.id, services.aware(o.created_at).astimezone(ALMATY).strftime("%d.%m.%Y %H:%M"),
-                    STATUS_KK.get(o.status, o.status), db.get(Listing, o.listing_id).title, size.label if size else "",
+                    STATUS_KK.get(o.status, o.status), cell(db.get(Listing, o.listing_id).title),
+                    cell(size.label) if size else "",
                     tenge(o.item_price_tiyn), o.promo_code or "", tenge(o.promo_discount_tiyn) if o.promo_code else "",
                     tenge(o.delivery_price_tiyn), tenge(fee) if settled else "", tenge(net) if settled else "",
-                    (o.delivery_city or "") if paid else ""])
+                    cell(o.delivery_city or "") if paid else ""])
     name = f"vitrina-sales-{now_utc().astimezone(ALMATY):%Y-%m-%d}.csv"
     return Response(content="\ufeff" + out.getvalue(), media_type="text/csv; charset=utf-8",
                     headers={"Content-Disposition": f'attachment; filename="{name}"'})
@@ -678,7 +748,7 @@ def create_listing(body: ListingIn, request: Request, background: BackgroundTask
                    cfg: Settings = Depends(get_settings), storage: Storage = Depends(get_storage)):
     if not user.is_seller:
         raise ApiError(403, "seller_required")
-    if not cfg.allow_external_media and not all(storage.owns(p.url) for p in body.photos):
+    if not cfg.allow_external_media and not all(storage.owns(p.url, user.id) for p in body.photos):
         raise ApiError(422, "foreign_media")
     frames = sum(p.angle == "frame" for p in body.photos)
     if 0 < frames < MIN_SPIN_FRAMES:
@@ -752,6 +822,7 @@ def edit_listing(listing_id: int, body: ListingPatch, user: User = Depends(curre
         raise ApiError(409, "invalid_status")
     if body.price_tiyn is not None:
         set_price(db, listing, body.price_tiyn)
+        listing.pre_sale_price_tiyn = None  # the seller chose a price by hand: ending a sale must not undo it
     if body.delivery_price_tiyn is not None:
         listing.delivery_price_tiyn = body.delivery_price_tiyn
     if body.description is not None:
@@ -835,6 +906,8 @@ def start_shop_sale(body: ShopSaleIn, user: User = Depends(current_user), db: Se
     for listing in db.scalars(select(Listing).where(Listing.seller_id == user.id, Listing.status == "published")):
         new = max(100, (listing.price_tiyn * (100 - body.percent) + 5000) // 10000 * 100)  # half up, as the app
         if new < listing.price_tiyn:
+            if listing.pre_sale_price_tiyn is None:  # a second sale on top keeps the first original price
+                listing.pre_sale_price_tiyn = listing.price_tiyn
             set_price(db, listing, new)
             changed += 1
     db.commit()
@@ -843,11 +916,13 @@ def start_shop_sale(body: ShopSaleIn, user: User = Depends(current_user), db: Se
 
 @api.delete("/me/shop-sale")
 def end_shop_sale(user: User = Depends(current_user), db: Session = Depends(get_db)):
-    """Puts back the crossed-out price on every listing that still shows one."""
+    """Puts back the price each listing had before the sale; listings from before that was stored fall back to the
+    crossed-out price."""
     changed = 0
     for listing in db.scalars(select(Listing).where(Listing.seller_id == user.id)):
-        old = was_price(listing)
-        if old is not None:
+        old = listing.pre_sale_price_tiyn or was_price(listing)
+        listing.pre_sale_price_tiyn = None
+        if old is not None and old != listing.price_tiyn:
             set_price(db, listing, old)
             changed += 1
     db.commit()
@@ -922,17 +997,34 @@ def search_listings(q: str | None = None, category: str | None = None, brand: st
     return out
 
 
-def did_you_mean(db: Session, q: str) -> str | None:
-    """When a search finds nothing, the nearest spelling that does: 'nkie air' -> 'Nike air'. Words are matched
-    against what is on sale now, so the hint never leads to another empty page."""
-    import difflib
-    vocab: dict[str, str] = {}  # normalized word -> how to show it
+_VOCAB: dict[int, tuple[tuple, dict[str, str]]] = {}
+
+
+def search_vocabulary(db: Session) -> dict[str, str]:
+    """Every word on sale (normalized -> how to show it). Rebuilt only when the published catalog changes, which
+    one cheap count tells, instead of reading every listing on each search that finds nothing."""
+    version = tuple(db.execute(select(func.count(Listing.id), func.max(Listing.id), func.sum(Listing.price_tiyn))
+                               .where(Listing.status == "published")).one())
+    key = id(db.get_bind())
+    cached = _VOCAB.get(key)
+    if cached and cached[0] == version:
+        return cached[1]
+    vocab: dict[str, str] = {}
     for text in db.scalars(select(Listing.search_text).where(Listing.status == "published")):
         for w in text.split():
             vocab.setdefault(w, w)
     for brand in db.scalars(select(Listing.brand).where(Listing.status == "published", Listing.brand.is_not(None))):
         for w in brand.split():
             vocab[normalize_query(w)] = w  # show brands the way sellers write them
+    _VOCAB[key] = (version, vocab)
+    return vocab
+
+
+def did_you_mean(db: Session, q: str) -> str | None:
+    """When a search finds nothing, the nearest spelling that does: 'nkie air' -> 'Nike air'. Words are matched
+    against what is on sale now, so the hint never leads to another empty page."""
+    import difflib
+    vocab = search_vocabulary(db)
     words, changed = [], False
     for w in normalize_query(q).split():
         if w in vocab or len(w) < 3:
@@ -1061,7 +1153,7 @@ IMAGE_SEARCH_PER_MINUTE = 20
 
 
 @api.post("/search/image")
-async def search_by_image(request: Request, file: UploadFile = File(...), category: str | None = None,
+def search_by_image(request: Request, file: UploadFile = File(...), category: str | None = None,
                           size_cm: str | None = None, limit: int = 20, db: Session = Depends(get_db)):
     """Listings that look like the uploaded photo, most similar first. The photo is not stored."""
     embed = request.app.state.embedder
@@ -1070,7 +1162,7 @@ async def search_by_image(request: Request, file: UploadFile = File(...), catego
     client = request.client.host if request.client else "unknown"
     if not request.app.state.image_search_limiter.allow(client, time.monotonic()):
         raise ApiError(429, "rate_limited")
-    data = await file.read(MAX_UPLOAD_BYTES + 1)
+    data = file.file.read(MAX_UPLOAD_BYTES + 1)
     if len(data) > MAX_UPLOAD_BYTES:
         raise ApiError(413, "file_too_large")
     import numpy as np
@@ -1109,7 +1201,7 @@ def suggest_details(body: SuggestIn, request: Request, user: User = Depends(curr
         raise ApiError(403, "seller_required")
     if embed is None:
         raise ApiError(503, "image_search_off")
-    if not storage.owns(body.photo_url):
+    if not storage.owns(body.photo_url, user.id):
         raise ApiError(422, "foreign_media")
     import numpy as np
     full = embed(storage.read(body.photo_url))
@@ -1409,8 +1501,14 @@ def announce(db: Session, listing: Listing) -> None:
             services.notify(db, follower, "followed_shop", f"«{shop}» жаңа тауар қойды: «{listing.title}», {price}",
                             f"«{shop}» выставил новый товар: «{listing.title}», {price}",
                             f"“{shop}” listed something new: “{listing.title}”, {price}", listing_id=listing.id)
-    for saved in db.scalars(select(SavedSearch).join(User, User.id == SavedSearch.user_id).where(
-            User.is_blocked.is_(False)).order_by(SavedSearch.id)).all():
+    # Only searches this listing can match on its plain fields are checked one by one; with many saved searches
+    # checking every one of them made publishing slow.
+    candidates = select(SavedSearch).join(User, User.id == SavedSearch.user_id).where(
+        User.is_blocked.is_(False),
+        or_(SavedSearch.category.is_(None), SavedSearch.category == "", SavedSearch.category == listing.category),
+        or_(SavedSearch.min_price_tiyn.is_(None), SavedSearch.min_price_tiyn <= listing.price_tiyn),
+        or_(SavedSearch.max_price_tiyn.is_(None), SavedSearch.max_price_tiyn >= listing.price_tiyn))
+    for saved in db.scalars(candidates.order_by(SavedSearch.id)).all():
         if saved.user_id in told:
             continue
         match = catalog_filter(select(Listing.id).where(Listing.id == listing.id), **search_values(saved))
@@ -1481,9 +1579,10 @@ def list_favorites(user: User = Depends(current_user), db: Session = Depends(get
 
 
 # ---------------------------------------------------------------- orders
-def order_for(db: Session, order_id: int, user: User, *, role: str | None = None) -> Order:
-    """Returns 404 (not 403) for orders the user is not part of, so ids leak nothing."""
-    order = db.get(Order, order_id)
+def order_for(db: Session, order_id: int, user: User, *, role: str | None = None, lock: bool = False) -> Order:
+    """Returns 404 (not 403) for orders the user is not part of, so ids leak nothing.
+    With lock, the row stays locked until commit: every action that changes an order's status takes it."""
+    order = services.locked_order(db, order_id) if lock else db.get(Order, order_id)
     if order is None:
         raise ApiError(404, "not_found")
     is_party = user.id in (order.buyer_id, order.seller_id)
@@ -1555,7 +1654,17 @@ def create_order(body: OrderIn, user: User = Depends(current_user), db: Session 
     if offer:
         offer.status, offer.order_id = "ordered", order.id
     db.add(IdempotencyRecord(user_id=user.id, scope="create_order", key=idempotency_key, order_id=order.id))
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # The same tap arrived twice at once and the other request won: answer with its order, take nothing.
+        db.rollback()
+        seen = db.scalar(select(IdempotencyRecord).where(IdempotencyRecord.user_id == user.id,
+                                                         IdempotencyRecord.scope == "create_order",
+                                                         IdempotencyRecord.key == idempotency_key))
+        if seen is None:
+            raise
+        return order_out(db.get(Order, seen.order_id))
     return order_out(order)
 
 
@@ -1568,11 +1677,12 @@ def list_orders(role: Literal["buyer", "seller"] = "buyer", user: User = Depends
 
 
 @api.get("/orders/{order_id}")
-def get_order(order_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+def get_order(order_id: int, user: User = Depends(current_user), db: Session = Depends(get_db),
+              cfg: Settings = Depends(get_settings)):
     order = order_for(db, order_id, user)
     reviewed = db.scalar(select(Review.id).where(Review.order_id == order.id)) is not None
     events = db.scalars(select(OrderEvent).where(OrderEvent.order_id == order.id).order_by(OrderEvent.id)).all()
-    act_by = services.deadline(db, order)
+    act_by = services.deadline(db, order, cfg.confirm_window)
     return {**order_summary(db, order), "reviewed": reviewed, "delivery": delivery_out(order, user),
             "deadline": act_by.isoformat() if act_by else None,
             "history": [{"status": e.to_status, "at": services.aware(e.at).isoformat()} for e in events]}
@@ -1580,7 +1690,7 @@ def get_order(order_id: int, user: User = Depends(current_user), db: Session = D
 
 @api.post("/orders/{order_id}/pay")
 def start_payment(order_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    order = order_for(db, order_id, user, role="buyer")
+    order = order_for(db, order_id, user, role="buyer", lock=True)
     if order.status == S.CREATED.value:
         services.move(db, order, S.PAYMENT_PENDING, Actor.BUYER, user_id=user.id)
         db.commit()
@@ -1592,7 +1702,7 @@ def start_payment(order_id: int, user: User = Depends(current_user), db: Session
 
 @api.post("/orders/{order_id}/cancel")
 def cancel_order(order_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    order = order_for(db, order_id, user, role="buyer")
+    order = order_for(db, order_id, user, role="buyer", lock=True)
     if order.status in (S.CREATED.value, S.PAYMENT_PENDING.value):
         services.move(db, order, S.CANCELLED, Actor.BUYER, user_id=user.id)
     else:  # once paid, cancelling means a full refund through the provider
@@ -1605,7 +1715,10 @@ def cancel_order(order_id: int, user: User = Depends(current_user), db: Session 
 
 @api.post("/orders/{order_id}/decline")
 def decline_order(order_id: int, body: ReasonIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    order = order_for(db, order_id, user, role="seller")
+    order = order_for(db, order_id, user, role="seller", lock=True)
+    # Only before the pair leaves: a "decline" on a return would refund in full and put back a shoe still away.
+    if order.status not in DECLINABLE:
+        raise ApiError(409, "invalid_status")
     services.move(db, order, S.REFUND_PENDING, Actor.SELLER, user_id=user.id, reason=body.reason)
     order.pending_refund_tiyn = services.total_tiyn(order)
     services.restock(db, order)
@@ -1615,7 +1728,7 @@ def decline_order(order_id: int, body: ReasonIn, user: User = Depends(current_us
 
 @api.post("/orders/{order_id}/accept")
 def accept_order(order_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    order = order_for(db, order_id, user, role="seller")
+    order = order_for(db, order_id, user, role="seller", lock=True)
     services.move(db, order, S.SELLER_ACCEPTED, Actor.SELLER, user_id=user.id)
     db.commit()
     return order_out(order)
@@ -1623,7 +1736,12 @@ def accept_order(order_id: int, user: User = Depends(current_user), db: Session 
 
 @api.post("/orders/{order_id}/ship")
 def ship_order(order_id: int, body: ShipIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    order = order_for(db, order_id, user, role="seller")
+    order = order_for(db, order_id, user, role="seller", lock=True)
+    # A number already on another parcel would let its delivery complete this order too.
+    taken = db.scalar(select(Order.id).where(Order.tracking_number == body.tracking_number.strip(),
+                                             Order.id != order.id, Order.status.in_(IN_DELIVERY)))
+    if taken is not None:
+        raise ApiError(409, "tracking_in_use")
     services.move(db, order, S.SHIPPED, Actor.SELLER, user_id=user.id, tracking_number=body.tracking_number)
     db.commit()
     return order_out(order)
@@ -1632,19 +1750,33 @@ def ship_order(order_id: int, body: ShipIn, user: User = Depends(current_user), 
 @api.post("/orders/{order_id}/confirm")
 def confirm_order(order_id: int, user: User = Depends(current_user), db: Session = Depends(get_db),
                   cfg: Settings = Depends(get_settings)):
-    order = order_for(db, order_id, user, role="buyer")
+    order = order_for(db, order_id, user, role="buyer", lock=True)
     services.move(db, order, S.COMPLETED, Actor.BUYER, user_id=user.id)
     services.settle(db, order, refund_tiyn=0, rule=cfg.commission, actor=f"buyer:{user.id}")
     db.commit()
     return order_out(order)
 
 
+@api.post("/orders/{order_id}/received")
+def mark_received(order_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """The buyer has the parcel though no courier reported it: this starts the inspection window, it does not
+    release the money."""
+    order = order_for(db, order_id, user, role="buyer", lock=True)
+    services.move(db, order, S.DELIVERED_PENDING_CONFIRMATION, Actor.BUYER, user_id=user.id, reason="buyer received")
+    db.commit()
+    return order_out(order)
+
+
 @api.post("/orders/{order_id}/dispute")
 def open_dispute(order_id: int, body: ReasonIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    order = order_for(db, order_id, user, role="buyer")
+    """The buyer disputes a delivery or a return the seller ignores; the seller disputes only a return."""
+    order = order_for(db, order_id, user, lock=True)
+    if user.id not in (order.buyer_id, order.seller_id):
+        raise ApiError(404, "not_found")
     if not body.reason.strip():
         raise ApiError(422, "reason_required")
-    services.move(db, order, S.DISPUTED, Actor.BUYER, user_id=user.id, reason=body.reason)
+    actor = Actor.BUYER if user.id == order.buyer_id else Actor.SELLER
+    services.move(db, order, S.DISPUTED, actor, user_id=user.id, reason=body.reason)
     order.dispute_reason = body.reason
     db.commit()
     return order_out(order)
@@ -1652,7 +1784,7 @@ def open_dispute(order_id: int, body: ReasonIn, user: User = Depends(current_use
 
 @api.post("/orders/{order_id}/return")
 def request_return(order_id: int, body: ReasonIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    order = order_for(db, order_id, user, role="buyer")
+    order = order_for(db, order_id, user, role="buyer", lock=True)
     if not body.reason.strip():
         raise ApiError(422, "reason_required")
     services.move(db, order, S.RETURN_REQUESTED, Actor.BUYER, user_id=user.id, reason=body.reason)
@@ -1662,7 +1794,7 @@ def request_return(order_id: int, body: ReasonIn, user: User = Depends(current_u
 
 @api.post("/orders/{order_id}/approve-return")
 def approve_return(order_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    order = order_for(db, order_id, user, role="seller")
+    order = order_for(db, order_id, user, role="seller", lock=True)
     services.move(db, order, S.REFUND_PENDING, Actor.SELLER, user_id=user.id, reason="seller approved return")
     order.pending_refund_tiyn = services.total_tiyn(order)
     db.commit()
@@ -1673,7 +1805,10 @@ def approve_return(order_id: int, user: User = Depends(current_user), db: Sessio
 @api.post("/admin/orders/{order_id}/resolve")
 def resolve_dispute(order_id: int, body: ResolveIn, staff: User = Depends(staff_user),
                     db: Session = Depends(get_db), cfg: Settings = Depends(get_settings)):
-    order = order_for(db, order_id, staff)
+    order = order_for(db, order_id, staff, lock=True)
+    # Only a dispute: on an order that never shipped a partial refund would pay the seller for nothing sent.
+    if order.status != S.DISPUTED.value:
+        raise ApiError(409, "invalid_status")
     if body.refund_tiyn > services.total_tiyn(order):
         raise ApiError(422, "validation", "refund exceeds the order total")
     if body.refund_tiyn == 0:
@@ -1685,6 +1820,34 @@ def resolve_dispute(order_id: int, body: ResolveIn, staff: User = Depends(staff_
     services.audit(db, staff.id, "resolve_dispute", f"order:{order.id}", f"refund={body.refund_tiyn}; {body.reason}")
     db.commit()
     return order_out(order)
+
+
+@api.post("/admin/orders/{order_id}/delivered")
+def mark_delivered(order_id: int, body: ReasonIn, staff: User = Depends(staff_user), db: Session = Depends(get_db)):
+    """Support confirms a delivery the courier never reported (a call, a photo of the handover)."""
+    order = order_for(db, order_id, staff, lock=True)
+    if not body.reason.strip():
+        raise ApiError(422, "reason_required")
+    services.move(db, order, S.DELIVERED_PENDING_CONFIRMATION, Actor.SUPPORT, user_id=staff.id, reason=body.reason)
+    services.audit(db, staff.id, "mark_delivered", f"order:{order.id}", body.reason)
+    db.commit()
+    return order_out(order)
+
+
+@api.post("/admin/listings/{listing_id}/unhide")
+def unhide_listing(listing_id: int, body: ReasonIn, staff: User = Depends(staff_user), db: Session = Depends(get_db)):
+    """Undo a hide: the listing goes back to the seller as a draft, and publishing runs moderation again."""
+    listing = db.get(Listing, listing_id)
+    if listing is None:
+        raise ApiError(404, "not_found")
+    if listing.status != "hidden":
+        raise ApiError(409, "invalid_status")
+    if not body.reason.strip():
+        raise ApiError(422, "reason_required")
+    listing.status = "draft"
+    services.audit(db, staff.id, "unhide_listing", f"listing:{listing.id}", body.reason)
+    db.commit()
+    return {"id": listing.id, "status": listing.status}
 
 
 @api.post("/admin/listings/{listing_id}/hide")
@@ -1847,6 +2010,28 @@ def admin_audit(staff: User = Depends(staff_user), db: Session = Depends(get_db)
                        "at": services.aware(r.at).isoformat()} for r in rows]}
 
 
+@api.get("/admin/orders/{order_id}/evidence")
+def order_evidence(order_id: int, staff: User = Depends(staff_user), db: Session = Depends(get_db)):
+    """What support decides a dispute on: both sides' words, the chat with its photos, and the parcel details.
+    Read-only, and every look is written to the audit log because it shows a private conversation."""
+    from .models import Conversation, Message
+    order = order_for(db, order_id, staff)
+    conv = db.scalar(select(Conversation).where(Conversation.listing_id == order.listing_id,
+                                                Conversation.buyer_id == order.buyer_id))
+    messages = [] if conv is None else db.scalars(select(Message).where(Message.conversation_id == conv.id)
+                                                  .order_by(Message.id).limit(500)).all()
+    events = db.scalars(select(OrderEvent).where(OrderEvent.order_id == order.id).order_by(OrderEvent.id)).all()
+    services.audit(db, staff.id, "view_evidence", f"order:{order.id}")
+    db.commit()
+    return {"tracking_number": order.tracking_number, "dispute_reason": order.dispute_reason,
+            "delivery_city": order.delivery_city,
+            "delivered_at": services.aware(order.delivered_at).isoformat() if order.delivered_at else None,
+            "statements": [{"actor": e.actor, "status": e.to_status, "reason": e.reason,
+                            "at": services.aware(e.at).isoformat()} for e in events if e.reason],
+            "messages": [{"from": "buyer" if m.sender_id == order.buyer_id else "seller", "body": m.body,
+                          "photo_url": m.photo_url, "at": services.aware(m.created_at).isoformat()} for m in messages]}
+
+
 @api.get("/admin/orders/{order_id}/ledger")
 def order_ledger(order_id: int, staff: User = Depends(staff_user), db: Session = Depends(get_db)):
     from .models import LedgerTx
@@ -1857,8 +2042,13 @@ def order_ledger(order_id: int, staff: User = Depends(staff_user), db: Session =
 
 
 # ---------------------------------------------------------------- webhooks (provider -> us)
-async def verified_event(request: Request, secret: bytes) -> dict:
-    body = await request.body()
+async def raw_body(request: Request) -> bytes:
+    """Read in the event loop, so the handler itself can be a plain function that runs in the threadpool:
+    database work inside an async handler would stall every other request."""
+    return await request.body()
+
+
+def verified_event(request: Request, body: bytes, secret: bytes) -> dict:
     try:
         ts = int(request.headers.get("X-Timestamp", "0"))
         verify(secret, ts, body, request.headers.get("X-Signature", ""))
@@ -1878,21 +2068,25 @@ def first_time(db: Session, source: str, event_id: str) -> bool:
 
 
 hooks = APIRouter(prefix="/api/v1/webhooks")
+IN_DELIVERY = (S.SHIPPED.value, S.IN_TRANSIT.value)
+DECLINABLE = (S.PAID.value, S.SELLER_ACCEPTED.value, S.PREPARING.value)
 
 
 @hooks.post("/payments/sandbox")
-async def payment_webhook(request: Request, db: Session = Depends(get_db), cfg: Settings = Depends(get_settings)):
-    event = await verified_event(request, cfg.payment_webhook_secret)
+def payment_webhook(request: Request, body: bytes = Depends(raw_body), db: Session = Depends(get_db),
+                    cfg: Settings = Depends(get_settings)):
+    event = verified_event(request, body, cfg.payment_webhook_secret)
     try:
         event_id, kind, order_id = str(event["id"]), event["type"], int(event["order_id"])
         amount, currency = event["amount_tiyn"], event["currency"]
     except (KeyError, TypeError, ValueError) as exc:
         raise ApiError(422, "validation", f"malformed event: {exc}") from exc
-    order = db.get(Order, order_id)
-    if order is None:
-        raise ApiError(404, "not_found")
     if not first_time(db, "payments", event_id):
         return {"result": "duplicate"}
+    order = services.locked_order(db, order_id)
+    if order is None:
+        db.rollback()
+        raise ApiError(404, "not_found")
     if kind == "payment.succeeded":
         if amount != services.total_tiyn(order) or currency != "KZT":
             db.rollback()
@@ -1906,8 +2100,12 @@ async def payment_webhook(request: Request, db: Session = Depends(get_db), cfg: 
             db.commit()
             return {"result": "refund", "status": order.status}
         if order.status != S.PAYMENT_PENDING.value:
+            # A second capture for an order that is already paid (two tabs, a retried session) or being refunded.
+            # The money is real: it is booked as owed to the buyer and support refunds it, never dropped.
+            services.record_overpayment(db, order, event_id, amount)
+            services.audit(db, None, "overpayment", f"order:{order.id}", f"event={event_id}; amount={amount}")
             db.commit()
-            return {"result": "duplicate"}
+            return {"result": "overpayment", "status": order.status}
         services.record_payment(db, order, event_id)
         services.move(db, order, S.PAID, Actor.SYSTEM)
         services.notify_sold_out(db, order)
@@ -1917,30 +2115,60 @@ async def payment_webhook(request: Request, db: Session = Depends(get_db), cfg: 
             raise ApiError(409, "amount_mismatch")
         services.move(db, order, S.REFUNDED, Actor.SYSTEM)
         services.settle(db, order, refund_tiyn=amount, rule=cfg.commission, actor="system")
+        services.record_refund_paid(db, order, event_id, amount)
     db.commit()
     return {"result": "applied", "status": order.status}
 
 
 @hooks.post("/delivery/sandbox")
-async def delivery_webhook(request: Request, db: Session = Depends(get_db), cfg: Settings = Depends(get_settings)):
-    event = await verified_event(request, cfg.delivery_webhook_secret)
-    order = db.scalar(select(Order).where(Order.tracking_number == str(event.get("tracking_number", ""))))
-    if order is None:
+def delivery_webhook(request: Request, body: bytes = Depends(raw_body), db: Session = Depends(get_db),
+                     cfg: Settings = Depends(get_settings)):
+    event = verified_event(request, body, cfg.delivery_webhook_secret)
+    # Only an order still on its way: a number reused later, or one already delivered, is not this parcel.
+    order_id = db.scalar(select(Order.id).where(Order.tracking_number == str(event.get("tracking_number", "")),
+                                                Order.status.in_(IN_DELIVERY)).order_by(Order.id.desc()))
+    if order_id is None:
         raise ApiError(404, "not_found")
     if not first_time(db, "delivery", str(event.get("id"))):
         return {"result": "duplicate"}
+    order = services.locked_order(db, order_id)
     target = {"delivery.in_transit": S.IN_TRANSIT, "delivery.delivered": S.DELIVERED_PENDING_CONFIRMATION}.get(event.get("type"))
     if target is None:
         db.commit()
         return {"result": "ignored"}
+    if order.status == target.value:
+        db.commit()
+        return {"result": "duplicate", "status": order.status}
     services.move(db, order, target, Actor.SYSTEM)
     db.commit()
     return {"result": "applied", "status": order.status}
 
 
 # ---------------------------------------------------------------- app
+def logging_setup() -> None:
+    """Our own loggers ("vitrina.*") print INFO and up on stderr under uvicorn too; without this, job results and
+    errors were dropped by the default logging setup. One line per record, easy to ship to a log store."""
+    root = logging.getLogger("vitrina")
+    if root.handlers:
+        return
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter('{"at":"%(asctime)s","level":"%(levelname)s","logger":"%(name)s",'
+                                           '"msg":%(message)r}'))
+    root.addHandler(handler)
+    root.setLevel(os.environ.get("VITRINA_LOG_LEVEL", "INFO").upper())
+    root.propagate = False
+
+
+# Largest request body accepted: one photo or video upload plus the multipart framing around it.
+MAX_REQUEST_BYTES = MAX_UPLOAD_BYTES + 64 * 1024
+# The console loads only its own files; share pages may also show photos from the media host.
+ADMIN_CSP = "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' https: data:; frame-ancestors 'none'"
+SHARE_CSP = "default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'unsafe-inline'; img-src 'self' https: data:; media-src 'self' https:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings()
+    logging_setup()
     if settings.env == "production" and (problems := production_problems(settings)):
         raise RuntimeError("Refusing to start in production:\n- " + "\n- ".join(problems))
 
@@ -1959,12 +2187,44 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.segmenter = cutout.load_segmenter(settings.cutout_model)
     app.state.embedder = visual.load_embedder(settings.search_model)
     app.state.image_search_limiter = SlidingWindowLimiter(IMAGE_SEARCH_PER_MINUTE, 60)
+    app.state.otp_limiter = SlidingWindowLimiter(OTP_REQUESTS_PER_ADDRESS_PER_HOUR, 3600)
     app.add_exception_handler(ApiError, api_error_handler)
 
     async def validation_handler(request: Request, exc: RequestValidationError):
         return await api_error_handler(request, ApiError(422, "validation", str(exc.errors()[:3])))
 
     app.add_exception_handler(RequestValidationError, validation_handler)
+
+    async def unexpected_handler(request: Request, exc: Exception):
+        # Anything unplanned (database or storage down, a bug) is logged with the request id and answered in the
+        # usual error shape, so the app shows its own translated "try again" instead of raw text.
+        log.exception("unhandled error on %s %s [%s]", request.method, request.url.path,
+                      getattr(request.state, "request_id", "-"))
+        response = await api_error_handler(request, ApiError(503, "unavailable"))
+        # This runs outside the middleware below, so the id the log line carries is attached here.
+        response.headers["X-Request-ID"] = getattr(request.state, "request_id", "-")
+        return response
+
+    app.add_exception_handler(Exception, unexpected_handler)
+
+    @app.middleware("http")
+    async def guard(request: Request, call_next):
+        request.state.request_id = request.headers.get("X-Request-ID") or secrets.token_hex(8)
+        # Refuse oversized bodies before anything parses them; uploads are the only large requests we accept.
+        length = request.headers.get("content-length")
+        if length is not None and (not length.isdigit() or int(length) > MAX_REQUEST_BYTES):
+            return await api_error_handler(request, ApiError(413, "file_too_large"))
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = request.state.request_id
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        path = request.url.path
+        # Pages a browser renders: the support console and the public share pages, which show seller content.
+        if path.startswith(("/admin", "/l/", "/s/")):
+            response.headers.setdefault("X-Frame-Options", "DENY")
+            response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+            response.headers.setdefault("Content-Security-Policy", ADMIN_CSP if path.startswith("/admin") else SHARE_CSP)
+        return response
+
     app.include_router(api)
     app.include_router(hooks)
     app.include_router(social_router)

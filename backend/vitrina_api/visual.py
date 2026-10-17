@@ -19,7 +19,7 @@ from pathlib import Path
 
 from PIL import Image
 
-log = logging.getLogger(__name__)
+log = logging.getLogger("vitrina.visual")
 
 MODEL_NAME = "mobilenetv2-12+hsv1"
 COLOR_WEIGHT = 0.5  # share of the colour part in the final cosine score

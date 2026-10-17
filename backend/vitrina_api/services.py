@@ -1,18 +1,21 @@
 """Order, ledger and settlement operations on the database, built on vitrina_core rules."""
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.orm import Session
 
-from vitrina_core.money import (PROVIDER_CLEARING, CommissionRule, Entry, escrow, settlement_entries,
+from vitrina_core.money import (PROVIDER_CLEARING, CommissionRule, Entry, buyer_refund, escrow, settlement_entries,
                                 validate_entries)
 from vitrina_core.orders import Actor, Order as CoreOrder, OrderStatus, TransitionError, transition
 
 from .errors import ApiError
 from .models import (AuditLog, Block, LedgerEntry, LedgerTx, Listing, ListingSize, Notification, Order, OrderEvent,
                      Review, StockAlert, User)
+
+log = logging.getLogger("vitrina.services")
 
 
 def aware(dt: datetime | None) -> datetime | None:
@@ -164,6 +167,18 @@ def record_payment(db: Session, order: Order, event_id: str) -> None:
             entries=[Entry(PROVIDER_CLEARING, debit=amount), Entry(escrow(str(order.id)), credit=amount)])
 
 
+def record_overpayment(db: Session, order: Order, event_id: str, amount: int) -> None:
+    """A capture the order did not need: owed straight back to the buyer, outside the order's escrow."""
+    post_tx(db, key=f"payment:{event_id}", order_id=order.id, kind="overpayment", actor="system",
+            entries=[Entry(PROVIDER_CLEARING, debit=amount), Entry(buyer_refund(str(order.buyer_id)), credit=amount)])
+
+
+def record_refund_paid(db: Session, order: Order, event_id: str, amount: int) -> None:
+    """The provider sent the refund: the platform no longer owes the buyer that money."""
+    post_tx(db, key=f"refund:{event_id}", order_id=order.id, kind="refund_paid", actor="system",
+            entries=[Entry(buyer_refund(str(order.buyer_id)), debit=amount), Entry(PROVIDER_CLEARING, credit=amount)])
+
+
 def settle(db: Session, order: Order, *, refund_tiyn: int, rule: CommissionRule, actor: str,
            reason: str | None = None) -> LedgerTx:
     key = f"settle:{order.id}"
@@ -177,8 +192,11 @@ def settle(db: Session, order: Order, *, refund_tiyn: int, rule: CommissionRule,
 
 
 def restock(db: Session, order: Order) -> None:
+    # One atomic increment: a read-modify-write here could overwrite an order placed at the same moment.
+    db.execute(update(ListingSize).where(ListingSize.id == order.size_id)
+               .values(quantity=ListingSize.quantity + 1).execution_options(synchronize_session=False))
     size = db.get(ListingSize, order.size_id)
-    size.quantity += 1
+    db.refresh(size, ["quantity"])
     listing = db.get(Listing, order.listing_id)
     if listing.status == "sold":
         listing.status = "published"
@@ -206,14 +224,23 @@ def audit(db: Session, user_id: int | None, action: str, target: str, reason: st
 def run_auto_complete(db: Session, *, now: datetime, window, rule: CommissionRule) -> list[int]:
     """Scheduler job: complete delivered orders whose confirmation window passed with no dispute."""
     done = []
-    rows = db.scalars(select(Order).where(Order.status == OrderStatus.DELIVERED_PENDING_CONFIRMATION.value)).all()
-    for order in rows:
-        if now < aware(order.delivered_at) + window:
-            continue
-        move(db, order, OrderStatus.COMPLETED, Actor.SCHEDULER, now=now, confirm_after=window)
-        settle(db, order, refund_tiyn=0, rule=rule, actor="scheduler")
-        done.append(order.id)
-    db.commit()
+    ids = db.scalars(select(Order.id).where(Order.status == OrderStatus.DELIVERED_PENDING_CONFIRMATION.value)
+                     .order_by(Order.id)).all()
+    db.rollback()
+    for order_id in ids:
+        try:
+            order = locked_order(db, order_id)
+            if (order is None or order.status != OrderStatus.DELIVERED_PENDING_CONFIRMATION.value
+                    or now < aware(order.delivered_at) + window):
+                db.rollback()
+                continue
+            move(db, order, OrderStatus.COMPLETED, Actor.SCHEDULER, now=now, confirm_after=window)
+            settle(db, order, refund_tiyn=0, rule=rule, actor="scheduler")
+            db.commit()
+            done.append(order.id)
+        except Exception:
+            db.rollback()
+            log.exception("auto-completing order %s failed", order_id)
     return done
 
 
@@ -290,6 +317,11 @@ UNPAID_CREATED_TTL = timedelta(minutes=30)
 UNPAID_PENDING_TTL = timedelta(hours=2)
 # A paid order the seller neither accepted nor declined goes back to the buyer as a full refund.
 SELLER_ANSWER_TTL = timedelta(hours=48)
+# An accepted order that never ships is refunded too: escrow is never held without a clock running.
+SHIP_BY_TTL = timedelta(days=5)
+# A parcel with no delivery news after this long, and a return the seller leaves unanswered, go to support.
+DELIVERY_TTL = timedelta(days=21)
+RETURN_ANSWER_TTL = timedelta(hours=48)
 
 
 def entered_at(db: Session, order: Order) -> datetime:
@@ -300,28 +332,79 @@ def entered_at(db: Session, order: Order) -> datetime:
 
 
 EXPIRY = {OrderStatus.CREATED.value: UNPAID_CREATED_TTL, OrderStatus.PAYMENT_PENDING.value: UNPAID_PENDING_TTL,
-          OrderStatus.PAID.value: SELLER_ANSWER_TTL}
+          OrderStatus.PAID.value: SELLER_ANSWER_TTL, OrderStatus.SELLER_ACCEPTED.value: SHIP_BY_TTL,
+          OrderStatus.PREPARING.value: SHIP_BY_TTL, OrderStatus.SHIPPED.value: DELIVERY_TTL,
+          OrderStatus.IN_TRANSIT.value: DELIVERY_TTL, OrderStatus.RETURN_REQUESTED.value: RETURN_ANSWER_TTL}
+# What the expiry job does when each clock runs out, and the reason it writes in the history.
+REFUND_ON_EXPIRY = {OrderStatus.PAID.value: "seller did not answer",
+                    OrderStatus.SELLER_ACCEPTED.value: "seller did not ship in time",
+                    OrderStatus.PREPARING.value: "seller did not ship in time"}
+DISPUTE_ON_EXPIRY = {OrderStatus.SHIPPED.value: "no delivery news in time",
+                     OrderStatus.IN_TRANSIT.value: "no delivery news in time",
+                     OrderStatus.RETURN_REQUESTED.value: "seller did not answer the return"}
 
 
-def deadline(db: Session, order: Order) -> datetime | None:
-    """When the expiry job acts on this order if nobody does first; None when no clock is running."""
+def deadline(db: Session, order: Order, confirm_window: timedelta | None = None) -> datetime | None:
+    """When a timer acts on this order if nobody does first; None when no clock is running.
+    The inspection window after delivery is a setting, so it counts only when the caller passes it."""
+    if order.status == OrderStatus.DELIVERED_PENDING_CONFIRMATION.value:
+        return aware(order.delivered_at) + confirm_window if confirm_window and order.delivered_at else None
     ttl = EXPIRY.get(order.status)
     return entered_at(db, order) + ttl if ttl else None
 
 
-def run_expire_orders(db: Session, *, now: datetime) -> dict[str, list[int]]:
-    """Scheduler job: release pairs held by orders nobody paid for, and refund paid orders the seller ignored."""
-    cancelled, refunded = [], []
-    for order in db.scalars(select(Order).where(Order.status.in_(EXPIRY))).all():
-        if now < deadline(db, order):
-            continue
-        if order.status == OrderStatus.PAID.value:
-            move(db, order, OrderStatus.REFUND_PENDING, Actor.SCHEDULER, now=now, reason="seller did not answer")
-            order.pending_refund_tiyn = total_tiyn(order)
-            refunded.append(order.id)
-        else:
-            move(db, order, OrderStatus.CANCELLED, Actor.SCHEDULER, now=now, reason="not paid in time")
-            cancelled.append(order.id)
-        restock(db, order)
+def locked_order(db: Session, order_id: int) -> Order | None:
+    """The order row, locked until commit, and re-read so a status another request just wrote is the one we see.
+    Every status change starts here, so a job, a webhook and a tap at the same moment cannot both act."""
+    return db.scalar(select(Order).where(Order.id == order_id).with_for_update().execution_options(
+        populate_existing=True))
+
+
+def run_purge(db: Session, *, now: datetime) -> list[str]:
+    """Scheduler job: drop rows that only ever mattered for a short while, so these tables do not grow forever.
+    Sign-in codes after two days (the daily failure cap reads one), dead tokens a week after expiry, webhook
+    ids after half a year (providers retry for days, not months)."""
+    from .models import AuthToken, OtpCode, WebhookEvent
+    done = []
+    for model, old in ((OtpCode, OtpCode.created_at < now - timedelta(days=2)),
+                       (AuthToken, AuthToken.expires_at < now - timedelta(days=7)),
+                       (WebhookEvent, WebhookEvent.received_at < now - timedelta(days=180))):
+        n = db.execute(delete(model).where(old)).rowcount
+        if n:
+            done.append(f"{model.__tablename__}:{n}")
     db.commit()
-    return {"cancelled": cancelled, "refunded": refunded}
+    return done
+
+
+def run_expire_orders(db: Session, *, now: datetime) -> dict[str, list[int]]:
+    """Scheduler job: release pairs held by orders nobody paid for, refund paid orders the seller ignored or never
+    shipped, and hand stalled deliveries and unanswered returns to support. One order per transaction, so one
+    failure neither undoes the rest nor blocks the next pass."""
+    cancelled, refunded, disputed = [], [], []
+    ids = db.scalars(select(Order.id).where(Order.status.in_(EXPIRY)).order_by(Order.id)).all()
+    db.rollback()
+    for order_id in ids:
+        try:
+            order = locked_order(db, order_id)
+            if order is None or order.status not in EXPIRY or now < deadline(db, order):
+                db.rollback()
+                continue
+            status = order.status
+            if status in REFUND_ON_EXPIRY:
+                move(db, order, OrderStatus.REFUND_PENDING, Actor.SCHEDULER, now=now, reason=REFUND_ON_EXPIRY[status])
+                order.pending_refund_tiyn = total_tiyn(order)
+                restock(db, order)
+                refunded.append(order.id)
+            elif status in DISPUTE_ON_EXPIRY:
+                move(db, order, OrderStatus.DISPUTED, Actor.SCHEDULER, now=now, reason=DISPUTE_ON_EXPIRY[status])
+                order.dispute_reason = order.dispute_reason or DISPUTE_ON_EXPIRY[status]
+                disputed.append(order.id)
+            else:
+                move(db, order, OrderStatus.CANCELLED, Actor.SCHEDULER, now=now, reason="not paid in time")
+                restock(db, order)
+                cancelled.append(order.id)
+            db.commit()
+        except Exception:
+            db.rollback()
+            log.exception("expiring order %s failed", order_id)
+    return {"cancelled": cancelled, "refunded": refunded, "disputed": disputed}

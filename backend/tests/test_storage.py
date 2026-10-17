@@ -62,7 +62,7 @@ class S3StorageTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.s3.read("https://cdn.example.kz/7/../../secret")
         with self.assertRaises(RuntimeError):
-            self.s3.read("https://cdn.example.kz/7/missing.jpg")
+            self.s3.read("https://cdn.example.kz/7/" + "0" * 32 + ".jpg")
 
 
 class ChoiceTests(unittest.TestCase):

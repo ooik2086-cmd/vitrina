@@ -135,7 +135,9 @@ def my_payouts(user: User = Depends(current_user), db: Session = Depends(get_db)
 @router.post("/me/payouts", status_code=201)
 def request_payout(body: PayoutIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     seller_only(user)
-    account = db.get(PayoutAccount, user.id)
+    # The account row is locked until commit, so two taps (or two phones) cannot both pass the checks below and
+    # pay out the same balance twice.
+    account = db.scalar(select(PayoutAccount).where(PayoutAccount.seller_id == user.id).with_for_update())
     if account is None:
         raise ApiError(409, "payout_account_required")
     if open_payout(db, user.id) is not None:

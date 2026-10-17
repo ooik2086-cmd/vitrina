@@ -11,6 +11,8 @@ from fastapi.testclient import TestClient
 from PIL import Image
 from sqlalchemy import create_engine
 
+os.environ.setdefault("VITRINA_LOG_LEVEL", "WARNING")  # keep test output to what failed
+
 from vitrina_api import promo
 from vitrina_api.app import create_app
 from vitrina_api.config import Settings
@@ -596,7 +598,8 @@ class OrderFlowTests(ApiTestCase):
         self.assertEqual(ok.json()["status"], "REFUNDED")
         with self.db() as db:
             buyer_id = db.query(User).filter_by(phone="+77010000002").one().id
-            self.assertEqual(balance(db, buyer_refund(str(buyer_id))), 1_000_000)
+            # The provider sent the refund, so the platform no longer owes the buyer anything.
+            self.assertEqual(balance(db, buyer_refund(str(buyer_id))), 0)
             self.assertEqual(balance(db, escrow(str(order["id"]))), 0)
 
     def test_scenario_d_auto_complete_after_window_only(self):
@@ -633,8 +636,8 @@ class OrderFlowTests(ApiTestCase):
     def test_jobs_pass_runs_both_jobs(self):
         self.delivered()
         self.assertEqual(jobs.run_once(self.app.state.sessions, self.cfg),
-                         {"cancelled": [], "refunded": [], "completed": [], "review_reminders": [],
-                          "listing_tips": []})
+                         {"cancelled": [], "refunded": [], "disputed": [], "completed": [], "review_reminders": [],
+                          "listing_tips": [], "purged": []})
 
     def test_unpaid_order_lets_go_of_the_pair_after_half_an_hour(self):
         listing, order = self.ordered()
@@ -734,8 +737,14 @@ class OpsTests(ApiTestCase):
         ready = Settings(env="production", debug_otp=False, auto_create_schema=False, otp_secret=b"o" * 40,
                          payment_webhook_secret=b"p" * 40, delivery_webhook_secret=b"d" * 40,
                          database_url="postgresql+psycopg://u:p@db/vitrina", media_dir=self.tmp.name,
-                         public_media_url="https://cdn.vitrina.kz", cors_origins=[])
+                         public_media_url="https://cdn.vitrina.kz", cors_origins=[], s3_bucket="vitrina",
+                         s3_endpoint="https://s3.example.kz", s3_access_key="k", s3_secret_key="s")
         self.assertEqual(production_problems(ready), [])
+        from dataclasses import replace
+        for loose, env in ((dict(cors_origins=["*"]), "VITRINA_CORS_ORIGINS"),
+                           (dict(allow_external_media=True), "VITRINA_ALLOW_EXTERNAL_MEDIA"),
+                           (dict(s3_bucket=""), "VITRINA_S3_BUCKET"), (dict(s3_access_key=""), "VITRINA_S3_ACCESS_KEY")):
+            self.assertIn(env, " ".join(production_problems(replace(ready, **loose))))
 
 
 class ShareTests(ApiTestCase):
@@ -1828,9 +1837,13 @@ class WebhookSecurityTests(ApiTestCase):
         self.assertEqual(self.pay(order, amount=1).status_code, 409)
         self.assertEqual(self.pay(order, event_id="evt_x", amount=None).json()["status"], "PAID")
         self.assertEqual(self.pay(order, event_id="evt_x").json()["result"], "duplicate")
+        # A second, different capture is real money: it is owed back to the buyer, never dropped.
+        self.assertEqual(self.pay(order, event_id="evt_y").json()["result"], "overpayment")
         self.assertEqual(self.pay(order, event_id="evt_y").json()["result"], "duplicate")
         with self.db() as db:
             self.assertEqual(balance(db, escrow(str(order["id"]))), order["total_tiyn"])
+            buyer_id = db.query(User).filter_by(phone="+77010000002").one().id
+            self.assertEqual(balance(db, buyer_refund(str(buyer_id))), order["total_tiyn"])
 
     def test_unsigned_or_stale_webhooks_rejected(self):
         _, order = self.ordered()
@@ -1847,6 +1860,207 @@ class WebhookSecurityTests(ApiTestCase):
     def test_buyer_cannot_confirm_unpaid_order(self):
         _, order = self.ordered()
         self.assertEqual(self.post(f"/orders/{order['id']}/confirm", self.buyer).json()["code"], "invalid_transition")
+
+
+class AuditFixTests(ApiTestCase):
+    """Fixes from the 10-expert audit: orders never stall, money is never dropped, and the edges are guarded."""
+
+    def shipped(self, tracking="KZ1", key="k1"):
+        listing, order = self.ordered(key)
+        self.post(f"/orders/{order['id']}/pay", self.buyer)
+        self.pay(order, event_id=f"evt_{key}")
+        self.post(f"/orders/{order['id']}/accept", self.seller)
+        r = self.post(f"/orders/{order['id']}/ship", self.seller, {"tracking_number": tracking})
+        self.assertEqual(r.status_code, 200, r.text)
+        return listing, order
+
+    def get(self, path, token):
+        return self.c.get(f"/api/v1{path}", headers=self.h(token))
+
+    def later(self, **delta):
+        return datetime.now(timezone.utc) + timedelta(**delta)
+
+    def test_buyer_can_say_received_without_a_courier_event_and_sees_the_window(self):
+        _, order = self.shipped()
+        self.assertEqual(self.post(f"/orders/{order['id']}/received", self.seller).status_code, 404)
+        got = self.post(f"/orders/{order['id']}/received", self.buyer).json()
+        self.assertEqual(got["status"], "DELIVERED_PENDING_CONFIRMATION")
+        detail = self.get(f"/orders/{order['id']}", self.buyer).json()
+        until = datetime.fromisoformat(detail["deadline"])
+        self.assertGreater(until, self.later(days=4, hours=23))
+        self.assertLess(until, self.later(days=5, hours=1))
+
+    def test_accepted_order_that_never_ships_is_refunded_and_restocked(self):
+        listing, order = self.ordered()
+        self.post(f"/orders/{order['id']}/pay", self.buyer)
+        self.pay(order)
+        self.post(f"/orders/{order['id']}/accept", self.seller)
+        self.assertIsNotNone(self.get(f"/orders/{order['id']}", self.buyer).json()["deadline"])
+        with self.db() as db:
+            self.assertEqual(run_expire_orders(db, now=self.later(days=4))["refunded"], [])
+        with self.db() as db:
+            self.assertEqual(run_expire_orders(db, now=self.later(days=6))["refunded"], [order["id"]])
+        self.assertEqual(self.get(f"/orders/{order['id']}", self.buyer).json()["status"], "REFUND_PENDING")
+        self.assertTrue(self.c.get(f"/api/v1/listings/{listing['id']}").json()["sizes"][0]["available"])
+
+    def test_parcel_with_no_news_and_unanswered_return_go_to_support(self):
+        _, lost = self.shipped("KZ-LOST", key="a")
+        listing, order = self.delivered_second()
+        self.assertEqual(self.post(f"/orders/{order['id']}/return", self.buyer, {"reason": "Өлшемі сай емес"})
+                         .json()["status"], "RETURN_REQUESTED")
+        with self.db() as db:
+            out = run_expire_orders(db, now=self.later(days=22))
+        self.assertEqual(sorted(out["disputed"]), sorted([lost["id"], order["id"]]))
+        self.assertEqual(self.get(f"/orders/{lost['id']}", self.buyer).json()["status"], "DISPUTED")
+
+    def delivered_second(self):
+        listing, order = self.shipped("KZ-2", key="b")
+        self.assertEqual(self.deliver("KZ-2", event_id="d2").json()["status"], "DELIVERED_PENDING_CONFIRMATION")
+        return listing, order
+
+    def test_return_can_be_contested_by_the_seller_but_not_declined_into_a_refund(self):
+        listing, order = self.delivered()
+        self.post(f"/orders/{order['id']}/return", self.buyer, {"reason": "Өлшемі сай емес"})
+        declined = self.post(f"/orders/{order['id']}/decline", self.seller, {"reason": "жоқ"})
+        self.assertEqual(declined.json()["code"], "invalid_status")
+        self.assertFalse(self.c.get(f"/api/v1/listings/{listing['id']}").json()["sizes"][0]["available"])
+        self.assertEqual(self.post(f"/orders/{order['id']}/dispute", self.seller, {"reason": ""}).status_code, 422)
+        got = self.post(f"/orders/{order['id']}/dispute", self.seller, {"reason": "Аяқ киім киілген"})
+        self.assertEqual(got.json()["status"], "DISPUTED")
+
+    def test_buyer_escalates_an_ignored_return(self):
+        _, order = self.delivered()
+        self.post(f"/orders/{order['id']}/return", self.buyer, {"reason": "Ақау бар"})
+        self.assertEqual(self.post(f"/orders/{order['id']}/dispute", self.buyer, {"reason": "Сатушы жауап бермейді"})
+                         .json()["status"], "DISPUTED")
+
+    def test_support_resolves_only_disputes(self):
+        _, order = self.ordered()
+        self.post(f"/orders/{order['id']}/pay", self.buyer)
+        self.pay(order)
+        staff = self.make_staff()
+        r = self.post(f"/admin/orders/{order['id']}/resolve", staff, {"refund_tiyn": 100_000, "reason": "x"})
+        self.assertEqual(r.json()["code"], "invalid_status")
+
+    def test_tracking_number_cannot_be_reused_and_repeat_delivery_news_is_harmless(self):
+        self.shipped("KZ-SAME", key="a")
+        listing, order = self.ordered("b")
+        self.post(f"/orders/{order['id']}/pay", self.buyer)
+        self.pay(order, event_id="evt_b")
+        self.post(f"/orders/{order['id']}/accept", self.seller)
+        r = self.post(f"/orders/{order['id']}/ship", self.seller, {"tracking_number": "KZ-SAME"})
+        self.assertEqual(r.json()["code"], "tracking_in_use")
+        self.assertEqual(self.deliver("KZ-SAME", event_id="x1").json()["status"], "DELIVERED_PENDING_CONFIRMATION")
+        self.assertEqual(self.deliver("KZ-SAME", event_id="x2").status_code, 404)  # no parcel on its way any more
+
+    def test_support_sees_the_chat_and_can_mark_delivered(self):
+        listing, order = self.shipped()
+        cid = self.post("/conversations", self.buyer, {"listing_id": listing["id"]}).json()["id"]
+        self.post(f"/conversations/{cid}/messages", self.buyer, {"body": "Посылка келмеді"})
+        staff = self.make_staff()
+        self.assertEqual(self.get(f"/admin/orders/{order['id']}/evidence", self.buyer).status_code, 403)
+        ev = self.get(f"/admin/orders/{order['id']}/evidence", staff).json()
+        self.assertEqual((ev["tracking_number"], ev["messages"][0]["from"], ev["messages"][0]["body"]),
+                         ("KZ1", "buyer", "Посылка келмеді"))
+        self.assertEqual(self.post(f"/admin/orders/{order['id']}/delivered", staff, {"reason": ""}).status_code, 422)
+        done = self.post(f"/admin/orders/{order['id']}/delivered", staff, {"reason": "Курьер қолхатты жіберді"})
+        self.assertEqual(done.json()["status"], "DELIVERED_PENDING_CONFIRMATION")
+        with self.db() as db:
+            from vitrina_api.models import AuditLog
+            actions = [a.action for a in db.query(AuditLog).all()]
+        self.assertIn("view_evidence", actions)
+        self.assertIn("mark_delivered", actions)
+
+    def test_hidden_listing_can_be_given_back_as_a_draft(self):
+        listing = self.publish()
+        staff = self.make_staff()
+        self.post(f"/admin/listings/{listing['id']}/hide", staff, {"reason": "Шағым"})
+        self.assertEqual(self.post(f"/admin/listings/{listing['id']}/unhide", self.seller, {"reason": "x"}).status_code, 403)
+        r = self.post(f"/admin/listings/{listing['id']}/unhide", staff, {"reason": "Шағым расталмады"})
+        self.assertEqual(r.json()["status"], "draft")
+
+    def test_logout_ends_the_session_on_the_server_and_staff_tokens_are_short(self):
+        self.assertEqual(self.post("/auth/logout", self.buyer).json(), {"ok": True})
+        self.assertEqual(self.get("/me", self.buyer).status_code, 401)
+        other = self.login("+77010000002")
+        third = self.login("+77010000002")
+        self.post("/auth/logout?everywhere=true", other)
+        self.assertEqual(self.get("/me", third).status_code, 401)
+        self.make_staff()
+        staff = self.login("+77010000009")
+        with self.db() as db:
+            from vitrina_api.models import AuthToken
+            from vitrina_api.services import aware
+            newest = db.query(AuthToken).order_by(AuthToken.id.desc()).first()
+            self.assertLess(aware(newest.expires_at), self.later(hours=13))
+        self.assertEqual(self.get("/me", staff).status_code, 200)
+
+    def test_wrong_codes_are_capped_per_day_not_only_per_code(self):
+        phone = "+77010000055"
+        for _ in range(3):
+            self.c.post("/api/v1/auth/otp", json={"phone": phone})
+            for _ in range(5):
+                self.c.post("/api/v1/auth/verify", json={"phone": phone, "code": "000000"})
+        self.assertEqual(self.c.post("/api/v1/auth/otp", json={"phone": phone}).json()["code"], "rate_limited")
+
+    def test_unexpected_errors_answer_in_the_usual_shape_and_big_bodies_are_refused(self):
+        def boom():
+            raise RuntimeError("database went away")
+        self.app.add_api_route("/api/v1/boom", boom)
+        c = TestClient(self.app, raise_server_exceptions=False)
+        r = c.get("/api/v1/boom")
+        self.assertEqual((r.status_code, r.json()["code"]), (503, "unavailable"))
+        self.assertTrue(r.headers["X-Request-ID"])
+        big = c.post("/api/v1/media", content=b"x", headers={**self.h(self.seller), "Content-Length": str(50 * 1024 * 1024)})
+        self.assertEqual(big.status_code, 413)
+        admin = c.get("/admin/")
+        self.assertEqual(admin.headers["X-Frame-Options"], "DENY")
+        self.assertIn("frame-ancestors 'none'", admin.headers["Content-Security-Policy"])
+
+    def test_share_page_never_closes_its_script_early(self):
+        evil = "https://cdn.example/x.jpg</script><script>alert(1)</script>"
+        frames = [{"url": evil if i == 0 else f"https://cdn.example/f{i}.jpg", "angle": "frame"} for i in range(8)]
+        listing = self.publish(photos=LISTING["photos"] + frames)
+        page = self.c.get(f"/l/{listing['id']}").text
+        self.assertNotIn("</script><script>alert(1)", page)
+
+    def test_sales_file_never_runs_a_formula_typed_by_a_buyer(self):
+        listing = self.publish()
+        address = {**ADDRESS, "city": '=HYPERLINK("http://evil/","Алматы")'}
+        order = self.post("/orders", self.buyer, {"listing_id": listing["id"], "size_id": listing["sizes"][0]["id"],
+                                                  "delivery": address}, **{"Idempotency-Key": "f"}).json()
+        self.post(f"/orders/{order['id']}/pay", self.buyer)
+        self.pay(order)
+        text = self.c.get("/api/v1/me/sales.csv", headers=self.h(self.seller)).text
+        self.assertIn(";'=HYPERLINK", text.replace('"', ''))
+
+    def test_ending_a_sale_puts_back_a_price_raised_this_month(self):
+        listing = self.publish(price_tiyn=1_800_000)
+        r = self.c.patch(f"/api/v1/listings/{listing['id']}", json={"price_tiyn": 2_000_000}, headers=self.h(self.seller))
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(self.post("/me/shop-sale", self.seller, {"percent": 10}).json(), {"changed": 1})
+        self.assertEqual(self.c.delete("/api/v1/me/shop-sale", headers=self.h(self.seller)).json(), {"changed": 1})
+        self.assertEqual(self.c.get(f"/api/v1/listings/{listing['id']}").json()["price_tiyn"], 2_000_000)
+
+    def test_purge_drops_old_codes_and_dead_tokens(self):
+        from vitrina_api.services import run_purge
+        with self.db() as db:
+            done = run_purge(db, now=self.later(days=40))
+        self.assertTrue(any(x.startswith("otp_codes:") for x in done))
+        self.assertTrue(any(x.startswith("auth_tokens:") for x in done))
+
+
+class ForeignMediaTests(ApiTestCase):
+    external_media = False
+
+    def test_listing_photos_must_be_this_sellers_own_uploads(self):
+        own = "http://test/media/{}/" + "a" * 32 + ".jpg"
+        with self.db() as db:
+            seller_id = db.query(User).filter_by(phone="+77010000001").one().id
+        for url in ("http://test/media/9/x.jpg</script><script>alert(1)</script>", own.format(seller_id + 100),
+                    "http://test/media/" + str(seller_id) + "/../../etc/passwd"):
+            r = self.post("/listings", self.seller, {**LISTING, "photos": [{"url": url, "angle": "front"}]})
+            self.assertEqual(r.json()["code"], "foreign_media", url)
 
 
 if __name__ == "__main__":

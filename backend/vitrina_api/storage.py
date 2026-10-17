@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import io
+import re
 import secrets
 from datetime import datetime, timezone
 from pathlib import Path
@@ -56,13 +57,28 @@ class Storage(Protocol):
 
     def put(self, data: bytes, *, owner_id: int, ext: str = "jpg") -> str: ...
 
-    def owns(self, url: str) -> bool: ...
+    def owns(self, url: str, owner_id: int | None = None) -> bool: ...
 
     def read(self, url: str) -> bytes: ...
 
 
 def new_key(owner_id: int, ext: str) -> str:
     return f"{owner_id}/{secrets.token_hex(16)}.{ext}"
+
+
+# The only shape new_key produces. Anything else (quotes, "</script>", "?", "#", "..") was not written by us.
+KEY_RE = re.compile(r"(\d+)/[0-9a-f]{32}\.(?:jpg|webp|png|mp4)")
+
+
+def key_of(public_base: str, url: str, owner_id: int | None = None) -> str | None:
+    """The storage key of a URL we wrote, or None. With owner_id, only that user's own files count."""
+    if not isinstance(url, str) or not url.startswith(public_base + "/"):
+        return None
+    key = url[len(public_base) + 1:]
+    m = KEY_RE.fullmatch(key)
+    if m is None or (owner_id is not None and int(m.group(1)) != owner_id):
+        return None
+    return key
 
 
 CONTENT_TYPES = {"jpg": "image/jpeg", "webp": "image/webp", "png": "image/png", "mp4": "video/mp4"}
@@ -83,13 +99,14 @@ class LocalStorage:
         path.write_bytes(data)
         return f"{self.public_base}/{name}"
 
-    def owns(self, url: str) -> bool:
-        return url.startswith(self.public_base + "/")
+    def owns(self, url: str, owner_id: int | None = None) -> bool:
+        return key_of(self.public_base, url, owner_id) is not None
 
     def read(self, url: str) -> bytes:
-        if not self.owns(url):
+        key = key_of(self.public_base, url)
+        if key is None:
             raise ValueError("not stored here")
-        path = (self.root / url[len(self.public_base) + 1:]).resolve()
+        path = (self.root / key).resolve()
         if self.root.resolve() not in path.parents:
             raise ValueError("outside storage root")
         return path.read_bytes()
@@ -148,15 +165,13 @@ class S3Storage:
                                       "cache-control": "public, max-age=31536000, immutable"})
         return f"{self.public_base}/{key}"
 
-    def owns(self, url: str) -> bool:
-        return url.startswith(self.public_base + "/")
+    def owns(self, url: str, owner_id: int | None = None) -> bool:
+        return key_of(self.public_base, url, owner_id) is not None
 
     def read(self, url: str) -> bytes:
-        if not self.owns(url):
+        key = key_of(self.public_base, url)
+        if key is None:
             raise ValueError("not stored here")
-        key = url[len(self.public_base) + 1:]
-        if ".." in key.split("/"):
-            raise ValueError("outside storage root")
         return self._send("GET", key).content
 
 

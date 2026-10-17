@@ -15,7 +15,7 @@ from typing import Callable, Protocol
 
 from PIL import Image, ImageChops, ImageDraw
 
-log = logging.getLogger(__name__)
+log = logging.getLogger("vitrina.cutout")
 
 
 class Segmenter(Protocol):

@@ -45,7 +45,7 @@ const API = location.origin + '/api/v1';
 const STATUS = { CREATED:'Жасалды', PAYMENT_PENDING:'Төлем күтілуде', PAID:'Төленді', SELLER_ACCEPTED:'Қабылданды', PREPARING:'Дайындалуда',
   SHIPPED:'Жіберілді', IN_TRANSIT:'Жолда', DELIVERED_PENDING_CONFIRMATION:'Жеткізілді', COMPLETED:'Аяқталды', DISPUTED:'Дау',
   RETURN_REQUESTED:'Қайтару сұралды', REFUND_PENDING:'Қайтарылуда', REFUNDED:'Қайтарылды', CANCELLED:'Жойылды' };
-const ACTOR = { buyer:'сатып алушы', seller:'сатушы', system:'жүйе', support:'қолдау' };
+const ACTOR = { buyer:'сатып алушы', seller:'сатушы', system:'жүйе', support:'қолдау', scheduler:'таймер' };
 const actor = (a) => ACTOR[String(a).split(':')[0]] || a;
 const REASON = { fake:'Жалған тауар', wrong_photos:'Фото сәйкес емес', prohibited:'Тыйым салынған', contact_details:'Байланыс деректері', other:'Басқа' };
 const FLAG = { contacts:'Байланыс деректері', replica:'Көшірме', low_price:'Күдікті баға', reused_photo:'Бөтен фото' };
@@ -98,7 +98,10 @@ function shell(content) {
     `<button data-k="${k}" aria-current="${k === tab}">${l}${queues[k] ? ` <span class="pill">${queues[k]}</span>` : ''}</button>`).join('')}</nav>
     <span style="flex:1"></span><button class="ghost" id="out">Шығу</button></header><main></main></div>`);
   n.querySelectorAll('nav button').forEach(b => b.onclick = () => { tab = b.dataset.k; show(); });
-  n.querySelector('#out').onclick = () => { token = ''; sessionStorage.removeItem('vitrina_admin'); loginView(); };
+  n.querySelector('#out').onclick = async () => {
+    try { await call('POST', '/auth/logout'); } catch (_) { /* signed out locally either way */ }
+    token = ''; sessionStorage.removeItem('vitrina_admin'); loginView();
+  };
   n.querySelector('main').append(content);
   render(n);
 }
@@ -109,7 +112,34 @@ function orderCard(o, withResolve) {
       <div style="flex:1"><b>№${o.id} · ${esc(o.listing_title)}</b> <span class="pill">${esc(STATUS[o.status] || o.status)}</span>
       <div class="muted">Өлшем ${esc(o.size_label)} (${esc(o.size_cm)} см) · ${tenge(o.total_tiyn)} · сатып алушы #${o.buyer_id} · сатушы #${o.seller_id}</div>
       <ol class="hist">${o.history.map(h => `<li>${when(h.at)} · ${esc(STATUS[h.status] || h.status)} · ${esc(actor(h.actor))}${h.reason ? ' — «' + esc(h.reason) + '»' : ''}</li>`).join('')}</ol>
+      <button class="ghost" data-act="evidence">Дәлелдер мен ақша қозғалысы</button><div class="evidence"></div>
       </div></div></div>`);
+  const body = n.querySelector('.card > .row > div');
+  body.querySelector('[data-act=evidence]').onclick = async (e) => {
+    e.target.disabled = true;
+    const box = body.querySelector('.evidence');
+    try {
+      const [ev, led] = await Promise.all([call('GET', `/admin/orders/${o.id}/evidence`), call('GET', `/admin/orders/${o.id}/ledger`)]);
+      const who = { buyer: 'Сатып алушы', seller: 'Сатушы' };
+      box.replaceChildren($(`<div>
+        <div class="muted">Трек-нөмір: ${esc(ev.tracking_number || '—')} · Қала: ${esc(ev.delivery_city || '—')}${ev.delivered_at ? ' · Жеткізілді: ' + when(ev.delivered_at) : ''}</div>
+        ${ev.statements.length ? `<b>Тараптардың сөзі</b><ol class="hist">${ev.statements.map(x => `<li>${when(x.at)} · ${esc(actor(x.actor))}: «${esc(x.reason)}»</li>`).join('')}</ol>` : ''}
+        <b>Чат</b>${ev.messages.length ? `<ol class="hist">${ev.messages.map(m => `<li>${when(m.at)} · ${who[m.from]}: ${esc(m.body)}${m.photo_url ? ` <a href="${esc(m.photo_url)}" target="_blank" rel="noopener"><img src="${esc(m.photo_url)}" alt="Чаттағы фото" style="width:64px;height:64px"></a>` : ''}</li>`).join('')}</ol>` : '<div class="muted">Хат жоқ.</div>'}
+        <b>Ақша қозғалысы</b><table>${led.transactions.map(t => t.entries.map(x => `<tr><td>${esc(t.kind)}</td><td>${esc(x.account)}</td><td>${x.debit ? '−' + tenge(x.debit) : ''}</td><td>${x.credit ? '+' + tenge(x.credit) : ''}</td></tr>`).join('')).join('') || '<tr><td class="muted">Әзірге жоқ</td></tr>'}</table>
+      </div>`));
+    } catch (x) { box.textContent = x.message; e.target.disabled = false; }
+  };
+  if (o.status === 'SHIPPED' || o.status === 'IN_TRANSIT') {
+    const d = $(`<form class="inline"><input name="reason" placeholder="Неге жеткізілді деп санаймыз (міндетті)" required style="grid-column:1/3">
+      <button class="ghost">Жеткізілді деп белгілеу</button><div class="err" style="grid-column:1/-1"></div></form>`).querySelector('form');
+    d.onsubmit = async (e) => {
+      e.preventDefault();
+      if (!confirm(`№${o.id}: жеткізілді деп белгілеу? Сатып алушыға тексеруге уақыт беріледі.`)) return;
+      try { await call('POST', `/admin/orders/${o.id}/delivered`, { reason: d.reason.value.trim() }); show(); }
+      catch (x) { d.querySelector('.err').textContent = x.message; }
+    };
+    body.append(d);
+  }
   if (withResolve) {
     const f = $(`<form class="inline"><input name="refund" type="number" min="0" step="1" placeholder="Қайтару, ₸">
       <input name="reason" placeholder="Шешімнің себебі (міндетті)" required><button class="primary">Шешу</button>
@@ -121,7 +151,7 @@ function orderCard(o, withResolve) {
       try { await call('POST', `/admin/orders/${o.id}/resolve`, { refund_tiyn: refund, reason: f.reason.value.trim() }); show(); }
       catch (x) { f.querySelector('.err').textContent = x.message; }
     };
-    n.querySelector('.card > .row > div').append(f);
+    body.append(f);
   }
   return n;
 }
@@ -156,6 +186,15 @@ async function show() {
         box.append(n);
       });
       if (!r.items.length) box.append($(`<div class="card muted">Сатылымда тауар жоқ.</div>`));
+      const hidden = await call('GET', '/admin/listings?status=hidden');
+      if (hidden.items.length) box.append($(`<h3>Жасырылған</h3>`));
+      hidden.items.forEach(l => {
+        const n = $(`<div class="card"><b>#${l.id} · ${esc(l.title)}</b><div class="muted">${esc(l.seller.shop_name)}</div>
+          <form class="inline"><input name="reason" placeholder="Неге қайтарамыз (міндетті)" required style="grid-column:1/3"><button class="ghost">Сатушыға қайтару</button></form></div>`);
+        const f = n.querySelector('form');
+        f.onsubmit = async (e) => { e.preventDefault(); await call('POST', `/admin/listings/${l.id}/unhide`, { reason: f.reason.value.trim() }); show(); };
+        box.append(n);
+      });
     } else if (tab === 'moderation') {
       const r = await call('GET', '/admin/moderation');
       if (!r.items.length) box.append($(`<div class="card muted">Тексеруді күтіп тұрған тауар жоқ.</div>`));

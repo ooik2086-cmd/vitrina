@@ -67,4 +67,12 @@ def production_problems(s: Settings) -> list[str]:
         problems.append("VITRINA_DATABASE_URL must point at PostgreSQL")
     if any(o.startswith("http://") for o in s.cors_origins) or s.public_media_url.startswith("http://"):
         problems.append("VITRINA_CORS_ORIGINS and VITRINA_PUBLIC_MEDIA_URL must use https")
+    if "*" in s.cors_origins:
+        problems.append("VITRINA_CORS_ORIGINS must list the app's origins, not *")
+    if s.allow_external_media:
+        problems.append("VITRINA_ALLOW_EXTERNAL_MEDIA must be 0: listings could show images from any site")
+    if not s.s3_bucket:
+        problems.append("VITRINA_S3_BUCKET must be set: photos on the API server's disk are lost with the server")
+    elif not (s.s3_endpoint.startswith("https://") and s.s3_access_key and s.s3_secret_key):
+        problems.append("VITRINA_S3_ENDPOINT (https), VITRINA_S3_ACCESS_KEY and VITRINA_S3_SECRET_KEY must be set")
     return problems

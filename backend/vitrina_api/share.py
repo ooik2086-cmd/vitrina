@@ -124,9 +124,11 @@ def shared_listing(listing_id: int, request: Request, db: Session = Depends(get_
     backdrop = BACKDROPS.get(listing.showcase_style, "var(--studio)")
     spin_js = ""
     if len(shots) > 1:
+        # Inside <script> a "</script>" in any string would end the block, so "<" never appears raw.
+        urls_js = json.dumps(shots).replace("<", "\\u003c")
         spin_js = f"""<script>
 (() => {{
-  const urls = {json.dumps(shots)}, img = document.getElementById('shot'), stage = document.getElementById('stage');
+  const urls = {urls_js}, img = document.getElementById('shot'), stage = document.getElementById('stage');
   urls.forEach(u => {{ const i = new Image(); i.src = u; }});
   let k = 0, x0 = null, k0 = 0;
   const show = n => {{ k = ((n % urls.length) + urls.length) % urls.length; img.src = urls[k]; }};

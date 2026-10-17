@@ -50,13 +50,13 @@ def list_proofs(listing_id: int, user: User = Depends(current_user), db: Session
 
 
 @router.post("/listings/{listing_id}/proofs", status_code=201)
-async def add_proof(listing_id: int, file: UploadFile = File(...), user: User = Depends(current_user),
+def add_proof(listing_id: int, file: UploadFile = File(...), user: User = Depends(current_user),
                     db: Session = Depends(get_db), storage: Storage = Depends(get_storage)):
     listing = seller_listing(db, listing_id, user)
     count = len(db.scalars(select(AuthProof.id).where(AuthProof.listing_id == listing.id)).all())
     if count >= MAX_PROOFS:
         raise ApiError(409, "proof_limit")
-    data = await file.read(MAX_UPLOAD_BYTES + 1)
+    data = file.file.read(MAX_UPLOAD_BYTES + 1)
     if len(data) > MAX_UPLOAD_BYTES:
         raise ApiError(413, "file_too_large")
     db.add(AuthProof(listing_id=listing.id, url=storage.put(normalize_image(data), owner_id=user.id)))

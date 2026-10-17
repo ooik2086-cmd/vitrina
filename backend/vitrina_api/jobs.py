@@ -30,7 +30,9 @@ def run_once(sessions: sessionmaker, settings: Settings) -> dict[str, list[int]]
         reminded = services.run_review_reminders(db, now=now)
     with sessions() as db:
         tips = services.run_stale_listing_tips(db, now=now)
-    return {**expired, "completed": completed, "review_reminders": reminded, "listing_tips": tips}
+    with sessions() as db:
+        purged = services.run_purge(db, now=now)
+    return {**expired, "completed": completed, "review_reminders": reminded, "listing_tips": tips, "purged": purged}
 
 
 async def loop(sessions: sessionmaker, settings: Settings, interval_s: int) -> None:

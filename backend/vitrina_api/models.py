@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 
-from sqlalchemy import (BigInteger, Boolean, Date, DateTime, ForeignKey, Integer, LargeBinary, String, Text,
+from sqlalchemy import (BigInteger, Boolean, Date, DateTime, ForeignKey, Index, Integer, LargeBinary, String, Text,
                         UniqueConstraint, create_engine)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 
@@ -60,6 +60,9 @@ class AuthToken(Base):
 
 class Listing(Base):
     __tablename__ = "listings"
+    # The catalog filters on status first, then category and price, and sorts by price or by newest.
+    __table_args__ = (Index("ix_listings_status_category_price", "status", "category", "price_tiyn"),
+                      Index("ix_listings_status_price", "status", "price_tiyn"))
     id: Mapped[int] = mapped_column(primary_key=True)
     seller_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     status: Mapped[str] = mapped_column(String(20), default="draft", index=True)  # draft|moderation|published|paused|sold|hidden|rejected|archived
@@ -90,9 +93,14 @@ class Listing(Base):
     was_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     announced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # saved-search alerts sent
     stale_nudged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # 'not selling' tip sent
+    # The seller's own price before a shop-wide sale, put back when the sale ends (the crossed-out price may differ).
+    pre_sale_price_tiyn: Mapped[int | None] = mapped_column(BigInteger)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    sizes: Mapped[list[ListingSize]] = relationship(cascade="all, delete-orphan", order_by="ListingSize.id")
-    media: Mapped[list[Media]] = relationship(cascade="all, delete-orphan", order_by="Media.position")
+    # selectin: a page of listings loads all their sizes and photos in one query each, not two per listing.
+    sizes: Mapped[list[ListingSize]] = relationship(cascade="all, delete-orphan", order_by="ListingSize.id",
+                                                    lazy="selectin")
+    media: Mapped[list[Media]] = relationship(cascade="all, delete-orphan", order_by="Media.position",
+                                              lazy="selectin")
 
 
 class ListingSize(Base):
@@ -120,11 +128,13 @@ class Favorite(Base):
     __table_args__ = (UniqueConstraint("user_id", "listing_id"),)
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
-    listing_id: Mapped[int] = mapped_column(ForeignKey("listings.id"))
+    listing_id: Mapped[int] = mapped_column(ForeignKey("listings.id"), index=True)  # "saved by N" on every page
 
 
 class Order(Base):
     __tablename__ = "orders"
+    __table_args__ = (Index("ix_orders_listing_status", "listing_id", "status"),
+                      Index("ix_orders_seller_created", "seller_id", "created_at"))
     id: Mapped[int] = mapped_column(primary_key=True)
     buyer_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     seller_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
@@ -442,7 +452,11 @@ class Notification(Base):
 
 
 def make_session_factory(database_url: str, *, create_schema: bool = True):
-    kwargs = {"connect_args": {"check_same_thread": False}} if database_url.startswith("sqlite") else {}
+    # A server database: test connections before use (a restarted or failed-over Postgres leaves dead ones in the
+    # pool), recycle them before the server's idle timeout, and size the pool for the request threadpool.
+    kwargs = ({"connect_args": {"check_same_thread": False}} if database_url.startswith("sqlite")
+              else {"pool_pre_ping": True, "pool_recycle": 1800, "pool_size": 10, "max_overflow": 20,
+                    "pool_timeout": 10})
     engine = create_engine(database_url, **kwargs)
     if create_schema:
         Base.metadata.create_all(engine)

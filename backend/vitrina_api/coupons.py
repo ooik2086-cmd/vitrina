@@ -16,7 +16,6 @@ from sqlalchemy.orm import Session
 
 from vitrina_core.orders import OrderStatus as S
 
-from . import services
 from .deps import current_user, get_db, now_utc
 from .errors import ApiError
 from .models import Listing, Order, PromoCode, User

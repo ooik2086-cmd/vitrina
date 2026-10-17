@@ -20,7 +20,7 @@ from vitrina_core.catalog import compute_bounds
 from .models import Listing, Media
 from .social import CONTACT_RE
 
-log = logging.getLogger(__name__)
+log = logging.getLogger("vitrina.moderation")
 
 # Words that announce a copy of a branded shoe. Selling those is not allowed whatever the price.
 REPLICA_RE = re.compile(

@@ -167,13 +167,13 @@ def send_message(conversation_id: int, body: MessageIn, user: User = Depends(cur
 
 
 @router.post("/conversations/{conversation_id}/photos", status_code=201)
-async def send_photo(conversation_id: int, file: UploadFile = File(...), caption: str = Form("", max_length=2000),
+def send_photo(conversation_id: int, file: UploadFile = File(...), caption: str = Form("", max_length=2000),
                      user: User = Depends(current_user), db: Session = Depends(get_db),
                      storage: Storage = Depends(get_storage)):
     """A photo in the chat, e.g. a close-up the buyer asked for. Cleaned of metadata like any upload."""
     conv = conversation_for(db, conversation_id, user)
     check_rate(db, user)
-    data = await file.read(MAX_UPLOAD_BYTES + 1)
+    data = file.file.read(MAX_UPLOAD_BYTES + 1)
     if len(data) > MAX_UPLOAD_BYTES:
         raise ApiError(413, "file_too_large")
     url = storage.put(normalize_image(data), owner_id=user.id)
@@ -313,11 +313,11 @@ def reviewable_order(db: Session, order_id: int, user: User) -> Order:
 
 
 @router.post("/orders/{order_id}/review/photos", status_code=201)
-async def upload_review_photo(order_id: int, file: UploadFile = File(...), user: User = Depends(current_user),
+def upload_review_photo(order_id: int, file: UploadFile = File(...), user: User = Depends(current_user),
                               db: Session = Depends(get_db), storage: Storage = Depends(get_storage)):
     """A buyer's photo of the pair that arrived, for their review. Cleaned of metadata like any upload."""
     reviewable_order(db, order_id, user)
-    data = await file.read(MAX_UPLOAD_BYTES + 1)
+    data = file.file.read(MAX_UPLOAD_BYTES + 1)
     if len(data) > MAX_UPLOAD_BYTES:
         raise ApiError(413, "file_too_large")
     return {"url": storage.put(normalize_image(data), owner_id=user.id)}
@@ -328,8 +328,7 @@ def create_review(order_id: int, body: ReviewIn, user: User = Depends(current_us
                   storage: Storage = Depends(get_storage)):
     order = reviewable_order(db, order_id, user)
     # Only photos this buyer uploaded here: never a link to someone else's picture or another site.
-    own = storage.public_base + f"/{user.id}/"
-    if any(not url.startswith(own) for url in body.photos):
+    if not all(storage.owns(url, user.id) for url in body.photos):
         raise ApiError(422, "foreign_media")
     review = Review(order_id=order.id, seller_id=order.seller_id, buyer_id=user.id, rating=body.rating,
                     text=(body.text or "").strip() or None, photos=json.dumps(body.photos) if body.photos else None,

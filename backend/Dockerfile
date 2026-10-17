@@ -30,6 +30,9 @@ ENV VITRINA_SEARCH_MODEL=/app/models/${SEARCH_MODEL}.onnx
 RUN useradd --create-home vitrina && mkdir -p /data/media && chown -R vitrina /data
 USER vitrina
 ENV VITRINA_MEDIA_DIR=/data/media VITRINA_AUTO_CREATE_SCHEMA=0
+# Client addresses (used for rate limits) are read from X-Forwarded-For only when the request comes from these
+# proxies. Set it to the load balancer's address range; with the default, every user would share one limit.
+ENV FORWARDED_ALLOW_IPS=127.0.0.1
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=4)"
