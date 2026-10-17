@@ -27,6 +27,9 @@ LISTING = {
     "sizes": [{"label": "EU 42", "insole_cm": "26,5", "quantity": 1}], "photos": PHOTOS,
 }
 
+ADDRESS = {"recipient_name": "Айгерім Сапарова", "recipient_phone": "8 (701) 000-00-02", "city": "Алматы",
+           "address": "Абай даңғылы 10, 25-пәтер"}
+
 
 class ApiTestCase(unittest.TestCase):
     external_media = True
@@ -61,6 +64,8 @@ class ApiTestCase(unittest.TestCase):
         return {"Authorization": f"Bearer {token}", **extra}
 
     def post(self, path, token, body=None, **headers):
+        if path == "/orders" and body is not None and "delivery" not in body:
+            body = {**body, "delivery": ADDRESS}  # every order needs an address; DeliveryTests cover it
         return self.c.post(f"/api/v1{path}", json=body or {}, headers=self.h(token, **headers))
 
     def publish(self, **over):
@@ -1021,6 +1026,30 @@ class StockAlertTests(ApiTestCase):
         self.post(f"/orders/{order['id']}/cancel", self.buyer)
         self.assertEqual(self.notes(other), [("back_in_stock", listing["id"])])
         self.assertEqual(self.c.delete(url, headers=self.h(other)).json(), {"size_id": sid, "alert": False})
+
+
+class DeliveryTests(ApiTestCase):
+    def get(self, path, token):
+        return self.c.get(f"/api/v1{path}", headers=self.h(token))
+
+    def test_order_needs_an_address_and_the_seller_sees_it_only_once_paid(self):
+        listing = self.publish()
+        body = {"listing_id": listing["id"], "size_id": listing["sizes"][0]["id"]}
+        missing = self.c.post("/api/v1/orders", json=body, headers=self.h(self.buyer, **{"Idempotency-Key": "x"}))
+        self.assertEqual(missing.status_code, 422)
+        bad = self.post("/orders", self.buyer, {**body, "delivery": {**ADDRESS, "recipient_phone": "123"}},
+                        **{"Idempotency-Key": "y"})
+        self.assertEqual(bad.json()["code"], "invalid_phone")
+        order = self.post("/orders", self.buyer, {**body, "delivery": {**ADDRESS, "note": "  Домофон 25  "}},
+                          **{"Idempotency-Key": "z"}).json()
+        mine = self.get(f"/orders/{order['id']}", self.buyer).json()["delivery"]
+        self.assertEqual(mine, {"recipient_name": "Айгерім Сапарова", "recipient_phone": "+77010000002",
+                                "city": "Алматы", "address": "Абай даңғылы 10, 25-пәтер", "note": "Домофон 25"})
+        self.assertIsNone(self.get(f"/orders/{order['id']}", self.seller).json()["delivery"])  # not paid yet
+        self.assertEqual(self.get("/me", self.buyer).json()["last_delivery"]["address"], "Абай даңғылы 10, 25-пәтер")
+        self.post(f"/orders/{order['id']}/pay", self.buyer)
+        self.pay(order)
+        self.assertEqual(self.get(f"/orders/{order['id']}", self.seller).json()["delivery"], mine)
 
 
 class AdminTests(ApiTestCase):

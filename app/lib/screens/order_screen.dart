@@ -131,6 +131,13 @@ class _OrderScreenState extends State<OrderScreen> {
               child: ListView(padding: const EdgeInsets.fromLTRB(20, 8, 20, 24), children: [
                 _OrderHeader(order: o),
                 const SizedBox(height: 16),
+                if (o.delivery != null) ...[
+                  _DeliveryCard(delivery: o.delivery!),
+                  const SizedBox(height: 16)
+                ] else if (me?.id == o.sellerId && const {'CREATED', 'PAYMENT_PENDING'}.contains(o.status)) ...[
+                  Text(tr('Мекенжай төлем түскенде көрінеді.'), style: Theme.of(context).textTheme.bodySmall),
+                  const SizedBox(height: 16),
+                ],
                 _Timeline(order: o),
                 const SizedBox(height: 16),
                 const _ProtectionNote(),
@@ -189,6 +196,41 @@ class _OrderHeader extends StatelessWidget {
                 Text(trf('Өлшем {0} · {1} см', [o.sizeLabel, o.sizeCm]), style: theme.textTheme.bodySmall),
               const SizedBox(height: 4),
               Text(formatTenge(o.totalTiyn), style: weight(theme.textTheme.titleMedium!, 750)),
+            ]),
+          ),
+        ]),
+      ),
+    );
+  }
+}
+
+class _DeliveryCard extends StatelessWidget {
+  const _DeliveryCard({required this.delivery});
+  final Delivery delivery;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final d = delivery;
+    return Card(
+      key: const Key('delivery-card'),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Icon(Icons.place_outlined),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(tr('Жеткізу мекенжайы'), style: theme.textTheme.titleSmall),
+              const SizedBox(height: 4),
+              SelectableText('${d.city}, ${d.address}', style: theme.textTheme.bodyMedium),
+              SelectableText('${d.recipientName} · ${d.recipientPhone}', style: theme.textTheme.bodyMedium),
+              if (d.note != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(d.note!,
+                      style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+                ),
             ]),
           ),
         ]),

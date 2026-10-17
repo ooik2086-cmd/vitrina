@@ -111,10 +111,19 @@ class ListingPatch(BaseModel):
     sizes: list[StockIn] | None = Field(default=None, max_length=30)
 
 
+class DeliveryIn(BaseModel):
+    recipient_name: str = Field(min_length=2, max_length=80)
+    recipient_phone: str
+    city: str = Field(min_length=2, max_length=60)
+    address: str = Field(min_length=5, max_length=200)  # street, house, flat
+    note: str | None = Field(default=None, max_length=200)
+
+
 class OrderIn(BaseModel):
     listing_id: int
     size_id: int
     offer_id: int | None = None  # an accepted price offer for this listing and size
+    delivery: DeliveryIn
 
 
 class ShipIn(BaseModel):
@@ -238,6 +247,20 @@ def order_out(order: Order) -> dict:
     }
 
 
+ADDRESS_HIDDEN_UNTIL_PAID = (S.CREATED.value, S.PAYMENT_PENDING.value, S.CANCELLED.value)
+
+
+def delivery_out(order: Order, viewer: User) -> dict | None:
+    """The address for the buyer always, and for the seller once the order is paid: an unpaid order is not
+    a reason to hand a stranger's home address over."""
+    if order.delivery_address is None:
+        return None
+    if viewer.id != order.buyer_id and order.status in ADDRESS_HIDDEN_UNTIL_PAID:
+        return None
+    return {"recipient_name": order.recipient_name, "recipient_phone": order.recipient_phone,
+            "city": order.delivery_city, "address": order.delivery_address, "note": order.delivery_note}
+
+
 def order_summary(db: Session, order: Order) -> dict:
     """Order plus what a list row needs to be recognisable: the item's title, size and photo."""
     listing = db.get(Listing, order.listing_id)
@@ -262,7 +285,7 @@ def away_out(user: User | None) -> str | None:
 def me_out(user: User) -> dict:
     return {"id": user.id, "phone": user.phone, "display_name": user.display_name, "city": user.city,
             "is_seller": user.is_seller, "shop_name": user.shop_name, "role": user.role,
-            "away_until": away_out(user)}
+            "away_until": away_out(user), "last_delivery": json.loads(user.last_delivery) if user.last_delivery else None}
 
 
 # ---------------------------------------------------------------- auth + profile
@@ -1123,6 +1146,19 @@ def order_for(db: Session, order_id: int, user: User, *, role: str | None = None
     return order
 
 
+def clean_delivery(body: DeliveryIn) -> dict:
+    phone = re.sub(r"[\s()\-]", "", body.recipient_phone)
+    if phone.startswith("8") and len(phone) == 11:
+        phone = "+7" + phone[1:]
+    if not PHONE_RE.match(phone):
+        raise ApiError(422, "invalid_phone")
+    values = {"recipient_name": body.recipient_name.strip(), "recipient_phone": phone, "city": body.city.strip(),
+              "address": body.address.strip(), "note": (body.note or "").strip() or None}
+    if len(values["recipient_name"]) < 2 or len(values["city"]) < 2 or len(values["address"]) < 5:
+        raise ApiError(422, "validation", "delivery fields are required")
+    return values
+
+
 @api.post("/orders", status_code=201)
 def create_order(body: OrderIn, user: User = Depends(current_user), db: Session = Depends(get_db),
                  cfg: Settings = Depends(get_settings), idempotency_key: str | None = Header(default=None)):
@@ -1140,6 +1176,7 @@ def create_order(body: OrderIn, user: User = Depends(current_user), db: Session 
         raise ApiError(409, "own_listing")
     if away_until(db.get(User, listing.seller_id)):
         raise ApiError(409, "seller_away")
+    delivery = clean_delivery(body.delivery)
     offer = offers.offer_for_order(db, body.offer_id, user, listing, body.size_id) if body.offer_id else None
     size = db.scalar(select(ListingSize).where(ListingSize.id == body.size_id,
                                                ListingSize.listing_id == listing.id).with_for_update())
@@ -1152,7 +1189,11 @@ def create_order(body: OrderIn, user: User = Depends(current_user), db: Session 
                   status=S.CREATED.value,
                   # The listing may have got cheaper than the offer since; the buyer always pays the lower.
                   item_price_tiyn=min(listing.price_tiyn, offers.price(offer)) if offer else listing.price_tiyn,
-                  delivery_price_tiyn=listing.delivery_price_tiyn, commission_version=cfg.commission.version)
+                  delivery_price_tiyn=listing.delivery_price_tiyn, commission_version=cfg.commission.version,
+                  recipient_name=delivery["recipient_name"], recipient_phone=delivery["recipient_phone"],
+                  delivery_city=delivery["city"], delivery_address=delivery["address"],
+                  delivery_note=delivery["note"])
+    user.last_delivery = json.dumps(delivery, ensure_ascii=False)
     db.add(order)
     db.flush()
     if offer:
@@ -1175,7 +1216,7 @@ def get_order(order_id: int, user: User = Depends(current_user), db: Session = D
     order = order_for(db, order_id, user)
     reviewed = db.scalar(select(Review.id).where(Review.order_id == order.id)) is not None
     events = db.scalars(select(OrderEvent).where(OrderEvent.order_id == order.id).order_by(OrderEvent.id)).all()
-    return {**order_summary(db, order), "reviewed": reviewed,
+    return {**order_summary(db, order), "reviewed": reviewed, "delivery": delivery_out(order, user),
             "history": [{"status": e.to_status, "at": services.aware(e.at).isoformat()} for e in events]}
 
 

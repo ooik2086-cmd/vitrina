@@ -69,6 +69,9 @@ Map<String, dynamic> offerJson({String status = 'pending', int amount = 4000000,
       'expires_at': '2026-10-18T10:00:00+00:00',
     };
 
+const testDelivery =
+    Delivery(recipientName: 'Айгерім', recipientPhone: '+77010000002', city: 'Алматы', address: 'Абай 10, 25');
+
 http.Response jsonResponse(Object body, [int status = 200]) =>
     http.Response(jsonEncode(body), status, headers: {'content-type': 'application/json; charset=utf-8'});
 
@@ -119,7 +122,7 @@ void main() {
             jsonEncode({'code': 'out_of_stock', 'message_kk': 'Бұл өлшем таусылды.', 'message_ru': '…'}), 409,
             headers: {'content-type': 'application/json; charset=utf-8'})));
     await expectLater(
-        api.createOrder(1, 1, 'k'),
+        api.createOrder(1, 1, 'k', delivery: testDelivery),
         throwsA(isA<ApiException>()
             .having((e) => e.code, 'code', 'out_of_stock')
             .having((e) => e.messageKk, 'message', 'Бұл өлшем таусылды.')));
@@ -235,7 +238,7 @@ void main() {
               }),
               201);
         }));
-    final order = await api.createOrder(1, 1, 'abc');
+    final order = await api.createOrder(1, 1, 'abc', delivery: testDelivery);
     expect(key, 'abc');
     expect(order.status, 'CREATED');
   });
@@ -437,7 +440,26 @@ void main() {
     expect(tester.widget<Text>(find.byKey(const Key('total'))).data, formatTenge(4000000 + 150000));
     await tester.tap(find.text('Келісілген бағамен алу'));
     await tester.pumpAndSettle();
-    expect(ordered, {'listing_id': 7, 'size_id': 1, 'offer_id': 11});
+    await tester.tap(find.byKey(const Key('delivery-continue')));
+    await tester.pump();
+    expect(find.text('Аты-жөнін жазыңыз'), findsOneWidget); // nothing leaves the phone without an address
+    await tester.enterText(find.byKey(const Key('delivery-name')), 'Айгерім Сапарова');
+    await tester.enterText(find.byKey(const Key('delivery-phone')), '8 (701) 000-00-02');
+    await tester.enterText(find.byKey(const Key('delivery-city')), 'Алматы');
+    await tester.enterText(find.byKey(const Key('delivery-address')), 'Абай даңғылы 10, 25');
+    await tester.tap(find.byKey(const Key('delivery-continue')));
+    await tester.pumpAndSettle();
+    expect(ordered, {
+      'listing_id': 7,
+      'size_id': 1,
+      'delivery': {
+        'recipient_name': 'Айгерім Сапарова',
+        'recipient_phone': '+77010000002',
+        'city': 'Алматы',
+        'address': 'Абай даңғылы 10, 25',
+      },
+      'offer_id': 11,
+    });
   });
 
   testWidgets('seller answers an offer with their own price', (tester) async {

@@ -6,6 +6,7 @@ import '../labels.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import '../widgets/delivery_sheet.dart';
 import '../widgets/spin_viewer.dart';
 import 'chat_screen.dart';
 import 'login_screen.dart';
@@ -126,10 +127,20 @@ class _ListingScreenState extends State<ListingScreen> {
 
   Future<void> _order(Listing listing) async {
     if (!await _ensureSignedIn() || !mounted) return;
+    final delivery = await showModalBottomSheet<Delivery>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) => const DeliverySheet(),
+    );
+    if (delivery == null || !mounted) return;
     setState(() => _ordering = true);
     try {
+      final session = SessionScope.of(context);
       final offer = _offer?.status == 'accepted' && _offer!.sizeId == _sizeId ? _offer : null;
-      final order = await SessionScope.of(context).api.createOrder(listing.id, _sizeId!, _orderKey, offerId: offer?.id);
+      final order =
+          await session.api.createOrder(listing.id, _sizeId!, _orderKey, delivery: delivery, offerId: offer?.id);
+      session.api.me().then(session.update, onError: (_) {}); // the address is remembered for next time
       if (offer != null) _offer = null;
       _orderKey = newIdempotencyKey();
       if (!mounted) return;

@@ -391,6 +391,35 @@ class Listing {
   String? get coverUrl => (photos.isNotEmpty ? photos : media).firstOrNull?.url;
 }
 
+/// Where an order goes. The seller gets it only after the buyer pays.
+class Delivery {
+  const Delivery(
+      {required this.recipientName,
+      required this.recipientPhone,
+      required this.city,
+      required this.address,
+      this.note});
+  Delivery.fromJson(Map<String, dynamic> j)
+      : recipientName = j['recipient_name'] as String,
+        recipientPhone = j['recipient_phone'] as String,
+        city = j['city'] as String,
+        address = j['address'] as String,
+        note = j['note'] as String?;
+  final String recipientName;
+  final String recipientPhone;
+  final String city;
+  final String address;
+  final String? note;
+
+  Map<String, dynamic> toJson() => {
+        'recipient_name': recipientName,
+        'recipient_phone': recipientPhone,
+        'city': city,
+        'address': address,
+        if (note != null && note!.isNotEmpty) 'note': note,
+      };
+}
+
 class OrderInfo {
   OrderInfo.fromJson(Map<String, dynamic> j)
       : id = j['id'] as int,
@@ -405,6 +434,7 @@ class OrderInfo {
         listingCover = j['listing_cover'] as String?,
         sizeLabel = j['size_label'] as String?,
         sizeCm = j['size_cm'] as String?,
+        delivery = j['delivery'] == null ? null : Delivery.fromJson(j['delivery'] as Map<String, dynamic>),
         history = [
           for (final h in (j['history'] as List?) ?? const [])
             (status: (h as Map)['status'] as String, at: DateTime.parse(h['at'] as String).toLocal()),
@@ -421,6 +451,9 @@ class OrderInfo {
   final String? listingCover;
   final String? sizeLabel;
   final String? sizeCm;
+
+  /// Null for the seller until the order is paid.
+  final Delivery? delivery;
   final List<({String status, DateTime at})> history;
 }
 
@@ -432,7 +465,9 @@ class Me {
         city = j['city'] as String?,
         isSeller = j['is_seller'] as bool,
         shopName = j['shop_name'] as String?,
-        awayUntil = j['away_until'] == null ? null : DateTime.parse(j['away_until'] as String);
+        awayUntil = j['away_until'] == null ? null : DateTime.parse(j['away_until'] as String),
+        lastDelivery =
+            j['last_delivery'] == null ? null : Delivery.fromJson(j['last_delivery'] as Map<String, dynamic>);
   final int id;
   final String phone;
   final String? displayName;
@@ -442,6 +477,9 @@ class Me {
 
   /// Last day of the seller's holiday, while it lasts.
   final DateTime? awayUntil;
+
+  /// The address of the last order, to fill the next one in.
+  final Delivery? lastDelivery;
 }
 
 class ChatMessage {
@@ -706,10 +744,16 @@ class Api {
 
   // orders
   /// [idempotencyKey] must stay the same when the same tap is retried, so a lost response never creates two orders.
-  Future<OrderInfo> createOrder(int listingId, int sizeId, String idempotencyKey, {int? offerId}) async =>
-      OrderInfo.fromJson(await _send('POST', '/orders',
-          body: {'listing_id': listingId, 'size_id': sizeId, if (offerId != null) 'offer_id': offerId},
-          headers: {'Idempotency-Key': idempotencyKey}) as Map<String, dynamic>);
+  Future<OrderInfo> createOrder(int listingId, int sizeId, String idempotencyKey,
+          {required Delivery delivery, int? offerId}) async =>
+      OrderInfo.fromJson(await _send('POST', '/orders', body: {
+        'listing_id': listingId,
+        'size_id': sizeId,
+        'delivery': delivery.toJson(),
+        if (offerId != null) 'offer_id': offerId,
+      }, headers: {
+        'Idempotency-Key': idempotencyKey
+      }) as Map<String, dynamic>);
 
   Future<SavedSearch> saveSearch(Map<String, Object> body) async =>
       SavedSearch.fromJson(await _send('POST', '/saved-searches', body: body) as Map<String, dynamic>);

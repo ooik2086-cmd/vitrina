@@ -31,6 +31,7 @@ class User(Base):
     shop_name: Mapped[str | None] = mapped_column(String(80))
     is_blocked: Mapped[bool] = mapped_column(Boolean, default=False)
     away_until: Mapped[date | None] = mapped_column(Date)  # seller on holiday: no new orders through this day
+    last_delivery: Mapped[str | None] = mapped_column(Text)  # JSON of the address last ordered to, to prefill
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
@@ -132,6 +133,12 @@ class Order(Base):
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     pending_refund_tiyn: Mapped[int | None] = mapped_column(BigInteger)
     dispute_reason: Mapped[str | None] = mapped_column(Text)
+    # Where the pair goes. The seller sees it only once the order is paid.
+    recipient_name: Mapped[str | None] = mapped_column(String(80))
+    recipient_phone: Mapped[str | None] = mapped_column(String(16))
+    delivery_city: Mapped[str | None] = mapped_column(String(60))
+    delivery_address: Mapped[str | None] = mapped_column(String(200))
+    delivery_note: Mapped[str | None] = mapped_column(String(200))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
