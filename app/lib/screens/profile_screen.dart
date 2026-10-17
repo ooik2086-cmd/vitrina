@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../session.dart';
 import '../widgets/common.dart';
+import 'my_listings_screen.dart';
 
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({super.key});
@@ -26,6 +27,14 @@ class ProfileScreen extends StatelessWidget {
                   leading: const Icon(Icons.store_outlined),
                   title: Text(me.shopName ?? ''),
                   subtitle: Text('Сатушы · ${me.city ?? ''}'),
+                ),
+              if (me.isSeller)
+                ListTile(
+                  leading: const Icon(Icons.inventory_2_outlined),
+                  title: const Text('Менің тауарларым'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () =>
+                      Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MyListingsScreen())),
                 )
               else
                 ListTile(

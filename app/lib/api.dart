@@ -143,9 +143,11 @@ class Api {
         ...?headers,
       });
     if (body != null) req.body = jsonEncode(body);
-    final res = await http.Response.fromStream(await _client.send(req));
-    final text = utf8.decode(res.bodyBytes);
-    final data = text.isEmpty ? null : jsonDecode(text);
+    return _decode(await http.Response.fromStream(await _client.send(req)));
+  }
+
+  static dynamic _decode(http.Response res) {
+    final data = res.bodyBytes.isEmpty ? null : jsonDecode(utf8.decode(res.bodyBytes));
     if (res.statusCode >= 400) {
       final m = data is Map ? data : const {};
       throw ApiException(res.statusCode, (m['code'] ?? 'error') as String,
@@ -169,6 +171,27 @@ class Api {
 
   Future<Me> becomeSeller(String shopName, String city) async =>
       Me.fromJson(await _send('POST', '/me/seller', body: {'shop_name': shopName, 'city': city}) as Map<String, dynamic>);
+
+  // selling
+  /// Uploads one photo; the server strips metadata and returns the URL to reference in a listing.
+  Future<String> uploadPhoto(List<int> bytes, String filename) async {
+    final req = http.MultipartRequest('POST', Uri.parse('$base/media'))
+      ..headers.addAll({'Accept': 'application/json', if (token != null) 'Authorization': 'Bearer $token'})
+      ..files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
+    final data = _decode(await http.Response.fromStream(await _client.send(req)));
+    return (data as Map)['url'] as String;
+  }
+
+  Future<Listing> createListing(Map<String, dynamic> body) async =>
+      Listing.fromJson(await _send('POST', '/listings', body: body) as Map<String, dynamic>);
+
+  Future<Listing> publishListing(int id) async =>
+      Listing.fromJson(await _send('POST', '/listings/$id/publish') as Map<String, dynamic>);
+
+  Future<List<Listing>> myListings() async {
+    final r = await _send('GET', '/me/listings') as Map;
+    return [for (final j in r['items'] as List) Listing.fromJson(j as Map<String, dynamic>)];
+  }
 
   // catalog
   Future<List<Listing>> search({String? q, String? sizeCm, String? category}) async {

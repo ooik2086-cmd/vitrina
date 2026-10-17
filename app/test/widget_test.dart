@@ -6,7 +6,9 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:vitrina/api.dart';
 import 'package:vitrina/labels.dart';
+import 'package:vitrina/screens/listing_editor_screen.dart';
 import 'package:vitrina/screens/listing_screen.dart';
+import 'package:vitrina/screens/spin_capture_screen.dart';
 import 'package:vitrina/session.dart';
 import 'package:vitrina/widgets/spin_viewer.dart';
 
@@ -108,5 +110,64 @@ void main() {
     await tester.tap(find.text('42 · 27,0 см'));
     await tester.pump();
     expect(find.textContaining('Тапсырыс беру'), findsOneWidget);
+  });
+
+  test('photo upload is multipart with the token and returns the stored url', () async {
+    late http.BaseRequest seen;
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient.streaming((req, body) async {
+          seen = req;
+          final bytes = await body.toBytes();
+          expect(String.fromCharCodes(bytes), contains('filename="a.jpg"'));
+          return http.StreamedResponse(Stream.value(utf8.encode('{"url":"http://x/media/1/abc.jpg"}')), 201);
+        }))
+      ..token = 'tok';
+    expect(await api.uploadPhoto([1, 2, 3], 'a.jpg'), 'http://x/media/1/abc.jpg');
+    expect(seen.url.path, '/api/v1/media');
+    expect(seen.headers['Authorization'], 'Bearer tok');
+    expect(seen.headers['Content-Type'], startsWith('multipart/form-data'));
+  });
+
+  test('spin progress ring repaints only when the count changes', () {
+    final a = SpinProgressPainter(captured: 3, target: spinTargetFrames);
+    expect(a.shouldRepaint(SpinProgressPainter(captured: 3, target: spinTargetFrames)), isFalse);
+    expect(a.shouldRepaint(SpinProgressPainter(captured: 4, target: spinTargetFrames)), isTrue);
+  });
+
+  testWidgets('listing editor will not save without required fields and photos', (tester) async {
+    var calls = 0;
+    final api = Api(base: 'http://x/api/v1', client: MockClient((_) async {
+      calls++;
+      return http.Response('{}', 500);
+    }));
+    tester.view.physicalSize = const Size(500, 3000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(SessionScope(session: Session(api), child: const MaterialApp(home: ListingEditorScreen())));
+    for (final label in requiredAngles.values) {
+      expect(find.text('$label *'), findsOneWidget);
+    }
+    await tester.tap(find.text('Жариялау'));
+    await tester.pump();
+    expect(find.text('Толтырыңыз'), findsWidgets);
+    expect(find.text('Бағаны енгізіңіз'), findsOneWidget);
+
+    await tester.enterText(find.widgetWithText(TextFormField, 'Атауы'), 'Qadam Runner');
+    await tester.enterText(find.widgetWithText(TextFormField, 'Түсі'), 'ақ');
+    await tester.enterText(find.widgetWithText(TextFormField, 'Бағасы'), '34900');
+    await tester.enterText(find.widgetWithText(TextFormField, 'Өлшем'), '42');
+    await tester.enterText(find.widgetWithText(TextFormField, 'Ұлтарақ, см'), '27');
+    await tester.tap(find.text('Жариялау'));
+    await tester.pump();
+    expect(find.textContaining('Фото жетіспейді'), findsOneWidget);
+    expect(calls, 0); // nothing was sent
+
+    // Defect description becomes required for worn shoes.
+    await tester.tap(find.text('Жаңа, қорабымен'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Киілген, жақсы').last);
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(TextFormField, 'Ақаулары'), findsOneWidget);
   });
 }
