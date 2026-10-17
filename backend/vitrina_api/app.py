@@ -902,11 +902,14 @@ def close_reports(listing_id: int, body: ReportCloseIn, staff: User = Depends(st
     if body.action == "hide":
         listing.status = "hidden"
         services.notify(db, listing.seller_id, "listing_hidden",
-                        f"«{listing.title}» модератор шешімімен жасырылды: {body.reason}")
+                        f"«{listing.title}» модератор шешімімен жасырылды: {body.reason}",
+                        f"«{listing.title}» скрыт по решению модератора: {body.reason}")
     for reporter in {r.reporter_id for r in reports}:
         services.notify(db, reporter, "report_closed",
                         f"«{listing.title}» туралы шағымыңыз қаралды: "
-                        + ("тауар жасырылды." if body.action == "hide" else "бұзушылық табылмады."))
+                        + ("тауар жасырылды." if body.action == "hide" else "бұзушылық табылмады."),
+                        f"Ваша жалоба на «{listing.title}» рассмотрена: "
+                        + ("товар скрыт." if body.action == "hide" else "нарушений не найдено."))
     services.audit(db, staff.id, f"reports_{outcome}", f"listing:{listing.id}", body.reason)
     db.commit()
     return {"listing_id": listing.id, "status": listing.status, "closed": len(reports)}

@@ -26,23 +26,29 @@ def total_tiyn(order: Order) -> int:
 
 
 # Who hears about each order status, and what they read. "{id}" and "{tracking}" are filled in.
-STATUS_NOTICES: dict[OrderStatus, tuple[tuple[str, ...], str]] = {
-    OrderStatus.PAID: (("seller",), "Тапсырыс №{id} төленді. Қабылдаңыз немесе бас тартыңыз."),
-    OrderStatus.SELLER_ACCEPTED: (("buyer",), "Сатушы №{id} тапсырысты қабылдады."),
-    OrderStatus.SHIPPED: (("buyer",), "Тапсырыс №{id} жіберілді. Трек-нөмір: {tracking}."),
-    OrderStatus.DELIVERED_PENDING_CONFIRMATION: (("buyer",), "Тапсырыс №{id} жеткізілді. Тексеріп, растаңыз."),
-    OrderStatus.COMPLETED: (("buyer", "seller"), "Тапсырыс №{id} аяқталды."),
-    OrderStatus.DISPUTED: (("buyer", "seller"), "Тапсырыс №{id} бойынша дау ашылды. Қолдау қызметі қарайды."),
-    OrderStatus.RETURN_REQUESTED: (("seller",), "Сатып алушы №{id} тапсырысты қайтаруды сұрады."),
-    OrderStatus.REFUND_PENDING: (("buyer", "seller"), "Тапсырыс №{id} бойынша ақша қайтарылуда."),
-    OrderStatus.REFUNDED: (("buyer",), "Тапсырыс №{id} бойынша ақша қайтарылды."),
-    OrderStatus.CANCELLED: (("buyer", "seller"), "Тапсырыс №{id} жойылды."),
+STATUS_NOTICES: dict[OrderStatus, tuple[tuple[str, ...], str, str]] = {
+    OrderStatus.PAID: (("seller",), "Тапсырыс №{id} төленді. Қабылдаңыз немесе бас тартыңыз.",
+                       "Заказ №{id} оплачен. Примите его или откажитесь."),
+    OrderStatus.SELLER_ACCEPTED: (("buyer",), "Сатушы №{id} тапсырысты қабылдады.", "Продавец принял заказ №{id}."),
+    OrderStatus.SHIPPED: (("buyer",), "Тапсырыс №{id} жіберілді. Трек-нөмір: {tracking}.",
+                          "Заказ №{id} отправлен. Трек-номер: {tracking}."),
+    OrderStatus.DELIVERED_PENDING_CONFIRMATION: (("buyer",), "Тапсырыс №{id} жеткізілді. Тексеріп, растаңыз.",
+                                                 "Заказ №{id} доставлен. Проверьте и подтвердите получение."),
+    OrderStatus.COMPLETED: (("buyer", "seller"), "Тапсырыс №{id} аяқталды.", "Заказ №{id} завершён."),
+    OrderStatus.DISPUTED: (("buyer", "seller"), "Тапсырыс №{id} бойынша дау ашылды. Қолдау қызметі қарайды.",
+                           "По заказу №{id} открыт спор. Его рассмотрит поддержка."),
+    OrderStatus.RETURN_REQUESTED: (("seller",), "Сатып алушы №{id} тапсырысты қайтаруды сұрады.",
+                                   "Покупатель запросил возврат заказа №{id}."),
+    OrderStatus.REFUND_PENDING: (("buyer", "seller"), "Тапсырыс №{id} бойынша ақша қайтарылуда.",
+                                 "По заказу №{id} деньги возвращаются."),
+    OrderStatus.REFUNDED: (("buyer",), "Тапсырыс №{id} бойынша ақша қайтарылды.", "По заказу №{id} деньги возвращены."),
+    OrderStatus.CANCELLED: (("buyer", "seller"), "Тапсырыс №{id} жойылды.", "Заказ №{id} отменён."),
 }
 
 
-def notify(db: Session, user_id: int, kind: str, text: str, *, order_id: int | None = None,
+def notify(db: Session, user_id: int, kind: str, text: str, text_ru: str, *, order_id: int | None = None,
            conversation_id: int | None = None) -> None:
-    db.add(Notification(user_id=user_id, kind=kind, text_kk=text[:300], order_id=order_id,
+    db.add(Notification(user_id=user_id, kind=kind, text_kk=text[:300], text_ru=text_ru[:300], order_id=order_id,
                         conversation_id=conversation_id))
 
 
@@ -50,12 +56,13 @@ def notify_status(db: Session, order: Order, actor_user_id: int | None) -> None:
     rule = STATUS_NOTICES.get(OrderStatus(order.status))
     if rule is None:
         return
-    roles, template = rule
-    text = template.format(id=order.id, tracking=order.tracking_number or "—")
+    roles, template, template_ru = rule
+    values = {"id": order.id, "tracking": order.tracking_number or "—"}
+    text, text_ru = template.format(**values), template_ru.format(**values)
     for role in roles:
         user_id = order.buyer_id if role == "buyer" else order.seller_id
         if user_id != actor_user_id:  # nobody is told about their own action
-            notify(db, user_id, "order_status", text, order_id=order.id)
+            notify(db, user_id, "order_status", text, text_ru, order_id=order.id)
 
 
 def move(db: Session, order: Order, to: OrderStatus, actor: Actor, *, user_id: int | None = None,

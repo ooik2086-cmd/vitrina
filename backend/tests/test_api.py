@@ -487,6 +487,7 @@ class SocialTests(ApiTestCase):
         self.assertTrue(any("төленді" in n["text"] for n in seller_note["items"]))
         self.assertTrue(any("жіберілді" in n["text"] and "KZ1" in n["text"] for n in buyer_note["items"]))
         self.assertFalse(any("жіберілді" in n["text"] for n in seller_note["items"]))  # not told about own action
+        self.assertTrue(any("отправлен" in n["text_ru"] and "KZ1" in n["text_ru"] for n in buyer_note["items"]))
         self.assertGreater(buyer_note["unread"], 0)
         self.post("/notifications/read-all", self.buyer)
         self.assertEqual(self.get("/notifications", self.buyer).json()["unread"], 0)

@@ -76,7 +76,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                   backgroundColor: theme.colorScheme.surfaceContainerHighest,
                   child: Icon(icon, color: theme.colorScheme.onSurface),
                 ),
-                title: Text(n.text, style: n.read ? null : weight(theme.textTheme.bodyLarge!, 650)),
+                title: Text(n.shown, style: n.read ? null : weight(theme.textTheme.bodyLarge!, 650)),
                 subtitle: Text(_ago(n.createdAt)),
                 trailing: n.read ? null : const CircleAvatar(radius: 4, backgroundColor: Brand.accent),
                 onTap: () => _open(n),

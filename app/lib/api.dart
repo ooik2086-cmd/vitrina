@@ -300,6 +300,7 @@ class AppNotification {
       : id = j['id'] as int,
         kind = j['kind'] as String,
         text = j['text'] as String,
+        textRu = j['text_ru'] as String?,
         orderId = j['order_id'] as int?,
         conversationId = j['conversation_id'] as int?,
         read = j['read'] as bool,
@@ -307,6 +308,10 @@ class AppNotification {
   final int id;
   final String kind;
   final String text;
+  final String? textRu;
+
+  /// The notice in the interface language.
+  String get shown => appLanguage.value == 'ru' ? (textRu ?? text) : text;
   final int? orderId;
   final int? conversationId;
   final bool read;

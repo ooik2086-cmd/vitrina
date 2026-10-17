@@ -250,6 +250,7 @@ class Notification(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     kind: Mapped[str] = mapped_column(String(40))  # order_status | message | review
     text_kk: Mapped[str] = mapped_column(String(300))
+    text_ru: Mapped[str | None] = mapped_column(String(300))  # None on notices from before Russian was added
     order_id: Mapped[int | None] = mapped_column(Integer)
     conversation_id: Mapped[int | None] = mapped_column(Integer)
     read: Mapped[bool] = mapped_column(Boolean, default=False)

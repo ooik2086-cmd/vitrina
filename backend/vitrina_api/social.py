@@ -136,7 +136,8 @@ def send_message(conversation_id: int, body: MessageIn, user: User = Depends(cur
     else:
         conv.seller_last_read_id = msg.id
     other = conv.seller_id if user.id == conv.buyer_id else conv.buyer_id
-    services.notify(db, other, "message", f"Жаңа хабарлама: {text[:120]}", conversation_id=conv.id)
+    services.notify(db, other, "message", f"Жаңа хабарлама: {text[:120]}",
+                    f"Новое сообщение: {text[:120]}", conversation_id=conv.id)
     db.commit()
     return message_out(msg)
 
@@ -161,6 +162,7 @@ def create_review(order_id: int, body: ReviewIn, user: User = Depends(current_us
                     text=(body.text or "").strip() or None)
     db.add(review)
     services.notify(db, order.seller_id, "review", f"Жаңа пікір: {body.rating}/5, тапсырыс №{order.id}.",
+                    f"Новый отзыв: {body.rating}/5, заказ №{order.id}.",
                     order_id=order.id)
     db.commit()
     return review_out(db, review)
@@ -175,6 +177,7 @@ def reply_review(review_id: int, body: ReplyIn, user: User = Depends(current_use
         raise ApiError(409, "already_replied")
     review.seller_reply = body.text.strip()
     services.notify(db, review.buyer_id, "review_reply", f"Сатушы пікіріңізге жауап берді: {review.seller_reply[:120]}",
+                    f"Продавец ответил на ваш отзыв: {review.seller_reply[:120]}",
                     order_id=review.order_id)
     db.commit()
     return review_out(db, review)
@@ -199,7 +202,7 @@ def list_notifications(user: User = Depends(current_user), db: Session = Depends
     unread = db.scalar(select(func.count(Notification.id)).where(Notification.user_id == user.id,
                                                                  Notification.read.is_(False)))
     return {"unread": int(unread or 0), "items": [
-        {"id": n.id, "kind": n.kind, "text": n.text_kk, "order_id": n.order_id, "conversation_id": n.conversation_id,
+        {"id": n.id, "kind": n.kind, "text": n.text_kk, "text_ru": n.text_ru or n.text_kk, "order_id": n.order_id, "conversation_id": n.conversation_id,
          "read": n.read, "created_at": services.aware(n.created_at).isoformat()} for n in rows]}
 
 
