@@ -32,7 +32,7 @@ from vitrina_core.orders import Actor, OrderStatus as S
 from vitrina_core.webhooks import WebhookRejected, verify
 
 from . import services
-from . import authenticity, cutout, moderation, offers, promo, visual
+from . import authenticity, coupons, cutout, moderation, offers, promo, visual
 from .config import Settings
 from .deps import current_user, get_db, get_settings, get_storage, now_utc, optional_user, sha256, staff_user
 from .errors import ApiError, api_error_handler
@@ -124,6 +124,7 @@ class OrderIn(BaseModel):
     listing_id: int
     size_id: int
     offer_id: int | None = None  # an accepted price offer for this listing and size
+    promo_code: str | None = Field(default=None, max_length=20)  # the seller's code; not with an offer
     delivery: DeliveryIn
 
 
@@ -244,6 +245,7 @@ def order_out(order: Order) -> dict:
         "buyer_id": order.buyer_id, "seller_id": order.seller_id,
         "item_price_tiyn": order.item_price_tiyn, "delivery_price_tiyn": order.delivery_price_tiyn,
         "total_tiyn": services.total_tiyn(order), "tracking_number": order.tracking_number,
+        "promo_code": order.promo_code, "promo_discount_tiyn": order.promo_discount_tiyn or 0,
         "delivered_at": services.aware(order.delivered_at).isoformat() if order.delivered_at else None,
     }
 
@@ -1272,13 +1274,20 @@ def create_order(body: OrderIn, user: User = Depends(current_user), db: Session 
                                                ListingSize.listing_id == listing.id).with_for_update())
     if size is None or size.quantity <= 0:
         raise ApiError(409, "out_of_stock")
+    # The listing may have got cheaper than the offer since; the buyer always pays the lower.
+    price = min(listing.price_tiyn, offers.price(offer)) if offer else listing.price_tiyn
+    promo, off = None, 0
+    if body.promo_code:
+        if offer:
+            raise ApiError(409, "promo_with_offer")
+        promo, off = coupons.apply(db, body.promo_code, listing, price, user, lock=True)
     size.quantity -= 1
     if not any(s.quantity > 0 for s in listing.sizes):
         listing.status = "sold"
     order = Order(buyer_id=user.id, seller_id=listing.seller_id, listing_id=listing.id, size_id=size.id,
-                  status=S.CREATED.value,
-                  # The listing may have got cheaper than the offer since; the buyer always pays the lower.
-                  item_price_tiyn=min(listing.price_tiyn, offers.price(offer)) if offer else listing.price_tiyn,
+                  status=S.CREATED.value, item_price_tiyn=price - off,
+                  promo_code_id=promo.id if promo else None, promo_code=promo.code if promo else None,
+                  promo_discount_tiyn=off,
                   delivery_price_tiyn=listing.delivery_price_tiyn, commission_version=cfg.commission.version,
                   recipient_name=delivery["recipient_name"], recipient_phone=delivery["recipient_phone"],
                   delivery_city=delivery["city"], delivery_address=delivery["address"],
@@ -1666,6 +1675,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(share_router)
     app.include_router(offers.router)
     app.include_router(authenticity.router)
+    app.include_router(coupons.router)
     # Development only: serve uploaded photos from disk. Production serves them from the bucket/CDN.
     app.mount("/media", StaticFiles(directory=settings.media_dir), name="media")
     # Support console: a static page that talks to the same staff-only API; the page itself holds no data.

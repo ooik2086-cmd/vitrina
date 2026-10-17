@@ -5,7 +5,7 @@ import os
 import tempfile
 import time
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
 from PIL import Image
@@ -1160,6 +1160,86 @@ class NotificationSettingsTests(ApiTestCase):
         self.assertIn("order_status", kinds)
         on = self.c.put(url, json={"followed_shop": True}, headers=self.h(self.buyer)).json()["items"]
         self.assertTrue(all(i["on"] for i in on))
+
+
+class PromoCodeTests(ApiTestCase):
+    def get(self, path, token):
+        return self.c.get(f"/api/v1{path}", headers=self.h(token))
+
+    def order(self, listing, key, code=None, token=None):
+        body = {"listing_id": listing["id"], "size_id": listing["sizes"][0]["id"]}
+        if code:
+            body["promo_code"] = code
+        return self.post("/orders", token or self.buyer, body, **{"Idempotency-Key": key})
+
+    def test_seller_code_takes_money_off_the_item_once_per_buyer(self):
+        self.assertEqual(self.post("/me/promo-codes", self.buyer, {"code": "KYZ10", "percent": 10}).status_code, 403)
+        for bad in ({"code": "KYZ10"}, {"code": "KYZ10", "percent": 10, "amount_tiyn": 100_000},
+                    {"code": "KYZ10", "percent": 80}, {"code": "кыз10", "percent": 10},
+                    {"code": "KYZ10", "amount_tiyn": 100_050}):
+            self.assertEqual(self.post("/me/promo-codes", self.seller, bad).status_code, 422, bad)
+        r = self.post("/me/promo-codes", self.seller, {"code": " kyz10 ", "percent": 10, "max_uses": 2})
+        self.assertEqual(r.status_code, 201, r.text)
+        self.assertEqual(r.json()["code"], "KYZ10")
+        self.assertEqual(self.post("/me/promo-codes", self.seller, {"code": "KYZ10", "amount_tiyn": 50_000}).json()["code"],
+                         "promo_exists")
+        listing = self.publish(sizes=[{"label": "EU 42", "insole_cm": "26,5", "quantity": 5}])
+        self.assertEqual(self.get(f"/listings/{listing['id']}/promo?code=NOPE", self.buyer).json()["code"],
+                         "promo_not_found")
+        preview = self.get(f"/listings/{listing['id']}/promo?code=kyz10", self.buyer).json()
+        self.assertEqual(preview, {"code": "KYZ10", "discount_tiyn": 450_000, "item_price_tiyn": 4_050_000,
+                                   "total_tiyn": 4_200_000})
+        order = self.order(listing, "p1", "kyz10").json()
+        self.assertEqual((order["item_price_tiyn"], order["promo_code"], order["promo_discount_tiyn"]),
+                         (4_050_000, "KYZ10", 450_000))
+        self.assertEqual(self.pay(order).status_code, 200)  # the buyer pays the discounted total
+        self.assertEqual(self.order(listing, "p2", "KYZ10").json()["code"], "promo_already_used")
+        other = self.login("+77010000003")
+        self.assertEqual(self.order(listing, "p3", "KYZ10", other).status_code, 201)
+        third = self.login("+77010000004")
+        self.assertEqual(self.order(listing, "p4", "KYZ10", third).json()["code"], "promo_used_up")
+        codes = self.get("/me/promo-codes", self.seller).json()["items"]
+        self.assertEqual((codes[0]["uses"], codes[0]["max_uses"]), (2, 2))
+
+    def test_cancelled_order_gives_the_use_back_and_ended_code_stops(self):
+        promo = self.post("/me/promo-codes", self.seller, {"code": "MINUS5000", "amount_tiyn": 500_000,
+                                                           "max_uses": 1, "min_price_tiyn": 4_000_000}).json()
+        listing = self.publish(sizes=[{"label": "EU 42", "insole_cm": "26,5", "quantity": 5}])
+        cheap = self.publish(price_tiyn=3_000_000)
+        self.assertEqual(self.order(cheap, "c0", "MINUS5000").json()["code"], "promo_min_price")
+        first = self.order(listing, "c1", "MINUS5000").json()
+        self.assertEqual(first["item_price_tiyn"], 4_000_000)
+        self.post(f"/orders/{first['id']}/cancel", self.buyer)
+        again = self.order(listing, "c2", "MINUS5000")
+        self.assertEqual(again.status_code, 201, again.text)
+        self.assertEqual(self.c.delete(f"/api/v1/me/promo-codes/{promo['id']}", headers=self.h(self.buyer)).status_code,
+                         404)
+        self.c.delete(f"/api/v1/me/promo-codes/{promo['id']}", headers=self.h(self.seller))
+        self.assertEqual(self.get("/me/promo-codes", self.seller).json()["items"], [])
+        other = self.login("+77010000003")
+        self.assertEqual(self.order(listing, "c3", "MINUS5000", other).json()["code"], "promo_not_found")
+
+    def test_discount_is_at_most_half_and_not_with_an_offer_or_after_its_last_day(self):
+        self.post("/me/promo-codes", self.seller, {"code": "HALF", "amount_tiyn": 4_000_000})
+        listing = self.publish(sizes=[{"label": "EU 42", "insole_cm": "26,5", "quantity": 5}])
+        self.assertEqual(self.get(f"/listings/{listing['id']}/promo?code=HALF", self.buyer).json()["discount_tiyn"],
+                         2_250_000)
+        offer = self.post(f"/listings/{listing['id']}/offers", self.buyer,
+                          {"size_id": listing["sizes"][0]["id"], "amount_tiyn": 4_000_000}).json()
+        self.post(f"/offers/{offer['id']}/accept", self.seller)
+        r = self.post("/orders", self.buyer, {"listing_id": listing["id"], "size_id": listing["sizes"][0]["id"],
+                                              "offer_id": offer["id"], "promo_code": "HALF"}, **{"Idempotency-Key": "o1"})
+        self.assertEqual(r.json()["code"], "promo_with_offer")
+        yesterday = (datetime.now(timezone(timedelta(hours=5))).date() - timedelta(days=1)).isoformat()
+        self.assertEqual(self.post("/me/promo-codes", self.seller,
+                                   {"code": "OLD1", "percent": 5, "ends_on": yesterday}).status_code, 422)
+        with self.db() as db:
+            from vitrina_api.models import PromoCode
+            db.add(PromoCode(seller_id=listing["seller"]["id"], code="OLD2", percent=5, min_price_tiyn=0,
+                             ends_on=date.fromisoformat(yesterday)))
+            db.commit()
+        self.assertEqual(self.get(f"/listings/{listing['id']}/promo?code=OLD2", self.buyer).json()["code"],
+                         "promo_expired")
 
 
 class AdminTests(ApiTestCase):

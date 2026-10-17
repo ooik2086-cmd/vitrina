@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../api.dart';
 import '../i18n.dart';
+import '../labels.dart';
 import '../session.dart';
 import '../theme.dart';
 
@@ -13,9 +14,18 @@ String? normalizeKzPhone(String raw) {
   return RegExp(r'^\+7\d{10}$').hasMatch(p) ? p : null;
 }
 
+/// What the buyer chose right before ordering.
+class Checkout {
+  const Checkout(this.delivery, {this.promoCode});
+  final Delivery delivery;
+  final String? promoCode;
+}
+
 /// Asked right before an order: who receives the pair and where. Filled in from the last order.
+/// With [listingId], the buyer can also try the seller's promo code and see the new price.
 class DeliverySheet extends StatefulWidget {
-  const DeliverySheet({super.key});
+  const DeliverySheet({super.key, this.listingId});
+  final int? listingId;
 
   @override
   State<DeliverySheet> createState() => _DeliverySheetState();
@@ -24,6 +34,10 @@ class DeliverySheet extends StatefulWidget {
 class _DeliverySheetState extends State<DeliverySheet> {
   final _form = GlobalKey<FormState>();
   late final TextEditingController _name, _phone, _city, _address, _note;
+  final _promo = TextEditingController();
+  bool _promoOpen = false, _checking = false;
+  PromoPreview? _applied;
+  String? _promoError;
 
   @override
   void initState() {
@@ -39,24 +53,105 @@ class _DeliverySheetState extends State<DeliverySheet> {
 
   @override
   void dispose() {
-    for (final c in [_name, _phone, _city, _address, _note]) {
+    for (final c in [_name, _phone, _city, _address, _note, _promo]) {
       c.dispose();
     }
     super.dispose();
+  }
+
+  Future<void> _checkPromo() async {
+    final code = _promo.text.trim();
+    if (code.isEmpty) return;
+    setState(() {
+      _checking = true;
+      _promoError = null;
+    });
+    try {
+      final p = await SessionScope.of(context).api.checkPromo(widget.listingId!, code);
+      if (mounted) setState(() => _applied = p);
+    } on ApiException catch (e) {
+      if (mounted) setState(() => _promoError = e.message);
+    } catch (_) {
+      if (mounted) setState(() => _promoError = tr('Байланыс жоқ. Қайта көріңіз.'));
+    } finally {
+      if (mounted) setState(() => _checking = false);
+    }
   }
 
   void _submit() {
     if (!_form.currentState!.validate()) return;
     Navigator.pop(
       context,
-      Delivery(
-        recipientName: _name.text.trim(),
-        recipientPhone: normalizeKzPhone(_phone.text)!,
-        city: _city.text.trim(),
-        address: _address.text.trim(),
-        note: _note.text.trim().isEmpty ? null : _note.text.trim(),
+      Checkout(
+        Delivery(
+          recipientName: _name.text.trim(),
+          recipientPhone: normalizeKzPhone(_phone.text)!,
+          city: _city.text.trim(),
+          address: _address.text.trim(),
+          note: _note.text.trim().isEmpty ? null : _note.text.trim(),
+        ),
+        promoCode: _applied?.code,
       ),
     );
+  }
+
+  Widget _promoBlock(ThemeData theme) {
+    final applied = _applied;
+    if (applied != null) {
+      return Container(
+        key: const Key('promo-applied'),
+        padding: const EdgeInsets.fromLTRB(14, 10, 4, 10),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Row(children: [
+          const Icon(Icons.local_offer_rounded, size: 20, color: Brand.accent),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(trf('{0}: −{1}', [applied.code, formatTenge(applied.discountTiyn)]),
+                  style: weight(theme.textTheme.titleSmall!, 700)),
+              Text(trf('Жеткізумен бірге төлейсіз: {0}', [formatTenge(applied.totalTiyn)]),
+                  style: theme.textTheme.bodySmall),
+            ]),
+          ),
+          IconButton(
+            tooltip: tr('Промокодты алып тастау'),
+            icon: const Icon(Icons.close_rounded),
+            onPressed: () => setState(() => _applied = null),
+          ),
+        ]),
+      );
+    }
+    if (!_promoOpen) {
+      return TextButton.icon(
+        key: const Key('promo-open'),
+        onPressed: () => setState(() => _promoOpen = true),
+        icon: const Icon(Icons.local_offer_outlined, size: 18),
+        label: Text(tr('Промокод бар ма?')),
+      );
+    }
+    return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Expanded(
+        child: TextField(
+          key: const Key('promo-code'),
+          controller: _promo,
+          textCapitalization: TextCapitalization.characters,
+          decoration: InputDecoration(labelText: tr('Промокод'), errorText: _promoError, errorMaxLines: 2),
+          onSubmitted: (_) => _checkPromo(),
+        ),
+      ),
+      const SizedBox(width: 8),
+      SizedBox(
+        height: 48, // the field's height, so the button lines up with it
+        child: FilledButton.tonal(
+          key: const Key('promo-apply'),
+          onPressed: _checking ? null : _checkPromo,
+          child: Text(tr('Қолдану')),
+        ),
+      ),
+    ]);
   }
 
   String? _atLeast(String? v, int n, String message) => (v ?? '').trim().length < n ? message : null;
@@ -120,6 +215,7 @@ class _DeliverySheetState extends State<DeliverySheet> {
               maxLength: 200,
               decoration: field(tr('Курьерге ескерту (міндетті емес)'), icon: Icons.sticky_note_2_outlined),
             ),
+            if (widget.listingId != null) ...[_promoBlock(theme), const SizedBox(height: 12)],
             const SizedBox(height: 8),
             SizedBox(
               width: double.infinity,

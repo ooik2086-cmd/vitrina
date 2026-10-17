@@ -127,19 +127,20 @@ class _ListingScreenState extends State<ListingScreen> {
 
   Future<void> _order(Listing listing) async {
     if (!await _ensureSignedIn() || !mounted) return;
-    final delivery = await showModalBottomSheet<Delivery>(
+    final offer = _offer?.status == 'accepted' && _offer!.sizeId == _sizeId ? _offer : null;
+    final checkout = await showModalBottomSheet<Checkout>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      builder: (_) => const DeliverySheet(),
+      // An agreed price is already the seller's discount, so a promo code is not offered on top of it.
+      builder: (_) => DeliverySheet(listingId: offer == null ? listing.id : null),
     );
-    if (delivery == null || !mounted) return;
+    if (checkout == null || !mounted) return;
     setState(() => _ordering = true);
     try {
       final session = SessionScope.of(context);
-      final offer = _offer?.status == 'accepted' && _offer!.sizeId == _sizeId ? _offer : null;
-      final order =
-          await session.api.createOrder(listing.id, _sizeId!, _orderKey, delivery: delivery, offerId: offer?.id);
+      final order = await session.api.createOrder(listing.id, _sizeId!, _orderKey,
+          delivery: checkout.delivery, offerId: offer?.id, promoCode: checkout.promoCode);
       session.api.me().then(session.update, onError: (_) {}); // the address is remembered for next time
       if (offer != null) _offer = null;
       _orderKey = newIdempotencyKey();

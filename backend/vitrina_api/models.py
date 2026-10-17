@@ -142,6 +142,10 @@ class Order(Base):
     delivery_city: Mapped[str | None] = mapped_column(String(60))
     delivery_address: Mapped[str | None] = mapped_column(String(200))
     delivery_note: Mapped[str | None] = mapped_column(String(200))
+    # A seller's promo code takes its discount off item_price_tiyn, so the seller alone pays for it.
+    promo_code_id: Mapped[int | None] = mapped_column(ForeignKey("promo_codes.id"), index=True)
+    promo_code: Mapped[str | None] = mapped_column(String(20))
+    promo_discount_tiyn: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
@@ -309,6 +313,21 @@ class AuthProof(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     listing_id: Mapped[int] = mapped_column(ForeignKey("listings.id"), index=True)
     url: Mapped[str] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class PromoCode(Base):
+    """A seller's discount code: a percent or a fixed sum off one pair, each buyer once."""
+    __tablename__ = "promo_codes"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    seller_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    code: Mapped[str] = mapped_column(String(20))
+    percent: Mapped[int | None] = mapped_column(Integer)
+    amount_tiyn: Mapped[int | None] = mapped_column(BigInteger)
+    min_price_tiyn: Mapped[int] = mapped_column(BigInteger, default=0)
+    max_uses: Mapped[int | None] = mapped_column(Integer)
+    ends_on: Mapped[date | None] = mapped_column(Date)  # last day it works, Almaty time
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 

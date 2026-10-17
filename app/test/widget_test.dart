@@ -29,6 +29,7 @@ import 'package:vitrina/screens/spin_capture_screen.dart';
 import 'package:vitrina/ru.dart';
 import 'package:vitrina/session.dart';
 import 'package:vitrina/widgets/common.dart';
+import 'package:vitrina/widgets/delivery_sheet.dart';
 import 'package:vitrina/widgets/filter_sheet.dart';
 import 'package:vitrina/widgets/spin_viewer.dart';
 
@@ -454,6 +455,7 @@ void main() {
     expect(tester.widget<Text>(find.byKey(const Key('total'))).data, formatTenge(4000000 + 150000));
     await tester.tap(find.text('Келісілген бағамен алу'));
     await tester.pumpAndSettle();
+    expect(find.byKey(const Key('promo-open')), findsNothing); // no promo code on top of an agreed price
     await tester.tap(find.byKey(const Key('delivery-continue')));
     await tester.pump();
     expect(find.text('Аты-жөнін жазыңыз'), findsOneWidget); // nothing leaves the phone without an address
@@ -474,6 +476,53 @@ void main() {
       },
       'offer_id': 11,
     });
+  });
+
+  testWidgets('a promo code shows the new price and goes with the order', (tester) async {
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async {
+          expect(req.url.path, '/api/v1/listings/7/promo');
+          if (req.url.queryParameters['code'] != 'QADAM10') {
+            return jsonResponse({'code': 'promo_not_found', 'message_kk': 'Мұндай промокод жоқ.'}, 404);
+          }
+          return jsonResponse(
+              {'code': 'QADAM10', 'discount_tiyn': 450000, 'item_price_tiyn': 4050000, 'total_tiyn': 4200000});
+        }))
+      ..token = 'tok';
+    tester.view.physicalSize = const Size(400, 1800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    Checkout? result;
+    await tester.pumpWidget(SessionScope(
+        session: Session(api),
+        child: MaterialApp(
+            home: Builder(
+                builder: (context) => TextButton(
+                    onPressed: () async => result = await showModalBottomSheet<Checkout>(
+                        context: context, isScrollControlled: true, builder: (_) => const DeliverySheet(listingId: 7)),
+                    child: const Text('open'))))));
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('promo-open')));
+    await tester.pump();
+    await tester.enterText(find.byKey(const Key('promo-code')), 'nope');
+    await tester.tap(find.byKey(const Key('promo-apply')));
+    await tester.pumpAndSettle();
+    expect(find.text('Мұндай промокод жоқ.'), findsOneWidget);
+    await tester.enterText(find.byKey(const Key('promo-code')), 'QADAM10');
+    await tester.tap(find.byKey(const Key('promo-apply')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('promo-applied')), findsOneWidget);
+    expect(find.textContaining(formatTenge(4200000)), findsOneWidget);
+    await tester.enterText(find.byKey(const Key('delivery-name')), 'Айгерім Сапарова');
+    await tester.enterText(find.byKey(const Key('delivery-phone')), '+7 701 000 00 02');
+    await tester.enterText(find.byKey(const Key('delivery-city')), 'Алматы');
+    await tester.enterText(find.byKey(const Key('delivery-address')), 'Абай даңғылы 10, 25');
+    await tester.tap(find.byKey(const Key('delivery-continue')));
+    await tester.pumpAndSettle();
+    expect(result?.promoCode, 'QADAM10');
+    expect(result?.delivery.recipientPhone, '+77010000002');
   });
 
   testWidgets('seller answers an offer with their own price', (tester) async {

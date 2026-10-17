@@ -423,6 +423,42 @@ class Delivery {
 }
 
 /// A listing's proof of authenticity as its seller sees it; the photos are never shown to buyers.
+/// A seller's discount code, as the seller sees it.
+class PromoCode {
+  PromoCode.fromJson(Map<String, dynamic> j)
+      : id = j['id'] as int,
+        code = j['code'] as String,
+        percent = j['percent'] as int?,
+        amountTiyn = j['amount_tiyn'] as int?,
+        minPriceTiyn = j['min_price_tiyn'] as int,
+        maxUses = j['max_uses'] as int?,
+        endsOn = j['ends_on'] == null ? null : DateTime.parse(j['ends_on'] as String),
+        uses = j['uses'] as int,
+        active = j['active'] as bool;
+  final int id;
+  final String code;
+  final int? percent;
+  final int? amountTiyn;
+  final int minPriceTiyn;
+  final int? maxUses;
+  final DateTime? endsOn;
+  final int uses;
+  final bool active;
+}
+
+/// What the buyer pays with a code, before ordering.
+class PromoPreview {
+  PromoPreview.fromJson(Map<String, dynamic> j)
+      : code = j['code'] as String,
+        discountTiyn = j['discount_tiyn'] as int,
+        itemPriceTiyn = j['item_price_tiyn'] as int,
+        totalTiyn = j['total_tiyn'] as int;
+  final String code;
+  final int discountTiyn;
+  final int itemPriceTiyn;
+  final int totalTiyn;
+}
+
 class Proofs {
   Proofs.fromJson(Map<String, dynamic> j)
       : authenticity = j['authenticity'] as String,
@@ -457,6 +493,8 @@ class OrderInfo {
         sellerId = j['seller_id'] as int,
         totalTiyn = j['total_tiyn'] as int,
         trackingNumber = j['tracking_number'] as String?,
+        promoCode = j['promo_code'] as String?,
+        promoDiscountTiyn = (j['promo_discount_tiyn'] as int?) ?? 0,
         listingTitle = j['listing_title'] as String?,
         reviewed = (j['reviewed'] as bool?) ?? false,
         listingCover = j['listing_cover'] as String?,
@@ -474,6 +512,8 @@ class OrderInfo {
   final int sellerId;
   final int totalTiyn;
   final String? trackingNumber;
+  final String? promoCode;
+  final int promoDiscountTiyn;
   final String? listingTitle;
   final bool reviewed;
   final String? listingCover;
@@ -792,12 +832,13 @@ class Api {
   // orders
   /// [idempotencyKey] must stay the same when the same tap is retried, so a lost response never creates two orders.
   Future<OrderInfo> createOrder(int listingId, int sizeId, String idempotencyKey,
-          {required Delivery delivery, int? offerId}) async =>
+          {required Delivery delivery, int? offerId, String? promoCode}) async =>
       OrderInfo.fromJson(await _send('POST', '/orders', body: {
         'listing_id': listingId,
         'size_id': sizeId,
         'delivery': delivery.toJson(),
         if (offerId != null) 'offer_id': offerId,
+        if (promoCode != null) 'promo_code': promoCode,
       }, headers: {
         'Idempotency-Key': idempotencyKey
       }) as Map<String, dynamic>);
@@ -891,6 +932,19 @@ class Api {
       ..files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
     return (_decode(await http.Response.fromStream(await _client.send(req))) as Map)['url'] as String;
   }
+
+  Future<PromoPreview> checkPromo(int listingId, String code) async => PromoPreview.fromJson(
+      await _send('GET', '/listings/$listingId/promo', query: {'code': code}) as Map<String, dynamic>);
+
+  Future<List<PromoCode>> promoCodes() async {
+    final r = await _send('GET', '/me/promo-codes') as Map;
+    return [for (final j in r['items'] as List) PromoCode.fromJson(j as Map<String, dynamic>)];
+  }
+
+  Future<PromoCode> createPromoCode(Map<String, Object> body) async =>
+      PromoCode.fromJson(await _send('POST', '/me/promo-codes', body: body) as Map<String, dynamic>);
+
+  Future<void> endPromoCode(int id) => _send('DELETE', '/me/promo-codes/$id');
 
   Future<Proofs> proofs(int listingId) async =>
       Proofs.fromJson(await _send('GET', '/listings/$listingId/proofs') as Map<String, dynamic>);

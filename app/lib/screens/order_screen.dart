@@ -196,6 +196,9 @@ class _OrderHeader extends StatelessWidget {
                 Text(trf('Өлшем {0} · {1} см', [o.sizeLabel, o.sizeCm]), style: theme.textTheme.bodySmall),
               const SizedBox(height: 4),
               Text(formatTenge(o.totalTiyn), style: weight(theme.textTheme.titleMedium!, 750)),
+              if (o.promoCode != null)
+                Text(trf('Промокод {0}: −{1}', [o.promoCode, formatTenge(o.promoDiscountTiyn)]),
+                    key: const Key('order-promo'), style: theme.textTheme.bodySmall?.copyWith(color: Brand.accent)),
             ]),
           ),
         ]),
