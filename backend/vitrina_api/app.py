@@ -37,7 +37,7 @@ from vitrina_core.webhooks import WebhookRejected, verify
 
 from . import services
 from . import authenticity, coupons, cutout, jobs, moderation, offers, promo, qa, visual
-from .config import Settings
+from .config import Settings, production_problems
 from .deps import current_user, get_db, get_settings, get_storage, now_utc, optional_user, sha256, staff_user
 from .errors import ApiError, api_error_handler
 from .share import router as share_router
@@ -342,6 +342,16 @@ def verify_otp(body: OtpVerify, db: Session = Depends(get_db), cfg: Settings = D
     db.add(AuthToken(token_hash=sha256(raw), user_id=user.id, expires_at=now_utc() + cfg.token_ttl))
     db.commit()
     return {"token": raw, "user": me_out(user)}
+
+
+@api.get("/health")
+def health(db: Session = Depends(get_db)):
+    """For the load balancer and uptime checks: the process answers and the database does too."""
+    try:
+        db.execute(select(1))
+    except Exception:
+        raise ApiError(503, "unavailable")
+    return {"ok": True}
 
 
 @api.get("/me")
@@ -1795,6 +1805,8 @@ async def delivery_webhook(request: Request, db: Session = Depends(get_db), cfg:
 # ---------------------------------------------------------------- app
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings()
+    if settings.env == "production" and (problems := production_problems(settings)):
+        raise RuntimeError("Refusing to start in production:\n- " + "\n- ".join(problems))
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):

@@ -517,6 +517,26 @@ class PromoTests(ApiTestCase):
         self.assertEqual(r.json()["promo"], {"state": None, "url": None})  # it showed the old price
 
 
+class OpsTests(ApiTestCase):
+    def test_health_answers_with_the_database(self):
+        self.assertEqual(self.c.get("/api/v1/health").json(), {"ok": True})
+
+    def test_production_refuses_development_defaults(self):
+        from vitrina_api.app import create_app
+        from vitrina_api.config import production_problems
+        dev = Settings(env="production", database_url="sqlite://", media_dir=self.tmp.name)
+        with self.assertRaises(RuntimeError) as err:
+            create_app(dev)
+        for env in ("VITRINA_DEBUG_OTP", "VITRINA_OTP_SECRET", "VITRINA_PAYMENT_SECRET", "VITRINA_DELIVERY_SECRET",
+                    "VITRINA_AUTO_CREATE_SCHEMA", "VITRINA_DATABASE_URL"):
+            self.assertIn(env, str(err.exception))
+        ready = Settings(env="production", debug_otp=False, auto_create_schema=False, otp_secret=b"o" * 40,
+                         payment_webhook_secret=b"p" * 40, delivery_webhook_secret=b"d" * 40,
+                         database_url="postgresql+psycopg://u:p@db/vitrina", media_dir=self.tmp.name,
+                         public_media_url="https://cdn.vitrina.kz", cors_origins=[])
+        self.assertEqual(production_problems(ready), [])
+
+
 class ShareTests(ApiTestCase):
     def test_shared_link_shows_a_preview_page_for_published_listings_only(self):
         listing = self.publish(title="Ақ кеды <b>", sizes=[{"label": "EU 42", "insole_cm": "26,5", "quantity": 1}])

@@ -66,7 +66,7 @@ python3 -m pip install -r requirements.txt
 python3 -m unittest
 ```
 
-Күтілетін нәтиже: `Ran 146 tests ... OK`. PostgreSQL-де тексеру: `VITRINA_TEST_DATABASE_URL=postgresql+psycopg://... python3 -m unittest tests.test_api`.
+Күтілетін нәтиже: `Ran 148 tests ... OK`. PostgreSQL-де тексеру: `VITRINA_TEST_DATABASE_URL=postgresql+psycopg://... python3 -m unittest tests.test_api`.
 
 Қосымша: `cd app && flutter analyze && flutter test`.
 
@@ -91,6 +91,7 @@ python3 scripts/seed_demo.py        # 4 демо тауар
 - API құжаты: http://127.0.0.1:8000/docs
 - Қолдау панелі: http://127.0.0.1:8000/admin/ (пайдаланушыға дерекқорда `role='admin'` немесе `'support'` берілуі керек)
 - Әзірлеуде SMS орнына код жауапта `dev_code` болып келеді. Production-да `VITRINA_DEBUG_OTP=0`, барлық `VITRINA_*_SECRET` мәндері, `VITRINA_AUTO_CREATE_SCHEMA=0` және `alembic upgrade head` міндетті.
+- Production-да `VITRINA_ENV=production` қойыңыз: сонда API әзірлеу баптауларымен (dev кілттер, SQLite, кодты жауапта қайтару, http) іске қосылудан бас тартады және не түзету керегін тізіп береді. Денсаулық тексерісі: `GET /api/v1/health` (Docker HEALTHCHECK соны қолданады).
 - Flutter web-тен сұрау үшін: `VITRINA_CORS_ORIGINS=http://localhost:5000`.
 - Фото мен видео: `VITRINA_S3_BUCKET` берілсе, S3-үйлесімді бакетке сақталады (`VITRINA_S3_ENDPOINT`, `VITRINA_S3_REGION`, `VITRINA_S3_ACCESS_KEY`, `VITRINA_S3_SECRET_KEY`), ал `VITRINA_PUBLIC_MEDIA_URL` бакеттің немесе CDN-нің ашық мекенжайы болады. Бакет файлдарды ашық оқуға рұқсат беруі керек (bucket policy). Бакет берілмесе, бұрынғыдай дискке сақталады.
 - Уақытқа байланысты жұмыстар (төленбеген тапсырысты жою, сатушы жауап бермесе ақшаны қайтару, растамаған тапсырысты аяқтау, пікір туралы еске салу): `VITRINA_JOBS_INTERVAL=300` API ішінде әр 5 минут сайын жүргізеді, немесе cron-нан `python3 -m vitrina_api.jobs`. Бірнеше API процесі болса, cron-ды таңдаңыз.

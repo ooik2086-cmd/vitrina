@@ -31,4 +31,6 @@ RUN useradd --create-home vitrina && mkdir -p /data/media && chown -R vitrina /d
 USER vitrina
 ENV VITRINA_MEDIA_DIR=/data/media VITRINA_AUTO_CREATE_SCHEMA=0
 EXPOSE 8000
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=4)"
 CMD ["sh", "-c", "alembic upgrade head && uvicorn vitrina_api.app:create_app --factory --host 0.0.0.0 --port 8000 --proxy-headers"]
