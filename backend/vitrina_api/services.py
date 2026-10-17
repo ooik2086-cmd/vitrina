@@ -11,7 +11,7 @@ from vitrina_core.money import (PROVIDER_CLEARING, CommissionRule, Entry, escrow
 from vitrina_core.orders import Actor, Order as CoreOrder, OrderStatus, TransitionError, transition
 
 from .errors import ApiError
-from .models import AuditLog, LedgerEntry, LedgerTx, Listing, ListingSize, Order, OrderEvent
+from .models import AuditLog, LedgerEntry, LedgerTx, Listing, ListingSize, Notification, Order, OrderEvent
 
 
 def aware(dt: datetime | None) -> datetime | None:
@@ -23,6 +23,39 @@ def aware(dt: datetime | None) -> datetime | None:
 
 def total_tiyn(order: Order) -> int:
     return order.item_price_tiyn + order.delivery_price_tiyn
+
+
+# Who hears about each order status, and what they read. "{id}" and "{tracking}" are filled in.
+STATUS_NOTICES: dict[OrderStatus, tuple[tuple[str, ...], str]] = {
+    OrderStatus.PAID: (("seller",), "Тапсырыс №{id} төленді. Қабылдаңыз немесе бас тартыңыз."),
+    OrderStatus.SELLER_ACCEPTED: (("buyer",), "Сатушы №{id} тапсырысты қабылдады."),
+    OrderStatus.SHIPPED: (("buyer",), "Тапсырыс №{id} жіберілді. Трек-нөмір: {tracking}."),
+    OrderStatus.DELIVERED_PENDING_CONFIRMATION: (("buyer",), "Тапсырыс №{id} жеткізілді. Тексеріп, растаңыз."),
+    OrderStatus.COMPLETED: (("buyer", "seller"), "Тапсырыс №{id} аяқталды."),
+    OrderStatus.DISPUTED: (("buyer", "seller"), "Тапсырыс №{id} бойынша дау ашылды. Қолдау қызметі қарайды."),
+    OrderStatus.RETURN_REQUESTED: (("seller",), "Сатып алушы №{id} тапсырысты қайтаруды сұрады."),
+    OrderStatus.REFUND_PENDING: (("buyer", "seller"), "Тапсырыс №{id} бойынша ақша қайтарылуда."),
+    OrderStatus.REFUNDED: (("buyer",), "Тапсырыс №{id} бойынша ақша қайтарылды."),
+    OrderStatus.CANCELLED: (("buyer", "seller"), "Тапсырыс №{id} жойылды."),
+}
+
+
+def notify(db: Session, user_id: int, kind: str, text: str, *, order_id: int | None = None,
+           conversation_id: int | None = None) -> None:
+    db.add(Notification(user_id=user_id, kind=kind, text_kk=text[:300], order_id=order_id,
+                        conversation_id=conversation_id))
+
+
+def notify_status(db: Session, order: Order, actor_user_id: int | None) -> None:
+    rule = STATUS_NOTICES.get(OrderStatus(order.status))
+    if rule is None:
+        return
+    roles, template = rule
+    text = template.format(id=order.id, tracking=order.tracking_number or "—")
+    for role in roles:
+        user_id = order.buyer_id if role == "buyer" else order.seller_id
+        if user_id != actor_user_id:  # nobody is told about their own action
+            notify(db, user_id, "order_status", text, order_id=order.id)
 
 
 def move(db: Session, order: Order, to: OrderStatus, actor: Actor, *, user_id: int | None = None,
@@ -45,6 +78,7 @@ def move(db: Session, order: Order, to: OrderStatus, actor: Actor, *, user_id: i
     order.delivered_at = core.delivered_at
     db.add(OrderEvent(order_id=order.id, actor=actor.value, actor_user_id=user_id, from_status=frm,
                       to_status=order.status, reason=reason, at=now or datetime.now(timezone.utc)))
+    notify_status(db, order, user_id)
 
 
 def post_tx(db: Session, *, key: str, order_id: int | None, kind: str, entries: list[Entry], actor: str,

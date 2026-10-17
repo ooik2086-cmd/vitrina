@@ -6,7 +6,7 @@ import hmac
 import json
 import re
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Literal
 
@@ -25,64 +25,17 @@ from vitrina_core.webhooks import WebhookRejected, verify
 
 from . import services
 from .config import Settings
+from .deps import current_user, get_db, get_settings, get_storage, now_utc, optional_user, sha256, staff_user
 from .errors import ApiError, api_error_handler
+from .social import router as social_router, seller_rating
+from .models import (AuthToken, Favorite, IdempotencyRecord, Listing, ListingSize, Media, Order, OtpCode, Review,
+                     User, WebhookEvent, make_session_factory)
 from .storage import MAX_UPLOAD_BYTES, LocalStorage, normalize_image
-from .models import (AuthToken, Favorite, IdempotencyRecord, Listing, ListingSize, Media, Order, OtpCode, User,
-                     WebhookEvent, make_session_factory)
 
 CATEGORIES = ("sneakers", "sport", "casual", "classic", "boots_winter", "sandals", "kids", "other")
 PHONE_RE = re.compile(r"^\+7\d{10}$")
 MIN_SPIN_FRAMES = 8  # fewer real frames than this do not read as a rotation
 DEFECT_REQUIRED = {Condition.USED_GOOD.value, Condition.DEFECTIVE.value}
-
-
-def now_utc() -> datetime:
-    return datetime.now(timezone.utc)
-
-
-def sha256(text: str) -> str:
-    return hashlib.sha256(text.encode()).hexdigest()
-
-
-# ---------------------------------------------------------------- dependencies
-def get_db(request: Request):
-    db = request.app.state.sessions()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
-def get_settings(request: Request) -> Settings:
-    return request.app.state.settings
-
-
-def get_storage(request: Request) -> LocalStorage:
-    return request.app.state.storage
-
-
-def current_user(authorization: str | None = Header(default=None), db: Session = Depends(get_db)) -> User:
-    if not authorization or not authorization.startswith("Bearer "):
-        raise ApiError(401, "unauthorized")
-    token = db.scalar(select(AuthToken).where(AuthToken.token_hash == sha256(authorization[7:].strip())))
-    if token is None or token.revoked or services.aware(token.expires_at) < now_utc():
-        raise ApiError(401, "unauthorized")
-    user = db.get(User, token.user_id)
-    if user.is_blocked:
-        raise ApiError(403, "forbidden", "account blocked")
-    return user
-
-
-def optional_user(authorization: str | None = Header(default=None), db: Session = Depends(get_db)) -> User | None:
-    if not authorization:
-        return None
-    return current_user(authorization, db)
-
-
-def staff_user(user: User = Depends(current_user)) -> User:
-    if user.role not in ("support", "admin"):
-        raise ApiError(403, "forbidden")
-    return user
 
 
 # ---------------------------------------------------------------- schemas
@@ -185,7 +138,8 @@ def listing_out(db: Session, listing: Listing) -> dict:
                   for s in listing.sizes],
         "media": [{"original_url": m.original_url, "processed_url": m.processed_url, "angle": m.angle}
                   for m in listing.media],
-        "seller": {"id": seller.id, "shop_name": seller.shop_name, "city": seller.city},  # never the phone
+        "seller": {"id": seller.id, "shop_name": seller.shop_name, "city": seller.city,  # never the phone
+                   **seller_rating(db, seller.id)},
     }
 
 
@@ -463,7 +417,8 @@ def list_orders(role: Literal["buyer", "seller"] = "buyer", user: User = Depends
 @api.get("/orders/{order_id}")
 def get_order(order_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
     order = order_for(db, order_id, user)
-    return {**order_out(order), "listing_title": db.get(Listing, order.listing_id).title}
+    reviewed = db.scalar(select(Review.id).where(Review.order_id == order.id)) is not None
+    return {**order_out(order), "listing_title": db.get(Listing, order.listing_id).title, "reviewed": reviewed}
 
 
 @api.post("/orders/{order_id}/pay")
@@ -685,6 +640,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_exception_handler(RequestValidationError, validation_handler)
     app.include_router(api)
     app.include_router(hooks)
+    app.include_router(social_router)
     # Development only: serve uploaded photos from disk. Production serves them from the bucket/CDN.
     app.mount("/media", StaticFiles(directory=settings.media_dir), name="media")
     if settings.cors_origins:

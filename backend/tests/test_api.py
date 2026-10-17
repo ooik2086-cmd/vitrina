@@ -281,6 +281,70 @@ class MediaTests(ApiTestCase):
         self.assertEqual(served.headers["content-type"], "image/jpeg")
 
 
+class SocialTests(ApiTestCase):
+    def get(self, path, token):
+        return self.c.get(f"/api/v1{path}", headers=self.h(token))
+
+    def test_chat_between_buyer_and_seller_only(self):
+        listing = self.publish()
+        conv = self.post("/conversations", self.buyer, {"listing_id": listing["id"]})
+        self.assertEqual(conv.status_code, 201, conv.text)
+        cid = conv.json()["id"]
+        again = self.post("/conversations", self.buyer, {"listing_id": listing["id"]}).json()
+        self.assertEqual(again["id"], cid)  # one thread per buyer and listing
+        self.assertEqual(self.post("/conversations", self.seller, {"listing_id": listing["id"]}).status_code, 409)
+
+        self.assertEqual(self.post(f"/conversations/{cid}/messages", self.buyer, {"body": "42 өлшемі бар ма?"}).status_code, 201)
+        inbox = self.get("/conversations", self.seller).json()["items"]
+        self.assertEqual((inbox[0]["unread"], inbox[0]["role"], inbox[0]["other_name"]), (1, "seller", "Сатып алушы"))
+        self.assertNotIn("+7", str(inbox))  # phone numbers never shown
+        msgs = self.get(f"/conversations/{cid}/messages", self.seller).json()
+        self.assertEqual([m["body"] for m in msgs["items"]], ["42 өлшемі бар ма?"])
+        self.assertEqual(self.get("/conversations", self.seller).json()["items"][0]["unread"], 0)
+
+        stranger = self.login("+77010000005")
+        self.assertEqual(self.get(f"/conversations/{cid}/messages", stranger).status_code, 404)
+        self.assertEqual(self.post(f"/conversations/{cid}/messages", stranger, {"body": "hi"}).status_code, 404)
+
+    def test_contact_details_are_flagged_and_spam_limited(self):
+        listing = self.publish()
+        cid = self.post("/conversations", self.buyer, {"listing_id": listing["id"]}).json()["id"]
+        r = self.post(f"/conversations/{cid}/messages", self.seller, {"body": "Жазыңыз +7 701 123 45 67 ватсап"}).json()
+        self.assertTrue(r["contact_warning"])
+        r = self.post(f"/conversations/{cid}/messages", self.seller, {"body": "Ертең жіберемін"}).json()
+        self.assertFalse(r["contact_warning"])
+        codes = [self.post(f"/conversations/{cid}/messages", self.buyer, {"body": f"m{i}"}).status_code for i in range(21)]
+        self.assertEqual(codes[-1], 429)
+
+    def test_review_only_after_completion_once_with_reply(self):
+        listing, order = self.delivered()
+        early = self.post(f"/orders/{order['id']}/review", self.buyer, {"rating": 5})
+        self.assertEqual(early.json()["code"], "review_not_allowed")
+        self.post(f"/orders/{order['id']}/confirm", self.buyer)
+        r = self.post(f"/orders/{order['id']}/review", self.buyer, {"rating": 4, "text": "Сапасы жақсы"})
+        self.assertEqual(r.status_code, 201, r.text)
+        self.assertEqual(self.post(f"/orders/{order['id']}/review", self.buyer, {"rating": 1}).status_code, 409)
+        self.assertEqual(self.post(f"/orders/{order['id']}/review", self.seller, {"rating": 5}).status_code, 404)
+        self.assertEqual(self.post(f"/reviews/{r.json()['id']}/reply", self.buyer, {"text": "x"}).status_code, 404)
+        self.assertEqual(self.post(f"/reviews/{r.json()['id']}/reply", self.seller, {"text": "Рақмет!"}).status_code, 200)
+        seller = self.c.get(f"/api/v1/listings/{listing['id']}").json()["seller"]
+        self.assertEqual((seller["rating"], seller["reviews"]), (4.0, 1))
+        page = self.c.get(f"/api/v1/sellers/{seller['id']}/reviews").json()
+        self.assertEqual(page["items"][0]["seller_reply"], "Рақмет!")
+        self.assertTrue(self.get(f"/orders/{order['id']}", self.buyer).json()["reviewed"])
+
+    def test_order_steps_notify_the_other_side(self):
+        self.delivered()
+        seller_note = self.get("/notifications", self.seller).json()
+        buyer_note = self.get("/notifications", self.buyer).json()
+        self.assertTrue(any("төленді" in n["text"] for n in seller_note["items"]))
+        self.assertTrue(any("жіберілді" in n["text"] and "KZ1" in n["text"] for n in buyer_note["items"]))
+        self.assertFalse(any("жіберілді" in n["text"] for n in seller_note["items"]))  # not told about own action
+        self.assertGreater(buyer_note["unread"], 0)
+        self.post("/notifications/read-all", self.buyer)
+        self.assertEqual(self.get("/notifications", self.buyer).json()["unread"], 0)
+
+
 class WebhookSecurityTests(ApiTestCase):
     def test_scenario_e_duplicate_and_forged_payments(self):
         _, order = self.ordered()

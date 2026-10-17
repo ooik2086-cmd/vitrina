@@ -183,6 +183,56 @@ class AuditLog(Base):
     at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class Conversation(Base):
+    """One thread per buyer and listing; the seller is fixed by the listing."""
+    __tablename__ = "conversations"
+    __table_args__ = (UniqueConstraint("listing_id", "buyer_id"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    listing_id: Mapped[int] = mapped_column(ForeignKey("listings.id"), index=True)
+    buyer_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    seller_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    buyer_last_read_id: Mapped[int] = mapped_column(Integer, default=0)
+    seller_last_read_id: Mapped[int] = mapped_column(Integer, default=0)
+    last_message_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Message(Base):
+    __tablename__ = "messages"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    conversation_id: Mapped[int] = mapped_column(ForeignKey("conversations.id"), index=True)
+    sender_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    body: Mapped[str] = mapped_column(Text)
+    # Set when the text looks like a phone number or link: the other side sees a reminder to pay only in the app.
+    contact_warning: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Review(Base):
+    """A buyer's review of a seller, allowed once per completed order."""
+    __tablename__ = "reviews"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"), unique=True)
+    seller_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    buyer_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    rating: Mapped[int] = mapped_column(Integer)
+    text: Mapped[str | None] = mapped_column(Text)
+    seller_reply: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Notification(Base):
+    __tablename__ = "notifications"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(40))  # order_status | message | review
+    text_kk: Mapped[str] = mapped_column(String(300))
+    order_id: Mapped[int | None] = mapped_column(Integer)
+    conversation_id: Mapped[int | None] = mapped_column(Integer)
+    read: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+
+
 def make_session_factory(database_url: str):
     kwargs = {"connect_args": {"check_same_thread": False}} if database_url.startswith("sqlite") else {}
     engine = create_engine(database_url, **kwargs)
