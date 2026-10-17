@@ -79,6 +79,7 @@ class Listing(Base):
     moderation_flags: Mapped[str | None] = mapped_column(String(200))
     moderation_cleared: Mapped[str | None] = mapped_column(String(200))
     moderation_note: Mapped[str | None] = mapped_column(Text)
+    announced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # saved-search alerts sent
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     sizes: Mapped[list[ListingSize]] = relationship(cascade="all, delete-orphan", order_by="ListingSize.id")
     media: Mapped[list[Media]] = relationship(cascade="all, delete-orphan", order_by="Media.position")
@@ -258,6 +259,21 @@ class Review(Base):
     rating: Mapped[int] = mapped_column(Integer)
     text: Mapped[str | None] = mapped_column(Text)
     seller_reply: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class SavedSearch(Base):
+    """Catalog filters a buyer asked to be told about: a new listing that matches sends them a notification."""
+    __tablename__ = "saved_searches"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    q: Mapped[str | None] = mapped_column(String(100))
+    category: Mapped[str | None] = mapped_column(String(30))
+    brand: Mapped[str | None] = mapped_column(String(60))
+    condition: Mapped[str | None] = mapped_column(String(200))
+    min_price_tiyn: Mapped[int | None] = mapped_column(BigInteger)
+    max_price_tiyn: Mapped[int | None] = mapped_column(BigInteger)
+    size_cm: Mapped[str | None] = mapped_column(String(8))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 

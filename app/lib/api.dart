@@ -66,6 +66,46 @@ class Promo {
   final String? url;
 }
 
+/// Catalog filters a buyer saved; a new listing that matches them arrives as a notification.
+class SavedSearch {
+  SavedSearch.fromJson(Map<String, dynamic> j)
+      : id = j['id'] as int,
+        q = j['q'] as String?,
+        category = j['category'] as String?,
+        condition = j['condition'] as String?,
+        minPriceTiyn = j['min_price_tiyn'] as int?,
+        maxPriceTiyn = j['max_price_tiyn'] as int?,
+        sizeCm = j['size_cm'] as String?;
+  final int id;
+  final String? q;
+  final String? category;
+  final String? condition;
+  final int? minPriceTiyn;
+  final int? maxPriceTiyn;
+  final String? sizeCm;
+
+  /// The same filters as the catalog sends, for saving and comparing.
+  static Map<String, Object> body(
+          {String? q, String? category, String? sizeCm, CatalogFilter filter = const CatalogFilter()}) =>
+      {
+        if ((q ?? '').trim().isNotEmpty) 'q': q!.trim(),
+        if (category != null) 'category': category,
+        if (sizeCm != null) 'size_cm': sizeCm,
+        if (filter.conditions.isNotEmpty) 'condition': (filter.conditions.toList()..sort()).join(','),
+        if (filter.minPriceTiyn != null) 'min_price_tiyn': filter.minPriceTiyn!,
+        if (filter.maxPriceTiyn != null) 'max_price_tiyn': filter.maxPriceTiyn!,
+      };
+
+  Map<String, Object> get asBody => body(
+      q: q,
+      category: category,
+      sizeCm: sizeCm,
+      filter: CatalogFilter(
+          conditions: {...?condition?.split(',').where((c) => c.isNotEmpty)},
+          minPriceTiyn: minPriceTiyn,
+          maxPriceTiyn: maxPriceTiyn));
+}
+
 /// A buyer's price offer on one size; `priceTiyn` is what they pay once it is accepted.
 class Offer {
   Offer.fromJson(Map<String, dynamic> j)
@@ -584,6 +624,16 @@ class Api {
       OrderInfo.fromJson(await _send('POST', '/orders',
           body: {'listing_id': listingId, 'size_id': sizeId, if (offerId != null) 'offer_id': offerId},
           headers: {'Idempotency-Key': idempotencyKey}) as Map<String, dynamic>);
+
+  Future<SavedSearch> saveSearch(Map<String, Object> body) async =>
+      SavedSearch.fromJson(await _send('POST', '/saved-searches', body: body) as Map<String, dynamic>);
+
+  Future<List<SavedSearch>> savedSearches() async {
+    final r = await _send('GET', '/saved-searches') as Map;
+    return [for (final j in r['items'] as List) SavedSearch.fromJson(j as Map<String, dynamic>)];
+  }
+
+  Future<void> deleteSavedSearch(int id) => _send('DELETE', '/saved-searches/$id');
 
   Future<Offer> makeOffer(int listingId, int sizeId, int amountTiyn) async => Offer.fromJson(
       await _send('POST', '/listings/$listingId/offers', body: {'size_id': sizeId, 'amount_tiyn': amountTiyn})

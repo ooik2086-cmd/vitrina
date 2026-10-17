@@ -14,7 +14,7 @@ from sqlalchemy import create_engine
 from vitrina_api import promo
 from vitrina_api.app import create_app
 from vitrina_api.config import Settings
-from vitrina_api.models import Base, Offer, User
+from vitrina_api.models import Base, Offer, SavedSearch, User
 from vitrina_api.services import balance, run_auto_complete
 from vitrina_core.money import PLATFORM_FEE, buyer_refund, escrow, seller_payable
 from vitrina_core.webhooks import sign
@@ -768,6 +768,53 @@ class OfferTests(ApiTestCase):
         self.assertEqual(self.post(f"/offers/{offer['id']}/decline", self.seller).json()["status"], "declined")
         self.assertIn("қабылданбады", self.get("/notifications", self.buyer).json()["items"][0]["text"])
         self.assertEqual(self.post(f"/offers/{offer['id']}/withdraw", self.buyer).status_code, 409)
+
+
+class SavedSearchTests(ApiTestCase):
+    def get(self, path, token):
+        return self.c.get(f"/api/v1{path}", headers=self.h(token))
+
+    def test_buyer_is_told_once_when_a_matching_listing_goes_on_sale(self):
+        self.assertEqual(self.post("/saved-searches", self.buyer, {}).json()["code"], "validation")
+        r = self.post("/saved-searches", self.buyer, {"q": "nike", "size_cm": "26,5", "max_price_tiyn": 5_000_000})
+        self.assertEqual(r.status_code, 201, r.text)
+        again = self.post("/saved-searches", self.buyer, {"q": " nike ", "size_cm": "26,5", "max_price_tiyn": 5_000_000})
+        self.assertEqual(again.json()["id"], r.json()["id"])  # the same search is not stored twice
+        self.post("/saved-searches", self.buyer, {"category": "sneakers"})  # also matches; still one notice
+        self.publish(price_tiyn=6_000_000)  # too dear
+        self.publish(sizes=[{"label": "EU 40", "insole_cm": "25,0", "quantity": 1}])  # wrong size
+        self.assertEqual([n["kind"] for n in self.get("/notifications", self.buyer).json()["items"]],
+                         ["saved_search", "saved_search"])  # the category-only search matched both
+        with self.db() as db:
+            for s in db.query(SavedSearch).filter(SavedSearch.category.is_not(None)).all():
+                db.delete(s)
+            db.commit()
+        listing = self.publish()
+        notes = self.get("/notifications", self.buyer).json()["items"]
+        self.assertEqual((notes[0]["kind"], notes[0]["listing_id"]), ("saved_search", listing["id"]))
+        self.assertIn("Күнделікті кроссовка", notes[0]["text"])
+        self.assertEqual(self.get("/notifications", self.seller).json()["items"], [])  # never about your own
+        self.post(f"/listings/{listing['id']}/pause", self.seller)
+        self.post(f"/listings/{listing['id']}/publish", self.seller)
+        self.assertEqual(len(self.get("/notifications", self.buyer).json()["items"]), 3)  # not again
+
+    def test_listing_waiting_for_moderation_is_announced_only_when_approved(self):
+        self.post("/saved-searches", self.buyer, {"q": "кроссовка"})
+        r = self.post("/listings", self.seller, {**LISTING, "description": "WhatsApp 87011234567"})
+        self.post(f"/listings/{r.json()['id']}/publish", self.seller)
+        self.assertEqual(self.get("/notifications", self.buyer).json()["items"], [])
+        self.post(f"/admin/moderation/{r.json()['id']}/approve", self.make_staff())
+        self.assertEqual(self.get("/notifications", self.buyer).json()["items"][0]["kind"], "saved_search")
+
+    def test_list_delete_and_limit(self):
+        ids = [self.post("/saved-searches", self.buyer, {"q": f"model {i}"}).json()["id"] for i in range(10)]
+        self.assertEqual(self.post("/saved-searches", self.buyer, {"q": "one more"}).json()["code"],
+                         "saved_search_limit")
+        self.assertEqual(self.get("/saved-searches", self.seller).json()["items"], [])
+        self.assertEqual(self.c.delete(f"/api/v1/saved-searches/{ids[0]}", headers=self.h(self.seller)).status_code, 404)
+        self.assertEqual(self.c.delete(f"/api/v1/saved-searches/{ids[0]}", headers=self.h(self.buyer)).status_code, 204)
+        items = self.get("/saved-searches", self.buyer).json()["items"]
+        self.assertEqual((len(items), items[0]["q"]), (9, "model 9"))
 
 
 class AdminTests(ApiTestCase):

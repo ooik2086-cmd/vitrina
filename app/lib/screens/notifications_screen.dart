@@ -76,6 +76,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                 'review' || 'review_reply' => Icons.star_outline_rounded,
                 'price_drop' => Icons.trending_down_rounded,
                 'offer' || 'offer_reply' => Icons.local_offer_outlined,
+                'saved_search' => Icons.notifications_active_outlined,
                 'moderation' => Icons.fact_check_outlined,
                 'listing_hidden' || 'report_closed' => Icons.flag_outlined,
                 _ => Icons.local_shipping_outlined,

@@ -20,6 +20,7 @@ import 'package:vitrina/screens/listing_editor_screen.dart';
 import 'package:vitrina/screens/listing_screen.dart';
 import 'package:vitrina/screens/manage_listing_screen.dart';
 import 'package:vitrina/screens/offers_screen.dart';
+import 'package:vitrina/screens/saved_searches_screen.dart';
 import 'package:vitrina/screens/shop_screen.dart';
 import 'package:vitrina/screens/spin_capture_screen.dart';
 import 'package:vitrina/ru.dart';
@@ -376,6 +377,68 @@ void main() {
     expect(calls, contains('POST /api/v1/offers/11/counter {"amount_tiyn":4300000}'));
     expect(find.text('Сатушы баға ұсынды'), findsOneWidget);
     expect(find.byKey(const Key('accept-11')), findsNothing); // now it is the buyer's turn
+  });
+
+  test('saved search sends the catalog filters and reads back as one line', () {
+    final body = SavedSearch.body(
+        q: '  nike ',
+        category: 'sneakers',
+        sizeCm: '26,5',
+        filter: const CatalogFilter(conditions: {'used_good', 'new_with_box'}, maxPriceTiyn: 5000000));
+    expect(body, {
+      'q': 'nike',
+      'category': 'sneakers',
+      'size_cm': '26,5',
+      'condition': 'new_with_box,used_good',
+      'max_price_tiyn': 5000000,
+    });
+    final saved = SavedSearch.fromJson({'id': 1, ...body});
+    expect(saved.asBody, body);
+    expect(savedSearchLabel(saved), startsWith('«nike» · Кроссовкалар · 26,5 см · ${formatTenge(5000000)} дейін'));
+  });
+
+  testWidgets('catalog saves the current search and opens a saved one', (tester) async {
+    final calls = <String>[];
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async {
+          calls.add('${req.method} ${req.url.path}${req.body.isEmpty ? '' : ' ${req.body}'}');
+          switch (req.url.path) {
+            case '/api/v1/saved-searches' when req.method == 'POST':
+              return jsonResponse({'id': 4, ...jsonDecode(req.body) as Map<String, dynamic>}, 201);
+            case '/api/v1/saved-searches':
+              return jsonResponse({
+                'items': [
+                  {'id': 9, 'q': 'adidas', 'category': null, 'size_cm': null, 'condition': null,
+                   'min_price_tiyn': null, 'max_price_tiyn': null}
+                ]
+              });
+            case '/api/v1/notifications':
+              return jsonResponse({'unread': 0, 'items': []});
+            default:
+              return jsonResponse({'items': []});
+          }
+        }))
+      ..token = 'tok';
+    mySize.value = null;
+    await tester.pumpWidget(SessionScope(
+        session: Session(api), child: MaterialApp(home: Scaffold(body: const CatalogScreen()))));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('save-search')), findsNothing); // nothing to follow yet
+    await tester.enterText(find.byType(TextField), 'nike');
+    await tester.testTextInput.receiveAction(TextInputAction.search);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('save-search')));
+    await tester.pumpAndSettle();
+    expect(calls, contains('POST /api/v1/saved-searches {"q":"nike"}'));
+    expect(find.byKey(const Key('search-saved')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('saved-searches')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('«adidas»'));
+    await tester.pumpAndSettle();
+    expect(calls.last, startsWith('GET /api/v1/listings'));
+    expect(find.text('adidas'), findsOneWidget); // the query box shows the saved search
+    expect(find.byKey(const Key('search-saved')), findsOneWidget);
   });
 
   test('photo upload is multipart with the token and returns the stored url', () async {

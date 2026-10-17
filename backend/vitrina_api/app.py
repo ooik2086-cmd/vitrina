@@ -37,7 +37,7 @@ from .deps import current_user, get_db, get_settings, get_storage, now_utc, opti
 from .errors import ApiError, api_error_handler
 from .share import router as share_router
 from .social import router as social_router, seller_rating
-from .models import (AuditLog, ListingDailyViews, ListingEmbedding, ListingReport, AuthToken, Favorite, IdempotencyRecord, Listing, ListingSize, Media, Order, OrderEvent,
+from .models import (AuditLog, SavedSearch, ListingDailyViews, ListingEmbedding, ListingReport, AuthToken, Favorite, IdempotencyRecord, Listing, ListingSize, Media, Order, OrderEvent,
                      OtpCode, Review, User, WebhookEvent, make_session_factory)
 from .storage import MAX_UPLOAD_BYTES, LocalStorage, normalize_image
 
@@ -495,6 +495,7 @@ def route_after_checks(db: Session, storage: LocalStorage, listing: Listing) -> 
     else:
         listing.status = "published"
         listing.moderation_note = None
+        announce(db, listing)
 
 
 @api.patch("/listings/{listing_id}")
@@ -575,20 +576,15 @@ def pause_listing(listing_id: int, user: User = Depends(current_user), db: Sessi
     return listing_out(db, listing, owner=True)
 
 
-@api.get("/listings")
-def search_listings(q: str | None = None, category: str | None = None, brand: str | None = None,
-                    condition: str | None = None, min_price_tiyn: int | None = None,
-                    max_price_tiyn: int | None = None, size_cm: str | None = None,
-                    sort: Literal["new", "price_asc", "price_desc"] = "new", seller_id: int | None = None,
-                    limit: int = 20, offset: int = 0, db: Session = Depends(get_db)):
-    stmt = select(Listing).where(Listing.status == "published")
+def catalog_filter(stmt, *, q: str | None = None, category: str | None = None, brand: str | None = None,
+                   condition: str | None = None, min_price_tiyn: int | None = None,
+                   max_price_tiyn: int | None = None, size_cm: str | None = None):
+    """The catalog's filters, shared by search and by saved-search alerts so both agree on what matches."""
     if q:
         for token in normalize_query(q).split():
             stmt = stmt.where(Listing.search_text.contains(token))
     if category:
         stmt = stmt.where(Listing.category == category)
-    if seller_id is not None:
-        stmt = stmt.where(Listing.seller_id == seller_id)
     if brand:
         stmt = stmt.where(Listing.search_text.contains(normalize_query(brand)))
     if condition:  # one value or a comma-separated list
@@ -601,6 +597,20 @@ def search_listings(q: str | None = None, category: str | None = None, brand: st
         mm = cm_to_mm(size_cm)
         stmt = stmt.where(Listing.id.in_(select(ListingSize.listing_id).where(
             ListingSize.quantity > 0, ListingSize.insole_mm.between(mm - 5, mm + 5))))
+    return stmt
+
+
+@api.get("/listings")
+def search_listings(q: str | None = None, category: str | None = None, brand: str | None = None,
+                    condition: str | None = None, min_price_tiyn: int | None = None,
+                    max_price_tiyn: int | None = None, size_cm: str | None = None,
+                    sort: Literal["new", "price_asc", "price_desc"] = "new", seller_id: int | None = None,
+                    limit: int = 20, offset: int = 0, db: Session = Depends(get_db)):
+    stmt = catalog_filter(select(Listing).where(Listing.status == "published"), q=q, category=category,
+                          brand=brand, condition=condition, min_price_tiyn=min_price_tiyn,
+                          max_price_tiyn=max_price_tiyn, size_cm=size_cm)
+    if seller_id is not None:
+        stmt = stmt.where(Listing.seller_id == seller_id)
     order = {"new": (Listing.id.desc(),), "price_asc": (Listing.price_tiyn, Listing.id.desc()),
              "price_desc": (Listing.price_tiyn.desc(), Listing.id.desc())}[sort]
     rows = db.scalars(stmt.order_by(*order).limit(max(1, min(limit, 50))).offset(max(0, offset))).all()
@@ -841,6 +851,83 @@ def seller_analytics(days: int = 14, user: User = Depends(current_user), db: Ses
         "top": [{"id": l.id, "title": l.title, "status": l.status, "views": views_by_listing[l.id],
                  "orders": orders_by_listing[l.id]} for l in top if views_by_listing[l.id] or orders_by_listing[l.id]],
     }
+
+
+# ---------------------------------------------------------------- saved searches
+MAX_SAVED_SEARCHES = 10
+SEARCH_FIELDS = ("q", "category", "brand", "condition", "min_price_tiyn", "max_price_tiyn", "size_cm")
+
+
+class SavedSearchIn(BaseModel):
+    q: str | None = Field(default=None, max_length=100)
+    category: str | None = Field(default=None, max_length=30)
+    brand: str | None = Field(default=None, max_length=60)
+    condition: str | None = Field(default=None, max_length=200)
+    min_price_tiyn: int | None = Field(default=None, ge=0)
+    max_price_tiyn: int | None = Field(default=None, ge=0)
+    size_cm: str | None = Field(default=None, max_length=8)
+
+
+def search_values(source) -> dict:
+    values = {f: getattr(source, f) for f in SEARCH_FIELDS}
+    return {k: (v.strip() or None) if isinstance(v, str) else v for k, v in values.items()}
+
+
+def saved_search_out(s: SavedSearch) -> dict:
+    return {"id": s.id, **search_values(s), "created_at": services.aware(s.created_at).isoformat()}
+
+
+def announce(db: Session, listing: Listing) -> None:
+    """Tell buyers whose saved searches match a listing, once, when it first goes on sale."""
+    if listing.announced_at is not None:
+        return
+    listing.announced_at = now_utc()
+    db.flush()
+    told: set[int] = {listing.seller_id}
+    price = promo.format_tenge(listing.price_tiyn)
+    for saved in db.scalars(select(SavedSearch).join(User, User.id == SavedSearch.user_id).where(
+            User.is_blocked.is_(False)).order_by(SavedSearch.id)).all():
+        if saved.user_id in told:
+            continue
+        match = catalog_filter(select(Listing.id).where(Listing.id == listing.id), **search_values(saved))
+        if db.scalar(match) is not None:
+            told.add(saved.user_id)
+            services.notify(db, saved.user_id, "saved_search", f"Іздеуіңізге сай жаңа тауар: «{listing.title}», {price}",
+                            f"Новый товар по вашему поиску: «{listing.title}», {price}", listing_id=listing.id)
+
+
+@api.post("/saved-searches", status_code=201)
+def save_search(body: SavedSearchIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    values = search_values(body)
+    if not any(v is not None for v in values.values()):
+        raise ApiError(422, "validation", "a saved search needs at least one filter")
+    if values["size_cm"]:
+        cm_to_mm(values["size_cm"])  # same validation as the catalog
+    mine = db.scalars(select(SavedSearch).where(SavedSearch.user_id == user.id)).all()
+    same = next((s for s in mine if search_values(s) == values), None)
+    if same:
+        return saved_search_out(same)
+    if len(mine) >= MAX_SAVED_SEARCHES:
+        raise ApiError(409, "saved_search_limit")
+    saved = SavedSearch(user_id=user.id, **values)
+    db.add(saved)
+    db.commit()
+    return saved_search_out(saved)
+
+
+@api.get("/saved-searches")
+def list_saved_searches(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    rows = db.scalars(select(SavedSearch).where(SavedSearch.user_id == user.id).order_by(SavedSearch.id.desc())).all()
+    return {"items": [saved_search_out(s) for s in rows]}
+
+
+@api.delete("/saved-searches/{search_id}", status_code=204)
+def delete_saved_search(search_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    saved = db.get(SavedSearch, search_id)
+    if saved is None or saved.user_id != user.id:
+        raise ApiError(404, "not_found")
+    db.delete(saved)
+    db.commit()
 
 
 @api.post("/favorites/{listing_id}", status_code=204)
@@ -1118,6 +1205,7 @@ def approve_listing(listing_id: int, staff: User = Depends(staff_user), db: Sess
     listing.moderation_cleared = ",".join(sorted(set(split_codes(listing.moderation_cleared))
                                                  | set(split_codes(listing.moderation_flags)))) or None
     listing.moderation_note = None
+    announce(db, listing)
     services.audit(db, staff.id, "approve_listing", f"listing:{listing.id}", listing.moderation_flags or "")
     services.notify(db, listing.seller_id, "moderation", f"«{listing.title}» тексеруден өтті және сатылымда.",
                     f"«{listing.title}» прошёл проверку и уже продаётся.", listing_id=listing.id)

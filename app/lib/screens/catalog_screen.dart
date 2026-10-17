@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 
 import '../api.dart';
@@ -9,6 +11,7 @@ import '../widgets/filter_sheet.dart';
 import 'image_search_screen.dart';
 import 'listing_screen.dart';
 import 'notifications_screen.dart';
+import 'saved_searches_screen.dart';
 import '../i18n.dart';
 import '../my_size.dart';
 import '../recent.dart';
@@ -33,6 +36,8 @@ class _CatalogScreenState extends State<CatalogScreen> {
 
   int _unread = 0;
   bool? _countedFor;
+  String? _savedKey; // the current search, once the buyer asked to be told about it
+  bool _saving = false;
 
   @override
   void didChangeDependencies() {
@@ -96,6 +101,42 @@ class _CatalogScreenState extends State<CatalogScreen> {
     super.dispose();
   }
 
+  Map<String, Object> get _current =>
+      SavedSearch.body(q: _query.text, category: _category, sizeCm: _sizeCm, filter: _filter);
+
+  Future<void> _saveSearch() async {
+    final body = _current;
+    setState(() => _saving = true);
+    try {
+      await SessionScope.of(context).api.saveSearch(body);
+      if (!mounted) return;
+      setState(() => _savedKey = jsonEncode(body));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(tr('Сақталды. Сай тауар шыққанда хабарлаймыз.')),
+        action: SnackBarAction(label: tr('Барлығы'), onPressed: _openSaved),
+      ));
+    } catch (e) {
+      if (mounted) showError(context, e);
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _openSaved() async {
+    final picked = await Navigator.of(context)
+        .push<SavedSearch>(MaterialPageRoute(builder: (_) => const SavedSearchesScreen()));
+    if (picked == null) return;
+    _query.text = picked.q ?? '';
+    _category = picked.category;
+    _sizeCm = picked.sizeCm;
+    _filter = CatalogFilter(
+        conditions: {...?picked.condition?.split(',').where((c) => c.isNotEmpty)},
+        minPriceTiyn: picked.minPriceTiyn,
+        maxPriceTiyn: picked.maxPriceTiyn);
+    _savedKey = jsonEncode(picked.asBody);
+    _search();
+  }
+
   Future<void> _pickSize() async {
     final picked = await showModalBottomSheet<String>(
       context: context,
@@ -147,6 +188,13 @@ class _CatalogScreenState extends State<CatalogScreen> {
                   Expanded(
                     child: Text('VITRINA', style: weight(theme.textTheme.labelLarge!, 800).copyWith(letterSpacing: 3)),
                   ),
+                  if (SessionScope.of(context).signedIn)
+                    IconButton(
+                      key: const Key('saved-searches'),
+                      tooltip: tr('Сақталған іздеулер'),
+                      onPressed: _openSaved,
+                      icon: const Icon(Icons.bookmarks_outlined),
+                    ),
                   if (SessionScope.of(context).signedIn)
                     IconButton(
                       tooltip: tr('Хабарландырулар'),
@@ -229,6 +277,28 @@ class _CatalogScreenState extends State<CatalogScreen> {
               ),
             ),
           ),
+          if (SessionScope.of(context).signedIn && _current.isNotEmpty)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 20, 0),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: jsonEncode(_current) == _savedKey
+                      ? TextButton.icon(
+                          key: const Key('search-saved'),
+                          onPressed: _openSaved,
+                          icon: const Icon(Icons.notifications_active_rounded, color: Brand.accent),
+                          label: Text(tr('Хабарлау қосулы')),
+                        )
+                      : TextButton.icon(
+                          key: const Key('save-search'),
+                          onPressed: _saving ? null : _saveSearch,
+                          icon: const Icon(Icons.notifications_none_rounded),
+                          label: Text(tr('Жаңасы шыққанда хабарлау')),
+                        ),
+                ),
+              ),
+            ),
           ValueListenableBuilder<List<RecentItem>>(
             valueListenable: recentlyViewed,
             builder: (context, recent, _) => recent.isEmpty || _query.text.trim().isNotEmpty || _category != null
