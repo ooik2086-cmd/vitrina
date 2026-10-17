@@ -37,7 +37,7 @@ from .deps import current_user, get_db, get_settings, get_storage, now_utc, opti
 from .errors import ApiError, api_error_handler
 from .share import router as share_router
 from .social import reply_time, router as social_router, seller_rating, size_fit
-from .models import (AuditLog, Follow, SavedSearch, ListingDailyViews, ListingEmbedding, ListingReport, AuthToken, Favorite, IdempotencyRecord, Listing, ListingSize, Media, Order, OrderEvent,
+from .models import (AuditLog, Follow, SavedSearch, StockAlert, ListingDailyViews, ListingEmbedding, ListingReport, AuthToken, Favorite, IdempotencyRecord, Listing, ListingSize, Media, Order, OrderEvent,
                      OtpCode, Review, User, WebhookEvent, make_session_factory)
 from .storage import MAX_UPLOAD_BYTES, LocalStorage, normalize_image
 
@@ -553,6 +553,7 @@ def route_after_checks(db: Session, storage: LocalStorage, listing: Listing) -> 
         listing.status = "published"
         listing.moderation_note = None
         announce(db, listing)
+        services.tell_back_in_stock(db, listing)
 
 
 @api.patch("/listings/{listing_id}")
@@ -590,6 +591,7 @@ def edit_listing(listing_id: int, body: ListingPatch, user: User = Depends(curre
     if listing.status == "published" and (body.price_tiyn is not None or body.description is not None
                                           or body.defects is not None):
         route_after_checks(db, storage, listing)  # a live listing cannot slip a phone number in later
+    services.tell_back_in_stock(db, listing)
     db.commit()
     return listing_out(db, listing, owner=True)
 
@@ -893,6 +895,39 @@ def similar_listings(listing_id: int, limit: int = 10, db: Session = Depends(get
     return {"items": [{**listing_out(db, other), "similarity": round(score, 3)} for score, other in scored]}
 
 
+def waiting_size(db: Session, listing_id: int, size_id: int) -> ListingSize:
+    size = db.get(ListingSize, size_id)
+    listing = db.get(Listing, listing_id)
+    if size is None or listing is None or size.listing_id != listing_id or listing.status not in ("published", "sold"):
+        raise ApiError(404, "not_found")
+    return size
+
+
+@api.put("/listings/{listing_id}/sizes/{size_id}/alert")
+def alert_when_back(listing_id: int, size_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """Ask to be told when a sold-out size can be ordered again."""
+    size = waiting_size(db, listing_id, size_id)
+    if size.quantity > 0 and db.get(Listing, listing_id).status == "published":
+        raise ApiError(409, "in_stock")
+    if db.scalar(select(StockAlert.id).where(StockAlert.user_id == user.id, StockAlert.size_id == size.id)) is None:
+        db.add(StockAlert(user_id=user.id, listing_id=listing_id, size_id=size.id))
+        try:
+            db.commit()
+        except IntegrityError:  # a double tap
+            db.rollback()
+    return {"size_id": size.id, "alert": True}
+
+
+@api.delete("/listings/{listing_id}/sizes/{size_id}/alert")
+def cancel_stock_alert(listing_id: int, size_id: int, user: User = Depends(current_user),
+                       db: Session = Depends(get_db)):
+    for a in db.scalars(select(StockAlert).where(StockAlert.user_id == user.id, StockAlert.size_id == size_id,
+                                                 StockAlert.listing_id == listing_id)).all():
+        db.delete(a)
+    db.commit()
+    return {"size_id": size_id, "alert": False}
+
+
 @api.get("/listings/{listing_id}")
 def get_listing(listing_id: int, user: User | None = Depends(optional_user), db: Session = Depends(get_db)):
     listing = db.get(Listing, listing_id)
@@ -904,7 +939,9 @@ def get_listing(listing_id: int, user: User | None = Depends(optional_user), db:
         db.execute(update(Listing).where(Listing.id == listing.id).values(views=Listing.views + 1))
         count_daily_view(db, listing.id)
         db.commit()
-    return {**listing_out(db, listing, owner=owner), "size_fit": size_fit(db, listing)}
+    alerts = [] if user is None else list(db.scalars(select(StockAlert.size_id).where(
+        StockAlert.user_id == user.id, StockAlert.listing_id == listing.id)).all())
+    return {**listing_out(db, listing, owner=owner), "size_fit": size_fit(db, listing), "stock_alerts": alerts}
 
 
 ALMATY = timezone(timedelta(hours=5))  # Kazakhstan has one time zone, UTC+5, since March 2024

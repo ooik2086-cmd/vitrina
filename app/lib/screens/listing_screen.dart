@@ -38,6 +38,7 @@ class _ListingScreenState extends State<ListingScreen> {
   Offer? _offer; // the signed-in buyer's latest offer on this listing
   // One key per order attempt: a retried tap after a lost response returns the same order.
   String _orderKey = newIdempotencyKey();
+  Set<int>? _alerts; // sold-out sizes the buyer waits for, once they tap one
 
   @override
   void didChangeDependencies() {
@@ -78,6 +79,23 @@ class _ListingScreenState extends State<ListingScreen> {
     setState(() => _offer = offer);
     ScaffoldMessenger.of(context)
         .showSnackBar(SnackBar(content: Text(tr('Ұсыныс жіберілді. Сатушы жауап бергенде хабарлаймыз.'))));
+  }
+
+  Future<void> _toggleStockAlert(Listing l, ShoeSize size) async {
+    if (!await _ensureSignedIn() || !mounted) return;
+    final alerts = {...(_alerts ?? l.stockAlerts)};
+    final on = !alerts.contains(size.id);
+    try {
+      await SessionScope.of(context).api.setStockAlert(l.id, size.id, on);
+      if (!mounted) return;
+      setState(() => _alerts = on ? (alerts..add(size.id)) : (alerts..remove(size.id)));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(on
+              ? trf('{0} өлшемі қайта шыққанда хабарлаймыз.', [size.label])
+              : trf('{0} өлшемі туралы хабарлама өшірілді.', [size.label]))));
+    } catch (e) {
+      if (mounted) showError(context, e);
+    }
   }
 
   Future<bool> _ensureSignedIn() async {
@@ -312,8 +330,19 @@ class _ListingScreenState extends State<ListingScreen> {
               const SizedBox(height: 12),
               Wrap(spacing: 8, runSpacing: 8, children: [
                 for (final s in l.sizes)
-                  _SizeTile(size: s, selected: _sizeId == s.id, onTap: () => setState(() => _sizeId = s.id)),
+                  _SizeTile(
+                    size: s,
+                    selected: _sizeId == s.id,
+                    alerted: (_alerts ?? l.stockAlerts).contains(s.id),
+                    onTap: () => setState(() => _sizeId = s.id),
+                    onSoldOutTap: me?.id == l.sellerId ? null : () => _toggleStockAlert(l, s),
+                  ),
               ]),
+              if (me?.id != l.sellerId && l.sizes.any((s) => !s.available)) ...[
+                const SizedBox(height: 8),
+                Text(tr('Қалмаған өлшемді басыңыз: қайта шыққанда хабарлаймыз.'),
+                    style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
+              ],
               if (l.sizeFit != null) ...[const SizedBox(height: 12), SizeFitNote(fit: l.sizeFit!)],
               if (mySize.value != null) ...[
                 const SizedBox(height: 10),
@@ -515,10 +544,15 @@ class _Fact extends StatelessWidget {
 }
 
 class _SizeTile extends StatelessWidget {
-  const _SizeTile({required this.size, required this.selected, required this.onTap});
+  const _SizeTile(
+      {required this.size, required this.selected, required this.onTap, this.alerted = false, this.onSoldOutTap});
   final ShoeSize size;
   final bool selected;
   final VoidCallback onTap;
+
+  /// A sold-out size the buyer asked to hear about; tapping a sold-out size toggles that.
+  final bool alerted;
+  final VoidCallback? onSoldOutTap;
 
   @override
   Widget build(BuildContext context) {
@@ -528,7 +562,7 @@ class _SizeTile extends StatelessWidget {
     return Semantics(
       button: true,
       selected: selected,
-      enabled: size.available,
+      enabled: size.available || onSoldOutTap != null,
       label: trf('Өлшем {0}, {1} см{2}', [size.label, size.insoleCm, size.available ? '' : tr(', қалмады')]),
       child: Material(
         color: selected ? scheme.primary : scheme.surface,
@@ -538,15 +572,26 @@ class _SizeTile extends StatelessWidget {
         ),
         child: InkWell(
           borderRadius: BorderRadius.circular(14),
-          onTap: size.available ? onTap : null,
+          onTap: size.available ? onTap : onSoldOutTap,
           child: SizedBox(
             width: 76,
             height: 58,
-            child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-              Text(size.label,
-                  style: weight(theme.textTheme.titleSmall!, 700)
-                      .copyWith(color: fg, decoration: size.available ? null : TextDecoration.lineThrough)),
-              Text(trf('{0} см', [size.insoleCm]), style: theme.textTheme.labelSmall?.copyWith(color: fg)),
+            child: Stack(children: [
+              Center(
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  Text(size.label,
+                      style: weight(theme.textTheme.titleSmall!, 700)
+                          .copyWith(color: fg, decoration: size.available ? null : TextDecoration.lineThrough)),
+                  Text(trf('{0} см', [size.insoleCm]), style: theme.textTheme.labelSmall?.copyWith(color: fg)),
+                ]),
+              ),
+              if (!size.available && onSoldOutTap != null)
+                Positioned(
+                  top: 4,
+                  right: 4,
+                  child: Icon(alerted ? Icons.notifications_active : Icons.notifications_none_rounded,
+                      key: Key('alert-${size.id}'), size: 14, color: alerted ? Brand.accent : scheme.onSurfaceVariant),
+                ),
             ]),
           ),
         ),

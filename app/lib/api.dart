@@ -343,7 +343,8 @@ class Listing {
         stats = j['stats'] == null ? null : ListingStats.fromJson(j['stats'] as Map<String, dynamic>),
         promo = j['promo'] == null ? null : Promo.fromJson(j['promo'] as Map<String, dynamic>),
         moderation = j['moderation'] == null ? null : Moderation.fromJson(j['moderation'] as Map<String, dynamic>),
-        sizeFit = j['size_fit'] == null ? null : SizeFit.fromJson(j['size_fit'] as Map<String, dynamic>);
+        sizeFit = j['size_fit'] == null ? null : SizeFit.fromJson(j['size_fit'] as Map<String, dynamic>),
+        stockAlerts = {for (final id in (j['stock_alerts'] as List?) ?? const []) id as int};
 
   final int id;
   final String status;
@@ -373,6 +374,9 @@ class Listing {
 
   /// What buyers of this model said about the size; only on the product page, and only with enough answers.
   final SizeFit? sizeFit;
+
+  /// Sold-out sizes the signed-in buyer asked to hear about when they are back.
+  final Set<int> stockAlerts;
   final double? sellerRating;
   final int sellerReviews;
 
@@ -685,6 +689,10 @@ class Api {
     final r = await _send('GET', '/listings/$id/similar') as Map;
     return [for (final j in r['items'] as List) Listing.fromJson(j as Map<String, dynamic>)];
   }
+
+  /// Asks to be told (or stops asking) when a sold-out size can be ordered again.
+  Future<void> setStockAlert(int listingId, int sizeId, bool on) =>
+      _send(on ? 'PUT' : 'DELETE', '/listings/$listingId/sizes/$sizeId/alert');
 
   Future<Listing> listing(int id) async =>
       Listing.fromJson(await _send('GET', '/listings/$id') as Map<String, dynamic>);

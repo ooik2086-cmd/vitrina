@@ -293,6 +293,17 @@ class Follow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class StockAlert(Base):
+    """A buyer waiting for a sold-out size: told once when it can be ordered again, then the alert is gone."""
+    __tablename__ = "stock_alerts"
+    __table_args__ = (UniqueConstraint("user_id", "size_id"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    listing_id: Mapped[int] = mapped_column(ForeignKey("listings.id"), index=True)
+    size_id: Mapped[int] = mapped_column(ForeignKey("listing_sizes.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class Offer(Base):
     """A buyer's price offer on one size of a listing. The seller accepts, declines or names their own price;
     an accepted offer lets that buyer order at that price for a limited time."""

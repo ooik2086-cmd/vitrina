@@ -11,7 +11,8 @@ from vitrina_core.money import (PROVIDER_CLEARING, CommissionRule, Entry, escrow
 from vitrina_core.orders import Actor, Order as CoreOrder, OrderStatus, TransitionError, transition
 
 from .errors import ApiError
-from .models import AuditLog, LedgerEntry, LedgerTx, Listing, ListingSize, Notification, Order, OrderEvent
+from .models import (AuditLog, LedgerEntry, LedgerTx, Listing, ListingSize, Notification, Order, OrderEvent,
+                     StockAlert)
 
 
 def aware(dt: datetime | None) -> datetime | None:
@@ -131,6 +132,20 @@ def restock(db: Session, order: Order) -> None:
     listing = db.get(Listing, order.listing_id)
     if listing.status == "sold":
         listing.status = "published"
+    tell_back_in_stock(db, listing)
+
+
+def tell_back_in_stock(db: Session, listing: Listing) -> None:
+    """Notify buyers waiting for a size that is on sale again, once; call wherever stock or status can change."""
+    if listing.status != "published":
+        return
+    in_stock = {s.id: s.label for s in listing.sizes if s.quantity > 0}
+    for alert in db.scalars(select(StockAlert).where(StockAlert.listing_id == listing.id)).all():
+        if alert.size_id in in_stock:
+            label = in_stock[alert.size_id]
+            notify(db, alert.user_id, "back_in_stock", f"«{listing.title}», {label} өлшемі қайта сатылымда.",
+                   f"«{listing.title}», размер {label} снова в продаже.", listing_id=listing.id)
+            db.delete(alert)
 
 
 def audit(db: Session, user_id: int | None, action: str, target: str, reason: str | None = None) -> None:

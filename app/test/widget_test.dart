@@ -279,6 +279,38 @@ void main() {
     expect(fit(0, 3, 2).verdict, 'large');
   });
 
+  testWidgets('tapping a sold-out size asks to hear when it is back, and again turns it off', (tester) async {
+    final calls = <String>[];
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async {
+          if (req.url.path == '/api/v1/listings/7/sizes/2/alert') {
+            calls.add(req.method);
+            return jsonResponse({'size_id': 2, 'alert': req.method == 'PUT'});
+          }
+          if (req.url.path == '/api/v1/offers') return jsonResponse({'items': [], 'waiting': 0});
+          if (req.url.path.endsWith('/similar')) return jsonResponse({'items': []});
+          return jsonResponse(listingJson());
+        }))
+      ..token = 'tok';
+    tester.view.physicalSize = const Size(400, 1800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+        SessionScope(session: Session(api), child: const MaterialApp(home: ListingScreen(listingId: 7))));
+    await tester.pumpAndSettle();
+    expect(find.byIcon(Icons.notifications_none_rounded), findsOneWidget);
+    await tester.tap(find.text('43'));
+    await tester.pumpAndSettle();
+    expect(find.text('43 өлшемі қайта шыққанда хабарлаймыз.'), findsOneWidget);
+    expect(find.byIcon(Icons.notifications_active), findsOneWidget);
+    expect(find.text('Тапсырыс беру'), findsNothing); // a sold-out size is never selected for ordering
+    await tester.tap(find.text('43'));
+    await tester.pumpAndSettle();
+    expect(calls, ['PUT', 'DELETE']);
+    expect(find.byIcon(Icons.notifications_none_rounded), findsOneWidget);
+  });
+
   testWidgets('product page keeps segment, condition and authenticity apart and shows defects', (tester) async {
     final api = Api(
         base: 'http://x/api/v1',

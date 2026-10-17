@@ -78,6 +78,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                 'offer' || 'offer_reply' => Icons.local_offer_outlined,
                 'saved_search' => Icons.notifications_active_outlined,
                 'followed_shop' => Icons.storefront_outlined,
+                'back_in_stock' => Icons.inventory_outlined,
                 'moderation' => Icons.fact_check_outlined,
                 'listing_hidden' || 'report_closed' => Icons.flag_outlined,
                 _ => Icons.local_shipping_outlined,

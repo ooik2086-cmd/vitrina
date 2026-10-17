@@ -986,6 +986,43 @@ class ReplyTimeTests(ApiTestCase):
                          {"minutes": 50, "bucket": "hour"})
 
 
+class StockAlertTests(ApiTestCase):
+    def notes(self, token):
+        return [(n["kind"], n["listing_id"]) for n in
+                self.c.get("/api/v1/notifications", headers=self.h(token)).json()["items"]]
+
+    def test_buyer_is_told_once_when_a_sold_out_size_is_back(self):
+        listing = self.publish(sizes=[{"label": "EU 42", "insole_cm": "26,5", "quantity": 1},
+                                      {"label": "EU 43", "insole_cm": "27,5", "quantity": 0}])
+        lid = listing["id"]
+        s42, s43 = (s["id"] for s in listing["sizes"])
+        alert = lambda sid, method="PUT", token=None: self.c.request(  # noqa: E731
+            method, f"/api/v1/listings/{lid}/sizes/{sid}/alert", headers=self.h(token or self.buyer))
+        self.assertEqual(alert(s42).json()["code"], "in_stock")
+        self.assertEqual(alert(s43).json(), {"size_id": s43, "alert": True})
+        self.assertEqual(alert(s43).status_code, 200)  # a second tap changes nothing
+        shown = self.c.get(f"/api/v1/listings/{lid}", headers=self.h(self.buyer)).json()
+        self.assertEqual(shown["stock_alerts"], [s43])
+        self.assertEqual(self.c.get(f"/api/v1/listings/{lid}").json()["stock_alerts"], [])
+        self.c.patch(f"/api/v1/listings/{lid}", json={"sizes": [{"id": s43, "quantity": 2}]},
+                     headers=self.h(self.seller))
+        self.assertEqual(self.notes(self.buyer), [("back_in_stock", lid)])
+        self.c.patch(f"/api/v1/listings/{lid}", json={"sizes": [{"id": s43, "quantity": 3}]},
+                     headers=self.h(self.seller))
+        self.assertEqual(len(self.notes(self.buyer)), 1)  # the alert was used up
+        self.assertEqual(self.c.get(f"/api/v1/listings/{lid}", headers=self.h(self.buyer)).json()["stock_alerts"], [])
+
+    def test_a_cancelled_order_frees_the_size_for_whoever_was_waiting(self):
+        listing, order = self.ordered()  # the only pair: the listing is sold out now
+        other = self.login("+77010000004")
+        sid = listing["sizes"][0]["id"]
+        url = f"/api/v1/listings/{listing['id']}/sizes/{sid}/alert"
+        self.assertEqual(self.c.put(url, headers=self.h(other)).status_code, 200)
+        self.post(f"/orders/{order['id']}/cancel", self.buyer)
+        self.assertEqual(self.notes(other), [("back_in_stock", listing["id"])])
+        self.assertEqual(self.c.delete(url, headers=self.h(other)).json(), {"size_id": sid, "alert": False})
+
+
 class AdminTests(ApiTestCase):
     def test_support_console_page_is_served(self):
         r = self.c.get("/admin/")
