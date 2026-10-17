@@ -1095,6 +1095,27 @@ class AuthenticityTests(ApiTestCase):
         self.assertEqual((left["authenticity"], left["proofs"]), ("unverified", []))
 
 
+class SuggestTests(ApiTestCase):
+    def suggest(self, q):
+        return [(i["text"], i["kind"], i["count"]) for i in
+                self.c.get("/api/v1/search/suggest", params={"q": q}).json()["items"]]
+
+    def test_suggests_brands_and_models_on_sale_in_either_alphabet(self):
+        self.publish(brand="Nike", model_name="Air Force 1")
+        self.publish(brand="Nike", model_name="Air Force 1")
+        self.publish(brand="Nike", model_name="Dunk Low")
+        self.publish(brand="New Balance", model_name="574")
+        draft = self.post("/listings", self.seller, {**LISTING, "brand": "Nike", "model_name": "Secret"})
+        self.assertEqual(draft.status_code, 201)
+        self.assertEqual(self.suggest("ni"), [("Nike", "brand", 3), ("Nike Air Force 1", "model", 2),
+                                              ("Nike Dunk Low", "model", 1)])
+        self.assertEqual(self.suggest("най")[0], ("Nike", "brand", 3))  # half-typed Cyrillic alias
+        self.assertEqual(self.suggest("найк dunk"), [("Nike Dunk Low", "model", 1)])
+        self.assertEqual(self.suggest("force"), [("Nike Air Force 1", "model", 2)])  # any word of the model
+        self.assertEqual(self.suggest("нью"), [("New Balance", "brand", 1), ("New Balance 574", "model", 1)])
+        self.assertEqual(self.suggest("n"), [])  # one letter says too little
+
+
 class AdminTests(ApiTestCase):
     def test_support_console_page_is_served(self):
         r = self.c.get("/admin/")

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -25,6 +26,9 @@ class CatalogScreen extends StatefulWidget {
 
 class _CatalogScreenState extends State<CatalogScreen> {
   final _query = TextEditingController();
+  final _focus = FocusNode();
+  List<SearchSuggestion> _suggestions = const [];
+  Timer? _typing;
   String? _sizeCm = mySize.value;
   String? _category;
   CatalogFilter _filter = const CatalogFilter();
@@ -67,16 +71,42 @@ class _CatalogScreenState extends State<CatalogScreen> {
     _countUnread();
   }
 
-  Future<List<Listing>> _load({int offset = 0}) => SessionScope.of(context)
-      .api
-      .search(
-          q: _query.text.trim(), sizeCm: _sizeCm, category: _category, filter: _filter, sale: _sale, offset: offset);
+  Future<List<Listing>> _load({int offset = 0}) => SessionScope.of(context).api.search(
+      q: _query.text.trim(), sizeCm: _sizeCm, category: _category, filter: _filter, sale: _sale, offset: offset);
 
-  void _search() => setState(() {
-        _more.clear();
-        _hasMore = true;
-        _results = _load();
-      });
+  void _search() {
+    _typing?.cancel();
+    rememberSearch(_query.text);
+    _focus.unfocus();
+    setState(() {
+      _suggestions = const [];
+      _more.clear();
+      _hasMore = true;
+      _results = _load();
+    });
+  }
+
+  void _searchFor(String text) {
+    _query.text = text;
+    _search();
+  }
+
+  /// Suggestions follow the typing after a short pause, so each keystroke does not hit the server.
+  void _onTyped(String text) {
+    _typing?.cancel();
+    if (text.trim().length < 2) {
+      setState(() => _suggestions = const []);
+      return;
+    }
+    _typing = Timer(const Duration(milliseconds: 250), () async {
+      try {
+        final found = await SessionScope.of(context).api.suggest(text.trim());
+        if (mounted && _query.text == text && _focus.hasFocus) setState(() => _suggestions = found);
+      } catch (_) {
+        // Suggestions are a convenience; typing and searching work without them.
+      }
+    });
+  }
 
   /// Next page when the user nears the end; the first page stays in the FutureBuilder.
   Future<void> _loadMore(int loaded) async {
@@ -100,6 +130,8 @@ class _CatalogScreenState extends State<CatalogScreen> {
   @override
   void dispose() {
     _query.dispose();
+    _focus.dispose();
+    _typing?.cancel();
     super.dispose();
   }
 
@@ -125,8 +157,8 @@ class _CatalogScreenState extends State<CatalogScreen> {
   }
 
   Future<void> _openSaved() async {
-    final picked = await Navigator.of(context)
-        .push<SavedSearch>(MaterialPageRoute(builder: (_) => const SavedSearchesScreen()));
+    final picked =
+        await Navigator.of(context).push<SavedSearch>(MaterialPageRoute(builder: (_) => const SavedSearchesScreen()));
     if (picked == null) return;
     _query.text = picked.q ?? '';
     _category = picked.category;
@@ -215,8 +247,12 @@ class _CatalogScreenState extends State<CatalogScreen> {
                 Row(children: [
                   Expanded(
                     child: TextField(
+                      key: const Key('search-field'),
                       controller: _query,
+                      focusNode: _focus,
                       textInputAction: TextInputAction.search,
+                      onChanged: _onTyped,
+                      onTap: () => setState(() {}), // show recent searches
                       onSubmitted: (_) => _search(),
                       decoration: InputDecoration(
                         prefixIcon: const Icon(Icons.search),
@@ -239,6 +275,15 @@ class _CatalogScreenState extends State<CatalogScreen> {
                   const SizedBox(width: 10),
                   _SizeButton(sizeCm: _sizeCm, onTap: _pickSize),
                 ]),
+                ListenableBuilder(
+                  listenable: Listenable.merge([_focus, recentSearches]),
+                  builder: (context, _) => _SearchHints(
+                    typing: _query.text.trim().isNotEmpty,
+                    focused: _focus.hasFocus,
+                    suggestions: _suggestions,
+                    onPick: _searchFor,
+                  ),
+                ),
               ]),
             ),
           ),
@@ -416,11 +461,13 @@ class _SizeSheet extends StatelessWidget {
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(tr('Ұлтарақ ұзындығы'), style: theme.textTheme.titleLarge),
           const SizedBox(height: 4),
-          Text(tr('Өкшеден бас бармақтың ұшына дейін өлшеңіз. ±0,5 см аралығы көрсетіледі. Өлшеміңіз телефонда сақталады.'),
+          Text(
+              tr('Өкшеден бас бармақтың ұшына дейін өлшеңіз. ±0,5 см аралығы көрсетіледі. Өлшеміңіз телефонда сақталады.'),
               style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
           const SizedBox(height: 16),
           Wrap(spacing: 8, runSpacing: 8, children: [
-            for (final cm in _cm) ActionChip(label: Text(trf('{0} см', [cm])), onPressed: () => Navigator.pop(context, cm)),
+            for (final cm in _cm)
+              ActionChip(label: Text(trf('{0} см', [cm])), onPressed: () => Navigator.pop(context, cm)),
           ]),
           const SizedBox(height: 12),
           TextButton(onPressed: () => Navigator.pop(context, ''), child: Text(tr('Өлшемді алып тастау'))),
@@ -457,7 +504,8 @@ class _RecentRow extends StatelessWidget {
           itemBuilder: (context, i) {
             final r = items[i];
             return GestureDetector(
-              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => ListingScreen(listingId: r.id))),
+              onTap: () =>
+                  Navigator.of(context).push(MaterialPageRoute(builder: (_) => ListingScreen(listingId: r.id))),
               child: SizedBox(
                 width: 104,
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -499,6 +547,58 @@ class _Empty extends StatelessWidget {
         const SizedBox(height: 12),
         Text(text, style: theme.textTheme.bodyLarge),
         if (action != null) action!,
+      ]),
+    );
+  }
+}
+
+/// Under the search field: recent searches while it is empty, brands and models on sale while typing.
+class _SearchHints extends StatelessWidget {
+  const _SearchHints({required this.typing, required this.focused, required this.suggestions, required this.onPick});
+  final bool typing;
+  final bool focused;
+  final List<SearchSuggestion> suggestions;
+  final ValueChanged<String> onPick;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final muted = theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant);
+    if (!focused) return const SizedBox.shrink();
+    if (typing && suggestions.isNotEmpty) {
+      return Card(
+        key: const Key('suggestions'),
+        margin: const EdgeInsets.only(top: 8),
+        child: Column(children: [
+          for (final s in suggestions)
+            ListTile(
+              dense: true,
+              leading: Icon(s.kind == 'brand' ? Icons.sell_outlined : Icons.search_rounded, size: 20),
+              title: Text(s.text),
+              trailing: Text(trf('{0} тауар', [s.count]), style: muted),
+              onTap: () => onPick(s.text),
+            ),
+        ]),
+      );
+    }
+    final recent = recentSearches.value;
+    if (typing || recent.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      key: const Key('recent-searches'),
+      padding: const EdgeInsets.only(top: 10),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Expanded(child: Text(tr('Соңғы іздеулер'), style: muted)),
+          TextButton(onPressed: forgetSearches, child: Text(tr('Тазалау'))),
+        ]),
+        Wrap(spacing: 8, runSpacing: 4, children: [
+          for (final q in recent)
+            ActionChip(
+              avatar: const Icon(Icons.history_rounded, size: 18),
+              label: Text(q),
+              onPressed: () => onPick(q),
+            ),
+        ]),
       ]),
     );
   }

@@ -987,6 +987,44 @@ void main() {
     expect(find.textContaining('Сатылды'), findsOneWidget);
   });
 
+  testWidgets('typing in search suggests models on sale, and a picked search is remembered', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    await restoreRecentSearches();
+    final searched = <String?>[];
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async {
+          if (req.url.path == '/api/v1/search/suggest') {
+            return jsonResponse({
+              'items': [
+                {'text': 'Nike', 'kind': 'brand', 'count': 3},
+                {'text': 'Nike Air Force 1', 'kind': 'model', 'count': 2},
+              ]
+            });
+          }
+          searched.add(req.url.queryParameters['q']);
+          return jsonResponse({'items': []});
+        }));
+    await tester.pumpWidget(
+        SessionScope(session: Session(api), child: const MaterialApp(home: Scaffold(body: CatalogScreen()))));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('search-field')));
+    await tester.enterText(find.byKey(const Key('search-field')), 'най');
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pumpAndSettle();
+    expect(find.text('Nike Air Force 1'), findsOneWidget);
+    expect(find.text('2 тауар'), findsOneWidget);
+    await tester.tap(find.text('Nike Air Force 1'));
+    await tester.pumpAndSettle();
+    expect(searched.last, 'Nike Air Force 1');
+    expect(find.byKey(const Key('suggestions')), findsNothing);
+    expect(recentSearches.value, ['Nike Air Force 1']);
+    await tester.enterText(find.byKey(const Key('search-field')), '');
+    await tester.tap(find.byKey(const Key('search-field')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('recent-searches')), findsOneWidget);
+  });
+
   testWidgets('catalog loads the next page when scrolled near the end', (tester) async {
     final offsets = <String?>[];
     final api = Api(

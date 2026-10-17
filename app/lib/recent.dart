@@ -48,3 +48,27 @@ Future<void> forgetRecent() async {
   recentlyViewed.value = const [];
   await (await SharedPreferences.getInstance()).remove(_prefsKey);
 }
+
+/// What this person searched for lately, newest first, on the phone only.
+final recentSearches = ValueNotifier<List<String>>(const []);
+const _searchesKey = 'vitrina_recent_searches';
+const recentSearchLimit = 8;
+
+Future<void> restoreRecentSearches() async {
+  recentSearches.value = (await SharedPreferences.getInstance()).getStringList(_searchesKey) ?? const [];
+}
+
+Future<void> rememberSearch(String q) async {
+  final text = q.trim();
+  if (text.length < 2) return;
+  final list = [text, ...recentSearches.value.where((s) => s.toLowerCase() != text.toLowerCase())]
+      .take(recentSearchLimit)
+      .toList();
+  recentSearches.value = list;
+  await (await SharedPreferences.getInstance()).setStringList(_searchesKey, list);
+}
+
+Future<void> forgetSearches() async {
+  recentSearches.value = const [];
+  await (await SharedPreferences.getInstance()).remove(_searchesKey);
+}

@@ -16,7 +16,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, File, Header, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, File, Header, Query, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -26,7 +26,8 @@ from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from vitrina_core.catalog import Authenticity, Condition, compute_bounds, normalize_query
+from vitrina_core.catalog import (BRAND_SYNONYMS, Authenticity, Condition, compute_bounds, normalize_query,
+                                  transliterate)
 from vitrina_core.orders import Actor, OrderStatus as S
 from vitrina_core.webhooks import WebhookRejected, verify
 
@@ -949,6 +950,43 @@ def cancel_stock_alert(listing_id: int, size_id: int, user: User = Depends(curre
         db.delete(a)
     db.commit()
     return {"size_id": size_id, "alert": False}
+
+
+SUGGESTIONS = 8
+
+
+def suggestion_keys(text: str) -> set[str]:
+    """Forms a typed prefix may match: brand aliases mapped (найк -> nike) and plain transliteration (найк -> naik)."""
+    return {normalize_query(text), transliterate(" ".join(text.lower().split()))}
+
+
+def starts_a_word(key: str, typed: str) -> bool:
+    return key.startswith(typed) or f" {typed}" in key
+
+
+@api.get("/search/suggest")
+def search_suggest(q: str = Query(default="", max_length=60), db: Session = Depends(get_db)):
+    """Brands and models on sale now that start with what the buyer typed, the most offered first."""
+    raw = " ".join(q.lower().split())
+    typed = {t for t in suggestion_keys(q) if len(t) >= 2}
+    if len(raw) >= 2:  # "най" is half of the alias "найк": suggest Nike before the word is finished
+        typed |= {brand for alias, brand in BRAND_SYNONYMS.items() if alias.startswith(raw)}
+    if not typed:
+        return {"items": []}
+    rows = db.execute(select(Listing.brand, Listing.model_name, func.count(Listing.id)).where(
+        Listing.status == "published", Listing.brand.is_not(None)).group_by(Listing.brand, Listing.model_name)).all()
+    brands: dict[str, int] = {}
+    models: dict[str, int] = {}
+    for brand, model, n in rows:
+        brands[brand] = brands.get(brand, 0) + n
+        if model:
+            models[f"{brand} {model}"] = models.get(f"{brand} {model}", 0) + n
+    found = []
+    for kind, table in (("brand", brands), ("model", models)):
+        hits = [(text, n) for text, n in table.items()
+                if any(starts_a_word(k, t) for k in suggestion_keys(text) for t in typed)]
+        found += [{"text": text, "kind": kind, "count": n} for text, n in sorted(hits, key=lambda h: (-h[1], h[0]))]
+    return {"items": found[:SUGGESTIONS]}
 
 
 @api.get("/listings/{listing_id}")

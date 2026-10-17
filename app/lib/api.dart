@@ -435,6 +435,17 @@ class Proofs {
   final List<({int id, String url})> items;
 }
 
+/// A brand or model on sale now that starts with what the buyer is typing.
+class SearchSuggestion {
+  SearchSuggestion.fromJson(Map<String, dynamic> j)
+      : text = j['text'] as String,
+        kind = j['kind'] as String,
+        count = j['count'] as int;
+  final String text;
+  final String kind; // "brand" or "model"
+  final int count;
+}
+
 class OrderInfo {
   OrderInfo.fromJson(Map<String, dynamic> j)
       : id = j['id'] as int,
@@ -746,6 +757,11 @@ class Api {
   /// Asks to be told (or stops asking) when a sold-out size can be ordered again.
   Future<void> setStockAlert(int listingId, int sizeId, bool on) =>
       _send(on ? 'PUT' : 'DELETE', '/listings/$listingId/sizes/$sizeId/alert');
+
+  Future<List<SearchSuggestion>> suggest(String q) async {
+    final r = await _send('GET', '/search/suggest?q=${Uri.encodeQueryComponent(q)}') as Map;
+    return [for (final j in r['items'] as List) SearchSuggestion.fromJson(j as Map<String, dynamic>)];
+  }
 
   Future<Listing> listing(int id) async =>
       Listing.fromJson(await _send('GET', '/listings/$id') as Map<String, dynamic>);

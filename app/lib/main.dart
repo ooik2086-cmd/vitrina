@@ -18,6 +18,7 @@ Future<void> main() async {
   await restoreLanguage(_deviceLanguage());
   await restoreMySize();
   await restoreRecent();
+  await restoreRecentSearches();
   final session = Session(Api())..restore();
   runApp(VitrinaApp(session: session));
 }
