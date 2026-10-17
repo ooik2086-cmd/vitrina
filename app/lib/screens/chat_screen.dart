@@ -8,6 +8,7 @@ import '../session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import '../i18n.dart';
+import '../quick_replies.dart';
 
 String _time(DateTime t) => '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
 
@@ -176,6 +177,11 @@ class _ChatScreenState extends State<ChatScreen> {
         }
       });
 
+  /// A ready answer goes into the field, not straight to the buyer, so the seller can add the details.
+  void _useReply(String text) {
+    _input.value = TextEditingValue(text: text, selection: TextSelection.collapsed(offset: text.length));
+  }
+
   Future<void> _send() async {
     final text = _input.text.trim();
     if (text.isEmpty || _sending) return;
@@ -238,7 +244,9 @@ class _ChatScreenState extends State<ChatScreen> {
                   child: Padding(
                     padding: const EdgeInsets.all(32),
                     child: Text(
-                      conv?.role == 'buyer' ? tr('Өлшемі, жағдайы немесе жеткізу туралы сұраңыз.') : tr('Хабарлама әлі жоқ.'),
+                      conv?.role == 'buyer'
+                          ? tr('Өлшемі, жағдайы немесе жеткізу туралы сұраңыз.')
+                          : tr('Хабарлама әлі жоқ.'),
                       textAlign: TextAlign.center,
                       style: theme.textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
                     ),
@@ -254,6 +262,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   },
                 ),
         ),
+        if (conv?.role == 'seller') _QuickReplies(onPick: _useReply),
         Material(
           color: scheme.surface,
           child: SafeArea(
@@ -332,8 +341,8 @@ class _Bubble extends StatelessWidget {
             Padding(
               padding: EdgeInsets.only(bottom: message.body.isEmpty ? 4 : 8),
               child: GestureDetector(
-                onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                    builder: (_) => _PhotoViewer(url: message.photoUrl!), fullscreenDialog: true)),
+                onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => _PhotoViewer(url: message.photoUrl!), fullscreenDialog: true)),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(12),
                   child: Image.network(
@@ -380,6 +389,136 @@ class _PhotoViewer extends StatelessWidget {
       backgroundColor: Colors.black,
       appBar: AppBar(backgroundColor: Colors.black, foregroundColor: Colors.white),
       body: InteractiveViewer(maxScale: 5, child: Center(child: Image.network(url))),
+    );
+  }
+}
+
+class _QuickReplies extends StatelessWidget {
+  const _QuickReplies({required this.onPick});
+  final ValueChanged<String> onPick;
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<List<String>?>(
+      valueListenable: quickReplies,
+      builder: (context, _, __) {
+        final items = currentQuickReplies();
+        return SizedBox(
+          height: 48,
+          child: ListView(
+            key: const Key('quick-replies'),
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+            children: [
+              // First, so it is never scrolled out of reach.
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: ActionChip(
+                  key: const Key('edit-quick-replies'),
+                  avatar: const Icon(Icons.edit_outlined, size: 16),
+                  label: Text(tr('Үлгілер')),
+                  onPressed: () => showModalBottomSheet<void>(
+                    context: context,
+                    isScrollControlled: true,
+                    showDragHandle: true,
+                    builder: (_) => const QuickRepliesSheet(),
+                  ),
+                ),
+              ),
+              for (final t in items)
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: ActionChip(
+                    label: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 220),
+                      child: Text(t, overflow: TextOverflow.ellipsis),
+                    ),
+                    onPressed: () => onPick(t),
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// Add, change or remove ready answers.
+class QuickRepliesSheet extends StatefulWidget {
+  const QuickRepliesSheet({super.key});
+
+  @override
+  State<QuickRepliesSheet> createState() => _QuickRepliesSheetState();
+}
+
+class _QuickRepliesSheetState extends State<QuickRepliesSheet> {
+  late final List<TextEditingController> _rows = [
+    for (final t in currentQuickReplies()) TextEditingController(text: t)
+  ];
+
+  @override
+  void dispose() {
+    for (final c in _rows) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: EdgeInsets.fromLTRB(20, 8, 20, 20 + MediaQuery.of(context).viewInsets.bottom),
+      child: SingleChildScrollView(
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(tr('Жылдам жауаптар'), style: weight(theme.textTheme.titleLarge!, 800)),
+          const SizedBox(height: 4),
+          Text(tr('Басқанда мәтін өріске қойылады, жібермес бұрын толықтыра аласыз. Тек осы телефонда сақталады.'),
+              style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+          const SizedBox(height: 12),
+          for (final (i, c) in _rows.indexed)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Row(children: [
+                Expanded(
+                  child: TextField(
+                    key: Key('quick-reply-$i'),
+                    controller: c,
+                    minLines: 1,
+                    maxLines: 3,
+                    maxLength: maxQuickReplyLength,
+                    decoration: const InputDecoration(counterText: ''),
+                  ),
+                ),
+                IconButton(
+                  tooltip: tr('Өшіру'),
+                  icon: const Icon(Icons.remove_circle_outline),
+                  onPressed: () => setState(() => _rows.removeAt(i).dispose()),
+                ),
+              ]),
+            ),
+          if (_rows.length < maxQuickReplies)
+            TextButton.icon(
+              key: const Key('add-quick-reply'),
+              onPressed: () => setState(() => _rows.add(TextEditingController())),
+              icon: const Icon(Icons.add),
+              label: Text(tr('Жауап қосу')),
+            ),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton(
+              key: const Key('save-quick-replies'),
+              onPressed: () async {
+                await saveQuickReplies([for (final c in _rows) c.text]);
+                if (context.mounted) Navigator.pop(context);
+              },
+              child: Text(tr('Сақтау')),
+            ),
+          ),
+        ]),
+      ),
     );
   }
 }

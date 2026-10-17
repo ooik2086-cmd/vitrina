@@ -10,6 +10,7 @@ import 'package:vitrina/api.dart';
 import 'package:vitrina/i18n.dart';
 import 'package:vitrina/labels.dart';
 import 'package:vitrina/my_size.dart';
+import 'package:vitrina/quick_replies.dart';
 import 'package:vitrina/recent.dart';
 import 'package:vitrina/screens/analytics_screen.dart';
 import 'package:vitrina/screens/catalog_screen.dart';
@@ -871,6 +872,46 @@ void main() {
             w is Image && w.image is NetworkImage && (w.image as NetworkImage).url == 'http://x/media/3/sole.jpg'),
         findsOneWidget);
     expect(find.byKey(const Key('chat-photo')), findsOneWidget);
+    expect(find.byKey(const Key('quick-replies')), findsNothing); // ready answers are the seller's
+    await tester.pumpWidget(const SizedBox()); // stop polling
+  });
+
+  testWidgets('seller puts a ready answer in the field and can edit the list', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    await restoreQuickReplies();
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async => jsonResponse({
+              'conversation': {
+                'id': 9,
+                'listing_id': 7,
+                'listing_title': 'Кроссовка',
+                'listing_cover': null,
+                'price_tiyn': 2490000,
+                'role': 'seller',
+                'other_name': 'Айгерім',
+                'last_message': null,
+                'unread': 0,
+              },
+              'items': [],
+            })));
+    await tester.pumpWidget(SessionScope(
+        session: Session(api),
+        child: const MaterialApp(home: ChatScreen(conversationId: 9, pollEvery: Duration(hours: 1)))));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Сәлеметсіз бе! Иә, бар.'));
+    await tester.pump();
+    expect(tester.widget<TextField>(find.byType(TextField)).controller!.text, 'Сәлеметсіз бе! Иә, бар.');
+    await tester.tap(find.byKey(const Key('edit-quick-replies')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('add-quick-reply')));
+    await tester.pump();
+    await tester.enterText(find.byKey(const Key('quick-reply-4')), 'Бүгін 18:00-ге дейін жіберемін');
+    await tester.tap(find.byKey(const Key('save-quick-replies')));
+    await tester.pumpAndSettle();
+    expect(currentQuickReplies().last, 'Бүгін 18:00-ге дейін жіберемін');
+    final saved = (await SharedPreferences.getInstance()).getString('vitrina_quick_replies')!;
+    expect((jsonDecode(saved) as List).length, 5);
     await tester.pumpWidget(const SizedBox()); // stop polling
   });
 

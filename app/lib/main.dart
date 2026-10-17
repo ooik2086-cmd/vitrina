@@ -11,6 +11,7 @@ import 'session.dart';
 import 'theme.dart';
 import 'i18n.dart';
 import 'my_size.dart';
+import 'quick_replies.dart';
 import 'recent.dart';
 
 Future<void> main() async {
@@ -19,6 +20,7 @@ Future<void> main() async {
   await restoreMySize();
   await restoreRecent();
   await restoreRecentSearches();
+  await restoreQuickReplies();
   final session = Session(Api())..restore();
   runApp(VitrinaApp(session: session));
 }
@@ -98,7 +100,8 @@ class _HomeShellState extends State<HomeShell> {
               label: tr('Чат')),
           NavigationDestination(
               icon: Icon(Icons.receipt_long_outlined), selectedIcon: Icon(Icons.receipt_long), label: tr('Тапсырыс')),
-          NavigationDestination(icon: Icon(Icons.person_outline), selectedIcon: Icon(Icons.person), label: tr('Профиль')),
+          NavigationDestination(
+              icon: Icon(Icons.person_outline), selectedIcon: Icon(Icons.person), label: tr('Профиль')),
         ],
       ),
     );
