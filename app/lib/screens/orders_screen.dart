@@ -9,23 +9,29 @@ import 'order_screen.dart';
 import '../i18n.dart';
 
 class OrdersScreen extends StatelessWidget {
-  const OrdersScreen({super.key});
+  const OrdersScreen({super.key, this.sellerTab = false, this.onlyMine = false});
+
+  /// Opened from the profile's to-do card: straight to the side and the orders that wait on this person.
+  final bool sellerTab;
+  final bool onlyMine;
 
   @override
   Widget build(BuildContext context) {
     final session = SessionScope.of(context);
     if (!session.signedIn) return SignInPrompt(text: tr('Тапсырыстарыңызды көру үшін кіріңіз.'));
     final seller = session.me?.isSeller ?? false;
+    final filter = onlyMine ? 'mine' : 'all';
     return DefaultTabController(
       length: seller ? 2 : 1,
+      initialIndex: seller && sellerTab ? 1 : 0,
       child: Scaffold(
         appBar: AppBar(
           title: Text(tr('Тапсырыстар')),
           bottom: seller ? TabBar(tabs: [Tab(text: tr('Сатып алғаным')), Tab(text: tr('Сатқаным'))]) : null,
         ),
         body: TabBarView(children: [
-          const _OrderList(role: 'buyer'),
-          if (seller) const _OrderList(role: 'seller'),
+          _OrderList(role: 'buyer', filter: filter),
+          if (seller) _OrderList(role: 'seller', filter: filter),
         ]),
       ),
     );
@@ -41,8 +47,9 @@ bool orderWaitsForMe(OrderInfo o, String role) =>
     (role == 'seller' ? _waitsForSeller : _waitsForBuyer).contains(o.status);
 
 class _OrderList extends StatefulWidget {
-  const _OrderList({required this.role});
+  const _OrderList({required this.role, this.filter = 'all'});
   final String role;
+  final String filter;
 
   @override
   State<_OrderList> createState() => _OrderListState();
@@ -50,7 +57,7 @@ class _OrderList extends StatefulWidget {
 
 class _OrderListState extends State<_OrderList> {
   Future<List<OrderInfo>>? _orders;
-  String _filter = 'all';
+  late String _filter = widget.filter;
 
   @override
   void didChangeDependencies() {

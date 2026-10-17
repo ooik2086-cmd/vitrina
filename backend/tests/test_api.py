@@ -877,6 +877,19 @@ class OfferTests(ApiTestCase):
         return self.post(f"/listings/{listing['id']}/offers", token or self.buyer,
                          {"size_id": listing["sizes"][0]["id"], "amount_tiyn": amount})
 
+    def test_todo_counts_what_waits_on_each_side(self):
+        listing = self.publish()
+        self.assertEqual(self.offer(listing, 4_000_000).status_code, 201)
+        self.post(f"/listings/{listing['id']}/questions", self.buyer, {"text": "Өлшемі сай ма?"})
+        other = self.publish(title="Екінші")
+        self.post("/orders", self.buyer, {"listing_id": other["id"], "size_id": other["sizes"][0]["id"]},
+                  **{"Idempotency-Key": "todo"})
+        seller = self.get("/me/todo", self.seller).json()
+        self.assertEqual((seller["offers"], seller["questions"], seller["to_accept"], seller["to_ship"]), (1, 1, 0, 0))
+        buyer = self.get("/me/todo", self.buyer).json()
+        self.assertEqual((buyer["to_pay"], buyer["to_confirm"], buyer["offers_answered"]), (1, 0, 0))
+        self.assertNotIn("offers", buyer)  # seller lines only for sellers
+
     def test_offer_bounds_and_daily_limit(self):
         listing = self.publish()  # 45 000 ₸
         self.assertEqual(self.offer(listing, 4_500_000).json()["code"], "offer_not_lower")

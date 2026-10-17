@@ -43,7 +43,7 @@ from .errors import ApiError, api_error_handler
 from .share import router as share_router
 from .social import CONTACT_RE, reply_time, router as social_router, seller_rating, size_fit
 from .models import (AuditLog, PriceChange, AuthToken, Block, Follow, Notification, Offer, SavedSearch, StockAlert, ListingDailyViews, ListingEmbedding, ListingReport, AuthToken, Favorite, IdempotencyRecord, Listing, ListingSize, Media, Order, OrderEvent,
-                     OtpCode, Review, User, WebhookEvent, make_session_factory)
+                     OtpCode, Question, Review, User, WebhookEvent, make_session_factory)
 from .storage import MAX_UPLOAD_BYTES, Storage, make_storage, normalize_image
 
 CATEGORIES = ("sneakers", "sport", "casual", "classic", "boots_winter", "sandals", "kids", "other")
@@ -1221,6 +1221,35 @@ def count_daily_view(db: Session, listing_id: int) -> None:
             db.add(ListingDailyViews(listing_id=listing_id, day=day, views=1))
     except IntegrityError:  # another request created the row a moment ago
         db.execute(bump)
+
+
+@api.get("/me/todo")
+def my_todo(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """What waits on this person right now, as counts for the profile's to-do card. Seller lines come only for
+    sellers. Offers past their answer time are not counted: they have already lapsed."""
+    def orders(role, *statuses):
+        who = Order.seller_id if role == "seller" else Order.buyer_id
+        return int(db.scalar(select(func.count(Order.id)).where(who == user.id, Order.status.in_(statuses))) or 0)
+
+    now = now_utc()
+    out = {
+        "to_pay": orders("buyer", S.CREATED.value, S.PAYMENT_PENDING.value),
+        "to_confirm": orders("buyer", S.DELIVERED_PENDING_CONFIRMATION.value),
+        "offers_answered": int(db.scalar(select(func.count(Offer.id)).where(
+            Offer.buyer_id == user.id, Offer.status.in_(("countered", "accepted")), Offer.expires_at > now)) or 0),
+    }
+    if user.is_seller:
+        out |= {
+            "to_accept": orders("seller", S.PAID.value),
+            "to_ship": orders("seller", S.SELLER_ACCEPTED.value, S.PREPARING.value),
+            "returns": orders("seller", S.RETURN_REQUESTED.value),
+            "questions": int(db.scalar(select(func.count(Question.id)).join(Listing, Listing.id == Question.listing_id)
+                                       .where(Listing.seller_id == user.id, Question.answer.is_(None),
+                                              Question.hidden.is_(False))) or 0),
+            "offers": int(db.scalar(select(func.count(Offer.id)).where(
+                Offer.seller_id == user.id, Offer.status == "pending", Offer.expires_at > now)) or 0),
+        }
+    return out
 
 
 @api.get("/me/analytics")

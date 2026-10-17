@@ -690,4 +690,12 @@ const en = <String, String>{
   '360° витрина деген не?': 'What is the 360° showcase?',
   'Неге чаттан шықпау керек?': 'Why stay in the app’s chat?',
   'Сызылған баға: соңғы 30 күндегі ең төмен баға.': 'Crossed-out price: the lowest of the last 30 days.',
+  'Қабылдауды күтетін тапсырыс': 'Orders to accept',
+  'Жіберуді күтетін тапсырыс': 'Orders to ship',
+  'Қайтару сұрауы': 'Return requests',
+  'Жауапсыз баға ұсынысы': 'Price offers to answer',
+  'Жауапсыз сұрақ': 'Questions to answer',
+  'Төлемді күтетін тапсырыс': 'Orders to pay',
+  'Алғаныңызды растау': 'Confirm you received it',
+  'Сатушы жауап берген ұсыныс': 'Offers the seller answered',
 };

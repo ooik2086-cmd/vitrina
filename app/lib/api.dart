@@ -841,6 +841,10 @@ class Api {
   Future<Analytics> analytics({int days = 14}) async =>
       Analytics.fromJson(await _send('GET', '/me/analytics', query: {'days': '$days'}) as Map<String, dynamic>);
 
+  /// Counts of what waits on the signed-in person; seller keys appear only for sellers.
+  Future<Map<String, int>> todo() async =>
+      (await _send('GET', '/me/todo') as Map).map((k, v) => MapEntry(k as String, v as int));
+
   Future<Earnings> earnings() async => Earnings.fromJson(await _send('GET', '/me/earnings') as Map<String, dynamic>);
 
   Future<List<Listing>> myListings() async {

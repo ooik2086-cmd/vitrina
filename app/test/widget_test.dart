@@ -30,6 +30,7 @@ import 'package:vitrina/screens/offers_screen.dart';
 import 'package:vitrina/screens/order_screen.dart';
 import 'package:vitrina/listing_quality.dart';
 import 'package:vitrina/screens/help_screen.dart';
+import 'package:vitrina/widgets/todo_card.dart';
 import 'package:vitrina/screens/orders_screen.dart';
 import 'package:vitrina/screens/profile_screen.dart';
 import 'package:vitrina/screens/saved_searches_screen.dart';
@@ -751,6 +752,25 @@ void main() {
     expect(payWithinMinutes, 30); // backend/vitrina_api/services.py UNPAID_CREATED_TTL
     expect(sellerAnswersWithinHours, 48); // SELLER_ANSWER_TTL
     expect(buyerChecksWithinDays, 5); // config.py confirm_window
+  });
+
+  testWidgets('to-do card lists only what waits and opens where it is done', (tester) async {
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async => http.Response(
+            jsonEncode(req.url.path.endsWith('/me/todo')
+                ? {'to_pay': 0, 'to_confirm': 1, 'offers_answered': 0, 'questions': 2}
+                : {'items': []}),
+            200,
+            headers: {'content-type': 'application/json; charset=utf-8'})))
+      ..token = 't';
+    await tester
+        .pumpWidget(SessionScope(session: Session(api), child: const MaterialApp(home: Scaffold(body: TodoCard()))));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('todo-to_confirm')), findsOneWidget);
+    expect(find.byKey(const Key('todo-questions')), findsOneWidget);
+    expect(find.byKey(const Key('todo-to_pay')), findsNothing); // zero is not shown
+    expect(find.text('2'), findsOneWidget);
   });
 
   test('listing quality counts what the page has and puts the biggest gap first', () {
@@ -1618,7 +1638,8 @@ void main() {
     final api = Api(
         base: 'http://x/api/v1',
         client: MockClient((req) async {
-          calls.add('${req.method} ${req.url.path}');
+          // The profile's to-do card reads its counts on open; only what the dialog does matters here.
+          if (!req.url.path.endsWith('/me/todo')) calls.add('${req.method} ${req.url.path}');
           return jsonResponse({'deleted': true});
         }))
       ..token = 'tok';

@@ -4,6 +4,7 @@ import '../appearance.dart';
 import '../labels.dart';
 import '../session.dart';
 import '../widgets/common.dart';
+import '../widgets/todo_card.dart';
 import 'analytics_screen.dart';
 import 'blocked_screen.dart';
 import 'earnings_screen.dart';
@@ -35,6 +36,7 @@ class ProfileScreen extends StatelessWidget {
       body: me == null
           ? const Center(child: CircularProgressIndicator())
           : ListView(children: [
+              const TodoCard(),
               ListTile(
                 leading: const Icon(Icons.person_outline),
                 title: Text(me.displayName ?? tr('Аты көрсетілмеген')),
