@@ -4,7 +4,9 @@ from __future__ import annotations
 import collections
 import hashlib
 import hmac
+import io
 import json
+import logging
 import re
 import secrets
 import threading
@@ -18,6 +20,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, File, Header, 
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from PIL import Image
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
@@ -28,7 +31,7 @@ from vitrina_core.orders import Actor, OrderStatus as S
 from vitrina_core.webhooks import WebhookRejected, verify
 
 from . import services
-from . import cutout, visual
+from . import cutout, promo, visual
 from .config import Settings
 from .deps import current_user, get_db, get_settings, get_storage, now_utc, optional_user, sha256, staff_user
 from .errors import ApiError, api_error_handler
@@ -39,6 +42,8 @@ from .storage import MAX_UPLOAD_BYTES, LocalStorage, normalize_image
 
 CATEGORIES = ("sneakers", "sport", "casual", "classic", "boots_winter", "sandals", "kids", "other")
 PHONE_RE = re.compile(r"^\+7\d{10}$")
+log = logging.getLogger(__name__)
+
 MIN_SPIN_FRAMES = 8  # fewer real frames than this do not read as a rotation
 DEFECT_REQUIRED = {Condition.USED_GOOD.value, Condition.DEFECTIVE.value}
 
@@ -186,7 +191,8 @@ def listing_out(db: Session, listing: Listing, *, owner: bool = False) -> dict:
                   for m in listing.media],
         "seller": {"id": seller.id, "shop_name": seller.shop_name, "city": seller.city,  # never the phone
                    **seller_rating(db, seller.id)},
-        **({"stats": listing_stats(db, listing)} if owner else {}),
+        **({"stats": listing_stats(db, listing),
+            "promo": {"state": listing.promo_state, "url": listing.promo_url}} if owner else {}),
     }
 
 
@@ -376,6 +382,37 @@ def embed_listing(state, listing_id: int) -> bool:
         return True
 
 
+SPIN_PROMO_MAX_FRAMES = 36
+
+
+def render_listing_promo(state, listing_id: int, lang: str) -> bool:
+    """Background job: the shareable promo video. Uses the 360° frames when there are any, else the angle photos."""
+    storage = state.storage
+    with state.sessions() as db:
+        listing = db.get(Listing, listing_id)
+        if listing is None:
+            return False
+        media = sorted(listing.media, key=lambda m: m.position)
+        frames = [m for m in media if m.angle == "frame"]
+        spin = len(frames) >= MIN_SPIN_FRAMES
+        chosen = frames[:SPIN_PROMO_MAX_FRAMES] if spin else [m for m in media if m.angle in PROMO_ANGLES]
+        try:
+            photos = [Image.open(io.BytesIO(storage.read(m.processed_url or m.original_url))) for m in chosen
+                      if storage.owns(m.processed_url or m.original_url)]
+            video = promo.render_video(photos, title=listing.title, price=promo.format_tenge(listing.price_tiyn),
+                                       style=listing.showcase_style, lang=lang, spin=spin)
+            listing.promo_url = storage.put(video, owner_id=listing.seller_id, ext="mp4")
+            listing.promo_state = "ready"
+        except Exception:
+            log.exception("promo video failed for listing %s", listing_id)
+            listing.promo_state = "failed"
+        db.commit()
+        return listing.promo_state == "ready"
+
+
+PROMO_ANGLES = ("outer", "front", "inner", "back", "top")
+
+
 def prepare_listing_media(state, listing_id: int) -> None:
     # Cut-outs first, so the search vector is computed on the shoe without its backdrop.
     cutout_listing(state, listing_id)
@@ -443,6 +480,8 @@ def edit_listing(listing_id: int, body: ListingPatch, user: User = Depends(curre
     if listing.status == "hidden":
         raise ApiError(409, "invalid_status")
     if body.price_tiyn is not None:
+        if body.price_tiyn != listing.price_tiyn and listing.promo_state == "ready":
+            listing.promo_state, listing.promo_url = None, None  # the video shows the old price
         listing.price_tiyn = body.price_tiyn
     if body.delivery_price_tiyn is not None:
         listing.delivery_price_tiyn = body.delivery_price_tiyn
@@ -464,6 +503,24 @@ def edit_listing(listing_id: int, body: ListingPatch, user: User = Depends(curre
         elif listing.status == "sold" and in_stock:
             listing.status = "paused"  # restocked; the seller republishes when ready
     db.commit()
+    return listing_out(db, listing, owner=True)
+
+
+class PromoIn(BaseModel):
+    lang: Literal["kk", "ru"] = "kk"
+
+
+@api.post("/listings/{listing_id}/promo", status_code=202)
+def make_promo(listing_id: int, body: PromoIn, request: Request, background: BackgroundTasks,
+               user: User = Depends(current_user), db: Session = Depends(get_db)):
+    listing = own_listing(db, listing_id, user)
+    if listing.status == "hidden":
+        raise ApiError(409, "invalid_status")
+    if not promo.available():
+        raise ApiError(503, "promo_off")
+    listing.promo_state, listing.promo_url = "rendering", None
+    db.commit()
+    background.add_task(render_listing_promo, request.app.state, listing.id, body.lang)
     return listing_out(db, listing, owner=True)
 
 

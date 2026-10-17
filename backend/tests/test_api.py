@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 from sqlalchemy import create_engine
 
+from vitrina_api import promo
 from vitrina_api.app import create_app
 from vitrina_api.config import Settings
 from vitrina_api.models import Base, User
@@ -381,6 +382,31 @@ def jpeg(size=(800, 600), orientation=None, gps=False) -> bytes:
     out = io.BytesIO()
     img.save(out, "JPEG", exif=exif.tobytes())
     return out.getvalue()
+
+
+@unittest.skipUnless(promo.available(), "ffmpeg not installed")
+class PromoTests(ApiTestCase):
+    external_media = False
+
+    def test_seller_makes_a_promo_video_and_a_price_change_retires_it(self):
+        urls = [self.c.post("/api/v1/media", files={"file": ("p.jpg", jpeg(), "image/jpeg")},
+                            headers=self.h(self.seller)).json()["url"] for _ in range(4)]
+        photos = [{"url": u, "angle": a} for u, a in zip(urls, ("front", "outer", "inner", "back"))]
+        listing = self.publish(photos=photos)
+        lid = listing["id"]
+        self.assertEqual(listing["promo"], {"state": None, "url": None})
+        self.assertEqual(self.post(f"/listings/{lid}/promo", self.buyer).status_code, 404)
+        r = self.post(f"/listings/{lid}/promo", self.seller, {"lang": "ru"})
+        self.assertEqual(r.status_code, 202, r.text)
+        self.assertEqual(r.json()["promo"]["state"], "rendering")
+        mine = self.c.get("/api/v1/me/listings", headers=self.h(self.seller)).json()["items"][0]["promo"]
+        self.assertEqual(mine["state"], "ready")  # the test client runs background jobs before returning
+        video = os.path.join(self.cfg.media_dir, mine["url"].removeprefix("http://test/media/"))
+        with open(video, "rb") as f:
+            self.assertEqual(f.read(12)[4:8], b"ftyp")  # an MP4 container
+        self.assertNotIn("promo", self.c.get(f"/api/v1/listings/{lid}").json())  # only the seller sees it
+        r = self.c.patch(f"/api/v1/listings/{lid}", json={"price_tiyn": 3_900_000}, headers=self.h(self.seller))
+        self.assertEqual(r.json()["promo"], {"state": None, "url": None})  # it showed the old price
 
 
 class MediaTests(ApiTestCase):

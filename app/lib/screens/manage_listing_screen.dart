@@ -1,4 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../api.dart';
 import '../labels.dart';
@@ -138,6 +142,16 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
               const SizedBox(height: 20),
               _StatsRow(stats: _l.stats!),
             ],
+            if (!locked) ...[
+              const SizedBox(height: 16),
+              PromoCard(
+                listing: _l,
+                onChanged: (l) => setState(() {
+                  _l = l;
+                  _changed = true;
+                }),
+              ),
+            ],
             const SizedBox(height: 24),
             Text(tr('Баға'), style: theme.textTheme.titleMedium),
             const SizedBox(height: 8),
@@ -238,6 +252,136 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
                 ),
               ),
       ),
+    );
+  }
+}
+
+/// Makes and hands out the 8-second promo video: the seller's 360° photos, the price and music,
+/// sized for Instagram, TikTok and WhatsApp statuses.
+class PromoCard extends StatefulWidget {
+  const PromoCard({super.key, required this.listing, required this.onChanged, this.pollEvery = const Duration(seconds: 2)});
+  final Listing listing;
+  final ValueChanged<Listing> onChanged;
+  final Duration pollEvery;
+
+  @override
+  State<PromoCard> createState() => _PromoCardState();
+}
+
+class _PromoCardState extends State<PromoCard> {
+  Timer? _poll;
+  bool _starting = false;
+
+  String? get _state => widget.listing.promo?.state;
+
+  @override
+  void initState() {
+    super.initState();
+    if (_state == 'rendering') _schedule();
+  }
+
+  @override
+  void dispose() {
+    _poll?.cancel();
+    super.dispose();
+  }
+
+  void _schedule() {
+    _poll?.cancel();
+    _poll = Timer(widget.pollEvery, () async {
+      try {
+        final l = await SessionScope.of(context).api.listing(widget.listing.id);
+        if (!mounted) return;
+        widget.onChanged(l);
+        if (l.promo?.state == 'rendering') _schedule();
+      } catch (_) {
+        if (mounted) _schedule();
+      }
+    });
+  }
+
+  Future<void> _make() async {
+    setState(() => _starting = true);
+    try {
+      final l = await SessionScope.of(context).api.makePromo(widget.listing.id, appLanguage.value);
+      if (!mounted) return;
+      widget.onChanged(l);
+      _schedule();
+    } catch (e) {
+      if (mounted) showError(context, e);
+    } finally {
+      if (mounted) setState(() => _starting = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final url = widget.listing.promo?.url;
+    final rendering = _state == 'rendering' || _starting;
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Brand.ink,
+        borderRadius: BorderRadius.circular(Brand.radius),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.movie_creation_outlined, color: Colors.white),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(tr('Жарнама видео'),
+                style: weight(theme.textTheme.titleMedium!, 700).copyWith(color: Colors.white)),
+          ),
+        ]),
+        const SizedBox(height: 6),
+        Text(
+          switch (_state) {
+            'ready' => tr('Дайын. Видеоны ашып, телефонға сақтаңыз немесе сілтемесін жіберіңіз.'),
+            'failed' => tr('Видео жасалмады. Қайта көріңіз.'),
+            _ when rendering => tr('Видео жасалуда, бұл бірнеше секунд алады…'),
+            _ => tr('8 секундтық тік видео: 360° айналым, баға және музыка. Instagram, TikTok және WhatsApp үшін.'),
+          },
+          style: theme.textTheme.bodyMedium?.copyWith(color: Colors.white70),
+        ),
+        const SizedBox(height: 12),
+        if (rendering)
+          const LinearProgressIndicator(color: Brand.accent, backgroundColor: Colors.white24)
+        else if (_state == 'ready' && url != null)
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            FilledButton.icon(
+              key: const Key('open-promo'),
+              style: FilledButton.styleFrom(backgroundColor: Brand.accent),
+              onPressed: () => launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication),
+              icon: const Icon(Icons.play_arrow_rounded),
+              label: Text(tr('Ашу')),
+            ),
+            OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(foregroundColor: Colors.white, side: const BorderSide(color: Colors.white38)),
+              onPressed: () async {
+                await Clipboard.setData(ClipboardData(text: url));
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr('Сілтеме көшірілді'))));
+                }
+              },
+              icon: const Icon(Icons.link_rounded),
+              label: Text(tr('Сілтемені көшіру')),
+            ),
+            TextButton(
+              style: TextButton.styleFrom(foregroundColor: Colors.white70),
+              onPressed: _make,
+              child: Text(tr('Қайта жасау')),
+            ),
+          ])
+        else
+          FilledButton.icon(
+            key: const Key('make-promo'),
+            style: FilledButton.styleFrom(backgroundColor: Brand.accent),
+            onPressed: _make,
+            icon: const Icon(Icons.auto_awesome_rounded),
+            label: Text(tr('Видео жасау')),
+          ),
+      ]),
     );
   }
 }

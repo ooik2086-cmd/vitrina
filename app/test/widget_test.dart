@@ -320,6 +320,45 @@ void main() {
     expect(find.text('Сақталды'), findsOneWidget);
   });
 
+  testWidgets('seller starts a promo video and the card follows it until it is ready', (tester) async {
+    final calls = <String>[];
+    var polls = 0;
+    Map<String, dynamic> withPromo(String? state) =>
+        {...listingJson(), 'promo': {'state': state, 'url': state == 'ready' ? 'http://x/media/3/v.mp4' : null}};
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async {
+          calls.add('${req.method} ${req.url.path} ${req.body}');
+          final body = req.method == 'POST' ? withPromo('rendering') : withPromo(++polls < 2 ? 'rendering' : 'ready');
+          return http.Response(jsonEncode(body), req.method == 'POST' ? 202 : 200,
+              headers: {'content-type': 'application/json; charset=utf-8'});
+        }));
+    Listing current = Listing.fromJson(withPromo(null));
+    await tester.pumpWidget(SessionScope(
+      session: Session(api),
+      child: MaterialApp(
+        home: Scaffold(
+          body: StatefulBuilder(
+            builder: (context, setState) => PromoCard(
+              listing: current,
+              pollEvery: const Duration(milliseconds: 10),
+              onChanged: (l) => setState(() => current = l),
+            ),
+          ),
+        ),
+      ),
+    ));
+    await tester.tap(find.byKey(const Key('make-promo')));
+    await tester.pump();
+    expect(find.byType(LinearProgressIndicator), findsOneWidget);
+    for (var i = 0; i < 5; i++) {
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+    expect(find.byKey(const Key('open-promo')), findsOneWidget);
+    expect(calls.first, 'POST /api/v1/listings/7/promo {"lang":"kk"}');
+    expect(calls.skip(1).every((c) => c.startsWith('GET /api/v1/listings/7')), isTrue);
+  });
+
   test('catalog filter builds the query and counts what differs from default', () {
     const f = CatalogFilter(
         sort: 'price_asc', conditions: {'new_with_box', 'new_no_box'}, minPriceTiyn: 1000000, maxPriceTiyn: null);

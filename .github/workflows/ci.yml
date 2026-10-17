@@ -15,6 +15,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - run: sudo apt-get update -q && sudo apt-get install -yq --no-install-recommends ffmpeg  # promo videos
       - run: python -m pip install -r requirements.txt
       - run: python -m unittest -v
 
@@ -40,6 +41,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - run: sudo apt-get update -q && sudo apt-get install -yq --no-install-recommends ffmpeg  # promo videos
       - run: python -m pip install -r requirements.txt
       - run: python -m unittest tests.test_api -v
 

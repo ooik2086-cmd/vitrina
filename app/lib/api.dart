@@ -54,6 +54,15 @@ class ListingStats {
   final int sold;
 }
 
+/// The seller's shareable promo video. state: null (never made), rendering, ready or failed.
+class Promo {
+  Promo.fromJson(Map<String, dynamic> j)
+      : state = j['state'] as String?,
+        url = j['url'] as String?;
+  final String? state;
+  final String? url;
+}
+
 class Shop {
   Shop.fromJson(Map<String, dynamic> j)
       : id = j['id'] as int,
@@ -160,7 +169,8 @@ class Listing {
         sellerId = (j['seller'] as Map)['id'] as int,
         sellerRating = ((j['seller'] as Map)['rating'] as num?)?.toDouble(),
         sellerReviews = ((j['seller'] as Map)['reviews'] as int?) ?? 0,
-        stats = j['stats'] == null ? null : ListingStats.fromJson(j['stats'] as Map<String, dynamic>);
+        stats = j['stats'] == null ? null : ListingStats.fromJson(j['stats'] as Map<String, dynamic>),
+        promo = j['promo'] == null ? null : Promo.fromJson(j['promo'] as Map<String, dynamic>);
 
   final int id;
   final String status;
@@ -186,6 +196,7 @@ class Listing {
 
   /// Only on the seller's own listings.
   final ListingStats? stats;
+  final Promo? promo;
 
   /// 360° frames in upload order: real photos only, nothing generated in between.
   List<MediaItem> get frames => media.where((m) => m.angle == 'frame').toList();
@@ -401,6 +412,10 @@ class Api {
             for (final e in stock.entries) {'id': e.key, 'quantity': e.value}
           ],
       }) as Map<String, dynamic>);
+
+  /// Starts rendering the promo video; poll [listing] until promo.state is no longer "rendering".
+  Future<Listing> makePromo(int id, String lang) async =>
+      Listing.fromJson(await _send('POST', '/listings/$id/promo', body: {'lang': lang}) as Map<String, dynamic>);
 
   Future<Listing> pauseListing(int id) async =>
       Listing.fromJson(await _send('POST', '/listings/$id/pause') as Map<String, dynamic>);

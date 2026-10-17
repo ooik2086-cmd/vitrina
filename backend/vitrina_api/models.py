@@ -72,6 +72,8 @@ class Listing(Base):
     showcase_style: Mapped[str] = mapped_column(String(20), default="clean")
     search_text: Mapped[str] = mapped_column(Text, default="")
     views: Mapped[int] = mapped_column(Integer, default=0, server_default="0")  # product page opens by others
+    promo_state: Mapped[str | None] = mapped_column(String(12))  # rendering | ready | failed; None = never made
+    promo_url: Mapped[str | None] = mapped_column(String(500))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     sizes: Mapped[list[ListingSize]] = relationship(cascade="all, delete-orphan", order_by="ListingSize.id")
     media: Mapped[list[Media]] = relationship(cascade="all, delete-orphan", order_by="Media.position")
