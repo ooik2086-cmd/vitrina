@@ -34,6 +34,7 @@ class User(Base):
     last_delivery: Mapped[str | None] = mapped_column(Text)  # JSON of the address last ordered to, to prefill
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # the person deleted the account
     muted_kinds: Mapped[str | None] = mapped_column(String(200))  # comma-separated optional alerts turned off
+    shop_about: Mapped[str | None] = mapped_column(Text)  # the seller's own words on the shop page: returns, hours
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 

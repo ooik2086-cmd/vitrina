@@ -39,7 +39,7 @@ from .config import Settings
 from .deps import current_user, get_db, get_settings, get_storage, now_utc, optional_user, sha256, staff_user
 from .errors import ApiError, api_error_handler
 from .share import router as share_router
-from .social import reply_time, router as social_router, seller_rating, size_fit
+from .social import CONTACT_RE, reply_time, router as social_router, seller_rating, size_fit
 from .models import (AuditLog, AuthToken, Block, Follow, Notification, Offer, SavedSearch, StockAlert, ListingDailyViews, ListingEmbedding, ListingReport, AuthToken, Favorite, IdempotencyRecord, Listing, ListingSize, Media, Order, OrderEvent,
                      OtpCode, Review, User, WebhookEvent, make_session_factory)
 from .storage import MAX_UPLOAD_BYTES, LocalStorage, normalize_image
@@ -291,7 +291,8 @@ def away_out(user: User | None) -> str | None:
 def me_out(user: User) -> dict:
     return {"id": user.id, "phone": user.phone, "display_name": user.display_name, "city": user.city,
             "is_seller": user.is_seller, "shop_name": user.shop_name, "role": user.role,
-            "away_until": away_out(user), "last_delivery": json.loads(user.last_delivery) if user.last_delivery else None}
+            "away_until": away_out(user), "last_delivery": json.loads(user.last_delivery) if user.last_delivery else None,
+            "shop_about": user.shop_about}
 
 
 # ---------------------------------------------------------------- auth + profile
@@ -424,6 +425,27 @@ def set_away(body: AwayIn, user: User = Depends(current_user), db: Session = Dep
         raise ApiError(422, "validation", f"until must be within {MAX_AWAY_DAYS} days from today")
     user = db.merge(user)
     user.away_until = body.until
+    db.commit()
+    return me_out(user)
+
+
+MAX_SHOP_ABOUT = 500
+
+
+class ShopAboutIn(BaseModel):
+    text: str | None = Field(default=None, max_length=MAX_SHOP_ABOUT)
+
+
+@api.put("/me/shop-about")
+def set_shop_about(body: ShopAboutIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """A few lines on the shop page: how the seller ships, returns, answers. Contacts stay in the app's chat."""
+    if not user.is_seller:
+        raise ApiError(403, "seller_required")
+    text = (body.text or "").strip() or None
+    if text and CONTACT_RE.search(text):
+        raise ApiError(422, "contacts_not_allowed")
+    user = db.merge(user)
+    user.shop_about = text
     db.commit()
     return me_out(user)
 
@@ -855,6 +877,7 @@ def seller_profile(seller_id: int, user: User | None = Depends(optional_user), d
     return {"id": seller.id, "shop_name": seller.shop_name, "city": seller.city,
             "since": services.aware(seller.created_at).date().isoformat(),
             "completed_sales": int(sales or 0), "listings": int(live or 0), "away_until": away_out(seller),
+            "about": seller.shop_about,
             "followers": followers(db, seller.id), "reply_time": reply_time(db, seller.id),
             "following": user is not None and db.scalar(select(Follow.id).where(
                 Follow.user_id == user.id, Follow.seller_id == seller.id)) is not None,

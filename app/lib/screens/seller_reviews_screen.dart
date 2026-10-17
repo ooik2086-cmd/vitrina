@@ -64,7 +64,6 @@ class _SellerReviewsScreenState extends State<SellerReviewsScreen> {
         ],
       ),
     );
-    text.dispose();
     if (answer == null || answer.isEmpty || !mounted) return;
     try {
       await SessionScope.of(context).api.replyToReview(r.id, answer);

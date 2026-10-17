@@ -69,6 +69,7 @@ class ProfileScreen extends StatelessWidget {
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PromoCodesScreen())),
                 ),
+              if (me.isSeller) const ShopAboutTile(),
               if (me.isSeller) const AwayTile(),
               ListTile(
                 key: const Key('offers'),
@@ -203,6 +204,82 @@ class ProfileScreen extends StatelessWidget {
       if (context.mounted) showError(context, e);
     }
   }
+}
+
+/// The seller's own lines on the shop page. Contacts are refused by the server, so the chat stays the one channel.
+class ShopAboutTile extends StatelessWidget {
+  const ShopAboutTile({super.key});
+
+  Future<void> _edit(BuildContext context) async {
+    final session = SessionScope.of(context);
+    final saved = await showDialog<String>(
+      context: context,
+      builder: (_) => _ShopAboutDialog(initial: session.me?.shopAbout ?? ''),
+    );
+    if (saved == null || !context.mounted) return;
+    try {
+      session.update(await session.api.setShopAbout(saved.isEmpty ? null : saved));
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr('Дүкен беті жаңартылды.'))));
+      }
+    } catch (e) {
+      if (context.mounted) showError(context, e);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final about = SessionScope.of(context).me?.shopAbout;
+    return ListTile(
+      key: const Key('shop-about-tile'),
+      leading: const Icon(Icons.edit_note_rounded),
+      title: Text(tr('Дүкен туралы')),
+      subtitle:
+          Text(about ?? tr('Жазылмаған: жөнелту, қайтару, жұмыс уақыты'), maxLines: 2, overflow: TextOverflow.ellipsis),
+      trailing: const Icon(Icons.chevron_right),
+      onTap: () => _edit(context),
+    );
+  }
+}
+
+/// Owns its controller, so it is disposed only after the dialog's closing animation.
+class _ShopAboutDialog extends StatefulWidget {
+  const _ShopAboutDialog({required this.initial});
+  final String initial;
+
+  @override
+  State<_ShopAboutDialog> createState() => _ShopAboutDialogState();
+}
+
+class _ShopAboutDialogState extends State<_ShopAboutDialog> {
+  late final _text = TextEditingController(text: widget.initial);
+
+  @override
+  void dispose() {
+    _text.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+        title: Text(tr('Дүкен туралы')),
+        content: TextField(
+          key: const Key('shop-about-field'),
+          controller: _text,
+          autofocus: true,
+          maxLines: 5,
+          maxLength: 500,
+          decoration: InputDecoration(
+              hintText: tr('Мысалы: жөнелту мерзімі, қайтару шарты, жұмыс уақыты. Телефон мен сілтеме жазылмайды.')),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: Text(tr('Болдырмау'))),
+          FilledButton(
+              key: const Key('shop-about-save'),
+              onPressed: () => Navigator.pop(context, _text.text.trim()),
+              child: Text(tr('Сақтау'))),
+        ],
+      );
 }
 
 /// Holiday mode: the shop stays visible, but orders and offers wait until the seller is back.

@@ -174,9 +174,13 @@ class Shop {
         reviews = j['reviews'] as int,
         followers = j['followers'] as int? ?? 0,
         following = j['following'] as bool? ?? false,
-        replyBucket = (j['reply_time'] as Map?)?['bucket'] as String?;
+        replyBucket = (j['reply_time'] as Map?)?['bucket'] as String?,
+        about = j['about'] as String?;
   final int id;
   final String shopName;
+
+  /// The seller's own few lines: shipping, returns, hours. Never contacts; the server refuses those.
+  final String? about;
   final String? city;
   final DateTime since;
   final int completedSales;
@@ -569,8 +573,10 @@ class Me {
         shopName = j['shop_name'] as String?,
         awayUntil = j['away_until'] == null ? null : DateTime.parse(j['away_until'] as String),
         lastDelivery =
-            j['last_delivery'] == null ? null : Delivery.fromJson(j['last_delivery'] as Map<String, dynamic>);
+            j['last_delivery'] == null ? null : Delivery.fromJson(j['last_delivery'] as Map<String, dynamic>),
+        shopAbout = j['shop_about'] as String?;
   final int id;
+  final String? shopAbout;
   final String phone;
   final String? displayName;
   final String? city;
@@ -754,6 +760,10 @@ class Api {
 
   /// Deletes the account for good; refused while an order is still open.
   Future<void> deleteAccount() => _send('DELETE', '/me');
+
+  /// Null or blank clears it.
+  Future<Me> setShopAbout(String? text) async =>
+      Me.fromJson(await _send('PUT', '/me/shop-about', body: {'text': text}) as Map<String, dynamic>);
 
   Future<Me> becomeSeller(String shopName, String city) async => Me.fromJson(
       await _send('POST', '/me/seller', body: {'shop_name': shopName, 'city': city}) as Map<String, dynamic>);

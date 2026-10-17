@@ -120,6 +120,17 @@ class _ShopScreenState extends State<ShopScreen> {
                       ),
                     ]),
                   ],
+                  if (shop.about != null) ...[
+                    const SizedBox(height: 14),
+                    Container(
+                      key: const Key('shop-about'),
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(14),
+                      decoration:
+                          BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(14)),
+                      child: Text(shop.about!, style: theme.textTheme.bodyMedium),
+                    ),
+                  ],
                   const SizedBox(height: 16),
                   Row(children: [
                     Icon(Icons.people_outline, size: 18, color: theme.colorScheme.onSurfaceVariant),

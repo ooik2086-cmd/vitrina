@@ -930,6 +930,19 @@ class AwayTests(ApiTestCase):
         self.assertIsNone(self.c.get(f"/api/v1/listings/{listing['id']}").json()["seller"]["away_until"])
 
 
+    def test_shop_about_is_shown_on_the_shop_page_without_contacts(self):
+        listing = self.publish()
+        seller_id = self.c.get(f"/api/v1/listings/{listing['id']}").json()["seller"]["id"]
+        about = "Жөнелту 1 күнде. Өлшемі келмесе 3 күн ішінде қайтарамыз."
+        self.assertEqual(self.put("/me/shop-about", self.buyer, {"text": about}).json()["code"], "seller_required")
+        self.assertEqual(self.put("/me/shop-about", self.seller, {"text": "WhatsApp +7 701 000 00 01"}).json()["code"],
+                         "contacts_not_allowed")
+        self.assertEqual(self.put("/me/shop-about", self.seller, {"text": "x" * 501}).status_code, 422)
+        self.assertEqual(self.put("/me/shop-about", self.seller, {"text": f"  {about} "}).json()["shop_about"], about)
+        self.assertEqual(self.c.get(f"/api/v1/sellers/{seller_id}").json()["about"], about)
+        self.assertIsNone(self.put("/me/shop-about", self.seller, {"text": "   "}).json()["shop_about"])
+        self.assertIsNone(self.c.get(f"/api/v1/sellers/{seller_id}").json()["about"])
+
 class FollowTests(ApiTestCase):
     def test_followers_hear_about_each_new_listing_once(self):
         first = self.publish()

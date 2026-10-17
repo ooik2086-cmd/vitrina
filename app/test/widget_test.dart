@@ -1468,6 +1468,7 @@ void main() {
                   'listings': 1,
                   'rating': 4.8,
                   'reviews': 9,
+                  'about': 'Жөнелту 1 күнде.',
                 }
               : (() {
                   sellerQuery = req.url.queryParameters['seller_id'];
@@ -1486,6 +1487,38 @@ void main() {
     expect(find.text('9 пікір'), findsOneWidget);
     expect(find.textContaining('қаз 2026'), findsOneWidget);
     expect(find.text('Nike Air Force 1'), findsOneWidget);
+    expect(find.text('Жөнелту 1 күнде.'), findsOneWidget);
+  });
+
+  testWidgets('seller writes the shop page note and the profile shows it', (tester) async {
+    Object? sent;
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async {
+          sent = jsonDecode(req.body);
+          return http.Response(
+              jsonEncode({
+                'id': 1,
+                'phone': '+77010000001',
+                'is_seller': true,
+                'shop_name': 'Qadam Store',
+                'shop_about': (sent as Map)['text'],
+              }),
+              200,
+              headers: {'content-type': 'application/json; charset=utf-8'});
+        }));
+    final session = Session(api)
+      ..update(Me.fromJson({'id': 1, 'phone': '+77010000001', 'is_seller': true, 'shop_name': 'Qadam Store'}));
+    await tester
+        .pumpWidget(SessionScope(session: session, child: const MaterialApp(home: Scaffold(body: ShopAboutTile()))));
+    expect(find.text('Жазылмаған: жөнелту, қайтару, жұмыс уақыты'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('shop-about-tile')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('shop-about-field')), '  Қайтару 3 күн ішінде. ');
+    await tester.tap(find.byKey(const Key('shop-about-save')));
+    await tester.pumpAndSettle();
+    expect(sent, {'text': 'Қайтару 3 күн ішінде.'});
+    expect(find.text('Қайтару 3 күн ішінде.'), findsOneWidget);
   });
 
   testWidgets('turning an optional alert off saves it, and a failed save puts the switch back', (tester) async {
