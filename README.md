@@ -28,7 +28,7 @@ python3 -m pip install -r requirements.txt
 python3 -m unittest
 ```
 
-Күтілетін нәтиже: `Ran 81 tests ... OK`. PostgreSQL-де тексеру: `VITRINA_TEST_DATABASE_URL=postgresql+psycopg://... python3 -m unittest tests.test_api`.
+Күтілетін нәтиже: `Ran 82 tests ... OK`. PostgreSQL-де тексеру: `VITRINA_TEST_DATABASE_URL=postgresql+psycopg://... python3 -m unittest tests.test_api`.
 
 Қосымша: `cd app && flutter analyze && flutter test`.
 
