@@ -107,18 +107,18 @@ class _Pick extends StatelessWidget {
         decoration: BoxDecoration(
           color: Brand.studio,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: picked ? Brand.ink : Colors.transparent, width: 2),
+          border: Border.all(color: picked ? Theme.of(context).colorScheme.primary : Colors.transparent, width: 2),
         ),
         child: Stack(fit: StackFit.expand, children: [
           if (cover != null) Image.network(cover, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const SizedBox()),
           if (picked)
-            const Positioned(
+            Positioned(
               right: 4,
               top: 4,
               child: CircleAvatar(
                 radius: 10,
-                backgroundColor: Brand.ink,
-                child: Icon(Icons.check_rounded, size: 14, color: Colors.white),
+                backgroundColor: Theme.of(context).colorScheme.primary,
+                child: Icon(Icons.check_rounded, size: 14, color: Theme.of(context).colorScheme.onPrimary),
               ),
             ),
         ]),

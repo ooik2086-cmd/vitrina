@@ -44,6 +44,12 @@ class _SellerReviewsScreenState extends State<SellerReviewsScreen> {
     _items ??= SessionScope.of(context).api.sellerReviews(widget.sellerId);
   }
 
+  void _retry() {
+    setState(() {
+      _items = SessionScope.of(context).api.sellerReviews(widget.sellerId);
+    });
+  }
+
   /// The seller answers each review once, in public, under the buyer's words.
   Future<void> _reply(Review r) async {
     final text = TextEditingController();
@@ -87,7 +93,9 @@ class _SellerReviewsScreenState extends State<SellerReviewsScreen> {
       body: FutureBuilder<List<Review>>(
         future: _items,
         builder: (context, snap) {
-          if (snap.hasError) return Center(child: Text('${snap.error}'));
+          if (snap.hasError && snap.connectionState == ConnectionState.done) {
+            return ErrorRetry(error: snap.error, onRetry: _retry);
+          }
           if (!snap.hasData) return const Center(child: CircularProgressIndicator());
           final items = snap.data!;
           return ListView(padding: const EdgeInsets.all(20), children: [

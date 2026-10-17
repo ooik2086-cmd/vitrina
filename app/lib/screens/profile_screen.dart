@@ -225,6 +225,10 @@ class ProfileScreen extends StatelessWidget {
     if (ok != true) return;
     try {
       session.update(await session.api.becomeSeller(shop.text.trim(), city.text.trim()));
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(tr('Сатушы режимі қосылды. Енді «Менің тауарларым» бөлімінен тауар қоса аласыз.'))));
+      }
     } catch (e) {
       if (context.mounted) showError(context, e);
     }

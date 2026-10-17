@@ -51,7 +51,9 @@ class _ChatsScreenState extends State<ChatsScreen> {
       body: FutureBuilder<List<Conversation>>(
         future: _items,
         builder: (context, snap) {
-          if (snap.hasError) return Center(child: Text('${snap.error}'));
+          if (snap.hasError && snap.connectionState == ConnectionState.done) {
+            return ErrorRetry(error: snap.error, onRetry: _reload);
+          }
           if (!snap.hasData) return const Center(child: CircularProgressIndicator());
           final items = snap.data!;
           return RefreshIndicator(
@@ -124,7 +126,7 @@ class ChatScreen extends StatefulWidget {
   State<ChatScreen> createState() => _ChatScreenState();
 }
 
-class _ChatScreenState extends State<ChatScreen> {
+class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final _input = TextEditingController();
   final _scroll = ScrollController();
   final List<ChatMessage> _messages = [];
@@ -132,20 +134,47 @@ class _ChatScreenState extends State<ChatScreen> {
   Timer? _poll;
   bool _sending = false;
   bool _loading = false;
+  bool _started = false;
+  Object? _loadError; // the first load failed, so there is nothing to show but the error and a retry
 
   Api get _api => SessionScope.of(context).api;
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (_poll == null) {
+    if (!_started) {
+      _started = true;
       _fetch();
-      _poll = Timer.periodic(widget.pollEvery, (_) => _fetch());
+      _startPolling();
+    }
+  }
+
+  void _startPolling() {
+    _poll?.cancel();
+    _poll = Timer.periodic(widget.pollEvery, (_) => _fetch());
+  }
+
+  /// No polling while the app is in the background: it would only use the battery and the data plan.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _fetch();
+      _startPolling();
+    } else if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
+      _poll?.cancel();
+      _poll = null;
     }
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _poll?.cancel();
     _input.dispose();
     _scroll.dispose();
@@ -162,14 +191,22 @@ class _ChatScreenState extends State<ChatScreen> {
       final known = {for (final m in _messages) m.id};
       setState(() {
         _conversation = conv;
+        _loadError = null;
         _messages.addAll(fresh.where((m) => !known.contains(m.id)));
       });
       if (fresh.isNotEmpty) _toBottom();
-    } catch (_) {
-      // Keep the thread on screen; the next poll retries.
+    } catch (e) {
+      // With the thread on screen, keep it there; the next poll retries. Before it ever loaded, say why.
+      if (mounted && _conversation == null) setState(() => _loadError = e);
     } finally {
+      // Every request ends within the API timeout, so a hung one cannot stop the polling for good.
       _loading = false;
     }
+  }
+
+  void _retry() {
+    setState(() => _loadError = null);
+    _fetch();
   }
 
   void _toBottom() => WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -294,28 +331,30 @@ class _ChatScreenState extends State<ChatScreen> {
             ]),
           ),
         Expanded(
-          child: _messages.isEmpty
-              ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(32),
-                    child: Text(
-                      conv?.role == 'buyer'
-                          ? tr('Өлшемі, жағдайы немесе жеткізу туралы сұраңыз.')
-                          : tr('Хабарлама әлі жоқ.'),
-                      textAlign: TextAlign.center,
-                      style: theme.textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
+          child: conv == null && _loadError != null
+              ? ErrorRetry(error: _loadError, onRetry: _retry)
+              : _messages.isEmpty
+                  ? Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(32),
+                        child: Text(
+                          conv?.role == 'buyer'
+                              ? tr('Өлшемі, жағдайы немесе жеткізу туралы сұраңыз.')
+                              : tr('Хабарлама әлі жоқ.'),
+                          textAlign: TextAlign.center,
+                          style: theme.textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
+                        ),
+                      ),
+                    )
+                  : ListView.builder(
+                      controller: _scroll,
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                      itemCount: _messages.length,
+                      itemBuilder: (context, i) {
+                        final m = _messages[i];
+                        return _Bubble(message: m, mine: m.senderId == me);
+                      },
                     ),
-                  ),
-                )
-              : ListView.builder(
-                  controller: _scroll,
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-                  itemCount: _messages.length,
-                  itemBuilder: (context, i) {
-                    final m = _messages[i];
-                    return _Bubble(message: m, mine: m.senderId == me);
-                  },
-                ),
         ),
         if (conv?.role == 'seller') _QuickReplies(onPick: _useReply),
         Material(

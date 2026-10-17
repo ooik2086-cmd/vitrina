@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
@@ -17,7 +18,15 @@ String shopShareUrl(int sellerId, {String base = apiBase}) =>
 
 /// Error as the API returns it: a stable code plus ready messages in Kazakh, Russian and English.
 class ApiException implements Exception {
-  ApiException(this.status, this.code, this.messageKk, [this.detail, this.messageRu, this.messageEn]);
+  ApiException(this.status, this.code, this.messageKk, [this.detail, this.messageRu, this.messageEn]) : _local = false;
+
+  /// Raised by the app itself when the server could not be reached or answered something unreadable;
+  /// [messageKk] is then a key for [tr], so the text follows the interface language.
+  ApiException.local(this.status, this.code, this.messageKk, [this.detail])
+      : messageRu = null,
+        messageEn = null,
+        _local = true;
+  final bool _local;
   final int status;
   final String code;
   final String messageKk;
@@ -26,7 +35,10 @@ class ApiException implements Exception {
   final String? messageEn;
 
   /// The server's message in the interface language.
-  String get message => pick(messageKk, messageRu, messageEn);
+  String get message => _local ? tr(messageKk) : pick(messageKk, messageRu, messageEn);
+
+  /// No answer at all: no network, the server is down, or it did not answer in time.
+  bool get offline => code == 'network' || code == 'timeout';
 
   @override
   String toString() => message;
@@ -794,6 +806,13 @@ class Api {
   final String base;
   String? token;
 
+  /// How long one request may take before the app gives up and says so; uploads carry photos and get longer.
+  static const timeout = Duration(seconds: 20);
+  static const uploadTimeout = Duration(seconds: 60);
+
+  static const _offlineText = 'Байланыс жоқ. Интернетті тексеріп, қайталап көріңіз.';
+  static const _brokenText = 'Сервер уақытша жауап бермей тұр. Біраз кейін қайталап көріңіз.';
+
   Future<dynamic> _send(String method, String path,
       {Object? body, Map<String, String>? query, Map<String, String>? headers}) async {
     final uri = Uri.parse('$base$path').replace(queryParameters: query);
@@ -805,14 +824,52 @@ class Api {
         ...?headers,
       });
     if (body != null) req.body = jsonEncode(body);
-    return _decode(await http.Response.fromStream(await _client.send(req)));
+    return _decode(await _fetch(req));
+  }
+
+  /// Sends one request and reads the whole answer within [limit]. A dropped connection, an unreachable host or a
+  /// request that hangs all end as an [ApiException] with a message for people, never as a raw socket error.
+  Future<http.Response> _fetch(http.BaseRequest req, {Duration limit = timeout}) async {
+    try {
+      return await (() async => http.Response.fromStream(await _client.send(req)))().timeout(limit);
+    } on TimeoutException {
+      throw ApiException.local(0, 'timeout', _offlineText);
+    } on ApiException {
+      rethrow;
+    } on Exception {
+      // http.ClientException, SocketException on mobile, XMLHttpRequest errors on the web.
+      throw ApiException.local(0, 'network', _offlineText);
+    }
+  }
+
+  Future<dynamic> _upload(http.MultipartRequest req) async => _decode(await _fetch(req, limit: uploadTimeout));
+
+  /// A file the server streams back (CSV, PDF): its bytes, or the server's error.
+  Future<List<int>> _bytes(String path, {Map<String, String>? query}) async {
+    final req = http.Request('GET', Uri.parse('$base$path').replace(queryParameters: query))
+      ..headers.addAll({if (token != null) 'Authorization': 'Bearer $token'});
+    final res = await _fetch(req, limit: uploadTimeout);
+    if (res.statusCode >= 400) _decode(res); // throws the server's error
+    return res.bodyBytes;
   }
 
   static dynamic _decode(http.Response res) {
-    final data = res.bodyBytes.isEmpty ? null : jsonDecode(utf8.decode(res.bodyBytes));
+    Object? data;
+    try {
+      data = res.bodyBytes.isEmpty ? null : jsonDecode(utf8.decode(res.bodyBytes));
+    } on FormatException {
+      // A proxy's HTML page or a bare "Internal Server Error": nothing the screens can show as it is.
+      throw ApiException.local(res.statusCode, 'unavailable', _brokenText);
+    }
     if (res.statusCode >= 400) {
       final m = data is Map ? data : const {};
-      throw ApiException(res.statusCode, (m['code'] ?? 'error') as String, (m['message_kk'] ?? tr('Қате.')) as String,
+      if (m['message_kk'] is! String) {
+        final detail = m['detail'] is String ? m['detail'] as String : null;
+        throw res.statusCode >= 500
+            ? ApiException.local(res.statusCode, (m['code'] as String?) ?? 'unavailable', _brokenText, detail)
+            : ApiException.local(res.statusCode, (m['code'] as String?) ?? 'error', 'Қате.', detail);
+      }
+      throw ApiException(res.statusCode, (m['code'] ?? 'error') as String, m['message_kk'] as String,
           m['detail'] as String?, m['message_ru'] as String?, m['message_en'] as String?);
     }
     return data;
@@ -871,7 +928,7 @@ class Api {
     final req = http.MultipartRequest('POST', Uri.parse('$base/media'))
       ..headers.addAll({'Accept': 'application/json', if (token != null) 'Authorization': 'Bearer $token'})
       ..files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
-    final data = _decode(await http.Response.fromStream(await _client.send(req)));
+    final data = await _upload(req);
     return (data as Map)['url'] as String;
   }
 
@@ -880,7 +937,7 @@ class Api {
     final req = http.MultipartRequest('POST', Uri.parse('$base/search/image'))
       ..headers['Accept'] = 'application/json'
       ..files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
-    final data = _decode(await http.Response.fromStream(await _client.send(req))) as Map;
+    final data = await _upload(req) as Map;
     return [for (final j in data['items'] as List) Listing.fromJson(j as Map<String, dynamic>)];
   }
 
@@ -1058,6 +1115,9 @@ class Api {
   /// Starts a payment with the provider. Only the provider's signed webhook marks the order paid.
   Future<void> startPayment(int id) => _send('POST', '/orders/$id/pay');
 
+  /// The buyer has the parcel in hand: starts the inspection window, after which the seller is paid.
+  Future<OrderInfo> markReceived(int id) => action(id, 'received');
+
   Future<OrderInfo> action(int id, String action, {String? reason, String? trackingNumber}) async =>
       OrderInfo.fromJson(await _send('POST', '/orders/$id/$action', body: {
         if (reason != null) 'reason': reason,
@@ -1094,8 +1154,7 @@ class Api {
       ..headers.addAll({'Accept': 'application/json', if (token != null) 'Authorization': 'Bearer $token'})
       ..fields['caption'] = caption
       ..files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
-    return ChatMessage.fromJson(
-        _decode(await http.Response.fromStream(await _client.send(req))) as Map<String, dynamic>);
+    return ChatMessage.fromJson(await _upload(req) as Map<String, dynamic>);
   }
 
   // reviews
@@ -1111,7 +1170,7 @@ class Api {
     final req = http.MultipartRequest('POST', Uri.parse('$base/orders/$orderId/review/photos'))
       ..headers.addAll({'Accept': 'application/json', if (token != null) 'Authorization': 'Bearer $token'})
       ..files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
-    return (_decode(await http.Response.fromStream(await _client.send(req))) as Map)['url'] as String;
+    return (await _upload(req) as Map)['url'] as String;
   }
 
   /// Answered questions for everyone; the asker's own and, for the seller, all of them. [unanswered] is the
@@ -1156,20 +1215,10 @@ class Api {
   Future<void> endPromoCode(int id) => _send('DELETE', '/me/promo-codes/$id');
 
   /// The seller's orders of the last [days] days as a spreadsheet file (semicolon CSV with a BOM).
-  Future<List<int>> salesCsv({int days = 90}) async {
-    final uri = Uri.parse('$base/me/sales.csv').replace(queryParameters: {'days': '$days'});
-    final res = await _client.get(uri, headers: {if (token != null) 'Authorization': 'Bearer $token'});
-    if (res.statusCode >= 400) _decode(res); // throws the server's error
-    return res.bodyBytes;
-  }
+  Future<List<int>> salesCsv({int days = 90}) => _bytes('/me/sales.csv', query: {'days': '$days'});
 
   /// The A6 packing slip for a paid order, as PDF bytes; only the seller can get it.
-  Future<List<int>> packingSlip(int orderId) async {
-    final res = await _client.get(Uri.parse('$base/orders/$orderId/slip.pdf'),
-        headers: {if (token != null) 'Authorization': 'Bearer $token'});
-    if (res.statusCode >= 400) _decode(res); // throws the server's error
-    return res.bodyBytes;
-  }
+  Future<List<int>> packingSlip(int orderId) => _bytes('/orders/$orderId/slip.pdf');
 
   Future<Proofs> proofs(int listingId) async =>
       Proofs.fromJson(await _send('GET', '/listings/$listingId/proofs') as Map<String, dynamic>);
@@ -1178,7 +1227,7 @@ class Api {
     final req = http.MultipartRequest('POST', Uri.parse('$base/listings/$listingId/proofs'))
       ..headers.addAll({'Accept': 'application/json', if (token != null) 'Authorization': 'Bearer $token'})
       ..files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
-    return Proofs.fromJson(_decode(await http.Response.fromStream(await _client.send(req))) as Map<String, dynamic>);
+    return Proofs.fromJson(await _upload(req) as Map<String, dynamic>);
   }
 
   Future<Proofs> deleteProof(int listingId, int proofId) async =>

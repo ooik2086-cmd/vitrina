@@ -103,87 +103,116 @@ class _SpinCaptureScreenState extends State<SpinCaptureScreen> with WidgetsBindi
     setState(() => _lastBytes = bytes);
   }
 
+  /// Back with frames taken asks before throwing them away.
+  Future<void> _confirmLeave() async {
+    final leave = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(tr('Кадрларды тастап шығу керек пе?')),
+        content: Text(trf('Түсірілген {0} кадр сақталмайды.', [_frames.length])),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Қалу'))),
+          FilledButton(
+              key: const Key('discard'), onPressed: () => Navigator.pop(context, true), child: Text(tr('Шығып кету'))),
+        ],
+      ),
+    );
+    if (leave == true && mounted) Navigator.pop(context);
+  }
+
   @override
   Widget build(BuildContext context) {
     final c = _controller;
     final n = _frames.length;
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
+    return PopScope(
+      canPop: n == 0,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _confirmLeave();
+      },
+      child: Scaffold(
         backgroundColor: Colors.black,
-        foregroundColor: Colors.white,
-        title: Text(tr('360° түсіру')),
-        actions: [
-          TextButton(
-            onPressed: n >= spinMinFrames ? () => Navigator.pop(context, List<XFile>.of(_frames)) : null,
-            child: Text(trf('Дайын ({0})', [n]), style: TextStyle(color: n >= spinMinFrames ? Colors.white : Colors.white38)),
-          ),
-        ],
-      ),
-      body: _error != null
-          ? Center(
-              child: Padding(
-                  padding: const EdgeInsets.all(24), child: Text(_error!, style: const TextStyle(color: Colors.white))))
-          : c == null
-              ? const Center(child: CircularProgressIndicator())
-              : Column(children: [
-                  Expanded(
-                    child: Stack(fit: StackFit.expand, children: [
-                      Center(child: CameraPreview(c)),
-                      if (_lastBytes != null)
-                        IgnorePointer(
-                            child: Opacity(opacity: 0.35, child: Image.memory(_lastBytes!, fit: BoxFit.contain))),
-                      Positioned(
-                        left: 16,
-                        right: 16,
-                        top: 12,
-                        child: Text(
-                          n == 0
-                              ? tr('Аяқкиімді жазық жерге қойып, бүйірінен түсіріңіз.')
-                              : tr('Аяқкиімді сәл бұрып (шамамен 15°), алдыңғы кадрмен сәйкестендіріп түсіріңіз.'),
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(color: Colors.white, shadows: [Shadow(blurRadius: 4)]),
+        appBar: AppBar(
+          backgroundColor: Colors.black,
+          foregroundColor: Colors.white,
+          title: Text(tr('360° түсіру')),
+          actions: [
+            TextButton(
+              onPressed: n >= spinMinFrames ? () => Navigator.pop(context, List<XFile>.of(_frames)) : null,
+              child: Text(trf('Дайын ({0})', [n]),
+                  style: TextStyle(color: n >= spinMinFrames ? Colors.white : Colors.white38)),
+            ),
+          ],
+        ),
+        body: _error != null
+            ? Center(
+                child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Text(_error!, style: const TextStyle(color: Colors.white))))
+            : c == null
+                ? const Center(child: CircularProgressIndicator())
+                : Column(children: [
+                    Expanded(
+                      child: Stack(fit: StackFit.expand, children: [
+                        Center(child: CameraPreview(c)),
+                        if (_lastBytes != null)
+                          IgnorePointer(
+                              child: Opacity(opacity: 0.35, child: Image.memory(_lastBytes!, fit: BoxFit.contain))),
+                        Positioned(
+                          left: 16,
+                          right: 16,
+                          top: 12,
+                          child: Text(
+                            n == 0
+                                ? tr('Аяқкиімді жазық жерге қойып, бүйірінен түсіріңіз.')
+                                : tr('Аяқкиімді сәл бұрып (шамамен 15°), алдыңғы кадрмен сәйкестендіріп түсіріңіз.'),
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(color: Colors.white, shadows: [Shadow(blurRadius: 4)]),
+                          ),
                         ),
-                      ),
-                    ]),
-                  ),
-                  SafeArea(
-                    top: false,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      child: Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
-                        IconButton(
-                          tooltip: tr('Соңғы кадрды өшіру'),
-                          onPressed: n > 0 && !_busy ? _undo : null,
-                          icon: const Icon(Icons.undo, color: Colors.white),
-                        ),
-                        GestureDetector(
-                          onTap: _capture,
-                          child: SizedBox(
-                            width: 84,
-                            height: 84,
-                            child: CustomPaint(
-                              painter: SpinProgressPainter(captured: n, target: spinTargetFrames),
-                              child: Center(
-                                child: Container(
-                                  width: 60,
-                                  height: 60,
-                                  decoration: BoxDecoration(
-                                      shape: BoxShape.circle, color: _busy ? Colors.white54 : Colors.white),
+                      ]),
+                    ),
+                    SafeArea(
+                      top: false,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        child: Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
+                          IconButton(
+                            tooltip: tr('Соңғы кадрды өшіру'),
+                            onPressed: n > 0 && !_busy ? _undo : null,
+                            icon: const Icon(Icons.undo, color: Colors.white),
+                          ),
+                          Semantics(
+                            button: true,
+                            label: tr('Кадр түсіру'),
+                            child: GestureDetector(
+                              onTap: _capture,
+                              child: SizedBox(
+                                width: 84,
+                                height: 84,
+                                child: CustomPaint(
+                                  painter: SpinProgressPainter(captured: n, target: spinTargetFrames),
+                                  child: Center(
+                                    child: Container(
+                                      width: 60,
+                                      height: 60,
+                                      decoration: BoxDecoration(
+                                          shape: BoxShape.circle, color: _busy ? Colors.white54 : Colors.white),
+                                    ),
+                                  ),
                                 ),
                               ),
                             ),
                           ),
-                        ),
-                        SizedBox(
-                          width: 48,
-                          child: Text('$n/$spinTargetFrames',
-                              textAlign: TextAlign.center, style: const TextStyle(color: Colors.white)),
-                        ),
-                      ]),
+                          SizedBox(
+                            width: 48,
+                            child: Text('$n/$spinTargetFrames',
+                                textAlign: TextAlign.center, style: const TextStyle(color: Colors.white)),
+                          ),
+                        ]),
+                      ),
                     ),
-                  ),
-                ]),
+                  ]),
+      ),
     );
   }
 }

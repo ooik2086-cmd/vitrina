@@ -43,6 +43,12 @@ class _ShopScreenState extends State<ShopScreen> {
     return (shop, items);
   }
 
+  void _retry() {
+    setState(() {
+      _data = _load();
+    });
+  }
+
   Future<void> _toggleFollow(Shop shop) async {
     final session = SessionScope.of(context);
     if (!session.signedIn) {
@@ -85,7 +91,9 @@ class _ShopScreenState extends State<ShopScreen> {
       body: FutureBuilder<(Shop, List<Listing>)>(
         future: _data,
         builder: (context, snap) {
-          if (snap.hasError) return Center(child: Text('${snap.error}'));
+          if (snap.hasError && snap.connectionState == ConnectionState.done) {
+            return ErrorRetry(error: snap.error, onRetry: _retry);
+          }
           if (!snap.hasData) return const Center(child: CircularProgressIndicator());
           final (shop, items) = snap.data!;
           return CustomScrollView(slivers: [
@@ -96,8 +104,8 @@ class _ShopScreenState extends State<ShopScreen> {
                   Row(children: [
                     CircleAvatar(
                       radius: 30,
-                      backgroundColor: Brand.ink,
-                      foregroundColor: Colors.white,
+                      backgroundColor: Theme.of(context).colorScheme.primary,
+                      foregroundColor: Theme.of(context).colorScheme.onPrimary,
                       child: Text(shop.shopName.characters.first.toUpperCase(),
                           style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w700)),
                     ),
@@ -217,8 +225,7 @@ class _ShopScreenState extends State<ShopScreen> {
               SliverPadding(
                 padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
                 sliver: SliverGrid.builder(
-                  gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                      maxCrossAxisExtent: 240, mainAxisSpacing: 22, crossAxisSpacing: 14, childAspectRatio: 0.64),
+                  gridDelegate: ListingGridDelegate.of(context),
                   itemCount: items.length,
                   itemBuilder: (_, i) => ListingTile(listing: items[i]),
                 ),

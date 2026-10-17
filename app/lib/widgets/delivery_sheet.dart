@@ -23,9 +23,12 @@ class Checkout {
 
 /// Asked right before an order: who receives the pair and where. Filled in from the last order.
 /// With [listingId], the buyer can also try the seller's promo code and see the new price.
+/// With [itemPriceTiyn], the sheet ends with what the order will cost in all, so nothing surprises on the next step.
 class DeliverySheet extends StatefulWidget {
-  const DeliverySheet({super.key, this.listingId});
+  const DeliverySheet({super.key, this.listingId, this.itemPriceTiyn, this.deliveryPriceTiyn = 0});
   final int? listingId;
+  final int? itemPriceTiyn;
+  final int deliveryPriceTiyn;
 
   @override
   State<DeliverySheet> createState() => _DeliverySheetState();
@@ -154,6 +157,42 @@ class _DeliverySheetState extends State<DeliverySheet> {
     ]);
   }
 
+  /// Item, delivery, the promo code's cut and the sum, as the order screen will show them.
+  Widget _summary(ThemeData theme, int item) {
+    final discount = _applied?.discountTiyn ?? 0;
+    Widget row(String label, String value, {TextStyle? style}) => Padding(
+          padding: const EdgeInsets.symmetric(vertical: 2),
+          child: Row(children: [
+            Expanded(child: Text(label, style: style ?? theme.textTheme.bodyMedium)),
+            Text(value, style: style ?? theme.textTheme.bodyMedium),
+          ]),
+        );
+    return Padding(
+      key: const Key('checkout-summary'),
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(children: [
+        row(tr('Тауар'), formatTenge(item)),
+        row(tr('Жеткізу'), widget.deliveryPriceTiyn == 0 ? tr('Тегін') : formatTenge(widget.deliveryPriceTiyn)),
+        if (discount > 0)
+          row(trf('Промокод {0}', [_applied!.code]), '−${formatTenge(discount)}',
+              style: theme.textTheme.bodyMedium?.copyWith(color: accentText(context))),
+        const Divider(height: 16),
+        row(tr('Жиыны'), formatTenge(_total!), style: weight(theme.textTheme.titleMedium!, 750)),
+        const SizedBox(height: 4),
+        Text(
+            tr('Келесі қадамда төлейсіз. Ақша VITRINA-да сақталып, сатушыға тауарды алғаныңызды растағанда не тексеру мерзімі өткенде өтеді.'),
+            style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+      ]),
+    );
+  }
+
+  /// What the buyer pays: the promo preview's own sum once a code is applied, else item plus delivery.
+  int? get _total {
+    final item = widget.itemPriceTiyn;
+    if (_applied != null) return _applied!.totalTiyn;
+    return item == null ? null : item + widget.deliveryPriceTiyn;
+  }
+
   String? _atLeast(String? v, int n, String message) => (v ?? '').trim().length < n ? message : null;
 
   @override
@@ -217,12 +256,15 @@ class _DeliverySheetState extends State<DeliverySheet> {
             ),
             if (widget.listingId != null) ...[_promoBlock(theme), const SizedBox(height: 12)],
             const SizedBox(height: 8),
+            if (widget.itemPriceTiyn != null) _summary(theme, widget.itemPriceTiyn!),
             SizedBox(
               width: double.infinity,
               child: FilledButton(
                 key: const Key('delivery-continue'),
                 onPressed: _submit,
-                child: Text(tr('Тапсырысты рәсімдеу')),
+                child: Text(_total == null
+                    ? tr('Тапсырысты рәсімдеу')
+                    : trf('Тапсырысты рәсімдеу · {0}', [formatTenge(_total!)])),
               ),
             ),
           ]),

@@ -23,6 +23,12 @@ class _BlockedScreenState extends State<BlockedScreen> {
     _items = SessionScope.of(context).api.blockedUsers();
   }
 
+  void _retry() {
+    setState(() {
+      _items = SessionScope.of(context).api.blockedUsers();
+    });
+  }
+
   Future<void> _unblock(BlockedUser b) async {
     final api = SessionScope.of(context).api;
     try {
@@ -43,7 +49,9 @@ class _BlockedScreenState extends State<BlockedScreen> {
       body: FutureBuilder<List<BlockedUser>>(
         future: _items,
         builder: (context, snap) {
-          if (snap.hasError) return Center(child: Text('${snap.error}'));
+          if (snap.hasError && snap.connectionState == ConnectionState.done) {
+            return ErrorRetry(error: snap.error, onRetry: _retry);
+          }
           if (!snap.hasData) return const Center(child: CircularProgressIndicator());
           final items = snap.data!;
           if (items.isEmpty) {

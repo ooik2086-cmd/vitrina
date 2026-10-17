@@ -131,38 +131,44 @@ class _PageBody extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 32),
-      child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-        Container(
-          width: 168,
-          height: 168,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: Brand.studio,
-            border: Border.all(color: Brand.accent.withValues(alpha: 0.35), width: 2),
-          ),
-          child: Icon(page.icon, size: 76, color: Brand.ink),
-        ),
-        const SizedBox(height: 36),
-        Text(tr(page.title), textAlign: TextAlign.center, style: weight(theme.textTheme.headlineSmall!, 750)),
-        const SizedBox(height: 14),
-        Text(tr(page.text),
-            textAlign: TextAlign.center,
-            style: theme.textTheme.bodyLarge?.copyWith(color: theme.colorScheme.onSurfaceVariant, height: 1.45)),
-        if (showSize) ...[
-          const SizedBox(height: 24),
-          ValueListenableBuilder<String?>(
-            valueListenable: mySize,
-            builder: (context, size, _) => OutlinedButton.icon(
-              key: const Key('onboarding-size'),
-              onPressed: () => showSizeGuide(context),
-              icon: Icon(size == null ? Icons.add_rounded : Icons.check_rounded, size: 18),
-              label: Text(size == null ? tr('Өлшемімді көрсету') : trf('Өлшеміңіз: {0} см', [size])),
+    // Scrolls when a small phone or large text leaves too little room; centred otherwise, as before.
+    return LayoutBuilder(
+      builder: (context, box) => SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(minHeight: box.maxHeight),
+          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+            Container(
+              width: 168,
+              height: 168,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Brand.studio,
+                border: Border.all(color: Brand.accent.withValues(alpha: 0.35), width: 2),
+              ),
+              child: Icon(page.icon, size: 76, color: Brand.ink),
             ),
-          ),
-        ],
-      ]),
+            const SizedBox(height: 36),
+            Text(tr(page.title), textAlign: TextAlign.center, style: weight(theme.textTheme.headlineSmall!, 750)),
+            const SizedBox(height: 14),
+            Text(tr(page.text),
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodyLarge?.copyWith(color: theme.colorScheme.onSurfaceVariant, height: 1.45)),
+            if (showSize) ...[
+              const SizedBox(height: 24),
+              ValueListenableBuilder<String?>(
+                valueListenable: mySize,
+                builder: (context, size, _) => OutlinedButton.icon(
+                  key: const Key('onboarding-size'),
+                  onPressed: () => showSizeGuide(context),
+                  icon: Icon(size == null ? Icons.add_rounded : Icons.check_rounded, size: 18),
+                  label: Text(size == null ? tr('Өлшемімді көрсету') : trf('Өлшеміңіз: {0} см', [size])),
+                ),
+              ),
+            ],
+          ]),
+        ),
+      ),
     );
   }
 }

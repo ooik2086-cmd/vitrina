@@ -96,22 +96,48 @@ class HomeShell extends StatefulWidget {
 /// Survives the rebuild after a language change, so the person stays on the tab they were on.
 int _lastTab = 0;
 
-class _HomeShellState extends State<HomeShell> {
+class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   int _tab = _lastTab;
   Map<String, int> _counts = const {};
   Timer? _poll;
+  bool _started = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (_poll == null) {
-      _poll = Timer.periodic(const Duration(minutes: 1), (_) => _refreshBadges());
+    if (!_started) {
+      _started = true;
+      _startPolling();
       _refreshBadges();
+    }
+  }
+
+  void _startPolling() {
+    _poll?.cancel();
+    _poll = Timer.periodic(const Duration(minutes: 1), (_) => _refreshBadges());
+  }
+
+  /// The badges stop counting while the app is in the background and catch up when it comes back.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _refreshBadges();
+      _startPolling();
+    } else if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
+      _poll?.cancel();
+      _poll = null;
     }
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _poll?.cancel();
     super.dispose();
   }
@@ -138,38 +164,50 @@ class _HomeShellState extends State<HomeShell> {
   Widget build(BuildContext context) {
     final chats = _counts['unread_messages'] ?? 0;
     final orders = ordersWaiting(_counts);
-    return Scaffold(
-      body: IndexedStack(index: _tab, children: const [
-        CatalogScreen(),
-        FavoritesScreen(),
-        ChatsScreen(),
-        OrdersScreen(),
-        ProfileScreen(),
-      ]),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _tab,
-        onDestinationSelected: (i) {
-          setState(() => _tab = _lastTab = i);
-          _refreshBadges();
-        },
-        destinations: [
-          NavigationDestination(
-              icon: Icon(Icons.storefront_outlined), selectedIcon: Icon(Icons.storefront), label: tr('Каталог')),
-          NavigationDestination(
-              icon: Icon(Icons.favorite_border), selectedIcon: Icon(Icons.favorite), label: tr('Таңдаулы')),
-          NavigationDestination(
-              key: const Key('tab-chat'),
-              icon: _badged(const Icon(Icons.chat_bubble_outline_rounded), chats),
-              selectedIcon: _badged(const Icon(Icons.chat_bubble_rounded), chats),
-              label: tr('Чат')),
-          NavigationDestination(
-              key: const Key('tab-orders'),
-              icon: _badged(const Icon(Icons.receipt_long_outlined), orders),
-              selectedIcon: _badged(const Icon(Icons.receipt_long), orders),
-              label: tr('Тапсырыс')),
-          NavigationDestination(
-              icon: Icon(Icons.person_outline), selectedIcon: Icon(Icons.person), label: tr('Профиль')),
-        ],
+    // Five labels do not fit a 320 dp phone or large text; then only the chosen tab is named.
+    final roomy = MediaQuery.sizeOf(context).width >= 360 && MediaQuery.textScalerOf(context).scale(14) <= 17;
+    // Back on another tab returns to the catalog first, rather than closing the app.
+    return PopScope(
+      canPop: _tab == 0,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) setState(() => _tab = _lastTab = 0);
+      },
+      child: Scaffold(
+        body: IndexedStack(index: _tab, children: const [
+          CatalogScreen(),
+          FavoritesScreen(),
+          ChatsScreen(),
+          OrdersScreen(),
+          ProfileScreen(),
+        ]),
+        bottomNavigationBar: NavigationBar(
+          selectedIndex: _tab,
+          labelBehavior: roomy
+              ? NavigationDestinationLabelBehavior.alwaysShow
+              : NavigationDestinationLabelBehavior.onlyShowSelected,
+          onDestinationSelected: (i) {
+            setState(() => _tab = _lastTab = i);
+            _refreshBadges();
+          },
+          destinations: [
+            NavigationDestination(
+                icon: Icon(Icons.storefront_outlined), selectedIcon: Icon(Icons.storefront), label: tr('Каталог')),
+            NavigationDestination(
+                icon: Icon(Icons.favorite_border), selectedIcon: Icon(Icons.favorite), label: tr('Таңдаулы')),
+            NavigationDestination(
+                key: const Key('tab-chat'),
+                icon: _badged(const Icon(Icons.chat_bubble_outline_rounded), chats),
+                selectedIcon: _badged(const Icon(Icons.chat_bubble_rounded), chats),
+                label: tr('Чат')),
+            NavigationDestination(
+                key: const Key('tab-orders'),
+                icon: _badged(const Icon(Icons.receipt_long_outlined), orders),
+                selectedIcon: _badged(const Icon(Icons.receipt_long), orders),
+                label: tr('Тапсырыс')),
+            NavigationDestination(
+                icon: Icon(Icons.person_outline), selectedIcon: Icon(Icons.person), label: tr('Профиль')),
+          ],
+        ),
       ),
     );
   }

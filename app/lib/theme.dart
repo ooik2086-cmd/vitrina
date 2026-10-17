@@ -5,6 +5,10 @@ import 'package:flutter/material.dart';
 abstract final class Brand {
   static const ink = Color(0xFF0E0E10);
   static const accent = Color(0xFFFF5A36);
+
+  /// The accent deep enough for white text on it and for accent text on a light canvas (4.6:1 with white).
+  /// [accent] stays for icons, badges' dots and other decoration.
+  static const accentStrong = Color(0xFFD93A17);
   static const canvasLight = Color(0xFFF5F4F1);
   static const canvasDark = Color(0xFF0C0C0E);
   static const studio = Color(0xFFF3F2EF); // product photo backdrop
@@ -162,6 +166,10 @@ TextTheme _withWeights(TextTheme t) {
     labelSmall: apply(t.labelSmall),
   );
 }
+
+/// Accent for text: the deeper shade on light screens, the bright one where the canvas is dark.
+Color accentText(BuildContext context) =>
+    Theme.of(context).brightness == Brightness.dark ? Brand.accent : Brand.accentStrong;
 
 /// Bold weight helper for one-off emphasis (prices, badges).
 TextStyle weight(TextStyle s, double w) => _w(s, w);

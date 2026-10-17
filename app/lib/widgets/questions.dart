@@ -221,7 +221,9 @@ class _QuestionsScreenState extends State<QuestionsScreen> {
       body: FutureBuilder<({List<Question> items, int? unanswered})>(
         future: _data,
         builder: (context, snap) {
-          if (snap.hasError) return Center(child: Text('${snap.error}'));
+          if (snap.hasError && snap.connectionState == ConnectionState.done) {
+            return ErrorRetry(error: snap.error, onRetry: _reload);
+          }
           if (!snap.hasData) return const Center(child: CircularProgressIndicator());
           final items = snap.data!.items;
           if (items.isEmpty) return Center(child: Text(tr('Әзірге сұрақ жоқ.')));

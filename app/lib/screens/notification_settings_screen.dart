@@ -26,13 +26,20 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (_on == null) {
-      SessionScope.of(context).api.notificationSettings().then((v) {
-        if (mounted) setState(() => _on = v);
-      }, onError: (Object e) {
-        if (mounted) setState(() => _error = e);
-      });
-    }
+    if (_on == null) _load();
+  }
+
+  void _load() {
+    SessionScope.of(context).api.notificationSettings().then((v) {
+      if (mounted) setState(() => _on = v);
+    }, onError: (Object e) {
+      if (mounted) setState(() => _error = e);
+    });
+  }
+
+  void _retry() {
+    setState(() => _error = null);
+    _load();
   }
 
   Future<void> _set(String kind, bool on) async {
@@ -55,7 +62,9 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
     return Scaffold(
       appBar: AppBar(title: Text(tr('Хабарлама баптаулары'))),
       body: on == null
-          ? Center(child: _error != null ? Text('$_error') : const CircularProgressIndicator())
+          ? (_error != null
+              ? ErrorRetry(error: _error, onRetry: _retry)
+              : const Center(child: CircularProgressIndicator()))
           : ListView(children: [
               for (final e in optionalAlerts.entries)
                 if (on.containsKey(e.key))

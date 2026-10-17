@@ -57,12 +57,11 @@ class _ImageSearchScreenState extends State<ImageSearchScreen> {
             if (snap.hasError) {
               return SliverFillRemaining(
                 hasScrollBody: false,
-                child: Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Text(snap.error is ApiException ? '${snap.error}' : tr('Серверге қосылу мүмкін болмады.'),
-                        textAlign: TextAlign.center),
-                  ),
+                child: ErrorRetry(
+                  error: snap.error,
+                  onRetry: () => setState(() {
+                    _results = SessionScope.of(context).api.searchByImage(widget.bytes, widget.filename);
+                  }),
                 ),
               );
             }
@@ -74,8 +73,7 @@ class _ImageSearchScreenState extends State<ImageSearchScreen> {
             return SliverPadding(
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
               sliver: SliverGrid.builder(
-                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                    maxCrossAxisExtent: 240, mainAxisSpacing: 22, crossAxisSpacing: 14, childAspectRatio: 0.64),
+                gridDelegate: ListingGridDelegate.of(context),
                 itemCount: items.length,
                 itemBuilder: (_, i) => ListingTile(listing: items[i]),
               ),

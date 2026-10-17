@@ -41,6 +41,12 @@ class _SavedSearchesScreenState extends State<SavedSearchesScreen> {
     _items = SessionScope.of(context).api.savedSearches();
   }
 
+  void _retry() {
+    setState(() {
+      _items = SessionScope.of(context).api.savedSearches();
+    });
+  }
+
   Future<void> _delete(SavedSearch s) async {
     try {
       await SessionScope.of(context).api.deleteSavedSearch(s.id);
@@ -62,7 +68,9 @@ class _SavedSearchesScreenState extends State<SavedSearchesScreen> {
       body: FutureBuilder<List<SavedSearch>>(
         future: _items,
         builder: (context, snap) {
-          if (snap.hasError) return Center(child: Text('${snap.error}'));
+          if (snap.hasError && snap.connectionState == ConnectionState.done) {
+            return ErrorRetry(error: snap.error, onRetry: _retry);
+          }
           if (!snap.hasData) return const Center(child: CircularProgressIndicator());
           final items = snap.data!;
           if (items.isEmpty) {

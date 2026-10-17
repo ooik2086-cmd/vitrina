@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -899,7 +900,12 @@ void main() {
     await tester.tap(find.byKey(const Key('promo-apply')));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('promo-applied')), findsOneWidget);
-    expect(find.textContaining(formatTenge(4200000)), findsOneWidget);
+    expect(
+        find.descendant(
+            of: find.byKey(const Key('promo-applied')), matching: find.textContaining(formatTenge(4200000))),
+        findsOneWidget);
+    // The button says what the order will cost, promo included.
+    expect(find.text('Тапсырысты рәсімдеу · ${formatTenge(4200000)}'), findsOneWidget);
     await tester.enterText(find.byKey(const Key('delivery-name')), 'Айгерім Сапарова');
     await tester.enterText(find.byKey(const Key('delivery-phone')), '+7 701 000 00 02');
     await tester.enterText(find.byKey(const Key('delivery-city')), 'Алматы');
@@ -2099,5 +2105,368 @@ void main() {
     await tester.pumpAndSettle();
     expect(path, '/api/v1/search/image');
     expect(tester.getTopLeft(find.text('Ең ұқсас')).dx, lessThan(tester.getTopLeft(find.text('Екінші')).dx));
+  });
+
+  test('a dropped connection and a bare 500 become a message for people, never a raw exception', () async {
+    final dropped =
+        Api(base: 'http://x/api/v1', client: MockClient((req) async => throw http.ClientException('reset', req.url)));
+    await expectLater(dropped.order(1), throwsA(isA<ApiException>().having((e) => e.code, 'code', 'network')));
+    final html =
+        Api(base: 'http://x/api/v1', client: MockClient((_) async => http.Response('Internal Server Error', 500)));
+    await expectLater(
+        html.order(1),
+        throwsA(isA<ApiException>()
+            .having((e) => e.status, 'status', 500)
+            .having((e) => e.message, 'message', 'Сервер уақытша жауап бермей тұр. Біраз кейін қайталап көріңіз.')));
+    // The server's own JSON for a 500 keeps its words, in the interface language.
+    final json = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((_) async => jsonResponse({
+              'code': 'unavailable',
+              'message_kk': 'Қызмет уақытша қолжетімсіз.',
+              'message_ru': 'Сервис временно недоступен.',
+              'message_en': 'The service is temporarily unavailable.',
+            }, 500)));
+    await expectLater(
+        json.order(1),
+        throwsA(isA<ApiException>()
+            .having((e) => e.code, 'code', 'unavailable')
+            .having((e) => e.message, 'message', 'Қызмет уақытша қолжетімсіз.')));
+    appLanguage.value = 'ru';
+    addTearDown(() => appLanguage.value = 'kk');
+    expect(ApiException.local(0, 'network', 'Байланыс жоқ. Интернетті тексеріп, қайталап көріңіз.').message,
+        'Нет связи. Проверьте интернет и попробуйте ещё раз.');
+  });
+
+  testWidgets('a list that timed out says so in words and loads on retry', (tester) async {
+    var calls = 0;
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) {
+          calls++;
+          if (calls == 1) return Completer<http.Response>().future; // hangs until the app gives up
+          return Future.value(jsonResponse({
+            'items': [
+              {
+                'id': 1,
+                'status': 'PAID',
+                'listing_id': 7,
+                'buyer_id': 2,
+                'seller_id': 1,
+                'total_tiyn': 1,
+                'listing_title': 'Shoe 1'
+              }
+            ]
+          }));
+        }))
+      ..token = 't';
+    final session = Session(api)..update(Me.fromJson({'id': 2, 'phone': '+77010000002', 'is_seller': false}));
+    await tester.pumpWidget(SessionScope(session: session, child: const MaterialApp(home: OrdersScreen())));
+    await tester.pump(Api.timeout - const Duration(seconds: 1));
+    expect(find.byType(CircularProgressIndicator), findsOneWidget); // still waiting
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pump();
+    expect(find.text('Байланыс жоқ. Интернетті тексеріп, қайталап көріңіз.'), findsOneWidget);
+    expect(find.textContaining('TimeoutException'), findsNothing);
+    await tester.tap(find.byKey(const Key('retry')));
+    await tester.pumpAndSettle();
+    expect(find.text('Shoe 1'), findsOneWidget);
+    expect(calls, 2);
+  });
+
+  Map<String, dynamic> orderJson(String status, {String? deadline}) => {
+        'id': 5,
+        'status': status,
+        'listing_id': 7,
+        'buyer_id': 2,
+        'seller_id': 1,
+        'total_tiyn': 4650000,
+        'history': [],
+        'deadline': deadline,
+      };
+
+  Future<List<http.Request>> pumpOrder(WidgetTester tester, String status, {required int meId}) async {
+    final posts = <http.Request>[];
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async {
+          if (req.method == 'POST') posts.add(req);
+          return jsonResponse(orderJson(status));
+        }))
+      ..token = 't';
+    final session = Session(api)
+      ..update(Me.fromJson({'id': meId, 'phone': '+7701000000$meId', 'is_seller': meId == 1}));
+    tester.view.physicalSize = const Size(500, 2000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(SessionScope(session: session, child: const MaterialApp(home: OrderScreen(orderId: 5))));
+    await tester.pumpAndSettle();
+    return posts;
+  }
+
+  testWidgets('order page shows a retry when the first load fails, and the order after it', (tester) async {
+    var calls = 0;
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async {
+          if (++calls == 1) return http.Response('<html>Bad Gateway</html>', 502);
+          return jsonResponse(orderJson('PAID'));
+        }))
+      ..token = 't';
+    final session = Session(api)..update(Me.fromJson({'id': 2, 'phone': '+77010000002', 'is_seller': false}));
+    await tester.pumpWidget(SessionScope(session: session, child: const MaterialApp(home: OrderScreen(orderId: 5))));
+    await tester.pumpAndSettle();
+    expect(find.text('Сервер уақытша жауап бермей тұр. Біраз кейін қайталап көріңіз.'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('retry')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('order-total')), findsOneWidget);
+    expect(find.byKey(const Key('retry')), findsNothing);
+  });
+
+  testWidgets('confirming receipt asks first and says where the money goes', (tester) async {
+    final posts = await pumpOrder(tester, 'DELIVERED_PENDING_CONFIRMATION', meId: 2);
+    await tester.tap(find.text('Алдым, бәрі дұрыс'));
+    await tester.pumpAndSettle();
+    expect(find.text('Бәрі дұрыс па?'), findsOneWidget);
+    expect(find.textContaining('ақша комиссия шегеріліп сатушыға өтеді'), findsOneWidget);
+    await tester.tap(find.text('Жабу'));
+    await tester.pumpAndSettle();
+    expect(posts, isEmpty); // closing the dialog changes nothing
+    await tester.tap(find.text('Алдым, бәрі дұрыс'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('confirm-action')));
+    await tester.pumpAndSettle();
+    expect([for (final r in posts) r.url.path], ['/api/v1/orders/5/confirm']);
+    expect(find.text('Рақмет! Тапсырыс аяқталды.'), findsOneWidget);
+  });
+
+  testWidgets('cancelling a paid order asks first and promises the refund', (tester) async {
+    final posts = await pumpOrder(tester, 'PAID', meId: 2);
+    await tester.tap(find.text('Бас тарту, ақшаны қайтару'));
+    await tester.pumpAndSettle();
+    expect(find.text('Тапсырыстан бас тарту керек пе?'), findsOneWidget);
+    expect(find.text('Ақша сізге толық қайтарылады, тапсырыс жабылады.'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('confirm-action')));
+    await tester.pumpAndSettle();
+    expect([for (final r in posts) r.url.path], ['/api/v1/orders/5/cancel']);
+  });
+
+  testWidgets('a buyer marks a shipped parcel received after a confirmation', (tester) async {
+    final posts = await pumpOrder(tester, 'SHIPPED', meId: 2);
+    expect(find.text('Дау ашу'), findsOneWidget);
+    await tester.tap(find.text('Тауарды алдым'));
+    await tester.pumpAndSettle();
+    expect(find.text('Сәлемдеме қолыңызға тиді ме?'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('confirm-action')));
+    await tester.pumpAndSettle();
+    expect([for (final r in posts) r.url.path], ['/api/v1/orders/5/received']);
+  });
+
+  testWidgets('on a return the seller can contest it with a reason, and the buyer can take it to support',
+      (tester) async {
+    final posts = await pumpOrder(tester, 'RETURN_REQUESTED', meId: 1);
+    expect(find.text('Қайтаруды мақұлдау'), findsOneWidget);
+    expect(find.text('Бас тарту'), findsNothing); // declining is only for orders not yet shipped
+    await tester.tap(find.text('Қайтаруға келіспеу'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('action-reason')), 'Табаны киілген, сатқанда жаңа болды');
+    await tester.tap(find.text('Жіберу'));
+    await tester.pumpAndSettle();
+    expect([for (final r in posts) r.url.path], ['/api/v1/orders/5/dispute']);
+    expect(jsonDecode(posts.single.body), {'reason': 'Табаны киілген, сатқанда жаңа болды'});
+
+    await tester.pumpWidget(const SizedBox());
+    await pumpOrder(tester, 'RETURN_REQUESTED', meId: 2);
+    expect(find.text('Дау ашу'), findsOneWidget);
+    expect(find.text('Қайтаруға келіспеу'), findsNothing);
+  });
+
+  testWidgets('a seller cannot decline once the pair has shipped', (tester) async {
+    await pumpOrder(tester, 'SHIPPED', meId: 1);
+    expect(find.text('Бас тарту'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+    await pumpOrder(tester, 'PREPARING', meId: 1);
+    expect(find.text('Бас тарту'), findsOneWidget);
+  });
+
+  testWidgets('a new unpaid order puts paying first, with the total on the button', (tester) async {
+    final posts = await pumpOrder(tester, 'CREATED', meId: 2);
+    expect(find.byKey(const Key('pay-now')), findsOneWidget);
+    expect(find.text('Енді төлеңіз'), findsOneWidget);
+    expect(find.text('Төлеу'), findsNothing); // one pay button, not two
+    await tester.tap(find.byKey(const Key('pay')));
+    await tester.pumpAndSettle();
+    expect([for (final r in posts) r.url.path], ['/api/v1/orders/5/pay']);
+  });
+
+  test('every running clock is told to each side in its own words', () {
+    const at = '2026-10-20T09:30:00';
+    for (final status in [
+      'SELLER_ACCEPTED',
+      'PREPARING',
+      'SHIPPED',
+      'IN_TRANSIT',
+      'RETURN_REQUESTED',
+      'DELIVERED_PENDING_CONFIRMATION'
+    ]) {
+      final o = OrderInfo.fromJson(orderJson(status, deadline: at));
+      final buyer = orderDeadlineText(o, 2);
+      final seller = orderDeadlineText(o, 1);
+      expect(buyer, isNotNull, reason: status);
+      expect(seller, isNotNull, reason: status);
+      expect(buyer, isNot(seller), reason: status);
+      expect(buyer, contains('20.10, 09:30'), reason: status);
+    }
+    String text(String status, int me) => orderDeadlineText(OrderInfo.fromJson(orderJson(status, deadline: at)), me)!;
+    expect(text('PREPARING', 2), contains('толық қайтарылады'));
+    expect(text('PREPARING', 1), contains('жіберіп'));
+    expect(text('SHIPPED', 2), contains('«Тауарды алдым»'));
+    expect(text('IN_TRANSIT', 1), contains('қолдау қызметі'));
+    expect(text('RETURN_REQUESTED', 1), contains('мақұлдаңыз'));
+    expect(text('DELIVERED_PENDING_CONFIRMATION', 2), contains('ақша сатушыға өтеді'));
+    expect(text('DELIVERED_PENDING_CONFIRMATION', 1), contains('сізге өтеді'));
+    expect(orderDeadlineText(OrderInfo.fromJson(orderJson('COMPLETED', deadline: at)), 2), isNull);
+  });
+
+  testWidgets('leaving the listing editor with unsaved work asks first', (tester) async {
+    tester.view.physicalSize = const Size(500, 3000); // the whole form is built, title field included
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final api = Api(base: 'http://x/api/v1', client: MockClient((_) async => jsonResponse({})));
+    await tester.pumpWidget(SessionScope(
+        session: Session(api),
+        child: MaterialApp(
+            home: Builder(
+                builder: (context) => TextButton(
+                    onPressed: () =>
+                        Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ListingEditorScreen())),
+                    child: const Text('open'))))));
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    // Nothing typed yet: back simply leaves.
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.byType(ListingEditorScreen), findsNothing);
+
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextFormField, 'Атауы'), 'Qadam Runner');
+    await tester.pump();
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.text('Сақтамай шығу керек пе?'), findsOneWidget);
+    await tester.tap(find.text('Қалу'));
+    await tester.pumpAndSettle();
+    expect(find.byType(ListingEditorScreen), findsOneWidget);
+    expect(find.text('Qadam Runner'), findsOneWidget);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('discard')));
+    await tester.pumpAndSettle();
+    expect(find.byType(ListingEditorScreen), findsNothing);
+  });
+
+  testWidgets('listing editor checks title length and insole centimetres on the spot', (tester) async {
+    final api = Api(base: 'http://x/api/v1', client: MockClient((_) async => jsonResponse({})));
+    tester.view.physicalSize = const Size(500, 3000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(SessionScope(session: Session(api), child: const MaterialApp(home: ListingEditorScreen())));
+    await tester.enterText(find.widgetWithText(TextFormField, 'Атауы'), 'AF');
+    await tester.enterText(find.widgetWithText(TextFormField, 'Ұлтарақ, см'), '5');
+    await tester.tap(find.text('Жариялау'));
+    await tester.pump();
+    expect(find.text('Атауы кемінде 3 таңбадан тұрсын'), findsOneWidget);
+    expect(find.text('8–35 см аралығында болуы керек'), findsOneWidget);
+    await tester.enterText(find.widgetWithText(TextFormField, 'Ұлтарақ, см'), 'жиырма');
+    await tester.tap(find.text('Жариялау'));
+    await tester.pump();
+    expect(find.text('Санмен жазыңыз, мысалы 27,5'), findsOneWidget);
+    expect(insoleCheck('27,5'), isNull);
+    expect(insoleCheck('27.5'), isNull);
+    expect(insoleCheck('36'), isNotNull);
+  });
+
+  testWidgets('a chat that could not load says why and opens on retry', (tester) async {
+    var calls = 0;
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async {
+          if (++calls == 1) throw http.ClientException('no route', req.url);
+          return jsonResponse({
+            'conversation': {
+              'id': 9,
+              'listing_id': 7,
+              'listing_title': 'Кроссовка',
+              'listing_cover': null,
+              'price_tiyn': 2490000,
+              'role': 'buyer',
+              'other_name': 'Qadam Store',
+              'last_message': null,
+              'unread': 0,
+            },
+            'items': [
+              {
+                'id': 1,
+                'sender_id': 3,
+                'body': 'Сәлем!',
+                'contact_warning': false,
+                'created_at': '2026-10-17T10:00:00Z'
+              }
+            ],
+          });
+        }))
+      ..token = 't';
+    final session = Session(api)..update(Me.fromJson({'id': 2, 'phone': '+77010000002', 'is_seller': false}));
+    await tester.pumpWidget(SessionScope(
+        session: session,
+        child: const MaterialApp(home: ChatScreen(conversationId: 9, pollEvery: Duration(hours: 1)))));
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('Байланыс жоқ. Интернетті тексеріп, қайталап көріңіз.'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('retry')));
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('Сәлем!'), findsOneWidget);
+  });
+
+  testWidgets('the seller sees their own listing without a buy button to press', (tester) async {
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async {
+          if (req.url.path == '/api/v1/offers') return jsonResponse({'items': [], 'waiting': 0});
+          if (req.url.path.endsWith('/similar')) return jsonResponse({'items': []});
+          if (req.url.path.endsWith('/questions')) return jsonResponse({'items': []});
+          return jsonResponse(listingJson());
+        }))
+      ..token = 'tok';
+    final session = Session(api)..update(Me.fromJson({'id': 3, 'phone': '+77010000003', 'is_seller': true}));
+    tester.view.physicalSize = const Size(400, 1800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester
+        .pumpWidget(SessionScope(session: session, child: const MaterialApp(home: ListingScreen(listingId: 7))));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('42'));
+    await tester.pump();
+    final buy = tester.widget<FilledButton>(find.byKey(const Key('buy')));
+    expect(buy.onPressed, isNull);
+    expect(find.text('Бұл сіздің тауарыңыз'), findsOneWidget);
+  });
+
+  testWidgets('catalog tiles never run into each other at the largest text size', (tester) async {
+    tester.view.physicalSize = const Size(360, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final items = [
+      for (var i = 0; i < 4; i++)
+        Listing.fromJson({...listingJson(), 'id': i + 1, 'title': 'Nike Air Force 1 Low White Triple Edition $i'})
+    ];
+    await tester.pumpWidget(MaterialApp(
+        home: MediaQuery(
+            data: const MediaQueryData(size: Size(360, 800), textScaler: TextScaler.linear(2)),
+            child: Scaffold(body: ListingGrid(items: items)))));
+    await tester.pump();
+    expect(tester.takeException(), isNull); // no RenderFlex overflow
   });
 }

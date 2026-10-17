@@ -5,6 +5,7 @@ import '../session.dart';
 import 'listing_editor_screen.dart';
 import 'manage_listing_screen.dart';
 import '../i18n.dart';
+import '../widgets/common.dart';
 import '../widgets/shop_sale.dart';
 
 class MyListingsScreen extends StatefulWidget {
@@ -81,7 +82,9 @@ class _MyListingsScreenState extends State<MyListingsScreen> {
       body: FutureBuilder<List<Listing>>(
         future: _items,
         builder: (context, snap) {
-          if (snap.hasError) return Center(child: Text('${snap.error}'));
+          if (snap.hasError && snap.connectionState == ConnectionState.done) {
+            return ErrorRetry(error: snap.error, onRetry: _reload);
+          }
           if (!snap.hasData) return const Center(child: CircularProgressIndicator());
           final all = snap.data!;
           if (all.isEmpty) {

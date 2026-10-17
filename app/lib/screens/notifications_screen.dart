@@ -45,6 +45,12 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     return items;
   }
 
+  void _retry() {
+    setState(() {
+      _items = _load();
+    });
+  }
+
   void _open(AppNotification n) {
     if ((n.kind == 'sold_out' || n.kind == 'listing_tip') && n.listingId != null) {
       _openOwnListing(n.listingId!);
@@ -91,7 +97,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       body: FutureBuilder<List<AppNotification>>(
         future: _items,
         builder: (context, snap) {
-          if (snap.hasError) return Center(child: Text('${snap.error}'));
+          if (snap.hasError && snap.connectionState == ConnectionState.done) {
+            return ErrorRetry(error: snap.error, onRetry: _retry);
+          }
           if (!snap.hasData) return const Center(child: CircularProgressIndicator());
           final items = snap.data!;
           if (items.isEmpty) return Center(child: Text(tr('Хабарландыру жоқ.')));

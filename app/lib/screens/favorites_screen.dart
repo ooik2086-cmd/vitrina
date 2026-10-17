@@ -27,6 +27,12 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
     }
   }
 
+  void _retry() {
+    setState(() {
+      _items = SessionScope.of(context).api.favorites();
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_items == null) return SignInPrompt(text: tr('Ұнаған тауарларды сақтау үшін кіріңіз.'));
@@ -44,7 +50,9 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
             ),
         ]),
         body: Builder(builder: (context) {
-          if (snap.hasError) return Center(child: Text('${snap.error}'));
+          if (snap.hasError && snap.connectionState == ConnectionState.done) {
+            return ErrorRetry(error: snap.error, onRetry: _retry);
+          }
           if (!snap.hasData) return const Center(child: CircularProgressIndicator());
           if (snap.data!.isEmpty) return Center(child: Text(tr('Таңдаулы тауар әлі жоқ.')));
           return RefreshIndicator(

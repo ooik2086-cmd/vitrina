@@ -65,12 +65,18 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
   Suggestion? _suggestion;
   bool _suggestAsked = false;
   String? _modelName;
+  late final String _initial; // what the form held on opening
 
   Api get _api => SessionScope.of(context).api;
 
   @override
   void initState() {
     super.initState();
+    _prefill();
+    _initial = _snapshot();
+  }
+
+  void _prefill() {
     final t = widget.template;
     if (t == null) return;
     _title.text = t.title;
@@ -107,6 +113,36 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
       s.dispose();
     }
     super.dispose();
+  }
+
+  /// Everything the seller can change, as one string, to tell whether leaving would lose work.
+  String _snapshot() => [
+        for (final c in [_title, _brand, _color, _defects, _description, _price, _delivery]) c.text.trim(),
+        _category,
+        _condition,
+        _style,
+        for (final r in _sizes) '${r.label.text.trim()}|${r.cm.text.trim()}|${r.qty.text.trim()}',
+        ..._photos.keys,
+        '${_defectPhotos.length}/${_frames.length}',
+      ].join('\u0000');
+
+  bool get _dirty => _snapshot() != _initial;
+
+  /// Back with unsaved work asks first; uploads already made are simply left unused.
+  Future<void> _confirmLeave() async {
+    final leave = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(tr('Сақтамай шығу керек пе?')),
+        content: Text(tr('Толтырған мәліметтер мен фотолар жоғалады. Кейін жалғастыру үшін жоба ретінде сақтаңыз.')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Қалу'))),
+          FilledButton(
+              key: const Key('discard'), onPressed: () => Navigator.pop(context, true), child: Text(tr('Шығып кету'))),
+        ],
+      ),
+    );
+    if (leave == true && mounted) Navigator.pop(context);
   }
 
   _Upload _startUpload(XFile file) {
@@ -243,8 +279,16 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
         ],
         'photos': photos,
       });
-      if (publish) await _api.publishListing(listing.id);
-      if (mounted) Navigator.pop(context, true);
+      final shown = publish ? await _api.publishListing(listing.id) : listing;
+      if (!mounted) return;
+      // Shown on the screen underneath, so the seller knows where the listing went.
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(!publish
+              ? tr('Жоба ретінде сақталды')
+              : shown.status == 'moderation'
+                  ? tr('Тексеруге жіберілді')
+                  : tr('Сатылымға шықты'))));
+      Navigator.pop(context, true);
     } catch (e) {
       if (mounted) showError(context, e);
     } finally {
@@ -254,212 +298,237 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
 
   String? _required(String? v) => (v ?? '').trim().isEmpty ? tr('Толтырыңыз') : null;
 
+  String? _titleCheck(String? v) {
+    final t = (v ?? '').trim();
+    if (t.isEmpty) return tr('Толтырыңыз');
+    return t.length < 3 ? tr('Атауы кемінде 3 таңбадан тұрсын') : null;
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final uploading =
         [..._photos.values, ..._defectPhotos, ..._frames].where((u) => u.url == null && u.error == null).length;
-    return Scaffold(
-      appBar: AppBar(title: Text(widget.template == null ? tr('Жаңа тауар') : tr('Ұқсас тауар'))),
-      body: Form(
-        key: _form,
-        child: ListView(padding: const EdgeInsets.all(16), children: [
-          if (widget.template != null)
-            Card(
-              key: const Key('template-note'),
-              color: theme.colorScheme.secondaryContainer,
-              margin: const EdgeInsets.only(bottom: 16),
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Row(children: [
-                  const Icon(Icons.content_copy_rounded, size: 20),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(trf(
-                        '«{0}» мәліметтері көшірілді. Фото мен 360° кадрларды осы жұптан жаңадан түсіріңіз.',
-                        [widget.template!.title])),
-                  ),
-                ]),
-              ),
-            ),
-          Text(tr('Фото'), style: theme.textTheme.titleMedium),
-          const SizedBox(height: 4),
-          Text(tr('Жарық жерде, біркелкі фонда түсіріңіз. Фото өзгертілмейді, тек метадеректер өшіріледі.'),
-              style: theme.textTheme.bodySmall),
-          const SizedBox(height: 8),
-          Wrap(spacing: 8, runSpacing: 8, children: [
-            for (final e in {...requiredAngles, ...optionalAngles}.entries)
-              _PhotoSlot(
-                label: tr(e.value),
-                required: requiredAngles.containsKey(e.key),
-                upload: _photos[e.key],
-                onTap: () => _pickAngle(e.key),
-              ),
-          ]),
-          const SizedBox(height: 16),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Row(children: [
-                  const Icon(Icons.threesixty),
-                  const SizedBox(width: 8),
-                  Expanded(child: Text(tr('360° көрініс'), style: theme.textTheme.titleSmall)),
-                  if (_frames.isNotEmpty)
-                    Text('${_frames.where((f) => f.url != null).length}/${_frames.length}',
-                        style: theme.textTheme.bodySmall),
-                ]),
-                const SizedBox(height: 4),
-                Text(
-                  trf('Міндетті емес, бірақ сатып алушы тауарды жан-жағынан көреді. Аяқкиімді аздап бұрып, {0} шақты кадр түсіріңіз.',
-                      [spinTargetFrames]),
-                  style: theme.textTheme.bodySmall,
+    return PopScope(
+      canPop: !_dirty,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _confirmLeave();
+      },
+      child: Scaffold(
+        appBar: AppBar(title: Text(widget.template == null ? tr('Жаңа тауар') : tr('Ұқсас тауар'))),
+        body: Form(
+          key: _form,
+          // Typing changes what back does, so the screen rebuilds with each edit.
+          onChanged: () => setState(() {}),
+          child: ListView(padding: contentPadding(context, const EdgeInsets.all(16)), children: [
+            if (widget.template != null)
+              Card(
+                key: const Key('template-note'),
+                color: theme.colorScheme.secondaryContainer,
+                margin: const EdgeInsets.only(bottom: 16),
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Row(children: [
+                    const Icon(Icons.content_copy_rounded, size: 20),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(trf(
+                          '«{0}» мәліметтері көшірілді. Фото мен 360° кадрларды осы жұптан жаңадан түсіріңіз.',
+                          [widget.template!.title])),
+                    ),
+                  ]),
                 ),
-                if (_frames.any((f) => f.error != null))
-                  Text(tr('Кейбір кадрлар жүктелмеді. Қайта түсіріңіз.'),
-                      style: TextStyle(color: theme.colorScheme.error)),
-                const SizedBox(height: 8),
-                Wrap(spacing: 8, children: [
-                  FilledButton.tonalIcon(
-                      onPressed: _captureSpin,
-                      icon: const Icon(Icons.photo_camera_outlined),
-                      label: Text(tr('Түсіру'))),
-                  OutlinedButton.icon(
-                      onPressed: _pickSpinFromGallery,
-                      icon: const Icon(Icons.photo_library_outlined),
-                      label: Text(tr('Галереядан'))),
-                ]),
-              ]),
-            ),
-          ),
-          const SizedBox(height: 16),
-          if (_suggestion != null)
-            _SuggestionCard(
-                suggestion: _suggestion!,
-                onApply: _applySuggestion,
-                onDismiss: () => setState(() => _suggestion = null)),
-          TextFormField(
-              controller: _title,
-              decoration: InputDecoration(labelText: tr('Атауы')),
-              validator: _required,
-              maxLength: 120),
-          DropdownButtonFormField<String>(
-            key: ValueKey('category-$_category'), // a suggestion can change it from outside
-            initialValue: _category,
-            decoration: InputDecoration(labelText: tr('Санаты')),
-            items: [for (final e in categories.entries) DropdownMenuItem(value: e.key, child: Text(tr(e.value)))],
-            onChanged: (v) => setState(() => _category = v!),
-          ),
-          TextFormField(controller: _brand, decoration: InputDecoration(labelText: tr('Бренді (міндетті емес)'))),
-          TextFormField(controller: _color, decoration: InputDecoration(labelText: tr('Түсі')), validator: _required),
-          DropdownButtonFormField<String>(
-            initialValue: _condition,
-            decoration: InputDecoration(labelText: tr('Жағдайы')),
-            items: [for (final e in conditions.entries) DropdownMenuItem(value: e.key, child: Text(tr(e.value)))],
-            onChanged: (v) => setState(() => _condition = v!),
-          ),
-          if (_defectRequired.contains(_condition)) ...[
-            TextFormField(
-              controller: _defects,
-              maxLines: 3,
-              decoration: InputDecoration(labelText: tr('Ақаулары'), hintText: tr('Не, қай жерде, қандай көлемде')),
-              validator: _required,
-            ),
+              ),
+            Text(tr('Фото'), style: theme.textTheme.titleMedium),
+            const SizedBox(height: 4),
+            Text(tr('Жарық жерде, біркелкі фонда түсіріңіз. Фото өзгертілмейді, тек метадеректер өшіріледі.'),
+                style: theme.textTheme.bodySmall),
             const SizedBox(height: 8),
             Wrap(spacing: 8, runSpacing: 8, children: [
-              for (final d in _defectPhotos) _PhotoSlot(label: tr('Ақау'), upload: d, onTap: null),
-              ActionChip(
-                  avatar: const Icon(Icons.add_a_photo_outlined, size: 18),
-                  label: Text(tr('Ақау фотосы')),
-                  onPressed: _addDefect),
+              for (final e in {...requiredAngles, ...optionalAngles}.entries)
+                _PhotoSlot(
+                  label: tr(e.value),
+                  required: requiredAngles.containsKey(e.key),
+                  upload: _photos[e.key],
+                  onTap: () => _pickAngle(e.key),
+                ),
             ]),
-          ],
-          TextFormField(
-              controller: _description,
-              maxLines: 3,
-              decoration: InputDecoration(labelText: tr('Сипаттамасы (міндетті емес)'))),
-          const SizedBox(height: 8),
-          Row(children: [
-            Expanded(
-              child: TextFormField(
-                controller: _price,
-                keyboardType: TextInputType.number,
-                decoration: InputDecoration(labelText: tr('Бағасы'), suffixText: '₸'),
-                validator: (v) => (_tiyn(v ?? '') ?? 0) <= 0 ? tr('Бағаны енгізіңіз') : null,
+            const SizedBox(height: 16),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(children: [
+                    const Icon(Icons.threesixty),
+                    const SizedBox(width: 8),
+                    Expanded(child: Text(tr('360° көрініс'), style: theme.textTheme.titleSmall)),
+                    if (_frames.isNotEmpty)
+                      Text('${_frames.where((f) => f.url != null).length}/${_frames.length}',
+                          style: theme.textTheme.bodySmall),
+                  ]),
+                  const SizedBox(height: 4),
+                  Text(
+                    trf('Міндетті емес, бірақ сатып алушы тауарды жан-жағынан көреді. Аяқкиімді аздап бұрып, {0} шақты кадр түсіріңіз.',
+                        [spinTargetFrames]),
+                    style: theme.textTheme.bodySmall,
+                  ),
+                  if (_frames.any((f) => f.error != null))
+                    Text(tr('Кейбір кадрлар жүктелмеді. Қайта түсіріңіз.'),
+                        style: TextStyle(color: theme.colorScheme.error)),
+                  const SizedBox(height: 8),
+                  Wrap(spacing: 8, children: [
+                    FilledButton.tonalIcon(
+                        onPressed: _captureSpin,
+                        icon: const Icon(Icons.photo_camera_outlined),
+                        label: Text(tr('Түсіру'))),
+                    OutlinedButton.icon(
+                        onPressed: _pickSpinFromGallery,
+                        icon: const Icon(Icons.photo_library_outlined),
+                        label: Text(tr('Галереядан'))),
+                  ]),
+                ]),
               ),
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: TextFormField(
-                controller: _delivery,
-                keyboardType: TextInputType.number,
-                decoration: InputDecoration(labelText: tr('Жеткізу'), suffixText: '₸'),
-              ),
+            const SizedBox(height: 16),
+            if (_suggestion != null)
+              _SuggestionCard(
+                  suggestion: _suggestion!,
+                  onApply: _applySuggestion,
+                  onDismiss: () => setState(() => _suggestion = null)),
+            TextFormField(
+                controller: _title,
+                decoration: InputDecoration(labelText: tr('Атауы')),
+                validator: _titleCheck,
+                maxLength: 120),
+            DropdownButtonFormField<String>(
+              key: ValueKey('category-$_category'), // a suggestion can change it from outside
+              initialValue: _category,
+              decoration: InputDecoration(labelText: tr('Санаты')),
+              items: [for (final e in categories.entries) DropdownMenuItem(value: e.key, child: Text(tr(e.value)))],
+              onChanged: (v) => setState(() => _category = v!),
             ),
-          ]),
-          const SizedBox(height: 16),
-          Text(tr('Өлшемдер'), style: theme.textTheme.titleMedium),
-          for (final (i, s) in _sizes.indexed)
+            TextFormField(controller: _brand, decoration: InputDecoration(labelText: tr('Бренді (міндетті емес)'))),
+            TextFormField(controller: _color, decoration: InputDecoration(labelText: tr('Түсі')), validator: _required),
+            DropdownButtonFormField<String>(
+              initialValue: _condition,
+              decoration: InputDecoration(labelText: tr('Жағдайы')),
+              items: [for (final e in conditions.entries) DropdownMenuItem(value: e.key, child: Text(tr(e.value)))],
+              onChanged: (v) => setState(() => _condition = v!),
+            ),
+            if (_defectRequired.contains(_condition)) ...[
+              TextFormField(
+                controller: _defects,
+                maxLines: 3,
+                decoration: InputDecoration(labelText: tr('Ақаулары'), hintText: tr('Не, қай жерде, қандай көлемде')),
+                validator: _required,
+              ),
+              const SizedBox(height: 8),
+              Wrap(spacing: 8, runSpacing: 8, children: [
+                for (final d in _defectPhotos) _PhotoSlot(label: tr('Ақау'), upload: d, onTap: null),
+                ActionChip(
+                    avatar: const Icon(Icons.add_a_photo_outlined, size: 18),
+                    label: Text(tr('Ақау фотосы')),
+                    onPressed: _addDefect),
+              ]),
+            ],
+            TextFormField(
+                controller: _description,
+                maxLines: 3,
+                decoration: InputDecoration(labelText: tr('Сипаттамасы (міндетті емес)'))),
+            const SizedBox(height: 8),
             Row(children: [
               Expanded(
-                  child: TextFormField(
-                      controller: s.label, decoration: InputDecoration(labelText: tr('Өлшем')), validator: _required)),
-              const SizedBox(width: 8),
-              Expanded(
                 child: TextFormField(
-                  controller: s.cm,
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  decoration: InputDecoration(labelText: tr('Ұлтарақ, см')),
-                  validator: _required,
+                  controller: _price,
+                  keyboardType: TextInputType.number,
+                  decoration: InputDecoration(labelText: tr('Бағасы'), suffixText: '₸'),
+                  validator: (v) => (_tiyn(v ?? '') ?? 0) <= 0 ? tr('Бағаны енгізіңіз') : null,
                 ),
               ),
-              const SizedBox(width: 8),
-              SizedBox(
-                width: 56,
+              const SizedBox(width: 12),
+              Expanded(
                 child: TextFormField(
-                    controller: s.qty,
-                    keyboardType: TextInputType.number,
-                    decoration: InputDecoration(labelText: tr('Саны'))),
-              ),
-              IconButton(
-                tooltip: tr('Өшіру'),
-                onPressed: _sizes.length > 1 ? () => setState(() => _sizes.removeAt(i).dispose()) : null,
-                icon: const Icon(Icons.remove_circle_outline),
+                  controller: _delivery,
+                  keyboardType: TextInputType.number,
+                  decoration: InputDecoration(labelText: tr('Жеткізу'), suffixText: '₸'),
+                ),
               ),
             ]),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton.icon(
-                onPressed: () => setState(() => _sizes.add(_SizeRow())),
-                icon: const Icon(Icons.add),
-                label: Text(tr('Өлшем қосу'))),
-          ),
-          const SizedBox(height: 8),
-          Text(tr('Витрина фоны'), style: theme.textTheme.titleMedium),
-          const SizedBox(height: 8),
-          SegmentedButton<String>(
-            segments: [
-              ButtonSegment(value: 'clean', label: Text(tr('Таза'))),
-              ButtonSegment(value: 'premium', label: Text(tr('Премиум'))),
-              ButtonSegment(value: 'dynamic', label: Text(tr('Динамик'))),
-            ],
-            selected: {_style},
-            onSelectionChanged: (v) => setState(() => _style = v.first),
-          ),
-          const SizedBox(height: 24),
-          if (uploading > 0) Text(trf('Жүктелуде: {0} фото', [uploading]), style: theme.textTheme.bodySmall),
-          FilledButton(
-            onPressed: _saving ? null : () => _save(publish: true),
-            child: Text(_saving ? tr('Сақталуда…') : tr('Жариялау')),
-          ),
-          TextButton(
-            onPressed: _saving ? null : () => _save(publish: false),
-            child: Text(tr('Жоба ретінде сақтау')),
-          ),
-        ]),
+            const SizedBox(height: 16),
+            Text(tr('Өлшемдер'), style: theme.textTheme.titleMedium),
+            for (final (i, s) in _sizes.indexed)
+              Row(children: [
+                Expanded(
+                    child: TextFormField(
+                        controller: s.label,
+                        decoration: InputDecoration(labelText: tr('Өлшем')),
+                        validator: _required)),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: TextFormField(
+                    controller: s.cm,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    decoration: InputDecoration(labelText: tr('Ұлтарақ, см')),
+                    validator: insoleCheck,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: 56,
+                  child: TextFormField(
+                      controller: s.qty,
+                      keyboardType: TextInputType.number,
+                      decoration: InputDecoration(labelText: tr('Саны'))),
+                ),
+                IconButton(
+                  tooltip: tr('Өшіру'),
+                  onPressed: _sizes.length > 1 ? () => setState(() => _sizes.removeAt(i).dispose()) : null,
+                  icon: const Icon(Icons.remove_circle_outline),
+                ),
+              ]),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                  onPressed: () => setState(() => _sizes.add(_SizeRow())),
+                  icon: const Icon(Icons.add),
+                  label: Text(tr('Өлшем қосу'))),
+            ),
+            const SizedBox(height: 8),
+            Text(tr('Витрина фоны'), style: theme.textTheme.titleMedium),
+            const SizedBox(height: 8),
+            SegmentedButton<String>(
+              segments: [
+                ButtonSegment(value: 'clean', label: Text(tr('Таза'))),
+                ButtonSegment(value: 'premium', label: Text(tr('Премиум'))),
+                ButtonSegment(value: 'dynamic', label: Text(tr('Динамик'))),
+              ],
+              selected: {_style},
+              onSelectionChanged: (v) => setState(() => _style = v.first),
+            ),
+            const SizedBox(height: 24),
+            if (uploading > 0) Text(trf('Жүктелуде: {0} фото', [uploading]), style: theme.textTheme.bodySmall),
+            FilledButton(
+              onPressed: _saving ? null : () => _save(publish: true),
+              child: Text(_saving ? tr('Сақталуда…') : tr('Жариялау')),
+            ),
+            TextButton(
+              onPressed: _saving ? null : () => _save(publish: false),
+              child: Text(tr('Жоба ретінде сақтау')),
+            ),
+          ]),
+        ),
       ),
     );
   }
+}
+
+/// Insole length as sellers type it, 27,5 or 27.5: a number of centimetres a shoe can have.
+String? insoleCheck(String? v) {
+  final t = (v ?? '').trim();
+  if (t.isEmpty) return tr('Толтырыңыз');
+  final cm = double.tryParse(t.replaceAll(',', '.'));
+  if (cm == null) return tr('Санмен жазыңыз, мысалы 27,5');
+  return cm < 8 || cm > 35 ? tr('8–35 см аралығында болуы керек') : null;
 }
 
 class _PhotoSlot extends StatelessWidget {
@@ -481,9 +550,10 @@ class _PhotoSlot extends StatelessWidget {
     } else if (u.url == null) {
       inner = const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2));
     } else {
-      inner = Image.network(u.url!, fit: BoxFit.cover, width: 96, height: 96);
+      inner = Image.network(u.url!, fit: BoxFit.cover, width: 96, height: 96, cacheWidth: 288);
     }
     return Semantics(
+      container: true,
       button: onTap != null,
       label: trf('{0} фотосы', [label]),
       child: InkWell(

@@ -125,24 +125,29 @@ class _EarningsScreenState extends State<EarningsScreen> {
       body: FutureBuilder<(Earnings, Payouts?)>(
         future: _data,
         builder: (context, snap) {
-          if (snap.hasError) return Center(child: Text('${snap.error}'));
+          if (snap.hasError && snap.connectionState == ConnectionState.done) {
+            return ErrorRetry(error: snap.error, onRetry: _reload);
+          }
           if (!snap.hasData) return const Center(child: CircularProgressIndicator());
           final (e, p) = snap.data!;
+          // The balance card is the primary colour: ink on the light canvas, white on the dark one.
+          final scheme = theme.colorScheme;
+          final muted = scheme.onPrimary.withValues(alpha: 0.7);
           return RefreshIndicator(
             onRefresh: _reload,
             child: ListView(padding: const EdgeInsets.fromLTRB(20, 8, 20, 24), children: [
               Container(
                 padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(color: Brand.ink, borderRadius: BorderRadius.circular(Brand.radius)),
+                decoration: BoxDecoration(color: scheme.primary, borderRadius: BorderRadius.circular(Brand.radius)),
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(tr('Сізге тиесілі'), style: TextStyle(color: Colors.white70)),
+                  Text(tr('Сізге тиесілі'), style: TextStyle(color: muted)),
                   const SizedBox(height: 4),
                   Text(formatTenge(e.payableTiyn),
-                      style: weight(theme.textTheme.headlineMedium!, 750).copyWith(color: Colors.white)),
+                      style: weight(theme.textTheme.headlineMedium!, 750).copyWith(color: scheme.onPrimary)),
                   const SizedBox(height: 4),
                   if (p == null)
-                    Text(tr('Төлем серіктесі қосылғанда картаңызға аударылады.'),
-                        style: TextStyle(color: Colors.white70, fontSize: 13))
+                    Text(tr('Төлем серіктесі қосылғанда банк шотыңызға шығарып алуға болады.'),
+                        style: TextStyle(color: muted, fontSize: 13))
                   else ...[
                     Text(
                         p.open
@@ -150,11 +155,11 @@ class _EarningsScreenState extends State<EarningsScreen> {
                             : p.payableTiyn < p.minTiyn
                                 ? trf('Ең аз шығару сомасы — {0}.', [formatTenge(p.minTiyn)])
                                 : tr('Банк шотыңызға шығарып алуға болады.'),
-                        style: TextStyle(color: Colors.white70, fontSize: 13)),
+                        style: TextStyle(color: muted, fontSize: 13)),
                     const SizedBox(height: 12),
                     FilledButton.icon(
                       key: const Key('payout'),
-                      style: FilledButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Brand.ink),
+                      style: FilledButton.styleFrom(backgroundColor: scheme.onPrimary, foregroundColor: scheme.primary),
                       onPressed: p.open || p.payableTiyn < p.minTiyn ? null : () => _payout(p),
                       icon: const Icon(Icons.account_balance_outlined),
                       label: Text(tr('Шотқа шығару')),
@@ -181,7 +186,8 @@ class _EarningsScreenState extends State<EarningsScreen> {
                 Expanded(child: _Stat(label: tr('Комиссия'), value: formatTenge(e.feesTiyn))),
               ]),
               const SizedBox(height: 8),
-              Text(tr('«Ұсталып тұр» — сатып алушы тауарды алып, растағанша сақталатын ақша.'),
+              Text(
+                  tr('«Ұсталып тұр» — сатып алушы тауарды алғанын растағанша не тексеру мерзімі өткенше сақталатын ақша. Содан кейін ол комиссия шегеріліп, сізге тиесілі сомаға қосылады.'),
                   style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
               if (p != null && p.items.isNotEmpty) ...[
                 const SizedBox(height: 24),
@@ -318,7 +324,7 @@ class _PayoutAccountSheetState extends State<PayoutAccountSheet> {
           .setPayoutAccount(holderName: _holder.text.trim(), iban: _iban.text, taxId: _tax.text);
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
-      setState(() => _error = '$e');
+      setState(() => _error = errorText(e));
     } finally {
       if (mounted) setState(() => _busy = false);
     }

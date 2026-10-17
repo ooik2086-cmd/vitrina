@@ -1,4 +1,7 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../api.dart';
@@ -11,6 +14,75 @@ import '../i18n.dart';
 void showError(BuildContext context, Object error) {
   final text = error is ApiException ? error.message : tr('Байланыс жоқ. Қайта көріңіз.');
   ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+}
+
+/// A failed load in people's words: the server's own message when it sent one, never a raw exception.
+String errorText(Object? error) => error is ApiException ? error.message : tr('Серверге қосылу мүмкін болмады.');
+
+/// Widest a screen's text column grows on a tablet or the web; phones are narrower than this anyway.
+const maxContentWidth = 640.0;
+
+/// [base] padding widened at the sides so the content stays [maxContentWidth] wide and centred.
+/// For lists, so the whole screen still scrolls and only the column narrows.
+EdgeInsets contentPadding(BuildContext context, EdgeInsets base) {
+  final extra = (MediaQuery.sizeOf(context).width - base.horizontal - maxContentWidth) / 2;
+  return extra <= 0 ? base : base.copyWith(left: base.left + extra, right: base.right + extra);
+}
+
+/// Keeps a screen body no wider than [maxContentWidth], centred, on wide screens.
+class ContentWidth extends StatelessWidget {
+  const ContentWidth({super.key, required this.child});
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => Align(
+        alignment: Alignment.topCenter,
+        child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: maxContentWidth), child: child),
+      );
+}
+
+/// An icon, one friendly line and an optional action: for empty lists and failed loads.
+class EmptyState extends StatelessWidget {
+  const EmptyState({super.key, required this.icon, required this.text, this.action});
+  final IconData icon;
+  final String text;
+  final Widget? action;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Icon(icon, size: 40, color: theme.colorScheme.onSurfaceVariant),
+          const SizedBox(height: 12),
+          Text(text, style: theme.textTheme.bodyLarge, textAlign: TextAlign.center),
+          if (action != null) action!,
+        ]),
+      ),
+    );
+  }
+}
+
+/// A load that failed, with a retry. Used wherever a screen has nothing to show but the error.
+class ErrorRetry extends StatelessWidget {
+  const ErrorRetry({super.key, required this.error, required this.onRetry});
+  final Object? error;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final e = error;
+    return EmptyState(
+      icon: e is ApiException && !e.offline ? Icons.error_outline_rounded : Icons.wifi_off_rounded,
+      text: errorText(e),
+      action: Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: TextButton(key: const Key('retry'), onPressed: onRetry, child: Text(tr('Қайта көру'))),
+      ),
+    );
+  }
 }
 
 /// Shown on tabs that need an account.
@@ -104,6 +176,7 @@ class ListingTile extends StatelessWidget {
                 else
                   Image.network(cover,
                       fit: BoxFit.cover,
+                      cacheWidth: 720, // a tile is at most 240 wide; three times that covers dense screens
                       errorBuilder: (_, __, ___) => const Icon(Icons.broken_image_outlined, color: Colors.black26)),
                 if (listing.frames.isNotEmpty) const Positioned(left: 10, top: 10, child: Badge360()),
                 if (listing.wasPriceTiyn != null) Positioned(right: 10, top: 10, child: SaleBadge(listing: listing)),
@@ -117,6 +190,8 @@ class ListingTile extends StatelessWidget {
         Text(listing.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: theme.textTheme.bodyMedium),
         const SizedBox(height: 2),
         Text(label(conditions, listing.condition),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: theme.textTheme.labelMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
       ]),
     );
@@ -132,7 +207,7 @@ class SaleBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => DecoratedBox(
-        decoration: BoxDecoration(color: Brand.accent, borderRadius: BorderRadius.circular(99)),
+        decoration: BoxDecoration(color: Brand.accentStrong, borderRadius: BorderRadius.circular(99)),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
           child: Text('−${salePercent(listing)}%',
@@ -151,7 +226,7 @@ class PriceLine extends StatelessWidget {
   Widget build(BuildContext context) {
     final was = listing.wasPriceTiyn;
     return Wrap(crossAxisAlignment: WrapCrossAlignment.end, spacing: 8, children: [
-      Text(formatTenge(listing.priceTiyn), style: was == null ? style : style.copyWith(color: Brand.accent)),
+      Text(formatTenge(listing.priceTiyn), style: was == null ? style : style.copyWith(color: accentText(context))),
       if (was != null)
         Padding(
           padding: const EdgeInsets.only(bottom: 2),
@@ -190,6 +265,51 @@ class Badge360 extends StatelessWidget {
   }
 }
 
+/// Height of the lines under a [ListingTile]'s photo at the current text size: price, two title lines, condition.
+double listingTileTextExtent(BuildContext context) {
+  final t = Theme.of(context).textTheme;
+  final scaler = MediaQuery.textScalerOf(context);
+  double line(TextStyle? s, double size, double height) => scaler.scale(s?.fontSize ?? size) * (s?.height ?? height);
+  final price = line(t.titleMedium, 16, 1.5);
+  // With large text a sale price and the crossed-out one no longer fit side by side.
+  final priceLines = scaler.scale(16) > 20 ? 2 : 1;
+  return 10 + price * priceLines + 2 + 2 * line(t.bodyMedium, 14, 1.43) + 2 + line(t.labelMedium, 12, 1.33) + 4;
+}
+
+/// Listing tiles up to 240 wide, each row as tall as a square photo plus the lines under it at the current text
+/// size, so large text never makes one tile run into the next (a fixed aspect ratio did).
+class ListingGridDelegate extends SliverGridDelegate {
+  const ListingGridDelegate({required this.textExtent, this.mainAxisSpacing = 22, this.crossAxisSpacing = 14});
+  ListingGridDelegate.of(BuildContext context, {double mainAxisSpacing = 22})
+      : this(textExtent: listingTileTextExtent(context), mainAxisSpacing: mainAxisSpacing);
+
+  static const maxCrossAxisExtent = 240.0;
+  final double textExtent;
+  final double mainAxisSpacing;
+  final double crossAxisSpacing;
+
+  @override
+  SliverGridLayout getLayout(SliverConstraints constraints) {
+    final across = constraints.crossAxisExtent;
+    final count = max(1, ((across + crossAxisSpacing) / (maxCrossAxisExtent + crossAxisSpacing)).ceil());
+    final width = max(0.0, (across - crossAxisSpacing * (count - 1)) / count);
+    return SliverGridRegularTileLayout(
+      crossAxisCount: count,
+      mainAxisStride: width + textExtent + mainAxisSpacing,
+      crossAxisStride: width + crossAxisSpacing,
+      childMainAxisExtent: width + textExtent,
+      childCrossAxisExtent: width,
+      reverseCrossAxis: axisDirectionIsReversed(constraints.crossAxisDirection),
+    );
+  }
+
+  @override
+  bool shouldRelayout(ListingGridDelegate oldDelegate) =>
+      oldDelegate.textExtent != textExtent ||
+      oldDelegate.mainAxisSpacing != mainAxisSpacing ||
+      oldDelegate.crossAxisSpacing != crossAxisSpacing;
+}
+
 class ListingGrid extends StatelessWidget {
   const ListingGrid({super.key, required this.items, this.padding = const EdgeInsets.all(16)});
   final List<Listing> items;
@@ -199,8 +319,7 @@ class ListingGrid extends StatelessWidget {
   Widget build(BuildContext context) {
     return GridView.builder(
       padding: padding,
-      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-          maxCrossAxisExtent: 240, mainAxisSpacing: 20, crossAxisSpacing: 14, childAspectRatio: 0.64),
+      gridDelegate: ListingGridDelegate.of(context, mainAxisSpacing: 20),
       itemCount: items.length,
       itemBuilder: (_, i) => ListingTile(listing: items[i]),
     );

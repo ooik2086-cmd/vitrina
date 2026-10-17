@@ -407,16 +407,21 @@ class _AuthenticityCardState extends State<AuthenticityCard> {
                   child: Image.network(item.url,
                       width: 72,
                       height: 72,
+                      cacheWidth: 216,
                       fit: BoxFit.cover,
                       errorBuilder: (_, __, ___) => Container(width: 72, height: 72, color: Brand.studio)),
                 ),
                 if (!done)
+                  // 48 by 48 to tap and named for screen readers; the mark itself stays small in the corner.
                   Positioned(
                     right: 0,
                     top: 0,
-                    child: GestureDetector(
-                      onTap: _busy ? null : () => _run((api) => api.deleteProof(widget.listingId, item.id)),
-                      child: const CircleAvatar(radius: 11, child: Icon(Icons.close, size: 14)),
+                    child: IconButton(
+                      tooltip: tr('Фотоны өшіру'),
+                      alignment: Alignment.topRight,
+                      padding: const EdgeInsets.all(2),
+                      onPressed: _busy ? null : () => _run((api) => api.deleteProof(widget.listingId, item.id)),
+                      icon: const CircleAvatar(radius: 11, child: Icon(Icons.close, size: 14)),
                     ),
                   ),
               ]),
@@ -463,7 +468,7 @@ class ModerationCard extends StatelessWidget {
     final reasons = m?.reasons(appLanguage.value) ?? const <String>[];
     return Card(
       key: const Key('moderation-card'),
-      color: rejected ? theme.colorScheme.errorContainer : Brand.studio,
+      color: rejected ? theme.colorScheme.errorContainer : theme.colorScheme.surfaceContainerHighest,
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -672,15 +677,17 @@ class _StatusPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final live = status == 'published';
+    final scheme = Theme.of(context).colorScheme;
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: live ? Brand.ink : Brand.studio,
+        color: live ? scheme.primary : scheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(99),
       ),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         child: Text(tr(listingStatuses[status] ?? status),
-            style: TextStyle(color: live ? Colors.white : Brand.ink, fontSize: 12, fontWeight: FontWeight.w600)),
+            style: TextStyle(
+                color: live ? scheme.onPrimary : scheme.onSurface, fontSize: 12, fontWeight: FontWeight.w600)),
       ),
     );
   }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../api.dart';
 import '../i18n.dart';
+import '../widgets/common.dart';
 import '../labels.dart';
 import '../session.dart';
 import '../theme.dart';
@@ -24,6 +25,12 @@ class _FollowingScreenState extends State<FollowingScreen> {
     _items ??= SessionScope.of(context).api.following();
   }
 
+  void _retry() {
+    setState(() {
+      _items = SessionScope.of(context).api.following();
+    });
+  }
+
   Future<void> _open(FollowedShop shop) async {
     await Navigator.of(context).push(MaterialPageRoute(builder: (_) => ShopScreen(sellerId: shop.id)));
     if (!mounted) return;
@@ -41,7 +48,9 @@ class _FollowingScreenState extends State<FollowingScreen> {
       body: FutureBuilder<List<FollowedShop>>(
         future: _items,
         builder: (context, snap) {
-          if (snap.hasError) return Center(child: Text('${snap.error}'));
+          if (snap.hasError && snap.connectionState == ConnectionState.done) {
+            return ErrorRetry(error: snap.error, onRetry: _retry);
+          }
           if (!snap.hasData) return const Center(child: CircularProgressIndicator());
           final items = snap.data!;
           if (items.isEmpty) {
@@ -69,8 +78,8 @@ class _FollowingScreenState extends State<FollowingScreen> {
               return ListTile(
                 key: Key('followed-${s.id}'),
                 leading: CircleAvatar(
-                  backgroundColor: Brand.ink,
-                  foregroundColor: Colors.white,
+                  backgroundColor: theme.colorScheme.primary,
+                  foregroundColor: theme.colorScheme.onPrimary,
                   child: Text(s.shopName.characters.first.toUpperCase()),
                 ),
                 title: Text(s.shopName),

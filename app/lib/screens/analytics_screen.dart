@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../api.dart';
 import '../i18n.dart';
+import '../widgets/common.dart';
 import '../labels.dart';
 import '../session.dart';
 import '../theme.dart';
@@ -38,7 +39,9 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
       body: FutureBuilder<Analytics>(
         future: _data,
         builder: (context, snap) {
-          if (snap.hasError) return Center(child: Text('${snap.error}'));
+          if (snap.hasError && snap.connectionState == ConnectionState.done) {
+            return ErrorRetry(error: snap.error, onRetry: () => _period(_days));
+          }
           if (!snap.hasData) return const Center(child: CircularProgressIndicator());
           final a = snap.data!;
           return ListView(padding: const EdgeInsets.fromLTRB(20, 4, 20, 32), children: [

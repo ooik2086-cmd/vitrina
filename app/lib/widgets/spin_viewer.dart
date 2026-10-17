@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../theme.dart';
 import '../i18n.dart';
@@ -39,6 +40,7 @@ class _SpinViewerState extends State<SpinViewer> {
   double _dragAccum = 0;
   bool _precached = false;
   Timer? _intro;
+  final _focus = FocusNode(debugLabel: 'spin');
 
   @override
   void didChangeDependencies() {
@@ -63,6 +65,7 @@ class _SpinViewerState extends State<SpinViewer> {
   @override
   void dispose() {
     _intro?.cancel();
+    _focus.dispose();
     super.dispose();
   }
 
@@ -77,53 +80,85 @@ class _SpinViewerState extends State<SpinViewer> {
     setState(() => _index = ((_index - steps) % n + n) % n);
   }
 
+  /// One frame on or back, for screen readers' swipe up and down and for the arrow keys.
+  void _step(int delta) {
+    _intro?.cancel();
+    final n = widget.frameUrls.length;
+    setState(() => _index = ((_index + delta) % n + n) % n);
+  }
+
+  KeyEventResult _onKey(FocusNode _, KeyEvent e) {
+    if (e is! KeyDownEvent && e is! KeyRepeatEvent) return KeyEventResult.ignored;
+    if (e.logicalKey == LogicalKeyboardKey.arrowRight) {
+      _step(1);
+    } else if (e.logicalKey == LogicalKeyboardKey.arrowLeft) {
+      _step(-1);
+    } else {
+      return KeyEventResult.ignored;
+    }
+    return KeyEventResult.handled;
+  }
+
   @override
   Widget build(BuildContext context) {
     final n = widget.frameUrls.length;
+    String frame(int i) => trf('кадр {0} / {1}', [(i % n + n) % n + 1, n]);
     return Semantics(
+      container: true,
+      slider: true,
       label: trf('360° көрініс, кадр {0} / {1}. Айналдыру үшін көлденең сүйреңіз.', [_index + 1, n]),
-      child: GestureDetector(
-        onHorizontalDragDown: (_) => _intro?.cancel(),
-        onHorizontalDragUpdate: _onDrag,
-        child: Stack(fit: StackFit.expand, children: [
-          Image.network(widget.frameUrls[_index],
-              fit: BoxFit.cover,
-              gaplessPlayback: true,
-              errorBuilder: (_, __, ___) => const Center(child: Icon(Icons.broken_image_outlined, size: 48))),
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 18,
-            child: Center(
-              child: DecoratedBox(
-                decoration:
-                    BoxDecoration(color: Colors.white.withValues(alpha: 0.92), borderRadius: BorderRadius.circular(99)),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                  child: Row(mainAxisSize: MainAxisSize.min, children: [
-                    const Icon(Icons.threesixty, size: 18, color: Brand.ink),
-                    const SizedBox(width: 8),
-                    SizedBox(
-                      width: 72,
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(99),
-                        child: LinearProgressIndicator(
-                          value: (_index + 1) / n,
-                          minHeight: 4,
-                          color: Brand.ink,
-                          backgroundColor: Colors.black12,
+      value: frame(_index),
+      increasedValue: frame(_index + 1),
+      decreasedValue: frame(_index - 1),
+      onIncrease: () => _step(1),
+      onDecrease: () => _step(-1),
+      child: Focus(
+        focusNode: _focus,
+        onKeyEvent: _onKey,
+        child: GestureDetector(
+          onTapDown: (_) => _focus.requestFocus(), // so the arrow keys turn it after a click
+          onHorizontalDragDown: (_) => _intro?.cancel(),
+          onHorizontalDragUpdate: _onDrag,
+          child: Stack(fit: StackFit.expand, children: [
+            Image.network(widget.frameUrls[_index],
+                fit: BoxFit.cover,
+                gaplessPlayback: true,
+                errorBuilder: (_, __, ___) => const Center(child: Icon(Icons.broken_image_outlined, size: 48))),
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 18,
+              child: Center(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.92), borderRadius: BorderRadius.circular(99)),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      const Icon(Icons.threesixty, size: 18, color: Brand.ink),
+                      const SizedBox(width: 8),
+                      SizedBox(
+                        width: 72,
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(99),
+                          child: LinearProgressIndicator(
+                            value: (_index + 1) / n,
+                            minHeight: 4,
+                            color: Brand.ink,
+                            backgroundColor: Colors.black12,
+                          ),
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    Text(tr('сүйреңіз'),
-                        style: TextStyle(color: Brand.ink, fontSize: 12, fontWeight: FontWeight.w600)),
-                  ]),
+                      const SizedBox(width: 8),
+                      Text(tr('сүйреңіз'),
+                          style: TextStyle(color: Brand.ink, fontSize: 12, fontWeight: FontWeight.w600)),
+                    ]),
+                  ),
                 ),
               ),
             ),
-          ),
-        ]),
+          ]),
+        ),
       ),
     );
   }

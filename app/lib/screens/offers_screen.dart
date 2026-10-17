@@ -78,7 +78,7 @@ class _OfferSheetState extends State<OfferSheet> {
       final offer = await SessionScope.of(context).api.makeOffer(widget.listing.id, widget.size.id, v);
       if (mounted) Navigator.pop(context, offer);
     } catch (e) {
-      if (mounted) setState(() => _error = e is ApiException ? e.message : '$e');
+      if (mounted) setState(() => _error = errorText(e));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -172,33 +172,35 @@ class OfferStatusCard extends StatelessWidget {
       _ => (Icons.info_outline, tr(offerStatuses[o.status] ?? o.status), ''),
     };
     final good = o.status == 'accepted' || o.status == 'countered';
+    // Scheme colours, not fixed ink and studio: the card stays readable on the dark canvas too.
+    final scheme = theme.colorScheme;
+    final fg = good ? scheme.onPrimary : scheme.onSurface;
     return Container(
       key: const Key('offer-card'),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: good ? Brand.ink : Brand.studio,
+        color: good ? scheme.primary : scheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(Brand.radius),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
-          Icon(icon, color: good ? Brand.accent : Brand.ink, size: 22),
+          Icon(icon, color: good ? Brand.accent : fg, size: 22),
           const SizedBox(width: 10),
           Expanded(
-            child: Text(title,
-                style: weight(theme.textTheme.titleMedium!, 700).copyWith(color: good ? Colors.white : Brand.ink)),
+            child: Text(title, style: weight(theme.textTheme.titleMedium!, 700).copyWith(color: fg)),
           ),
         ]),
         if (line.isNotEmpty) ...[
           const SizedBox(height: 6),
-          Text(line, style: theme.textTheme.bodyMedium?.copyWith(color: good ? Colors.white70 : null)),
+          Text(line, style: theme.textTheme.bodyMedium?.copyWith(color: good ? fg.withValues(alpha: 0.7) : null)),
         ],
         if (o.status == 'countered') ...[
           const SizedBox(height: 12),
           Row(children: [
             Expanded(
               child: OutlinedButton(
-                style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.white, side: const BorderSide(color: Colors.white38)),
+                style:
+                    OutlinedButton.styleFrom(foregroundColor: fg, side: BorderSide(color: fg.withValues(alpha: 0.38))),
                 onPressed: () => _act(context, 'decline'),
                 child: Text(tr('Бас тарту')),
               ),
@@ -207,7 +209,7 @@ class OfferStatusCard extends StatelessWidget {
             Expanded(
               child: FilledButton(
                 key: const Key('offer-accept'),
-                style: FilledButton.styleFrom(backgroundColor: Brand.accent, foregroundColor: Colors.white),
+                style: FilledButton.styleFrom(backgroundColor: Brand.accentStrong, foregroundColor: Colors.white),
                 onPressed: () => _act(context, 'accept'),
                 child: Text(tr('Келісемін')),
               ),
@@ -296,7 +298,9 @@ class _OffersScreenState extends State<OffersScreen> {
           child: FutureBuilder<List<Offer>>(
             future: _items,
             builder: (context, snap) {
-              if (snap.hasError) return Center(child: Text('${snap.error}'));
+              if (snap.hasError && snap.connectionState == ConnectionState.done) {
+                return ErrorRetry(error: snap.error, onRetry: () => setState(_load));
+              }
               if (!snap.hasData) return const Center(child: CircularProgressIndicator());
               final items = snap.data!;
               if (items.isEmpty) {
@@ -416,8 +420,8 @@ class _OfferTile extends StatelessWidget {
       margin: EdgeInsets.zero,
       child: InkWell(
         borderRadius: BorderRadius.circular(Brand.radius),
-        onTap: () => Navigator.of(context)
-            .push(MaterialPageRoute(builder: (_) => ListingScreen(listingId: o.listingId))),
+        onTap: () =>
+            Navigator.of(context).push(MaterialPageRoute(builder: (_) => ListingScreen(listingId: o.listingId))),
         child: Padding(
           padding: const EdgeInsets.all(14),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -445,28 +449,35 @@ class _OfferTile extends StatelessWidget {
               ),
             ]),
             const SizedBox(height: 12),
+            // Wraps instead of overflowing on a narrow phone or with large text.
             Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-              Text(formatTenge(o.amountTiyn), style: weight(theme.textTheme.titleLarge!, 800)),
-              const SizedBox(width: 8),
-              Padding(
-                padding: const EdgeInsets.only(bottom: 3),
-                child: Text('−$off%', style: theme.textTheme.labelLarge?.copyWith(color: Brand.accent)),
+              Expanded(
+                child: Wrap(crossAxisAlignment: WrapCrossAlignment.end, spacing: 8, children: [
+                  Text(formatTenge(o.amountTiyn), style: weight(theme.textTheme.titleLarge!, 800)),
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 3),
+                    child: Text('−$off%', style: theme.textTheme.labelLarge?.copyWith(color: accentText(context))),
+                  ),
+                  if (o.counterTiyn != null)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 3),
+                      child: Text(trf('→ {0}', [formatTenge(o.counterTiyn!)]), style: theme.textTheme.labelLarge),
+                    ),
+                ]),
               ),
-              if (o.counterTiyn != null)
-                Padding(
-                  padding: const EdgeInsets.only(left: 8, bottom: 3),
-                  child: Text(trf('→ {0}', [formatTenge(o.counterTiyn!)]), style: theme.textTheme.labelLarge),
-                ),
-              const Spacer(),
-              Text(tr(offerStatuses[o.status] ?? o.status),
-                  style: theme.textTheme.labelMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(tr(offerStatuses[o.status] ?? o.status),
+                    textAlign: TextAlign.end,
+                    style: theme.textTheme.labelMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+              ),
             ]),
             if (myTurn) ...[
               const SizedBox(height: 12),
               Row(children: [
                 Expanded(
-                  child: OutlinedButton(
-                      style: _compact, onPressed: onDecline, child: Text(tr('Бас тарту'), maxLines: 1)),
+                  child:
+                      OutlinedButton(style: _compact, onPressed: onDecline, child: Text(tr('Бас тарту'), maxLines: 1)),
                 ),
                 if (seller) ...[
                   const SizedBox(width: 8),

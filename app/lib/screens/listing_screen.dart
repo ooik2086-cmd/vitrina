@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
 
@@ -12,6 +14,7 @@ import '../widgets/questions.dart';
 import '../widgets/size_guide.dart';
 import '../widgets/spin_viewer.dart';
 import 'chat_screen.dart';
+import 'help_screen.dart';
 import 'login_screen.dart';
 import 'offers_screen.dart';
 import 'order_screen.dart';
@@ -47,12 +50,16 @@ class _ListingScreenState extends State<ListingScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    _loadListing();
+    _similar ??= SessionScope.of(context).api.similar(widget.listingId).catchError((_) => <Listing>[]);
+    _loadOffer();
+  }
+
+  void _loadListing() {
     _listing = SessionScope.of(context).api.listing(widget.listingId);
     _listing.then((l) {
       if (l.status == 'published') rememberViewed(l);
     }, onError: (_) {});
-    _similar ??= SessionScope.of(context).api.similar(widget.listingId).catchError((_) => <Listing>[]);
-    _loadOffer();
   }
 
   Future<void> _loadOffer() async {
@@ -136,7 +143,10 @@ class _ListingScreenState extends State<ListingScreen> {
       isScrollControlled: true,
       showDragHandle: true,
       // An agreed price is already the seller's discount, so a promo code is not offered on top of it.
-      builder: (_) => DeliverySheet(listingId: offer == null ? listing.id : null),
+      builder: (_) => DeliverySheet(
+          listingId: offer == null ? listing.id : null,
+          itemPriceTiyn: offer == null ? listing.priceTiyn : min(offer.priceTiyn, listing.priceTiyn),
+          deliveryPriceTiyn: listing.deliveryPriceTiyn),
     );
     if (checkout == null || !mounted) return;
     setState(() => _ordering = true);
@@ -148,6 +158,7 @@ class _ListingScreenState extends State<ListingScreen> {
       if (offer != null) _offer = null;
       _orderKey = newIdempotencyKey();
       if (!mounted) return;
+      // The order screen opens on its "now pay" banner: paying is the one step left.
       await Navigator.of(context).push(MaterialPageRoute(builder: (_) => OrderScreen(orderId: order.id)));
     } catch (e) {
       if (mounted) showError(context, e);
@@ -211,7 +222,9 @@ class _ListingScreenState extends State<ListingScreen> {
       body: FutureBuilder<Listing>(
         future: _listing,
         builder: (context, snap) {
-          if (snap.hasError) return Center(child: Text('${snap.error}'));
+          if (snap.hasError && snap.connectionState == ConnectionState.done) {
+            return SafeArea(child: ErrorRetry(error: snap.error, onRetry: () => setState(_loadListing)));
+          }
           if (!snap.hasData) return const Center(child: CircularProgressIndicator());
           return _body(context, snap.data!);
         },
@@ -231,6 +244,7 @@ class _ListingScreenState extends State<ListingScreen> {
     }
     final selected = l.sizes.where((s) => s.id == _sizeId).firstOrNull;
     final me = SessionScope.of(context).me;
+    final own = me?.id == l.sellerId;
     final away = l.sellerAwayUntil;
     final canOffer = l.status == 'published' && me?.id != l.sellerId && !_offerLive && away == null;
     final deal = _offer?.status == 'accepted' && _offer!.sizeId == selected?.id ? _offer : null;
@@ -238,29 +252,33 @@ class _ListingScreenState extends State<ListingScreen> {
     return Column(children: [
       Expanded(
         child: ListView(padding: EdgeInsets.zero, children: [
-          AspectRatio(
-            aspectRatio: 1,
-            child: Hero(
-              tag: 'listing-${l.id}',
-              // The 360° view uses cut-out frames over the seller's showcase style; the photo tab always shows
-              // the photos exactly as taken, so buyers can check the unedited originals.
-              child: DecoratedBox(
-                decoration: showcaseBackground(l.showcaseStyle),
-                child: Material(
-                  type: MaterialType.transparency,
-                  child: hasSpin && !_showPhotos
-                      ? SpinViewer(frameUrls: [for (final f in frames) f.url])
-                      : ColoredBox(
-                          color: Brand.studio,
-                          child: PhotoGallery(urls: [for (final p in l.photos) p.originalUrl]),
-                        ),
+          // Square on a phone; on a tablet or the web the photo stops growing so the details stay in view.
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 560),
+            child: AspectRatio(
+              aspectRatio: 1,
+              child: Hero(
+                tag: 'listing-${l.id}',
+                // The 360° view uses cut-out frames over the seller's showcase style; the photo tab always shows
+                // the photos exactly as taken, so buyers can check the unedited originals.
+                child: DecoratedBox(
+                  decoration: showcaseBackground(l.showcaseStyle),
+                  child: Material(
+                    type: MaterialType.transparency,
+                    child: hasSpin && !_showPhotos
+                        ? SpinViewer(frameUrls: [for (final f in frames) f.url])
+                        : ColoredBox(
+                            color: Brand.studio,
+                            child: PhotoGallery(urls: [for (final p in l.photos) p.originalUrl]),
+                          ),
+                  ),
                 ),
               ),
             ),
           ),
           if (hasSpin)
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+              padding: contentPadding(context, const EdgeInsets.fromLTRB(20, 14, 20, 0)),
               child: SegmentedButton<bool>(
                 showSelectedIcon: false,
                 segments: [
@@ -272,7 +290,7 @@ class _ListingScreenState extends State<ListingScreen> {
               ),
             ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+            padding: contentPadding(context, const EdgeInsets.fromLTRB(20, 20, 20, 24)),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(l.title, style: theme.textTheme.headlineSmall),
               const SizedBox(height: 6),
@@ -313,7 +331,8 @@ class _ListingScreenState extends State<ListingScreen> {
                 Container(
                   key: const Key('seller-away'),
                   padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(color: Brand.studio, borderRadius: BorderRadius.circular(Brand.radius)),
+                  decoration: BoxDecoration(
+                      color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(Brand.radius)),
                   child: Row(children: [
                     const Icon(Icons.beach_access_outlined),
                     const SizedBox(width: 10),
@@ -497,7 +516,7 @@ class _ListingScreenState extends State<ListingScreen> {
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      tr('Ақша сатушыға сіз тауарды алып, растағаннан кейін ғана өтеді. Бұл қорғау лицензиясы бар төлем серіктесі қосылғанда іске қосылады.'),
+                      tr(protectionText),
                       style: theme.textTheme.bodySmall,
                     ),
                   ),
@@ -513,7 +532,7 @@ class _ListingScreenState extends State<ListingScreen> {
         child: SafeArea(
           top: false,
           child: Container(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
+            padding: contentPadding(context, const EdgeInsets.fromLTRB(20, 12, 20, 12)),
             decoration: BoxDecoration(border: Border(top: BorderSide(color: scheme.outlineVariant))),
             child: Row(children: [
               Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -524,19 +543,24 @@ class _ListingScreenState extends State<ListingScreen> {
               const SizedBox(width: 16),
               Expanded(
                 child: FilledButton(
-                  style: FilledButton.styleFrom(backgroundColor: Brand.accent, foregroundColor: Colors.white),
-                  onPressed: l.status == 'published' && selected != null && !_ordering && away == null
+                  key: const Key('buy'),
+                  style: FilledButton.styleFrom(backgroundColor: Brand.accentStrong, foregroundColor: Colors.white),
+                  onPressed: l.status == 'published' && !own && selected != null && !_ordering && away == null
                       ? () => _order(l)
                       : null,
-                  child: Text(l.status != 'published'
-                      ? tr('Сатылған')
-                      : away != null
-                          ? trf('{0} бастап', [formatDay(away.add(const Duration(days: 1)))])
-                          : selected == null
-                              ? tr('Өлшемді таңдаңыз')
-                              : deal != null
-                                  ? tr('Келісілген бағамен алу')
-                                  : tr('Тапсырыс беру')),
+                  child: Text(own
+                      ? tr('Бұл сіздің тауарыңыз')
+                      : l.status == 'sold'
+                          ? tr('Сатылған')
+                          : l.status != 'published'
+                              ? tr('Қазір сатылымда жоқ')
+                              : away != null
+                                  ? trf('{0} бастап', [formatDay(away.add(const Duration(days: 1)))])
+                                  : selected == null
+                                      ? tr('Өлшемді таңдаңыз')
+                                      : deal != null
+                                          ? tr('Келісілген бағамен алу')
+                                          : tr('Тапсырыс беру')),
                 ),
               ),
             ]),
@@ -583,7 +607,9 @@ class _Fact extends StatelessWidget {
       child: Row(children: [
         Icon(icon, size: 20, color: theme.colorScheme.onSurfaceVariant),
         const SizedBox(width: 12),
-        Text(name, style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+        Flexible(
+          child: Text(name, style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+        ),
         const SizedBox(width: 12),
         Expanded(child: Text(value, textAlign: TextAlign.end, style: weight(theme.textTheme.bodyMedium!, 600))),
       ]),
@@ -607,7 +633,9 @@ class _SizeTile extends StatelessWidget {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final fg = selected ? scheme.onPrimary : (size.available ? scheme.onSurface : scheme.onSurfaceVariant);
+    // container: the tile is read as one button with this label, not as the two texts inside it.
     return Semantics(
+      container: true,
       button: true,
       selected: selected,
       enabled: size.available || onSoldOutTap != null,
@@ -621,11 +649,12 @@ class _SizeTile extends StatelessWidget {
         child: InkWell(
           borderRadius: BorderRadius.circular(14),
           onTap: size.available ? onTap : onSoldOutTap,
-          child: SizedBox(
-            width: 76,
-            height: 58,
-            child: Stack(children: [
-              Center(
+          // At least 76 by 58, and taller or wider when large text needs it.
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minWidth: 76, minHeight: 58),
+            child: Stack(alignment: Alignment.center, children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 child: Column(mainAxisSize: MainAxisSize.min, children: [
                   Text(size.label,
                       style: weight(theme.textTheme.titleSmall!, 700)
@@ -750,7 +779,7 @@ class _SimilarRow extends StatelessWidget {
           Text(tr('Ұқсас тауарлар'), style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 12),
           SizedBox(
-            height: 270,
+            height: 160 + listingTileTextExtent(context),
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
               clipBehavior: Clip.none,
@@ -794,9 +823,12 @@ class SizeFitNote extends StatelessWidget {
         Row(children: [
           const Icon(Icons.straighten_rounded, size: 20),
           const SizedBox(width: 8),
-          Expanded(child: Text(headline, style: weight(theme.textTheme.titleSmall!, 700))),
-          Text(trf('{0} сатып алушы', [fit.answers]),
-              style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
+          Expanded(flex: 3, child: Text(headline, style: weight(theme.textTheme.titleSmall!, 700))),
+          Flexible(
+            flex: 2,
+            child: Text(trf('{0} сатып алушы', [fit.answers]),
+                textAlign: TextAlign.end, style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
+          ),
         ]),
         const SizedBox(height: 4),
         Text(advice, style: theme.textTheme.bodyMedium),
@@ -812,7 +844,7 @@ class SizeFitNote extends StatelessWidget {
           ]),
         ),
         const SizedBox(height: 6),
-        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+        Wrap(alignment: WrapAlignment.spaceBetween, spacing: 12, children: [
           legend('Кішілеу', fit.small),
           legend('Сай', fit.trueToSize),
           legend('Үлкендеу', fit.large),

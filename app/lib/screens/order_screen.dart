@@ -15,38 +15,96 @@ import 'listing_screen.dart';
 
 /// An action the current user may offer on an order. The server still checks every move.
 class _Action {
-  const _Action(this.label, this.endpoint, {this.needs, this.destructive = false});
+  const _Action(this.label, this.endpoint,
+      {this.needs, this.destructive = false, this.ask, this.explain, this.done, this.hint});
   final String label;
   final String endpoint;
   final String? needs; // 'reason' or 'tracking'
   final bool destructive;
+
+  /// The question of a confirmation dialog; null when the move needs none (or asks for a reason instead).
+  final String? ask;
+
+  /// What happens to the order and the money, shown in the dialog before the move.
+  final String? explain;
+
+  /// Said in a snackbar once the server has made the move.
+  final String? done;
+
+  /// Placeholder of the reason field.
+  final String? hint;
 }
 
 List<_Action> _actionsFor(OrderInfo o, {required bool isBuyer}) {
+  final cancel = _Action(tr('Бас тарту'), 'cancel',
+      destructive: true,
+      ask: tr('Тапсырыстан бас тарту керек пе?'),
+      explain: tr('Тапсырыс жойылады, өлшем басқаларға ашылады. Төлем өтіп кетсе, ақша сізге толық қайтарылады.'),
+      done: tr('Тапсырыс жойылды.'));
+  final dispute = _Action(tr('Дау ашу'), 'dispute',
+      needs: 'reason',
+      destructive: true,
+      explain: tr('Тапсырысты қолдау қызметі қарайды. Шешім шыққанша ақша ешкімге өтпейді.'),
+      done: tr('Дау ашылды. Қолдау қызметі екі жақты да тыңдап, шешім шығарады.'));
   if (isBuyer) {
     return switch (o.status) {
-      'CREATED' => [_Action(tr('Төлеу'), 'pay'), _Action(tr('Бас тарту'), 'cancel', destructive: true)],
-      'PAYMENT_PENDING' => [_Action(tr('Бас тарту'), 'cancel', destructive: true)],
-      'PAID' => [_Action(tr('Бас тарту, ақшаны қайтару'), 'cancel', destructive: true)],
-      'SHIPPED' || 'IN_TRANSIT' => [_Action(tr('Дау ашу'), 'dispute', needs: 'reason', destructive: true)],
-      'DELIVERED_PENDING_CONFIRMATION' => [
-          _Action(tr('Алдым, бәрі дұрыс'), 'confirm'),
-          _Action(tr('Қайтару'), 'return', needs: 'reason'),
-          _Action(tr('Дау ашу'), 'dispute', needs: 'reason', destructive: true),
+      'CREATED' => [_Action(tr('Төлеу'), 'pay'), cancel],
+      'PAYMENT_PENDING' => [cancel],
+      'PAID' => [
+          _Action(tr('Бас тарту, ақшаны қайтару'), 'cancel',
+              destructive: true,
+              ask: tr('Тапсырыстан бас тарту керек пе?'),
+              explain: tr('Ақша сізге толық қайтарылады, тапсырыс жабылады.'),
+              done: tr('Тапсырыс жойылды. Ақша сізге қайтарылады.'))
         ],
+      'SHIPPED' || 'IN_TRANSIT' => [
+          _Action(tr('Тауарды алдым'), 'received',
+              ask: tr('Сәлемдеме қолыңызға тиді ме?'),
+              explain: trf(
+                  'Тексеруге {0} күн басталады. Осы уақытта растауға, қайтаруға не дау ашуға болады. Ештеңе таңдамасаңыз, тапсырыс аяқталып, ақша сатушыға өтеді.',
+                  [buyerChecksWithinDays]),
+              done: tr('Белгіленді. Аяқкиімді тексеріп көріңіз.')),
+          dispute,
+        ],
+      'DELIVERED_PENDING_CONFIRMATION' => [
+          _Action(tr('Алдым, бәрі дұрыс'), 'confirm',
+              ask: tr('Бәрі дұрыс па?'),
+              explain: tr(
+                  'Растасаңыз, ақша комиссия шегеріліп сатушыға өтеді. Осыдан кейін қайтару не дау ашу мүмкін болмайды.'),
+              done: tr('Рақмет! Тапсырыс аяқталды.')),
+          _Action(tr('Қайтару'), 'return',
+              needs: 'reason',
+              explain: tr('Сатушы қайтаруды мақұлдаса, ақша сізге қайтарылады. Келіспесе, қолдау қызметі шешеді.'),
+              done: tr('Қайтару сұрауы сатушыға жіберілді.')),
+          dispute,
+        ],
+      'RETURN_REQUESTED' => [dispute],
       _ => const [],
     };
   }
+  final decline = _Action(tr('Бас тарту'), 'decline',
+      needs: 'reason',
+      destructive: true,
+      explain: tr('Ақша сатып алушыға толық қайтарылады, өлшем қайта сатылымға шығады.'),
+      done: tr('Тапсырыстан бас тарттыңыз. Ақша сатып алушыға қайтарылады.'));
   return switch (o.status) {
-    'PAID' => [
-        _Action(tr('Қабылдау'), 'accept'),
-        _Action(tr('Бас тарту'), 'decline', needs: 'reason', destructive: true)
-      ],
+    'PAID' => [_Action(tr('Қабылдау'), 'accept', done: tr('Қабылданды. Енді аяқкиімді жіберіңіз.')), decline],
     'SELLER_ACCEPTED' || 'PREPARING' => [
-        _Action(tr('Жібердім'), 'ship', needs: 'tracking'),
-        _Action(tr('Бас тарту'), 'decline', needs: 'reason', destructive: true),
+        _Action(tr('Жібердім'), 'ship', needs: 'tracking', done: tr('Жіберілді деп белгіленді.')),
+        decline,
       ],
-    'RETURN_REQUESTED' => [_Action(tr('Қайтаруды мақұлдау'), 'approve-return')],
+    'RETURN_REQUESTED' => [
+        _Action(tr('Қайтаруды мақұлдау'), 'approve-return',
+            ask: tr('Қайтаруды мақұлдау керек пе?'),
+            explain: tr('Ақша сатып алушыға қайтарылады.'),
+            done: tr('Қайтару мақұлданды.')),
+        _Action(tr('Қайтаруға келіспеу'), 'dispute',
+            needs: 'reason',
+            destructive: true,
+            hint: tr('Неге келіспейсіз? Қолдау қызметі осыны оқиды.'),
+            explain: tr('Қайтаруды қолдау қызметі шешеді. Шешім шыққанша ақша ешкімге өтпейді.'),
+            done: tr('Қолдау қызметіне жіберілді.')),
+      ],
     _ => const [],
   };
 }
@@ -92,22 +150,47 @@ class _OrderScreenState extends State<OrderScreen> {
     if (_order == null && _error == null) _refresh();
   }
 
+  /// Loads the order. With nothing on screen yet a failure shows in place of it with a retry; once the order is
+  /// shown, a failed reload keeps it and says so in a snackbar.
   Future<void> _refresh() async {
     try {
       final o = await _api.order(widget.orderId);
-      if (mounted) setState(() => _order = o);
+      if (mounted) {
+        setState(() {
+          _order = o;
+          _error = null;
+        });
+      }
     } catch (e) {
-      if (mounted) setState(() => _error = e);
+      if (!mounted) return;
+      if (_order == null) {
+        setState(() => _error = e);
+      } else {
+        showError(context, e);
+      }
     }
   }
 
-  Future<String?> _ask(String title, String hint) {
+  void _retry() {
+    setState(() => _error = null);
+    _refresh();
+  }
+
+  Future<String?> _ask(String title, String hint, {String? explain}) {
     final ctrl = TextEditingController();
     return showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
         title: Text(title),
-        content: TextField(controller: ctrl, autofocus: true, maxLines: 3, decoration: InputDecoration(hintText: hint)),
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          if (explain != null) ...[Text(explain), const SizedBox(height: 12)],
+          TextField(
+              key: const Key('action-reason'),
+              controller: ctrl,
+              autofocus: true,
+              maxLines: 3,
+              decoration: InputDecoration(hintText: hint)),
+        ]),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: Text(tr('Жабу'))),
           FilledButton(onPressed: () => Navigator.pop(context, ctrl.text.trim()), child: Text(tr('Жіберу'))),
@@ -116,25 +199,49 @@ class _OrderScreenState extends State<OrderScreen> {
     );
   }
 
+  /// Yes or no before a move that touches the money; the dialog says what happens to it.
+  Future<bool> _confirm(_Action a) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(a.ask!),
+        content: a.explain == null ? null : Text(a.explain!),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Жабу'))),
+          FilledButton(
+              key: const Key('confirm-action'), onPressed: () => Navigator.pop(context, true), child: Text(a.label)),
+        ],
+      ),
+    );
+    return ok == true;
+  }
+
   Future<void> _do(_Action a) async {
     String? reason, tracking;
     if (a.needs == 'reason') {
-      reason = await _ask(a.label, tr('Себебін жазыңыз'));
+      reason = await _ask(a.label, a.hint ?? tr('Себебін жазыңыз'), explain: a.explain);
       if (reason == null || reason.isEmpty) return;
     } else if (a.needs == 'tracking') {
       tracking = await _ask(tr('Трек-нөмір'), tr('Мысалы, KZ123456789'));
       if (tracking == null || tracking.isEmpty) return;
+    } else if (a.ask != null) {
+      if (!await _confirm(a)) return;
     }
+    if (!mounted) return;
     setState(() => _busy = true);
     try {
       if (a.endpoint == 'pay') {
         await _api.startPayment(widget.orderId);
         _paymentStarted = true;
-        await _refresh();
+      } else if (a.endpoint == 'received') {
+        await _api.markReceived(widget.orderId);
       } else {
         await _api.action(widget.orderId, a.endpoint, reason: reason, trackingNumber: tracking);
-        await _refresh(); // the action reply has no history or photo; reload the full view
       }
+      if (mounted && a.done != null) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(a.done!)));
+      }
+      await _refresh(); // the action reply has no history or photo; reload the full view
     } catch (e) {
       if (mounted) showError(context, e);
     } finally {
@@ -174,10 +281,16 @@ class _OrderScreenState extends State<OrderScreen> {
           ),
       ]),
       body: o == null
-          ? Center(child: _error == null ? const CircularProgressIndicator() : Text('$_error'))
+          ? (_error == null
+              ? const Center(child: CircularProgressIndicator())
+              : ErrorRetry(error: _error, onRetry: _retry))
           : RefreshIndicator(
               onRefresh: _refresh,
-              child: ListView(padding: const EdgeInsets.fromLTRB(20, 8, 20, 24), children: [
+              child: ListView(padding: contentPadding(context, const EdgeInsets.fromLTRB(20, 8, 20, 24)), children: [
+                if (me?.id == o.buyerId && o.status == 'CREATED') ...[
+                  _PayNow(order: o, busy: _busy, onPay: () => _do(_actionsFor(o, isBuyer: true).first)),
+                  const SizedBox(height: 16),
+                ],
                 _OrderHeader(order: o),
                 const SizedBox(height: 16),
                 if (orderDeadlineText(o, me?.id) case final text?) ...[
@@ -227,12 +340,13 @@ class _OrderScreenState extends State<OrderScreen> {
                     ),
                   ),
                 for (final a in _actionsFor(o, isBuyer: me?.id == o.buyerId))
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: a.destructive
-                        ? OutlinedButton(onPressed: _busy ? null : () => _do(a), child: Text(a.label))
-                        : FilledButton(onPressed: _busy ? null : () => _do(a), child: Text(a.label)),
-                  ),
+                  if (a.endpoint != 'pay') // the banner on top carries it
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: a.destructive
+                          ? OutlinedButton(onPressed: _busy ? null : () => _do(a), child: Text(a.label))
+                          : FilledButton(onPressed: _busy ? null : () => _do(a), child: Text(a.label)),
+                    ),
               ]),
             ),
     );
@@ -465,7 +579,7 @@ class _ProtectionNote extends StatelessWidget {
         const SizedBox(width: 12),
         Expanded(
           child: Text(
-            tr('Ақша сатушыға сіз тауарды алып, растағаннан кейін ғана өтеді. Бұл схема лицензиясы бар төлем серіктесі қосылғаннан кейін ғана іске қосылады.'),
+            tr(protectionText),
             style: theme.textTheme.bodySmall,
           ),
         ),
@@ -574,15 +688,20 @@ class _ReviewFormState extends State<_ReviewForm> {
                   child: Image.network(url,
                       width: 72,
                       height: 72,
+                      cacheWidth: 216,
                       fit: BoxFit.cover,
                       errorBuilder: (_, __, ___) => const SizedBox(width: 72, height: 72)),
                 ),
+                // 48 by 48 to tap, though the round mark itself stays small in the photo's corner.
                 Positioned(
                   right: 0,
                   top: 0,
-                  child: GestureDetector(
-                    onTap: () => setState(() => _photos.remove(url)),
-                    child: const CircleAvatar(radius: 11, child: Icon(Icons.close, size: 14)),
+                  child: IconButton(
+                    tooltip: tr('Фотоны алып тастау'),
+                    alignment: Alignment.topRight,
+                    padding: const EdgeInsets.all(2),
+                    onPressed: () => setState(() => _photos.remove(url)),
+                    icon: const CircleAvatar(radius: 11, child: Icon(Icons.close, size: 14)),
                   ),
                 ),
               ]),
@@ -632,8 +751,66 @@ String? orderDeadlineText(OrderInfo o, int? meId) {
       trf('{0} дейін төлемесеңіз, тапсырыс жойылады және өлшем басқаларға ашылады.', [_clock(at)]),
     'PAID' when buyer => trf('Сатушы {0} дейін жауап бермесе, ақша сізге өзі қайтарылады.', [_clock(at)]),
     'PAID' => trf('{0} дейін қабылдаңыз немесе бас тартыңыз. Әйтпесе ақша сатып алушыға қайтарылады.', [_clock(at)]),
+    'SELLER_ACCEPTED' ||
+    'PREPARING' when buyer =>
+      trf('Сатушы {0} дейін жібермесе, тапсырыс жойылып, ақша сізге толық қайтарылады.', [_clock(at)]),
+    'SELLER_ACCEPTED' || 'PREPARING' => trf(
+        '{0} дейін жіберіп, трек-нөмірді енгізіңіз. Әйтпесе тапсырыс жойылып, ақша сатып алушыға толық қайтарылады.',
+        [_clock(at)]),
+    'SHIPPED' || 'IN_TRANSIT' when buyer => trf(
+        'Сәлемдемені алғанда «Тауарды алдым» басыңыз. {0} дейін жетпесе, тапсырысты қолдау қызметі дау ретінде қарайды.',
+        [_clock(at)]),
+    'SHIPPED' || 'IN_TRANSIT' => trf(
+        '{0} дейін жеткізілмесе, тапсырысты қолдау қызметі дау ретінде қарайды. Ақша оған дейін ұсталып тұрады.',
+        [_clock(at)]),
+    'RETURN_REQUESTED' when buyer =>
+      trf('Сатушы {0} дейін жауап бермесе, қайтаруды қолдау қызметі шешеді.', [_clock(at)]),
+    'RETURN_REQUESTED' => trf(
+        '{0} дейін қайтаруды мақұлдаңыз не келіспеу себебін жазыңыз. Әйтпесе қайтаруды қолдау қызметі шешеді.',
+        [_clock(at)]),
+    'DELIVERED_PENDING_CONFIRMATION' when buyer => trf(
+        '{0} дейін тексеріңіз. Растамасаңыз, қайтару не дау ашпасаңыз, тапсырыс өзі аяқталып, ақша сатушыға өтеді.',
+        [_clock(at)]),
+    'DELIVERED_PENDING_CONFIRMATION' => trf(
+        'Сатып алушы {0} дейін қайтару не дау ашпаса, тапсырыс аяқталып, ақша комиссия шегеріліп сізге өтеді.',
+        [_clock(at)]),
     _ => null,
   };
+}
+
+/// On top of an order the buyer has not paid yet: the size is held for them, and paying is the next step.
+class _PayNow extends StatelessWidget {
+  const _PayNow({required this.order, required this.busy, required this.onPay});
+  final OrderInfo order;
+  final bool busy;
+  final VoidCallback onPay;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Container(
+      key: const Key('pay-now'),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(color: scheme.primary, borderRadius: BorderRadius.circular(Brand.radius)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(tr('Енді төлеңіз'), style: weight(theme.textTheme.titleMedium!, 750).copyWith(color: scheme.onPrimary)),
+        const SizedBox(height: 4),
+        Text(tr('Тапсырыс жасалды, өлшем сізге сақталып тұр. Төлем түскенде сатушы тапсырысты көреді.'),
+            style: theme.textTheme.bodyMedium?.copyWith(color: scheme.onPrimary.withValues(alpha: 0.8))),
+        const SizedBox(height: 12),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton(
+            key: const Key('pay'),
+            style: FilledButton.styleFrom(backgroundColor: Brand.accentStrong, foregroundColor: Colors.white),
+            onPressed: busy ? null : onPay,
+            child: Text(trf('{0} төлеу', [formatTenge(order.totalTiyn)])),
+          ),
+        ),
+      ]),
+    );
+  }
 }
 
 class _DeadlineNote extends StatelessWidget {

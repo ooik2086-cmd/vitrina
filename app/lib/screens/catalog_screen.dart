@@ -87,6 +87,15 @@ class _CatalogScreenState extends State<CatalogScreen> {
     });
   }
 
+  /// Size, category, sale and the filter sheet off; the words typed stay. The saved size is kept for next time.
+  void _clearFilters() {
+    _sizeCm = null;
+    _category = null;
+    _sale = false;
+    _filter = const CatalogFilter();
+    _search();
+  }
+
   void _searchFor(String text) {
     _query.text = text;
     _search();
@@ -379,40 +388,49 @@ class _CatalogScreenState extends State<CatalogScreen> {
               if (snap.hasError) {
                 return SliverFillRemaining(
                   hasScrollBody: false,
-                  child: _Empty(
-                    icon: Icons.wifi_off_rounded,
-                    text: snap.error is ApiException ? '${snap.error}' : tr('Серверге қосылу мүмкін болмады.'),
-                    action: TextButton(onPressed: _search, child: Text(tr('Қайта көру'))),
-                  ),
+                  child: ErrorRetry(error: snap.error, onRetry: _search),
                 );
               }
               final items = [...snap.data!, ..._more];
               if (snap.data!.length < _page) _hasMore = false;
               if (items.isEmpty) {
                 final hint = _query.text.trim().isEmpty ? null : SessionScope.of(context).api.lastDidYouMean;
+                final narrowed = _filter.active > 0 || _sale || _category != null || _sizeCm != null;
                 return SliverFillRemaining(
                     hasScrollBody: false,
-                    child: _Empty(
+                    child: EmptyState(
                       icon: Icons.search_off_rounded,
                       text: tr('Ештеңе табылмады.'),
-                      action: hint == null
+                      action: hint == null && !narrowed
                           ? null
-                          : Padding(
-                              padding: const EdgeInsets.only(top: 8),
-                              child: ActionChip(
-                                key: const Key('did-you-mean'),
-                                avatar: const Icon(Icons.auto_fix_high_rounded, size: 18),
-                                label: Text(trf('«{0}» деп іздейсіз бе?', [hint])),
-                                onPressed: () => _searchFor(hint),
-                              ),
-                            ),
+                          : Column(mainAxisSize: MainAxisSize.min, children: [
+                              if (hint != null)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 8),
+                                  child: ActionChip(
+                                    key: const Key('did-you-mean'),
+                                    avatar: const Icon(Icons.auto_fix_high_rounded, size: 18),
+                                    label: Text(trf('«{0}» деп іздейсіз бе?', [hint])),
+                                    onPressed: () => _searchFor(hint),
+                                  ),
+                                ),
+                              if (narrowed)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 8),
+                                  child: TextButton.icon(
+                                    key: const Key('clear-filters'),
+                                    onPressed: _clearFilters,
+                                    icon: const Icon(Icons.filter_alt_off_outlined, size: 18),
+                                    label: Text(tr('Сүзгіні тазарту')),
+                                  ),
+                                ),
+                            ]),
                     ));
               }
               return SliverPadding(
                 padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
                 sliver: SliverGrid.builder(
-                  gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                      maxCrossAxisExtent: 240, mainAxisSpacing: 22, crossAxisSpacing: 14, childAspectRatio: 0.64),
+                  gridDelegate: ListingGridDelegate.of(context),
                   itemCount: items.length,
                   itemBuilder: (_, i) {
                     if (i >= items.length - 6 && _hasMore) {
@@ -487,7 +505,8 @@ class _SizeSheet extends StatelessWidget {
               ActionChip(label: Text(trf('{0} см', [cm])), onPressed: () => Navigator.pop(context, cm)),
           ]),
           const SizedBox(height: 12),
-          Row(children: [
+          // Wraps on a 320 dp phone instead of overflowing.
+          Wrap(alignment: WrapAlignment.spaceBetween, children: [
             TextButton.icon(
               key: const Key('size-guide'),
               onPressed: () async {
@@ -497,7 +516,6 @@ class _SizeSheet extends StatelessWidget {
               icon: const Icon(Icons.straighten, size: 18),
               label: Text(tr('EU, US, UK кестесі')),
             ),
-            const Spacer(),
             TextButton(onPressed: () => Navigator.pop(context, ''), child: Text(tr('Өлшемді алып тастау'))),
           ]),
         ]),
@@ -558,26 +576,6 @@ class _RecentRow extends StatelessWidget {
         ),
       ),
     ]);
-  }
-}
-
-class _Empty extends StatelessWidget {
-  const _Empty({required this.icon, required this.text, this.action});
-  final IconData icon;
-  final String text;
-  final Widget? action;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Center(
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        Icon(icon, size: 40, color: theme.colorScheme.onSurfaceVariant),
-        const SizedBox(height: 12),
-        Text(text, style: theme.textTheme.bodyLarge),
-        if (action != null) action!,
-      ]),
-    );
   }
 }
 
