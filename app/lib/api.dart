@@ -420,6 +420,21 @@ class Delivery {
       };
 }
 
+/// A listing's proof of authenticity as its seller sees it; the photos are never shown to buyers.
+class Proofs {
+  Proofs.fromJson(Map<String, dynamic> j)
+      : authenticity = j['authenticity'] as String,
+        note = j['note'] as String?,
+        items = [
+          for (final p in j['proofs'] as List) (id: (p as Map)['id'] as int, url: p['url'] as String),
+        ];
+  final String authenticity;
+
+  /// Why staff did not accept the proof, when they did not.
+  final String? note;
+  final List<({int id, String url})> items;
+}
+
 class OrderInfo {
   OrderInfo.fromJson(Map<String, dynamic> j)
       : id = j['id'] as int,
@@ -844,6 +859,19 @@ class Api {
       ..files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
     return (_decode(await http.Response.fromStream(await _client.send(req))) as Map)['url'] as String;
   }
+
+  Future<Proofs> proofs(int listingId) async =>
+      Proofs.fromJson(await _send('GET', '/listings/$listingId/proofs') as Map<String, dynamic>);
+
+  Future<Proofs> addProof(int listingId, List<int> bytes, String filename) async {
+    final req = http.MultipartRequest('POST', Uri.parse('$base/listings/$listingId/proofs'))
+      ..headers.addAll({'Accept': 'application/json', if (token != null) 'Authorization': 'Bearer $token'})
+      ..files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
+    return Proofs.fromJson(_decode(await http.Response.fromStream(await _client.send(req))) as Map<String, dynamic>);
+  }
+
+  Future<Proofs> deleteProof(int listingId, int proofId) async =>
+      Proofs.fromJson(await _send('DELETE', '/listings/$listingId/proofs/$proofId') as Map<String, dynamic>);
 
   Future<void> reportListing(int id, String reason, {String? text}) => _send('POST', '/listings/$id/report',
       body: {'reason': reason, if (text != null && text.isNotEmpty) 'text': text});

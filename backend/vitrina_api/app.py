@@ -31,7 +31,7 @@ from vitrina_core.orders import Actor, OrderStatus as S
 from vitrina_core.webhooks import WebhookRejected, verify
 
 from . import services
-from . import cutout, moderation, offers, promo, visual
+from . import authenticity, cutout, moderation, offers, promo, visual
 from .config import Settings
 from .deps import current_user, get_db, get_settings, get_storage, now_utc, optional_user, sha256, staff_user
 from .errors import ApiError, api_error_handler
@@ -1575,6 +1575,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(social_router)
     app.include_router(share_router)
     app.include_router(offers.router)
+    app.include_router(authenticity.router)
     # Development only: serve uploaded photos from disk. Production serves them from the bucket/CDN.
     app.mount("/media", StaticFiles(directory=settings.media_dir), name="media")
     # Support console: a static page that talks to the same staff-only API; the page itself holds no data.

@@ -783,6 +783,31 @@ void main() {
     expect(find.text('Сақталды'), findsOneWidget);
   });
 
+  testWidgets('authenticity card shows the staff answer and hides editing once checked', (tester) async {
+    Map<String, Object?> state = {'authenticity': 'unverified', 'note': 'Чекте модель көрінбейді', 'proofs': []};
+    final api = Api(base: 'http://x/api/v1', client: MockClient((req) async => jsonResponse(state)));
+    Future<void> show() async {
+      await tester.pumpWidget(SessionScope(
+          session: Session(api),
+          child: MaterialApp(home: Scaffold(body: AuthenticityCard(key: UniqueKey(), listingId: 7)))));
+      await tester.pumpAndSettle();
+    }
+
+    await show();
+    expect(find.text('Қызметкер: Чекте модель көрінбейді'), findsOneWidget);
+    expect(find.byKey(const Key('add-proof')), findsOneWidget);
+    state = {
+      'authenticity': 'documented',
+      'note': null,
+      'proofs': [
+        {'id': 1, 'url': 'http://x/r.jpg'},
+      ],
+    };
+    await show();
+    expect(find.text('Тексерілді: тауарда «Құжаты бар» белгісі тұр.'), findsOneWidget);
+    expect(find.byKey(const Key('add-proof')), findsNothing);
+  });
+
   testWidgets('a sent-back listing shows the staff note and resends for checking', (tester) async {
     String? posted;
     final api = Api(

@@ -67,6 +67,7 @@ class Listing(Base):
     color: Mapped[str] = mapped_column(String(40))
     condition: Mapped[str] = mapped_column(String(30))
     authenticity: Mapped[str] = mapped_column(String(30), default="unverified")
+    authenticity_note: Mapped[str | None] = mapped_column(Text)  # why staff did not accept the proof
     defects: Mapped[str | None] = mapped_column(Text)
     description: Mapped[str | None] = mapped_column(Text)
     price_tiyn: Mapped[int] = mapped_column(BigInteger)
@@ -297,6 +298,15 @@ class Follow(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     seller_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AuthProof(Base):
+    """A receipt, box label or tag photo backing a listing's authenticity. Seen only by its seller and staff."""
+    __tablename__ = "auth_proofs"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    listing_id: Mapped[int] = mapped_column(ForeignKey("listings.id"), index=True)
+    url: Mapped[str] = mapped_column(String(500))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 

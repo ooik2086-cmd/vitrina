@@ -1052,6 +1052,49 @@ class DeliveryTests(ApiTestCase):
         self.assertEqual(self.get(f"/orders/{order['id']}", self.seller).json()["delivery"], mine)
 
 
+class AuthenticityTests(ApiTestCase):
+    def upload(self, lid, token):
+        return self.c.post(f"/api/v1/listings/{lid}/proofs", headers=self.h(token),
+                           files={"file": ("receipt.jpg", jpeg(), "image/jpeg")})
+
+    def test_proof_is_private_and_staff_decide_what_the_listing_shows(self):
+        listing = self.publish()
+        lid = listing["id"]
+        self.assertEqual(self.upload(lid, self.buyer).status_code, 404)
+        proofs = self.upload(lid, self.seller).json()
+        self.assertEqual((proofs["authenticity"], len(proofs["proofs"])), ("seller_evidence", 1))
+        public = self.c.get(f"/api/v1/listings/{lid}").json()
+        self.assertEqual(public["authenticity"], "seller_evidence")
+        self.assertNotIn(proofs["proofs"][0]["url"], json.dumps(public))  # a receipt never reaches buyers
+        self.assertEqual(self.c.get(f"/api/v1/listings/{lid}/proofs", headers=self.h(self.buyer)).status_code, 404)
+        staff = self.make_staff()
+        queue = self.c.get("/api/v1/admin/authenticity", headers=self.h(staff)).json()["items"]
+        self.assertEqual([(q["id"], len(q["proofs"])) for q in queue], [(lid, 1)])
+        url = f"/api/v1/admin/listings/{lid}/authenticity"
+        self.assertEqual(self.c.post(url, json={"value": "documented"}, headers=self.h(self.seller)).status_code, 403)
+        self.assertEqual(self.c.post(url, json={"value": "unverified"}, headers=self.h(staff)).json()["code"],
+                         "reason_required")
+        no = self.c.post(url, json={"value": "unverified", "note": "Чекте модель көрінбейді"}, headers=self.h(staff))
+        self.assertEqual((no.json()["authenticity"], no.json()["note"]), ("unverified", "Чекте модель көрінбейді"))
+        again = self.upload(lid, self.seller).json()  # a better photo puts it back in the queue
+        self.assertEqual((again["authenticity"], again["note"]), ("seller_evidence", None))
+        ok = self.c.post(url, json={"value": "documented"}, headers=self.h(staff)).json()
+        self.assertEqual(ok["authenticity"], "documented")
+        self.assertEqual(self.c.get(f"/api/v1/listings/{lid}").json()["authenticity"], "documented")
+        self.assertEqual(self.c.get("/api/v1/admin/authenticity", headers=self.h(staff)).json()["items"], [])
+        kinds = [n["kind"] for n in self.c.get("/api/v1/notifications", headers=self.h(self.seller)).json()["items"]]
+        self.assertEqual(kinds.count("authenticity"), 2)
+
+    def test_removing_the_last_proof_drops_the_claim(self):
+        lid = self.publish()["id"]
+        for _ in range(4):
+            proofs = self.upload(lid, self.seller).json()
+        self.assertEqual(self.upload(lid, self.seller).json()["code"], "proof_limit")
+        for p in proofs["proofs"]:
+            left = self.c.delete(f"/api/v1/listings/{lid}/proofs/{p['id']}", headers=self.h(self.seller)).json()
+        self.assertEqual((left["authenticity"], left["proofs"]), ("unverified", []))
+
+
 class AdminTests(ApiTestCase):
     def test_support_console_page_is_served(self):
         r = self.c.get("/admin/")

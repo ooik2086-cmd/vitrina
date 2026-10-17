@@ -96,8 +96,8 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
         _changed = true;
       });
       final queued = l.status == 'moderation';
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(queued ? tr('Тексеруге жіберілді') : tr('Сатылымға шықты'))));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(queued ? tr('Тексеруге жіберілді') : tr('Сатылымға шықты'))));
     } catch (e) {
       if (mounted) showError(context, e);
     } finally {
@@ -165,6 +165,10 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
             if (_l.stats != null) ...[
               const SizedBox(height: 20),
               _StatsRow(stats: _l.stats!),
+            ],
+            if (!locked) ...[
+              const SizedBox(height: 16),
+              AuthenticityCard(listingId: _l.id, onChanged: () => _changed = true),
             ],
             if (!locked) ...[
               const SizedBox(height: 16),
@@ -253,7 +257,8 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
                     if (_l.status == 'published')
                       Expanded(
                         child: OutlinedButton(
-                          onPressed: _busy ? null : () => _run((api) => api.pauseListing(_l.id), tr('Сатылым тоқтатылды')),
+                          onPressed:
+                              _busy ? null : () => _run((api) => api.pauseListing(_l.id), tr('Сатылым тоқтатылды')),
                           child: Text(tr('Тоқтату')),
                         ),
                       ),
@@ -276,6 +281,140 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
                   ]),
                 ),
               ),
+      ),
+    );
+  }
+}
+
+/// Where the seller proves the pair is genuine: receipt, box label or tag photos that only staff see.
+class AuthenticityCard extends StatefulWidget {
+  const AuthenticityCard({super.key, required this.listingId, this.onChanged});
+  final int listingId;
+  final VoidCallback? onChanged;
+
+  @override
+  State<AuthenticityCard> createState() => _AuthenticityCardState();
+}
+
+class _AuthenticityCardState extends State<AuthenticityCard> {
+  Proofs? _p;
+  bool _busy = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_p == null) _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final p = await SessionScope.of(context).api.proofs(widget.listingId);
+      if (mounted) setState(() => _p = p);
+    } catch (_) {
+      // The card simply stays hidden; the rest of the page works without it.
+    }
+  }
+
+  Future<void> _run(Future<Proofs> Function(Api api) action) async {
+    setState(() => _busy = true);
+    try {
+      final p = await action(SessionScope.of(context).api);
+      if (!mounted) return;
+      setState(() => _p = p);
+      widget.onChanged?.call();
+    } catch (e) {
+      if (mounted) showError(context, e);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _add() async {
+    final file = await pickPhoto(context, title: tr('Чек, қорап жапсырмасы не бирка'));
+    if (file == null || !mounted) return;
+    final bytes = await file.readAsBytes();
+    if (!mounted) return;
+    await _run((api) => api.addProof(widget.listingId, bytes, file.name));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = _p;
+    if (p == null) return const SizedBox.shrink();
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final done = p.authenticity == 'documented' || p.authenticity == 'verified';
+    final status = switch (p.authenticity) {
+      'seller_evidence' => tr('Дәлел жіберілді, қызметкер тексереді.'),
+      'documented' ||
+      'verified' =>
+        trf('Тексерілді: тауарда «{0}» белгісі тұр.', [label(authenticity, p.authenticity)]),
+      _ => tr('Чек, қорап жапсырмасы не бирка фотосын қосыңыз. Тексерілген тауарға сенім көбірек.'),
+    };
+    return Card(
+      key: const Key('authenticity-card'),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Icon(done ? Icons.verified_rounded : Icons.verified_outlined,
+                color: done ? const Color(0xFF2E9E6A) : scheme.onSurfaceVariant),
+            const SizedBox(width: 10),
+            Expanded(child: Text(tr('Түпнұсқалығын дәлелдеу'), style: theme.textTheme.titleSmall)),
+          ]),
+          const SizedBox(height: 8),
+          Text(status, style: theme.textTheme.bodyMedium),
+          if (p.note != null) ...[
+            const SizedBox(height: 8),
+            Text(trf('Қызметкер: {0}', [p.note]), style: theme.textTheme.bodyMedium?.copyWith(color: scheme.error)),
+          ],
+          const SizedBox(height: 12),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            for (final item in p.items)
+              Stack(children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Image.network(item.url,
+                      width: 72,
+                      height: 72,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => Container(width: 72, height: 72, color: Brand.studio)),
+                ),
+                if (!done)
+                  Positioned(
+                    right: 0,
+                    top: 0,
+                    child: GestureDetector(
+                      onTap: _busy ? null : () => _run((api) => api.deleteProof(widget.listingId, item.id)),
+                      child: const CircleAvatar(radius: 11, child: Icon(Icons.close, size: 14)),
+                    ),
+                  ),
+              ]),
+            if (!done && p.items.length < 4)
+              SizedBox(
+                width: 72,
+                height: 72,
+                child: OutlinedButton(
+                  key: const Key('add-proof'),
+                  style: OutlinedButton.styleFrom(
+                      padding: EdgeInsets.zero, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+                  onPressed: _busy ? null : _add,
+                  child: _busy
+                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.add_a_photo_outlined),
+                ),
+              ),
+          ]),
+          const SizedBox(height: 8),
+          Row(children: [
+            Icon(Icons.lock_outline_rounded, size: 14, color: scheme.onSurfaceVariant),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(tr('Бұл фотоларды сатып алушылар көрмейді, тек VITRINA қызметкері.'),
+                  style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
+            ),
+          ]),
+        ]),
       ),
     );
   }
@@ -335,7 +474,8 @@ class ModerationCard extends StatelessWidget {
 /// Makes and hands out the 8-second promo video: the seller's 360° photos, the price and music,
 /// sized for Instagram, TikTok and WhatsApp statuses.
 class PromoCard extends StatefulWidget {
-  const PromoCard({super.key, required this.listing, required this.onChanged, this.pollEvery = const Duration(seconds: 2)});
+  const PromoCard(
+      {super.key, required this.listing, required this.onChanged, this.pollEvery = const Duration(seconds: 2)});
   final Listing listing;
   final ValueChanged<Listing> onChanged;
   final Duration pollEvery;
@@ -433,7 +573,8 @@ class _PromoCardState extends State<PromoCard> {
               label: Text(tr('Ашу')),
             ),
             OutlinedButton.icon(
-              style: OutlinedButton.styleFrom(foregroundColor: Colors.white, side: const BorderSide(color: Colors.white38)),
+              style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.white, side: const BorderSide(color: Colors.white38)),
               onPressed: () async {
                 await Clipboard.setData(ClipboardData(text: url));
                 if (context.mounted) {
