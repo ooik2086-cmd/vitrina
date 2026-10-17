@@ -35,6 +35,7 @@ from . import cutout, promo, visual
 from .config import Settings
 from .deps import current_user, get_db, get_settings, get_storage, now_utc, optional_user, sha256, staff_user
 from .errors import ApiError, api_error_handler
+from .share import router as share_router
 from .social import router as social_router, seller_rating
 from .models import (AuditLog, ListingEmbedding, ListingReport, AuthToken, Favorite, IdempotencyRecord, Listing, ListingSize, Media, Order, OrderEvent,
                      OtpCode, Review, User, WebhookEvent, make_session_factory)
@@ -1080,6 +1081,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(api)
     app.include_router(hooks)
     app.include_router(social_router)
+    app.include_router(share_router)
     # Development only: serve uploaded photos from disk. Production serves them from the bucket/CDN.
     app.mount("/media", StaticFiles(directory=settings.media_dir), name="media")
     # Support console: a static page that talks to the same staff-only API; the page itself holds no data.

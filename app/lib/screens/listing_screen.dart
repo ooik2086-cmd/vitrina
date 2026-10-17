@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../api.dart';
 import '../labels.dart';
@@ -47,6 +48,14 @@ class _ListingScreenState extends State<ListingScreen> {
     if (session.signedIn) return true;
     await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LoginScreen()));
     return session.signedIn;
+  }
+
+  Future<void> _share() async {
+    final l = await _listing;
+    await SharePlus.instance.share(ShareParams(
+      text: trf('{0} · {1}\n{2}', [l.title, formatTenge(l.priceTiyn), listingShareUrl(l.id)]),
+      subject: l.title,
+    ));
   }
 
   Future<void> _toggleFavorite() async {
@@ -107,6 +116,15 @@ class _ListingScreenState extends State<ListingScreen> {
         backgroundColor: Colors.transparent,
         leading: const Padding(padding: EdgeInsets.all(6), child: _RoundButton(back: true, child: BackButtonIcon())),
         actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: _RoundButton(
+              key: const Key('share'),
+              onTap: _share,
+              tooltip: tr('Бөлісу'),
+              child: const Icon(Icons.ios_share_rounded, color: Brand.ink),
+            ),
+          ),
           Padding(
             padding: const EdgeInsets.only(right: 10),
             child: _RoundButton(
@@ -363,7 +381,7 @@ class _ListingScreenState extends State<ListingScreen> {
 }
 
 class _RoundButton extends StatelessWidget {
-  const _RoundButton({required this.child, this.onTap, this.tooltip, this.back = false});
+  const _RoundButton({super.key, required this.child, this.onTap, this.tooltip, this.back = false});
   final Widget child;
   final VoidCallback? onTap;
   final String? tooltip;

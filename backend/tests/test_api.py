@@ -409,6 +409,24 @@ class PromoTests(ApiTestCase):
         self.assertEqual(r.json()["promo"], {"state": None, "url": None})  # it showed the old price
 
 
+class ShareTests(ApiTestCase):
+    def test_shared_link_shows_a_preview_page_for_published_listings_only(self):
+        listing = self.publish(title="Ақ кеды <b>", sizes=[{"label": "EU 42", "insole_cm": "26,5", "quantity": 1}])
+        r = self.c.get(f"/l/{listing['id']}")
+        self.assertEqual(r.status_code, 200)
+        page = r.text
+        self.assertIn('<meta property="og:title" content="Ақ кеды &lt;b&gt; · 45 000 ₸">', page)
+        self.assertIn('property="og:image"', page)
+        self.assertIn("EU 42 · 26,5 см", page)
+        self.assertIn(f'href="vitrina://open/listing/{listing["id"]}"', page)
+        self.assertNotIn("<b>", page.split("<body>")[1])  # seller text is escaped
+        self.assertNotIn("+7701", page)  # never the seller's phone
+        self.assertIn("Открыть в приложении", self.c.get(f"/l/{listing['id']}", headers={"Accept-Language": "ru-RU"}).text)
+        self.post(f"/listings/{listing['id']}/pause", self.seller)
+        self.assertEqual(self.c.get(f"/l/{listing['id']}").status_code, 404)
+        self.assertEqual(self.c.get("/l/99999").status_code, 404)
+
+
 class MediaTests(ApiTestCase):
     external_media = False
 

@@ -8,6 +8,9 @@ import 'i18n.dart';
 /// Override with `--dart-define=API_BASE=https://...`.
 const apiBase = String.fromEnvironment('API_BASE', defaultValue: 'http://10.0.2.2:8000/api/v1');
 
+/// Public page for a listing, as sent to friends: messengers show its photo and price, and it opens the app.
+String listingShareUrl(int id, {String base = apiBase}) => '${base.replaceFirst(RegExp(r'/api/v1/?$'), '')}/l/$id';
+
 /// Error as the API returns it: a stable code plus ready messages in Kazakh and Russian.
 class ApiException implements Exception {
   ApiException(this.status, this.code, this.messageKk, [this.detail, this.messageRu]);

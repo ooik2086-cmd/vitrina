@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'api.dart';
 import 'screens/catalog_screen.dart';
 import 'screens/chat_screen.dart';
+import 'screens/listing_screen.dart';
 import 'screens/favorites_screen.dart';
 import 'screens/orders_screen.dart';
 import 'screens/profile_screen.dart';
@@ -45,6 +46,12 @@ class VitrinaApp extends StatelessWidget {
           theme: buildTheme(Brightness.light),
           darkTheme: buildTheme(Brightness.dark),
           home: const HomeShell(),
+          // vitrina://open/listing/7 from a shared link's "open in app" button.
+          onGenerateRoute: (settings) {
+            final m = RegExp(r'^/listing/(\d+)$').firstMatch(settings.name ?? '');
+            if (m == null) return null;
+            return MaterialPageRoute(builder: (_) => ListingScreen(listingId: int.parse(m.group(1)!)));
+          },
         ),
       ),
     );
