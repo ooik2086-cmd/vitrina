@@ -63,7 +63,10 @@ class Listing {
         sizes = [for (final s in j['sizes'] as List) ShoeSize.fromJson(s as Map<String, dynamic>)],
         media = [for (final m in j['media'] as List) MediaItem.fromJson(m as Map<String, dynamic>)],
         shopName = (j['seller'] as Map)['shop_name'] as String?,
-        sellerCity = (j['seller'] as Map)['city'] as String?;
+        sellerCity = (j['seller'] as Map)['city'] as String?,
+        sellerId = (j['seller'] as Map)['id'] as int,
+        sellerRating = ((j['seller'] as Map)['rating'] as num?)?.toDouble(),
+        sellerReviews = ((j['seller'] as Map)['reviews'] as int?) ?? 0;
 
   final int id;
   final String status;
@@ -83,6 +86,9 @@ class Listing {
   final List<MediaItem> media;
   final String? shopName;
   final String? sellerCity;
+  final int sellerId;
+  final double? sellerRating;
+  final int sellerReviews;
 
   /// 360° frames in upload order: real photos only, nothing generated in between.
   List<MediaItem> get frames => media.where((m) => m.angle == 'frame').toList();
@@ -99,7 +105,8 @@ class OrderInfo {
         sellerId = j['seller_id'] as int,
         totalTiyn = j['total_tiyn'] as int,
         trackingNumber = j['tracking_number'] as String?,
-        listingTitle = j['listing_title'] as String?;
+        listingTitle = j['listing_title'] as String?,
+        reviewed = (j['reviewed'] as bool?) ?? false;
   final int id;
   final String status;
   final int listingId;
@@ -108,6 +115,7 @@ class OrderInfo {
   final int totalTiyn;
   final String? trackingNumber;
   final String? listingTitle;
+  final bool reviewed;
 }
 
 class Me {
@@ -124,6 +132,76 @@ class Me {
   final String? city;
   final bool isSeller;
   final String? shopName;
+}
+
+class ChatMessage {
+  ChatMessage.fromJson(Map<String, dynamic> j)
+      : id = j['id'] as int,
+        senderId = j['sender_id'] as int,
+        body = j['body'] as String,
+        contactWarning = j['contact_warning'] as bool,
+        createdAt = DateTime.parse(j['created_at'] as String).toLocal();
+  final int id;
+  final int senderId;
+  final String body;
+  final bool contactWarning;
+  final DateTime createdAt;
+}
+
+class Conversation {
+  Conversation.fromJson(Map<String, dynamic> j)
+      : id = j['id'] as int,
+        listingId = j['listing_id'] as int,
+        listingTitle = j['listing_title'] as String,
+        listingCover = j['listing_cover'] as String?,
+        priceTiyn = j['price_tiyn'] as int,
+        role = j['role'] as String,
+        otherName = j['other_name'] as String,
+        lastMessage = j['last_message'] == null ? null : ChatMessage.fromJson(j['last_message'] as Map<String, dynamic>),
+        unread = j['unread'] as int;
+  final int id;
+  final int listingId;
+  final String listingTitle;
+  final String? listingCover;
+  final int priceTiyn;
+  final String role;
+  final String otherName;
+  final ChatMessage? lastMessage;
+  final int unread;
+}
+
+class Review {
+  Review.fromJson(Map<String, dynamic> j)
+      : id = j['id'] as int,
+        rating = j['rating'] as int,
+        text = j['text'] as String?,
+        sellerReply = j['seller_reply'] as String?,
+        buyerName = j['buyer_name'] as String,
+        createdAt = DateTime.parse(j['created_at'] as String).toLocal();
+  final int id;
+  final int rating;
+  final String? text;
+  final String? sellerReply;
+  final String buyerName;
+  final DateTime createdAt;
+}
+
+class AppNotification {
+  AppNotification.fromJson(Map<String, dynamic> j)
+      : id = j['id'] as int,
+        kind = j['kind'] as String,
+        text = j['text'] as String,
+        orderId = j['order_id'] as int?,
+        conversationId = j['conversation_id'] as int?,
+        read = j['read'] as bool,
+        createdAt = DateTime.parse(j['created_at'] as String).toLocal();
+  final int id;
+  final String kind;
+  final String text;
+  final int? orderId;
+  final int? conversationId;
+  final bool read;
+  final DateTime createdAt;
 }
 
 class Api {
@@ -234,6 +312,44 @@ class Api {
         if (reason != null) 'reason': reason,
         if (trackingNumber != null) 'tracking_number': trackingNumber,
       }) as Map<String, dynamic>);
+
+  // chat
+  Future<Conversation> openConversation(int listingId) async => Conversation.fromJson(
+      await _send('POST', '/conversations', body: {'listing_id': listingId}) as Map<String, dynamic>);
+
+  Future<List<Conversation>> conversations() async {
+    final r = await _send('GET', '/conversations') as Map;
+    return [for (final j in r['items'] as List) Conversation.fromJson(j as Map<String, dynamic>)];
+  }
+
+  Future<(Conversation, List<ChatMessage>)> messages(int conversationId, {int afterId = 0}) async {
+    final r = await _send('GET', '/conversations/$conversationId/messages', query: {'after_id': '$afterId'}) as Map;
+    return (
+      Conversation.fromJson(r['conversation'] as Map<String, dynamic>),
+      [for (final j in r['items'] as List) ChatMessage.fromJson(j as Map<String, dynamic>)],
+    );
+  }
+
+  Future<ChatMessage> sendMessage(int conversationId, String body) async => ChatMessage.fromJson(
+      await _send('POST', '/conversations/$conversationId/messages', body: {'body': body}) as Map<String, dynamic>);
+
+  // reviews
+  Future<Review> review(int orderId, int rating, String? text) async => Review.fromJson(await _send(
+      'POST', '/orders/$orderId/review', body: {'rating': rating, if (text != null && text.isNotEmpty) 'text': text})
+      as Map<String, dynamic>);
+
+  Future<List<Review>> sellerReviews(int sellerId) async {
+    final r = await _send('GET', '/sellers/$sellerId/reviews') as Map;
+    return [for (final j in r['items'] as List) Review.fromJson(j as Map<String, dynamic>)];
+  }
+
+  // notifications
+  Future<(int, List<AppNotification>)> notifications() async {
+    final r = await _send('GET', '/notifications') as Map;
+    return (r['unread'] as int, [for (final j in r['items'] as List) AppNotification.fromJson(j as Map<String, dynamic>)]);
+  }
+
+  Future<void> readAllNotifications() => _send('POST', '/notifications/read-all');
 }
 
 String newIdempotencyKey() {

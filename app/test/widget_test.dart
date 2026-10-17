@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:vitrina/api.dart';
 import 'package:vitrina/labels.dart';
+import 'package:vitrina/screens/chat_screen.dart';
 import 'package:vitrina/screens/listing_editor_screen.dart';
 import 'package:vitrina/screens/listing_screen.dart';
 import 'package:vitrina/screens/spin_capture_screen.dart';
@@ -169,5 +170,34 @@ void main() {
     await tester.tap(find.text('Киілген, жақсы').last);
     await tester.pumpAndSettle();
     expect(find.widgetWithText(TextFormField, 'Ақаулары'), findsOneWidget);
+  });
+
+  testWidgets('chat shows both sides and warns only the reader about contact details', (tester) async {
+    final conv = {
+      'id': 9, 'listing_id': 7, 'listing_title': 'Кроссовка', 'listing_cover': null, 'price_tiyn': 2490000,
+      'role': 'buyer', 'other_name': 'Qadam Store', 'last_message': null, 'unread': 0,
+    };
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async => http.Response(
+            jsonEncode({
+              'conversation': conv,
+              'items': [
+                {'id': 1, 'sender_id': 2, 'body': '42 бар ма?', 'contact_warning': false, 'created_at': '2026-10-17T10:00:00Z'},
+                {'id': 2, 'sender_id': 3, 'body': 'Бар, +7 701 123 45 67', 'contact_warning': true, 'created_at': '2026-10-17T10:01:00Z'},
+              ],
+            }),
+            200,
+            headers: {'content-type': 'application/json; charset=utf-8'})));
+    final session = Session(api)..me = Me.fromJson({'id': 2, 'phone': '+77010000002', 'display_name': null, 'city': null, 'is_seller': false, 'shop_name': null});
+    await tester.pumpWidget(SessionScope(
+        session: session,
+        child: const MaterialApp(home: ChatScreen(conversationId: 9, pollEvery: Duration(hours: 1)))));
+    await tester.pumpAndSettle();
+    expect(find.text('Qadam Store'), findsOneWidget);
+    expect(find.text('42 бар ма?'), findsOneWidget);
+    expect(find.text('Бар, +7 701 123 45 67'), findsOneWidget);
+    expect(find.textContaining('Төлемді тек VITRINA арқылы'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox()); // stop polling
   });
 }

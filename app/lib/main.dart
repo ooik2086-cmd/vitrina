@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'api.dart';
 import 'screens/catalog_screen.dart';
+import 'screens/chat_screen.dart';
 import 'screens/favorites_screen.dart';
 import 'screens/orders_screen.dart';
 import 'screens/profile_screen.dart';
@@ -48,6 +49,7 @@ class _HomeShellState extends State<HomeShell> {
       body: IndexedStack(index: _tab, children: const [
         CatalogScreen(),
         FavoritesScreen(),
+        ChatsScreen(),
         OrdersScreen(),
         ProfileScreen(),
       ]),
@@ -58,6 +60,8 @@ class _HomeShellState extends State<HomeShell> {
           NavigationDestination(
               icon: Icon(Icons.storefront_outlined), selectedIcon: Icon(Icons.storefront), label: 'Каталог'),
           NavigationDestination(icon: Icon(Icons.favorite_border), selectedIcon: Icon(Icons.favorite), label: 'Таңдаулы'),
+          NavigationDestination(
+              icon: Icon(Icons.chat_bubble_outline_rounded), selectedIcon: Icon(Icons.chat_bubble_rounded), label: 'Чат'),
           NavigationDestination(
               icon: Icon(Icons.receipt_long_outlined), selectedIcon: Icon(Icons.receipt_long), label: 'Тапсырыс'),
           NavigationDestination(icon: Icon(Icons.person_outline), selectedIcon: Icon(Icons.person), label: 'Профиль'),

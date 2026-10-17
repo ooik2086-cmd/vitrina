@@ -6,8 +6,10 @@ import '../session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/spin_viewer.dart';
+import 'chat_screen.dart';
 import 'login_screen.dart';
 import 'order_screen.dart';
+import 'seller_reviews_screen.dart';
 
 const _minSpinFrames = 8;
 
@@ -64,6 +66,17 @@ class _ListingScreenState extends State<ListingScreen> {
       if (mounted) showError(context, e);
     } finally {
       if (mounted) setState(() => _ordering = false);
+    }
+  }
+
+  Future<void> _chat(Listing listing) async {
+    if (!await _ensureSignedIn() || !mounted) return;
+    try {
+      final conv = await SessionScope.of(context).api.openConversation(listing.id);
+      if (!mounted) return;
+      await Navigator.of(context).push(MaterialPageRoute(builder: (_) => ChatScreen(conversationId: conv.id)));
+    } catch (e) {
+      if (mounted) showError(context, e);
     }
   }
 
@@ -191,16 +204,48 @@ class _ListingScreenState extends State<ListingScreen> {
               ],
               const SizedBox(height: 24),
               Card(
-                child: ListTile(
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                  leading: CircleAvatar(
-                    backgroundColor: scheme.primary,
-                    foregroundColor: scheme.onPrimary,
-                    child: Text((l.shopName ?? 'С').characters.first.toUpperCase()),
+                child: Column(children: [
+                  ListTile(
+                    contentPadding: const EdgeInsets.fromLTRB(16, 6, 12, 0),
+                    leading: CircleAvatar(
+                      backgroundColor: scheme.primary,
+                      foregroundColor: scheme.onPrimary,
+                      child: Text((l.shopName ?? 'С').characters.first.toUpperCase()),
+                    ),
+                    title: Text(l.shopName ?? 'Сатушы', style: theme.textTheme.titleSmall),
+                    subtitle: Row(children: [
+                      if (l.sellerRating != null) ...[
+                        Stars(value: l.sellerRating!, size: 14),
+                        const SizedBox(width: 6),
+                        Text('${l.sellerRating!.toStringAsFixed(1)} · '),
+                      ],
+                      Flexible(
+                        child: Text(
+                          [if (l.sellerCity != null) l.sellerCity!, '${l.sellerReviews} пікір'].join(' · '),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ]),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                        builder: (_) => SellerReviewsScreen(
+                            sellerId: l.sellerId, shopName: l.shopName ?? 'Сатушы', rating: l.sellerRating))),
                   ),
-                  title: Text(l.shopName ?? 'Сатушы', style: theme.textTheme.titleSmall),
-                  subtitle: Text(l.sellerCity ?? ''),
-                ),
+                  if (SessionScope.of(context).me?.id != l.sellerId)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: () => _chat(l),
+                          icon: const Icon(Icons.chat_bubble_outline_rounded),
+                          label: const Text('Сатушыға жазу'),
+                        ),
+                      ),
+                    )
+                  else
+                    const SizedBox(height: 8),
+                ]),
               ),
               const SizedBox(height: 12),
               Container(

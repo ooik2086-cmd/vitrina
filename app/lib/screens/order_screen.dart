@@ -53,6 +53,7 @@ class _OrderScreenState extends State<OrderScreen> {
   Object? _error;
   bool _busy = false;
   bool _paymentStarted = false;
+  bool _reviewed = false;
 
   Api get _api => SessionScope.of(context).api;
 
@@ -140,6 +141,10 @@ class _OrderScreenState extends State<OrderScreen> {
                     child: Text('Төлем провайдері әлі қосылмаған: сынақ режимінде төлем расталмайды.'),
                   ),
                 const SizedBox(height: 16),
+                if (me?.id == o.buyerId && o.status == 'COMPLETED' && !o.reviewed && !_reviewed)
+                  _ReviewForm(orderId: o.id, onDone: () => setState(() => _reviewed = true)),
+                if (_reviewed)
+                  const Padding(padding: EdgeInsets.only(bottom: 12), child: Text('Пікіріңіз үшін рақмет!')),
                 for (final a in _actionsFor(o, isBuyer: me?.id == o.buyerId))
                   Padding(
                     padding: const EdgeInsets.only(bottom: 8),
@@ -166,6 +171,75 @@ class _ProtectionNote extends StatelessWidget {
           'Бұл схема лицензиясы бар төлем серіктесі қосылғаннан кейін ғана іске қосылады.',
           style: Theme.of(context).textTheme.bodySmall,
         ),
+      ),
+    );
+  }
+}
+
+class _ReviewForm extends StatefulWidget {
+  const _ReviewForm({required this.orderId, required this.onDone});
+  final int orderId;
+  final VoidCallback onDone;
+
+  @override
+  State<_ReviewForm> createState() => _ReviewFormState();
+}
+
+class _ReviewFormState extends State<_ReviewForm> {
+  int _rating = 0;
+  final _text = TextEditingController();
+  bool _busy = false;
+
+  @override
+  void dispose() {
+    _text.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    setState(() => _busy = true);
+    try {
+      await SessionScope.of(context).api.review(widget.orderId, _rating, _text.text.trim());
+      widget.onDone();
+    } catch (e) {
+      if (mounted) showError(context, e);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('Сатушыны бағалаңыз', style: theme.textTheme.titleMedium),
+          const SizedBox(height: 8),
+          Row(children: [
+            for (var i = 1; i <= 5; i++)
+              IconButton(
+                tooltip: '$i жұлдыз',
+                onPressed: () => setState(() => _rating = i),
+                icon: Icon(i <= _rating ? Icons.star_rounded : Icons.star_outline_rounded,
+                    size: 32, color: const Color(0xFFFFB020)),
+              ),
+          ]),
+          TextField(
+            controller: _text,
+            maxLines: 3,
+            maxLength: 1000,
+            decoration: const InputDecoration(hintText: 'Тауар сипаттамаға сәйкес пе? Жеткізу қалай болды?'),
+          ),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton(
+              onPressed: _rating == 0 || _busy ? null : _submit,
+              child: const Text('Пікір қалдыру'),
+            ),
+          ),
+        ]),
       ),
     );
   }

@@ -5,6 +5,7 @@ import '../labels.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import 'notifications_screen.dart';
 
 class CatalogScreen extends StatefulWidget {
   const CatalogScreen({super.key});
@@ -19,10 +20,34 @@ class _CatalogScreenState extends State<CatalogScreen> {
   String? _category;
   Future<List<Listing>>? _results;
 
+  int _unread = 0;
+  bool? _countedFor;
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     _results ??= _load();
+    final session = SessionScope.of(context);
+    if (_countedFor != session.signedIn) {
+      _countedFor = session.signedIn;
+      _countUnread();
+    }
+  }
+
+  Future<void> _countUnread() async {
+    final session = SessionScope.of(context);
+    if (!session.signedIn) return setState(() => _unread = 0);
+    try {
+      final (unread, _) = await session.api.notifications();
+      if (mounted) setState(() => _unread = unread);
+    } catch (_) {
+      // The badge is a hint; the list itself shows errors.
+    }
+  }
+
+  Future<void> _openNotifications() async {
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const NotificationsScreen()));
+    _countUnread();
   }
 
   Future<List<Listing>> _load() =>
@@ -53,6 +78,7 @@ class _CatalogScreenState extends State<CatalogScreen> {
       bottom: false,
       child: RefreshIndicator(
         onRefresh: () async {
+          _countUnread();
           _search();
           await _results;
         },
@@ -61,8 +87,23 @@ class _CatalogScreenState extends State<CatalogScreen> {
             child: Padding(
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('VITRINA', style: weight(theme.textTheme.labelLarge!, 800).copyWith(letterSpacing: 3)),
-                const SizedBox(height: 6),
+                Row(children: [
+                  Expanded(
+                    child: Text('VITRINA', style: weight(theme.textTheme.labelLarge!, 800).copyWith(letterSpacing: 3)),
+                  ),
+                  if (SessionScope.of(context).signedIn)
+                    IconButton(
+                      tooltip: 'Хабарландырулар',
+                      onPressed: _openNotifications,
+                      icon: Badge(
+                        isLabelVisible: _unread > 0,
+                        backgroundColor: Brand.accent,
+                        label: Text('$_unread'),
+                        child: const Icon(Icons.notifications_none_rounded),
+                      ),
+                    ),
+                ]),
+                const SizedBox(height: 2),
                 Text('Аяқкиімді жан-жағынан\nкөріп таңдаңыз', style: theme.textTheme.headlineMedium),
                 const SizedBox(height: 16),
                 Row(children: [
