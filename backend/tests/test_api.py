@@ -1116,6 +1116,32 @@ class SuggestTests(ApiTestCase):
         self.assertEqual(self.suggest("n"), [])  # one letter says too little
 
 
+class DeleteAccountTests(ApiTestCase):
+    def test_buyer_deletes_the_account_once_orders_are_done_and_can_start_over(self):
+        listing, order = self.ordered()
+        self.c.put(f"/api/v1/sellers/{listing['seller']['id']}/follow", headers=self.h(self.buyer))
+        self.assertEqual(self.c.delete("/api/v1/me", headers=self.h(self.buyer)).json()["code"], "open_orders")
+        self.post(f"/orders/{order['id']}/cancel", self.buyer)
+        old_id = self.c.get("/api/v1/me", headers=self.h(self.buyer)).json()["id"]
+        self.assertEqual(self.c.delete("/api/v1/me", headers=self.h(self.buyer)).json(), {"deleted": True})
+        self.assertEqual(self.c.get("/api/v1/me", headers=self.h(self.buyer)).status_code, 401)  # signed out
+        shop = self.c.get(f"/api/v1/sellers/{listing['seller']['id']}").json()
+        self.assertEqual(shop["followers"], 0)
+        with self.db() as db:
+            gone = db.get(User, old_id)
+            self.assertTrue(gone.phone.startswith("deleted:"))
+            self.assertIsNone(gone.last_delivery)
+        fresh = self.login("+77010000002")  # the number is free again: a new, empty account
+        self.assertNotEqual(self.c.get("/api/v1/me", headers=self.h(fresh)).json()["id"], old_id)
+
+    def test_a_deleted_shop_leaves_the_catalog(self):
+        listing = self.publish()
+        self.assertEqual(self.c.delete("/api/v1/me", headers=self.h(self.seller)).status_code, 200)
+        self.assertEqual(self.c.get(f"/api/v1/listings/{listing['id']}").status_code, 404)
+        self.assertEqual(self.c.get(f"/api/v1/sellers/{listing['seller']['id']}").status_code, 404)
+        self.assertEqual(self.c.get("/api/v1/listings").json()["items"], [])
+
+
 class AdminTests(ApiTestCase):
     def test_support_console_page_is_served(self):
         r = self.c.get("/admin/")

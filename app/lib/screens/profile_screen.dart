@@ -109,8 +109,45 @@ class ProfileScreen extends StatelessWidget {
                 title: Text(tr('Шығу')),
                 onTap: session.signOut,
               ),
+              ListTile(
+                key: const Key('delete-account'),
+                leading: Icon(Icons.delete_forever_outlined, color: Theme.of(context).colorScheme.error),
+                title: Text(tr('Аккаунтты жою'), style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                onTap: () => _deleteAccount(context),
+              ),
             ]),
     );
+  }
+
+  Future<void> _deleteAccount(BuildContext context) async {
+    final session = SessionScope.of(context);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(tr('Аккаунтты жою керек пе?')),
+        content: Text(tr(
+            'Аты-жөніңіз, мекенжайыңыз, таңдаулылар, сақталған іздеулер мен хабарламалар өшіріледі, тауарларыңыз каталогтан алынады. Тапсырыстар мен төлемдер туралы жазба заң бойынша сақталады. Бұл әрекетті қайтару мүмкін емес.')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Жабу'))),
+          FilledButton(
+            key: const Key('confirm-delete'),
+            style: FilledButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.error),
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(tr('Жою')),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await session.api.deleteAccount();
+      await session.signOut();
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr('Аккаунт жойылды.'))));
+      }
+    } catch (e) {
+      if (context.mounted) showError(context, e);
+    }
   }
 
   Future<void> _becomeSeller(BuildContext context) async {

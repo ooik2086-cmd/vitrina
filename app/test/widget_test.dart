@@ -20,6 +20,7 @@ import 'package:vitrina/screens/listing_editor_screen.dart';
 import 'package:vitrina/screens/listing_screen.dart';
 import 'package:vitrina/screens/manage_listing_screen.dart';
 import 'package:vitrina/screens/offers_screen.dart';
+import 'package:vitrina/screens/profile_screen.dart';
 import 'package:vitrina/screens/saved_searches_screen.dart';
 import 'package:vitrina/screens/seller_reviews_screen.dart';
 import 'package:vitrina/screens/shop_screen.dart';
@@ -1023,6 +1024,36 @@ void main() {
     await tester.tap(find.byKey(const Key('search-field')));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('recent-searches')), findsOneWidget);
+  });
+
+  testWidgets('deleting the account asks first, then signs out', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final calls = <String>[];
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async {
+          calls.add('${req.method} ${req.url.path}');
+          return jsonResponse({'deleted': true});
+        }))
+      ..token = 'tok';
+    final session = Session(api)
+      ..update(Me.fromJson({'id': 2, 'phone': '+77010000002', 'is_seller': false}));
+    tester.view.physicalSize = const Size(400, 1200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(SessionScope(session: session, child: const MaterialApp(home: ProfileScreen())));
+    await tester.tap(find.byKey(const Key('delete-account')));
+    await tester.pumpAndSettle();
+    expect(find.text('Аккаунтты жою керек пе?'), findsOneWidget);
+    await tester.tap(find.text('Жабу'));
+    await tester.pumpAndSettle();
+    expect(calls, isEmpty); // closing the dialog changes nothing
+    await tester.tap(find.byKey(const Key('delete-account')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('confirm-delete')));
+    await tester.pumpAndSettle();
+    expect(calls, ['DELETE /api/v1/me']);
+    expect(session.signedIn, isFalse);
   });
 
   testWidgets('catalog loads the next page when scrolled near the end', (tester) async {

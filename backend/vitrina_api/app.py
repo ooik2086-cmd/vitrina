@@ -22,7 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -38,7 +38,7 @@ from .deps import current_user, get_db, get_settings, get_storage, now_utc, opti
 from .errors import ApiError, api_error_handler
 from .share import router as share_router
 from .social import reply_time, router as social_router, seller_rating, size_fit
-from .models import (AuditLog, Follow, SavedSearch, StockAlert, ListingDailyViews, ListingEmbedding, ListingReport, AuthToken, Favorite, IdempotencyRecord, Listing, ListingSize, Media, Order, OrderEvent,
+from .models import (AuditLog, AuthToken, Follow, Notification, Offer, SavedSearch, StockAlert, ListingDailyViews, ListingEmbedding, ListingReport, AuthToken, Favorite, IdempotencyRecord, Listing, ListingSize, Media, Order, OrderEvent,
                      OtpCode, Review, User, WebhookEvent, make_session_factory)
 from .storage import MAX_UPLOAD_BYTES, LocalStorage, normalize_image
 
@@ -338,6 +338,33 @@ def verify_otp(body: OtpVerify, db: Session = Depends(get_db), cfg: Settings = D
 @api.get("/me")
 def get_me(user: User = Depends(current_user)):
     return me_out(user)
+
+
+@api.delete("/me")
+def delete_me(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """Deletes the account: personal data goes, the person is signed out everywhere and their listings leave the
+    catalog. Orders, payments and the ledger stay, without the name, because the law requires keeping them."""
+    open_orders = db.scalar(select(func.count(Order.id)).where(
+        or_(Order.buyer_id == user.id, Order.seller_id == user.id),
+        Order.status.not_in([s.value for s in (S.COMPLETED, S.REFUNDED, S.CANCELLED)])))
+    if open_orders:
+        raise ApiError(409, "open_orders")
+    now = now_utc()
+    for model, column in ((Favorite, Favorite.user_id), (SavedSearch, SavedSearch.user_id),
+                          (Follow, Follow.user_id), (Follow, Follow.seller_id), (StockAlert, StockAlert.user_id),
+                          (Notification, Notification.user_id)):
+        db.execute(delete(model).where(column == user.id))
+    db.execute(update(AuthToken).where(AuthToken.user_id == user.id).values(revoked=True))
+    db.execute(update(Offer).where(or_(Offer.buyer_id == user.id, Offer.seller_id == user.id),
+                                   Offer.status.in_(offers.OPEN)).values(status="withdrawn"))
+    db.execute(update(Listing).where(Listing.seller_id == user.id, Listing.status.not_in(("sold", "hidden")))
+               .values(status="paused"))
+    services.audit(db, user.id, "delete_account", f"user:{user.id}")
+    user.phone = f"deleted:{user.id}"  # frees the number: signing in with it again starts a new account
+    user.display_name = user.city = user.shop_name = user.last_delivery = user.away_until = None
+    user.is_blocked, user.deleted_at = True, now
+    db.commit()
+    return {"deleted": True}
 
 
 @api.patch("/me")

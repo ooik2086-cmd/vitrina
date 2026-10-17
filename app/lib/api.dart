@@ -665,6 +665,9 @@ class Api {
             : '${until.year}-${until.month.toString().padLeft(2, '0')}-${until.day.toString().padLeft(2, '0')}'
       }) as Map<String, dynamic>);
 
+  /// Deletes the account for good; refused while an order is still open.
+  Future<void> deleteAccount() => _send('DELETE', '/me');
+
   Future<Me> becomeSeller(String shopName, String city) async => Me.fromJson(
       await _send('POST', '/me/seller', body: {'shop_name': shopName, 'city': city}) as Map<String, dynamic>);
 

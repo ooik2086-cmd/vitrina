@@ -32,6 +32,7 @@ class User(Base):
     is_blocked: Mapped[bool] = mapped_column(Boolean, default=False)
     away_until: Mapped[date | None] = mapped_column(Date)  # seller on holiday: no new orders through this day
     last_delivery: Mapped[str | None] = mapped_column(Text)  # JSON of the address last ordered to, to prefill
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # the person deleted the account
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
