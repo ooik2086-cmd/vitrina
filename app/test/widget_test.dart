@@ -317,6 +317,7 @@ void main() {
             return jsonResponse({
               'id': 3, 'shop_name': 'Sneaker Lab', 'city': 'Алматы', 'since': '2026-01-10',
               'completed_sales': 4, 'listings': 0, 'rating': 4.8, 'reviews': 5, 'away_until': null,
+              'reply_time': {'minutes': 40, 'bucket': 'hour'},
               'followers': 12, 'following': false,
             });
           }
@@ -326,6 +327,7 @@ void main() {
     await tester.pumpWidget(SessionScope(session: Session(api), child: const MaterialApp(home: ShopScreen(sellerId: 3))));
     await tester.pumpAndSettle();
     expect(find.text('12 жазылушы'), findsOneWidget);
+    expect(find.text('Әдетте бір сағат ішінде жауап береді'), findsOneWidget);
     await tester.tap(find.byKey(const Key('follow')));
     await tester.pumpAndSettle();
     expect(find.text('13 жазылушы'), findsOneWidget);

@@ -14,7 +14,7 @@ from sqlalchemy import create_engine
 from vitrina_api import promo
 from vitrina_api.app import create_app
 from vitrina_api.config import Settings
-from vitrina_api.models import Base, Offer, SavedSearch, User
+from vitrina_api.models import Base, Conversation, Message, Offer, SavedSearch, User
 from vitrina_api.services import balance, run_auto_complete
 from vitrina_core.money import PLATFORM_FEE, buyer_refund, escrow, seller_payable
 from vitrina_core.webhooks import sign
@@ -954,6 +954,36 @@ class FollowTests(ApiTestCase):
         self.publish()
         kinds = [n["kind"] for n in self.c.get("/api/v1/notifications", headers=self.h(self.buyer)).json()["items"]]
         self.assertEqual(kinds, ["followed_shop"])
+
+
+class ReplyTimeTests(ApiTestCase):
+    def test_shop_shows_how_fast_the_seller_usually_answers(self):
+        listing = self.publish()
+        seller_id = listing["seller"]["id"]
+        now = datetime.now(timezone.utc)
+        with self.db() as db:
+            buyer = db.query(User).filter_by(phone="+77010000002").one()
+
+            conv = Conversation(listing_id=listing["id"], buyer_id=buyer.id, seller_id=seller_id)
+            db.add(conv)
+            db.flush()
+            # Answered in 30 minutes; then two buyer messages answered 50 minutes after the first one.
+            for who, minutes_ago in (("b", 300), ("s", 270), ("b", 200), ("b", 190), ("s", 150)):
+                db.add(Message(conversation_id=conv.id, sender_id=buyer.id if who == "b" else seller_id, body="?",
+                               created_at=now - timedelta(minutes=minutes_ago)))
+            db.commit()
+        self.assertIsNone(self.c.get(f"/api/v1/sellers/{seller_id}").json()["reply_time"])  # two waits only
+        self.make_staff("+77010000005")  # a second user to write from
+        with self.db() as db:
+            other = db.query(User).filter_by(phone="+77010000005").one()
+            conv = Conversation(listing_id=listing["id"], buyer_id=other.id, seller_id=seller_id)
+            db.add(conv)
+            db.flush()
+            db.add(Message(conversation_id=conv.id, sender_id=other.id, body="?",
+                           created_at=now - timedelta(hours=30)))  # never answered: counts as a day
+            db.commit()
+        self.assertEqual(self.c.get(f"/api/v1/sellers/{seller_id}").json()["reply_time"],
+                         {"minutes": 50, "bucket": "hour"})
 
 
 class AdminTests(ApiTestCase):

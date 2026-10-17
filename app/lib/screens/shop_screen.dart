@@ -62,6 +62,7 @@ class _ShopScreenState extends State<ShopScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     final me = SessionScope.of(context).me;
     return Scaffold(
       appBar: AppBar(title: Text(tr('Дүкен'))),
@@ -99,6 +100,26 @@ class _ShopScreenState extends State<ShopScreen> {
                       ]),
                     ),
                   ]),
+                  if (shop.replyBucket != null) ...[
+                    const SizedBox(height: 14),
+                    Row(key: const Key('reply-time'), children: [
+                      Icon(Icons.bolt_rounded,
+                          size: 18,
+                          color: shop.replyBucket == 'hour' ? const Color(0xFF2E9E6A) : scheme.onSurfaceVariant),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          tr(switch (shop.replyBucket) {
+                            'hour' => 'Әдетте бір сағат ішінде жауап береді',
+                            'hours' => 'Әдетте бірнеше сағатта жауап береді',
+                            'day' => 'Әдетте бір күн ішінде жауап береді',
+                            _ => 'Жауап беруі бір күннен ұзаққа созылады',
+                          }),
+                          style: theme.textTheme.bodyMedium,
+                        ),
+                      ),
+                    ]),
+                  ],
                   const SizedBox(height: 16),
                   Row(children: [
                     Icon(Icons.people_outline, size: 18, color: theme.colorScheme.onSurfaceVariant),

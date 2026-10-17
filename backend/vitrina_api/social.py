@@ -3,8 +3,9 @@ from __future__ import annotations
 
 import json
 import re
+import statistics
+from datetime import datetime, timedelta
 from typing import Literal
-from datetime import timedelta
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 from pydantic import BaseModel, Field
@@ -177,6 +178,38 @@ def post_message(db: Session, conv: Conversation, user: User, text: str, photo_u
 
 
 # ---------------------------------------------------------------- reviews
+REPLY_WINDOW = timedelta(days=30)
+REPLY_MIN_SAMPLES = 3
+UNANSWERED_AFTER = timedelta(hours=24)  # a question left this long counts as answered in a day, so silence shows
+
+
+def reply_time(db: Session, seller_id: int) -> dict | None:
+    """How fast the seller usually answers a buyer's message: the median wait over the last 30 days.
+
+    A wait starts at the first buyer message after the seller last wrote and ends at the seller's next message.
+    """
+    now = now_utc()
+    rows = db.execute(select(Message.conversation_id, Message.sender_id, Message.created_at).join(
+        Conversation, Conversation.id == Message.conversation_id).where(
+        Conversation.seller_id == seller_id, Message.created_at >= now - REPLY_WINDOW).order_by(
+        Message.conversation_id, Message.id)).all()
+    waits: list[float] = []
+    waiting_since: dict[int, datetime] = {}
+    for conv, sender, at in rows:
+        at = services.aware(at)
+        if sender != seller_id:
+            waiting_since.setdefault(conv, at)
+        elif conv in waiting_since:
+            waits.append((at - waiting_since.pop(conv)).total_seconds() / 60)
+    waits += [UNANSWERED_AFTER.total_seconds() / 60 for since in waiting_since.values()
+              if now - since >= UNANSWERED_AFTER]
+    if len(waits) < REPLY_MIN_SAMPLES:
+        return None
+    minutes = statistics.median(waits)
+    bucket = "hour" if minutes <= 60 else "hours" if minutes <= 180 else "day" if minutes < 1440 else "days"
+    return {"minutes": round(minutes), "bucket": bucket}
+
+
 FIT_MIN_ANSWERS = 3  # fewer answers than this say more about one foot than about the shoe
 
 

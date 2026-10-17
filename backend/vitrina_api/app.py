@@ -36,7 +36,7 @@ from .config import Settings
 from .deps import current_user, get_db, get_settings, get_storage, now_utc, optional_user, sha256, staff_user
 from .errors import ApiError, api_error_handler
 from .share import router as share_router
-from .social import router as social_router, seller_rating, size_fit
+from .social import reply_time, router as social_router, seller_rating, size_fit
 from .models import (AuditLog, Follow, SavedSearch, ListingDailyViews, ListingEmbedding, ListingReport, AuthToken, Favorite, IdempotencyRecord, Listing, ListingSize, Media, Order, OrderEvent,
                      OtpCode, Review, User, WebhookEvent, make_session_factory)
 from .storage import MAX_UPLOAD_BYTES, LocalStorage, normalize_image
@@ -721,7 +721,7 @@ def seller_profile(seller_id: int, user: User | None = Depends(optional_user), d
     return {"id": seller.id, "shop_name": seller.shop_name, "city": seller.city,
             "since": services.aware(seller.created_at).date().isoformat(),
             "completed_sales": int(sales or 0), "listings": int(live or 0), "away_until": away_out(seller),
-            "followers": followers(db, seller.id),
+            "followers": followers(db, seller.id), "reply_time": reply_time(db, seller.id),
             "following": user is not None and db.scalar(select(Follow.id).where(
                 Follow.user_id == user.id, Follow.seller_id == seller.id)) is not None,
             **seller_rating(db, seller.id)}

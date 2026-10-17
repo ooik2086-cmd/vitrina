@@ -173,7 +173,8 @@ class Shop {
         rating = (j['rating'] as num?)?.toDouble(),
         reviews = j['reviews'] as int,
         followers = j['followers'] as int? ?? 0,
-        following = j['following'] as bool? ?? false;
+        following = j['following'] as bool? ?? false,
+        replyBucket = (j['reply_time'] as Map?)?['bucket'] as String?;
   final int id;
   final String shopName;
   final String? city;
@@ -184,6 +185,9 @@ class Shop {
   final int reviews;
   final int followers;
   final bool following;
+
+  /// How fast the seller usually answers in chat: "hour", "hours", "day" or "days"; null while there is too little to say.
+  final String? replyBucket;
 }
 
 /// A shop the user follows, as listed on «Жазылымдар».
