@@ -268,6 +268,37 @@ class PayoutTests(ApiTestCase):
         self.assertEqual(self.c.delete("/api/v1/me", headers=self.h(self.seller)).json()["code"], "payout_owed")
 
 
+class DeliveryEstimateTests(ApiTestCase):
+    def test_estimate_adds_the_sellers_shipping_time_to_transit(self):
+        from vitrina_api.delivery_eta import known_city, transit_days
+        self.assertEqual((known_city(" алма-ата "), known_city("Nur-Sultan"), known_city("Москва")),
+                         ("Алматы", "Астана", None))
+        self.assertEqual(transit_days("Алматы", "Алматы"), (1, 2))
+        self.assertEqual(transit_days("Алматы", "Астана"), (3, 5))  # ~970 km
+        listing = self.publish()
+        url = f"/api/v1/listings/{listing['id']}/delivery-estimate"
+        self.assertIsNone(self.c.get(url).json()["estimate"])  # nobody to deliver to yet
+        e = self.c.get(url, params={"city": "Астана"}).json()["estimate"]
+        self.assertEqual((e["from_city"], e["city"], e["handling_days"]), ("Алматы", "Астана", 2))
+        today = date.fromisoformat(e["earliest"]) - timedelta(days=5)
+        self.assertEqual(date.fromisoformat(e["latest"]) - today, timedelta(days=7))
+        # The city of the buyer's last order is used without asking; a seller who ships same day gets 0 days.
+        _, order = self.ordered("k2")
+        self.post(f"/orders/{order['id']}/pay", self.buyer)
+        self.pay(order)
+        self.post(f"/orders/{order['id']}/accept", self.seller)
+        self.post(f"/orders/{order['id']}/ship", self.seller, {"tracking_number": "KZ9"})
+        e = self.c.get(url, headers=self.h(self.buyer)).json()["estimate"]
+        self.assertEqual((e["city"], e["handling_days"]), ("Алматы", 0))
+        self.assertEqual(date.fromisoformat(e["latest"]) - date.fromisoformat(e["earliest"]), timedelta(days=1))
+        # While the shop is away, the count starts the day after it is back.
+        back = date.fromisoformat(e["earliest"]) + timedelta(days=9)
+        self.assertEqual(self.c.put("/api/v1/me/away", json={"until": back.isoformat()},
+                                    headers=self.h(self.seller)).status_code, 200)
+        e = self.c.get(url, headers=self.h(self.buyer)).json()["estimate"]
+        self.assertEqual(date.fromisoformat(e["earliest"]), back + timedelta(days=2))
+
+
 class ReportTests(ApiTestCase):
     def report(self, lid, token, reason="fake", text=None):
         return self.post(f"/listings/{lid}/report", token, {"reason": reason, "text": text})

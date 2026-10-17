@@ -6,6 +6,7 @@ import '../labels.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import '../widgets/delivery_eta.dart';
 import '../widgets/delivery_sheet.dart';
 import '../widgets/questions.dart';
 import '../widgets/size_guide.dart';
@@ -288,6 +289,7 @@ class _ListingScreenState extends State<ListingScreen> {
                 l.deliveryPriceTiyn == 0 ? tr('Жеткізу тегін') : trf('Жеткізу {0}', [formatTenge(l.deliveryPriceTiyn)]),
                 style: theme.textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
               ),
+              DeliveryEta(listingId: l.id),
               if (away != null) ...[
                 const SizedBox(height: 12),
                 Container(

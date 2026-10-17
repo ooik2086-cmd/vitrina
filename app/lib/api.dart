@@ -336,6 +336,19 @@ class PayoutInfo {
   final String? reason;
 }
 
+/// About when a pair would arrive: the seller's usual shipping time plus transit between the cities.
+class DeliveryEstimate {
+  DeliveryEstimate.fromJson(Map<String, dynamic> j)
+      : city = j['city'] as String,
+        fromCity = j['from_city'] as String,
+        earliest = DateTime.parse(j['earliest'] as String),
+        latest = DateTime.parse(j['latest'] as String);
+  final String city;
+  final String fromCity;
+  final DateTime earliest;
+  final DateTime latest;
+}
+
 /// Catalog refinements beyond text, size and category.
 class CatalogFilter {
   const CatalogFilter({this.sort = 'new', this.conditions = const {}, this.minPriceTiyn, this.maxPriceTiyn});
@@ -889,6 +902,17 @@ class Api {
   /// Counts of what waits on the signed-in person; seller keys appear only for sellers.
   Future<Map<String, int>> todo() async =>
       (await _send('GET', '/me/todo') as Map).map((k, v) => MapEntry(k as String, v as int));
+
+  /// Null estimate when the city is unknown; [cities] are the ones an estimate can be made for.
+  Future<(DeliveryEstimate?, List<String>)> deliveryEstimate(int listingId, {String? city}) async {
+    final r = await _send('GET', '/listings/$listingId/delivery-estimate', query: city == null ? null : {'city': city})
+        as Map<String, dynamic>;
+    final e = r['estimate'];
+    return (
+      e == null ? null : DeliveryEstimate.fromJson(e as Map<String, dynamic>),
+      [for (final c in r['cities'] as List) c as String],
+    );
+  }
 
   Future<Payouts> payouts() async => Payouts.fromJson(await _send('GET', '/me/payouts') as Map<String, dynamic>);
 

@@ -31,6 +31,7 @@ import 'package:vitrina/screens/order_screen.dart';
 import 'package:vitrina/listing_quality.dart';
 import 'package:vitrina/screens/help_screen.dart';
 import 'package:vitrina/widgets/todo_card.dart';
+import 'package:vitrina/widgets/delivery_eta.dart';
 import 'package:vitrina/screens/orders_screen.dart';
 import 'package:vitrina/screens/profile_screen.dart';
 import 'package:vitrina/screens/saved_searches_screen.dart';
@@ -1671,6 +1672,36 @@ void main() {
     expect(find.text('Шығару сұрауыңыз қаралуда.'), findsOneWidget);
     expect(find.byKey(const Key('payout-7')), findsOneWidget);
     expect(tester.widget<FilledButton>(find.byKey(const Key('payout'))).onPressed, isNull);
+  });
+
+  testWidgets('the product page says about when it arrives, and another city can be picked', (tester) async {
+    pickedDeliveryCity.value = null;
+    final asked = <String?>[];
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async {
+          final city = req.url.queryParameters['city'];
+          asked.add(city);
+          final e = city == null
+              ? null
+              : {'city': city, 'from_city': 'Алматы', 'earliest': '2026-10-30', 'latest': '2026-11-01'};
+          return jsonResponse({
+            'estimate': e,
+            'cities': ['Алматы', 'Астана']
+          });
+        }));
+    await tester.pumpWidget(
+        SessionScope(session: Session(api), child: const MaterialApp(home: Scaffold(body: DeliveryEta(listingId: 5)))));
+    await tester.pumpAndSettle();
+    expect(find.text('Қашан жететінін білу үшін қалаңызды таңдаңыз'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('delivery-eta')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('eta-city-Астана')));
+    await tester.pumpAndSettle();
+    expect(asked, [null, 'Астана']);
+    expect(find.textContaining('шамамен 30 қаз – 1 қар'), findsOneWidget);
+    expect(pickedDeliveryCity.value, 'Астана');
+    expect(dateRange(DateTime(2026, 10, 20), DateTime(2026, 10, 22)), '20–22 қаз');
   });
 
   testWidgets('typing in search suggests models on sale, and a picked search is remembered', (tester) async {
