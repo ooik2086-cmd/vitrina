@@ -758,4 +758,6 @@ const en = <String, String>{
   'Қай қалаға жеткізу?': 'Deliver to which city?',
   'Қашан жететінін білу үшін қалаңызды таңдаңыз': 'Pick your city to see when it arrives',
   'шамамен {0}': 'about {0}',
+  '30 күнде {0} жұп сатып алынды': '{0} bought in the last 30 days',
+  '{0} адам таңдаулыға қосты': '{0} people saved it',
 };

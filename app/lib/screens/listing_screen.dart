@@ -290,6 +290,24 @@ class _ListingScreenState extends State<ListingScreen> {
                 style: theme.textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
               ),
               DeliveryEta(listingId: l.id),
+              if (l.soldRecently > 0 || l.savedBy > 0)
+                Padding(
+                  key: const Key('popularity'),
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Row(children: [
+                    Icon(Icons.local_fire_department_outlined, size: 18, color: Brand.accent),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        [
+                          if (l.soldRecently > 0) trf('30 күнде {0} жұп сатып алынды', [l.soldRecently]),
+                          if (l.savedBy > 0) trf('{0} адам таңдаулыға қосты', [l.savedBy]),
+                        ].join(' · '),
+                        style: theme.textTheme.bodyMedium,
+                      ),
+                    ),
+                  ]),
+                ),
               if (away != null) ...[
                 const SizedBox(height: 12),
                 Container(

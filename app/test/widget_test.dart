@@ -319,6 +319,28 @@ void main() {
     expect(fit(0, 3, 2).verdict, 'large');
   });
 
+  testWidgets('product page shows real demand only when the server sends it', (tester) async {
+    Map<String, dynamic>? popularity = {'sold_30d': 2, 'favorites': 5};
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async {
+          if (req.url.path.endsWith('/similar')) return jsonResponse({'items': []});
+          return jsonResponse({...listingJson(), 'popularity': popularity});
+        }));
+    tester.view.physicalSize = const Size(400, 1800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester
+        .pumpWidget(SessionScope(session: Session(api), child: const MaterialApp(home: ListingScreen(listingId: 7))));
+    await tester.pumpAndSettle();
+    expect(find.text('30 күнде 2 жұп сатып алынды · 5 адам таңдаулыға қосты'), findsOneWidget);
+    popularity = null;
+    await tester
+        .pumpWidget(SessionScope(session: Session(api), child: const MaterialApp(home: ListingScreen(listingId: 8))));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('popularity')), findsNothing);
+  });
+
   testWidgets('tapping a sold-out size asks to hear when it is back, and again turns it off', (tester) async {
     final calls = <String>[];
     final api = Api(

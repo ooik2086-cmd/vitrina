@@ -1207,7 +1207,26 @@ def get_listing(listing_id: int, user: User | None = Depends(optional_user), db:
         db.commit()
     alerts = [] if user is None else list(db.scalars(select(StockAlert.size_id).where(
         StockAlert.user_id == user.id, StockAlert.listing_id == listing.id)).all())
-    return {**listing_out(db, listing, owner=owner), "size_fit": size_fit(db, listing), "stock_alerts": alerts}
+    return {**listing_out(db, listing, owner=owner), "size_fit": size_fit(db, listing), "stock_alerts": alerts,
+            "popularity": popularity(db, listing)}
+
+
+POPULAR_DAYS = 30
+POPULAR_MIN_FAVORITES = 3  # one or two hearts say little; below this nothing is shown
+
+
+def popularity(db: Session, listing: Listing) -> dict | None:
+    """Real demand a buyer may weigh: pairs bought in the last 30 days (orders that stand, not cancelled or
+    refunded) and how many people saved it. None when there is nothing worth saying."""
+    since = now_utc() - timedelta(days=POPULAR_DAYS)
+    sold = int(db.scalar(select(func.count(Order.id)).where(
+        Order.listing_id == listing.id, Order.created_at >= since,
+        Order.status.not_in([S.CREATED.value, S.PAYMENT_PENDING.value, S.CANCELLED.value,
+                             S.REFUND_PENDING.value, S.REFUNDED.value]))) or 0)
+    saved = int(db.scalar(select(func.count(Favorite.id)).where(Favorite.listing_id == listing.id)) or 0)
+    if not sold and saved < POPULAR_MIN_FAVORITES:
+        return None
+    return {"sold_30d": sold, "favorites": saved if saved >= POPULAR_MIN_FAVORITES else 0}
 
 
 ALMATY = timezone(timedelta(hours=5))  # Kazakhstan has one time zone, UTC+5, since March 2024

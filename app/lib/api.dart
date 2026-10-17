@@ -416,6 +416,8 @@ class Listing {
         moderation = j['moderation'] == null ? null : Moderation.fromJson(j['moderation'] as Map<String, dynamic>),
         sizeFit = j['size_fit'] == null ? null : SizeFit.fromJson(j['size_fit'] as Map<String, dynamic>),
         stockAlerts = {for (final id in (j['stock_alerts'] as List?) ?? const []) id as int},
+        soldRecently = ((j['popularity'] as Map?)?['sold_30d'] as int?) ?? 0,
+        savedBy = ((j['popularity'] as Map?)?['favorites'] as int?) ?? 0,
         modelName = j['model_name'] as String?;
 
   final int id;
@@ -450,6 +452,10 @@ class Listing {
 
   /// Sold-out sizes the signed-in buyer asked to hear about when they are back.
   final Set<int> stockAlerts;
+
+  /// Pairs bought in the last 30 days and people who saved it; 0 when the server says nothing worth showing.
+  final int soldRecently;
+  final int savedBy;
   final double? sellerRating;
   final int sellerReviews;
 

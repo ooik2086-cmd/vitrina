@@ -299,6 +299,23 @@ class DeliveryEstimateTests(ApiTestCase):
         self.assertEqual(date.fromisoformat(e["earliest"]), back + timedelta(days=2))
 
 
+class PopularityTests(ApiTestCase):
+    def test_only_real_demand_is_shown(self):
+        listing = self.publish(sizes=[{"label": "EU 42", "insole_cm": "26,5", "quantity": 3}])
+        url = f"/api/v1/listings/{listing['id']}"
+        self.assertIsNone(self.c.get(url).json()["popularity"])
+        r = self.post("/orders", self.buyer, {"listing_id": listing["id"], "size_id": listing["sizes"][0]["id"]},
+                      **{"Idempotency-Key": "p1"})
+        self.assertIsNone(self.c.get(url).json()["popularity"])  # an unpaid order is not a sale
+        self.post(f"/orders/{r.json()['id']}/pay", self.buyer)
+        self.pay(r.json())
+        self.assertEqual(self.c.get(url).json()["popularity"], {"sold_30d": 1, "favorites": 0})
+        for i in range(3):
+            token = self.buyer if i == 0 else self.login(f"+7701000010{i}")
+            self.post(f"/favorites/{listing['id']}", token)
+        self.assertEqual(self.c.get(url).json()["popularity"], {"sold_30d": 1, "favorites": 3})
+
+
 class ReportTests(ApiTestCase):
     def report(self, lid, token, reason="fake", text=None):
         return self.post(f"/listings/{lid}/report", token, {"reason": reason, "text": text})
