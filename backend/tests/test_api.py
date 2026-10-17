@@ -15,7 +15,8 @@ from vitrina_api import promo
 from vitrina_api.app import create_app
 from vitrina_api.config import Settings
 from vitrina_api.models import Base, Conversation, Message, Offer, SavedSearch, User
-from vitrina_api.services import balance, run_auto_complete
+from vitrina_api import jobs
+from vitrina_api.services import balance, run_auto_complete, run_review_reminders
 from vitrina_core.money import PLATFORM_FEE, buyer_refund, escrow, seller_payable
 from vitrina_core.webhooks import sign
 
@@ -407,6 +408,31 @@ class OrderFlowTests(ApiTestCase):
             self.assertEqual(run_auto_complete(db, now=now + timedelta(days=6), window=self.cfg.confirm_window,
                                                rule=self.cfg.commission), [order["id"]])
         self.assertEqual(self.c.get(f"/api/v1/orders/{order['id']}", headers=self.h(self.buyer)).json()["status"], "COMPLETED")
+
+    def test_buyer_gets_one_review_reminder_a_few_days_after_completion(self):
+        _, order = self.delivered()
+        now = datetime.now(timezone.utc)
+        with self.db() as db:
+            run_auto_complete(db, now=now + timedelta(days=6), window=self.cfg.confirm_window, rule=self.cfg.commission)
+            self.assertEqual(run_review_reminders(db, now=now + timedelta(days=7)), [])  # too soon
+            self.assertEqual(run_review_reminders(db, now=now + timedelta(days=10)), [order["id"]])
+            self.assertEqual(run_review_reminders(db, now=now + timedelta(days=11)), [])  # only once
+        items = self.c.get("/api/v1/notifications", headers=self.h(self.buyer)).json()["items"]
+        reminder = next(n for n in items if n["kind"] == "review_reminder")
+        self.assertEqual(reminder["order_id"], order["id"])
+        self.assertIn("қалай болды?", reminder["text"])
+        self.assertIn("How is", reminder["text_en"])
+
+    def test_no_review_reminder_once_the_buyer_reviewed(self):
+        _, order = self.delivered()
+        self.assertEqual(self.post(f"/orders/{order['id']}/confirm", self.buyer).status_code, 200)
+        self.assertEqual(self.post(f"/orders/{order['id']}/review", self.buyer, {"rating": 5}).status_code, 201)
+        with self.db() as db:
+            self.assertEqual(run_review_reminders(db, now=datetime.now(timezone.utc) + timedelta(days=4)), [])
+
+    def test_jobs_pass_runs_both_jobs(self):
+        self.delivered()
+        self.assertEqual(jobs.run_once(self.app.state.sessions, self.cfg), {"completed": [], "review_reminders": []})
 
 
 def jpeg(size=(800, 600), orientation=None, gps=False) -> bytes:

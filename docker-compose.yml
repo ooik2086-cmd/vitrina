@@ -23,6 +23,7 @@ services:
       VITRINA_PUBLIC_MEDIA_URL: http://localhost:8000/media
       VITRINA_DEBUG_OTP: "1"
       VITRINA_CORS_ORIGINS: http://localhost:5000
+      VITRINA_JOBS_INTERVAL: "300"   # auto-complete unconfirmed orders, review reminders
     ports: ["8000:8000"]
     volumes: [media:/data/media]
 

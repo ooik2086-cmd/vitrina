@@ -1,7 +1,7 @@
 """Order, ledger and settlement operations on the database, built on vitrina_core rules."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
@@ -12,7 +12,7 @@ from vitrina_core.orders import Actor, Order as CoreOrder, OrderStatus, Transiti
 
 from .errors import ApiError
 from .models import (AuditLog, Block, LedgerEntry, LedgerTx, Listing, ListingSize, Notification, Order, OrderEvent,
-                     StockAlert, User)
+                     Review, StockAlert, User)
 
 
 def aware(dt: datetime | None) -> datetime | None:
@@ -212,6 +212,37 @@ def run_auto_complete(db: Session, *, now: datetime, window, rule: CommissionRul
             continue
         move(db, order, OrderStatus.COMPLETED, Actor.SCHEDULER, now=now, confirm_after=window)
         settle(db, order, refund_tiyn=0, rule=rule, actor="scheduler")
+        done.append(order.id)
+    db.commit()
+    return done
+
+
+REVIEW_REMINDER_AFTER = timedelta(days=3)
+# Orders completed longer ago than this are left alone: a reminder about a months-old pair reads as spam.
+REVIEW_REMINDER_UNTIL = timedelta(days=30)
+
+
+def run_review_reminders(db: Session, *, now: datetime, after=REVIEW_REMINDER_AFTER) -> list[int]:
+    """Scheduler job: a few days after an order completes with no review, the buyer gets one reminder.
+    Reviews are what new buyers trust a shop by, and most happy buyers simply forget."""
+    completed = (select(OrderEvent.order_id, func.max(OrderEvent.at).label("at"))
+                 .where(OrderEvent.to_status == OrderStatus.COMPLETED.value).group_by(OrderEvent.order_id).subquery())
+    rows = db.execute(select(Order, completed.c.at).join(completed, completed.c.order_id == Order.id)
+                      .outerjoin(Review, Review.order_id == Order.id)
+                      .where(Order.status == OrderStatus.COMPLETED.value, Order.review_reminded_at.is_(None),
+                             Review.id.is_(None))).all()
+    done = []
+    for order, at in rows:
+        age = now - aware(at)
+        if age < after or age > REVIEW_REMINDER_UNTIL:
+            continue
+        listing = db.get(Listing, order.listing_id)
+        title = listing.title if listing else f"№{order.id}"
+        notify(db, order.buyer_id, "review_reminder",
+               f"«{title}» қалай болды? Пікіріңіз басқа сатып алушыларға таңдауға көмектеседі.",
+               f"Как вам «{title}»? Ваш отзыв поможет другим покупателям с выбором.",
+               f"How is “{title}”? Your review helps other buyers choose.", order_id=order.id)
+        order.review_reminded_at = now
         done.append(order.id)
     db.commit()
     return done

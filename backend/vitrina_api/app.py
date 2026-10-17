@@ -1,6 +1,7 @@
 """VITRINA API v1 (modular monolith). Run: uvicorn vitrina_api.app:create_app --factory --reload"""
 from __future__ import annotations
 
+import asyncio
 import collections
 import csv
 import hashlib
@@ -13,6 +14,7 @@ import secrets
 import threading
 import time
 from datetime import date, datetime, timedelta, timezone
+from contextlib import asynccontextmanager
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Literal
@@ -34,7 +36,7 @@ from vitrina_core.orders import Actor, OrderStatus as S
 from vitrina_core.webhooks import WebhookRejected, verify
 
 from . import services
-from . import authenticity, coupons, cutout, moderation, offers, promo, qa, visual
+from . import authenticity, coupons, cutout, jobs, moderation, offers, promo, qa, visual
 from .config import Settings
 from .deps import current_user, get_db, get_settings, get_storage, now_utc, optional_user, sha256, staff_user
 from .errors import ApiError, api_error_handler
@@ -1783,7 +1785,16 @@ async def delivery_webhook(request: Request, db: Session = Depends(get_db), cfg:
 # ---------------------------------------------------------------- app
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings()
-    app = FastAPI(title="VITRINA API", version="0.1.0")
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        task = (asyncio.create_task(jobs.loop(app.state.sessions, settings, settings.jobs_interval_s))
+                if settings.jobs_interval_s > 0 else None)
+        yield
+        if task:
+            task.cancel()
+
+    app = FastAPI(title="VITRINA API", version="0.1.0", lifespan=lifespan)
     app.state.settings = settings
     app.state.sessions = make_session_factory(settings.database_url, create_schema=settings.auto_create_schema)
     app.state.storage = LocalStorage(settings.media_dir, settings.public_media_url)

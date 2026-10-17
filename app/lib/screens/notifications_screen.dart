@@ -102,7 +102,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
               final n = items[i];
               final icon = switch (n.kind) {
                 'message' => Icons.chat_bubble_outline_rounded,
-                'review' || 'review_reply' => Icons.star_outline_rounded,
+                'review' || 'review_reply' || 'review_reminder' => Icons.star_outline_rounded,
                 'price_drop' => Icons.trending_down_rounded,
                 'offer' || 'offer_reply' => Icons.local_offer_outlined,
                 'saved_search' => Icons.notifications_active_outlined,

@@ -24,6 +24,9 @@ class Settings:
     confirm_window: timedelta = timedelta(days=5)
     commission: CommissionRule = field(default_factory=lambda: CommissionRule(version="pilot-2026-10", rate_bp=500))
     min_listing_photos: int = 4
+    # Seconds between passes of the time-based jobs (vitrina_api/jobs.py) inside the API process. 0 = off, for
+    # tests and for deployments that run `python -m vitrina_api.jobs` from cron.
+    jobs_interval_s: int = field(default_factory=lambda: int(os.environ.get("VITRINA_JOBS_INTERVAL", "0")))
     # Development and tests create tables directly. Production sets this to 0 and runs `alembic upgrade head`.
     auto_create_schema: bool = field(default_factory=lambda: os.environ.get("VITRINA_AUTO_CREATE_SCHEMA", "1") == "1")
     # Uploaded photos. Local disk in development; production replaces LocalStorage with an S3-compatible bucket.

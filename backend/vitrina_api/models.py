@@ -147,6 +147,8 @@ class Order(Base):
     promo_code_id: Mapped[int | None] = mapped_column(ForeignKey("promo_codes.id"), index=True)
     promo_code: Mapped[str | None] = mapped_column(String(20))
     promo_discount_tiyn: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    # Set when the buyer got the one "how were they?" reminder, so it never comes twice.
+    review_reminded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
