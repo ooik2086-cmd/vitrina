@@ -1,6 +1,7 @@
 """Chat between buyer and seller, reviews of sellers, and in-app notifications."""
 from __future__ import annotations
 
+import json
 import re
 from datetime import timedelta
 
@@ -33,9 +34,13 @@ class MessageIn(BaseModel):
     body: str = Field(min_length=1, max_length=2000)
 
 
+MAX_REVIEW_PHOTOS = 3
+
+
 class ReviewIn(BaseModel):
     rating: int = Field(ge=1, le=5)
     text: str | None = Field(default=None, max_length=1000)
+    photos: list[str] = Field(default_factory=list, max_length=MAX_REVIEW_PHOTOS)
 
 
 class ReplyIn(BaseModel):
@@ -173,11 +178,11 @@ def post_message(db: Session, conv: Conversation, user: User, text: str, photo_u
 def review_out(db: Session, r: Review) -> dict:
     buyer = db.get(User, r.buyer_id)
     return {"id": r.id, "order_id": r.order_id, "rating": r.rating, "text": r.text, "seller_reply": r.seller_reply,
+            "photos": json.loads(r.photos) if r.photos else [],
             "buyer_name": buyer.display_name or "Сатып алушы", "created_at": services.aware(r.created_at).isoformat()}
 
 
-@router.post("/orders/{order_id}/review", status_code=201)
-def create_review(order_id: int, body: ReviewIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+def reviewable_order(db: Session, order_id: int, user: User) -> Order:
     order = db.get(Order, order_id)
     if order is None or order.buyer_id != user.id:
         raise ApiError(404, "not_found")
@@ -185,8 +190,30 @@ def create_review(order_id: int, body: ReviewIn, user: User = Depends(current_us
         raise ApiError(409, "review_not_allowed", "only completed orders can be reviewed")
     if db.scalar(select(Review).where(Review.order_id == order.id)):
         raise ApiError(409, "already_reviewed")
+    return order
+
+
+@router.post("/orders/{order_id}/review/photos", status_code=201)
+async def upload_review_photo(order_id: int, file: UploadFile = File(...), user: User = Depends(current_user),
+                              db: Session = Depends(get_db), storage: LocalStorage = Depends(get_storage)):
+    """A buyer's photo of the pair that arrived, for their review. Cleaned of metadata like any upload."""
+    reviewable_order(db, order_id, user)
+    data = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise ApiError(413, "file_too_large")
+    return {"url": storage.put(normalize_image(data), owner_id=user.id)}
+
+
+@router.post("/orders/{order_id}/review", status_code=201)
+def create_review(order_id: int, body: ReviewIn, user: User = Depends(current_user), db: Session = Depends(get_db),
+                  storage: LocalStorage = Depends(get_storage)):
+    order = reviewable_order(db, order_id, user)
+    # Only photos this buyer uploaded here: never a link to someone else's picture or another site.
+    own = storage.public_base + f"/{user.id}/"
+    if any(not url.startswith(own) for url in body.photos):
+        raise ApiError(422, "foreign_media")
     review = Review(order_id=order.id, seller_id=order.seller_id, buyer_id=user.id, rating=body.rating,
-                    text=(body.text or "").strip() or None)
+                    text=(body.text or "").strip() or None, photos=json.dumps(body.photos) if body.photos else None)
     db.add(review)
     services.notify(db, order.seller_id, "review", f"Жаңа пікір: {body.rating}/5, тапсырыс №{order.id}.",
                     f"Новый отзыв: {body.rating}/5, заказ №{order.id}.",

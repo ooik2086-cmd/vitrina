@@ -314,7 +314,25 @@ class _ReviewForm extends StatefulWidget {
 class _ReviewFormState extends State<_ReviewForm> {
   int _rating = 0;
   final _text = TextEditingController();
+  final List<String> _photos = [];
   bool _busy = false;
+  bool _uploading = false;
+
+  Future<void> _addPhoto() async {
+    final file = await pickPhoto(context, title: tr('Келген аяқкиімнің фотосы'));
+    if (file == null || !mounted) return;
+    setState(() => _uploading = true);
+    try {
+      final bytes = await file.readAsBytes();
+      if (!mounted) return;
+      final url = await SessionScope.of(context).api.uploadReviewPhoto(widget.orderId, bytes, file.name);
+      if (mounted) setState(() => _photos.add(url));
+    } catch (e) {
+      if (mounted) showError(context, e);
+    } finally {
+      if (mounted) setState(() => _uploading = false);
+    }
+  }
 
   @override
   void dispose() {
@@ -325,7 +343,7 @@ class _ReviewFormState extends State<_ReviewForm> {
   Future<void> _submit() async {
     setState(() => _busy = true);
     try {
-      await SessionScope.of(context).api.review(widget.orderId, _rating, _text.text.trim());
+      await SessionScope.of(context).api.review(widget.orderId, _rating, _text.text.trim(), photos: _photos);
       widget.onDone();
     } catch (e) {
       if (mounted) showError(context, e);
@@ -358,10 +376,47 @@ class _ReviewFormState extends State<_ReviewForm> {
             maxLength: 1000,
             decoration: InputDecoration(hintText: tr('Тауар сипаттамаға сәйкес пе? Жеткізу қалай болды?')),
           ),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            for (final url in _photos)
+              Stack(children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Image.network(url, width: 72, height: 72, fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => const SizedBox(width: 72, height: 72)),
+                ),
+                Positioned(
+                  right: 0,
+                  top: 0,
+                  child: GestureDetector(
+                    onTap: () => setState(() => _photos.remove(url)),
+                    child: const CircleAvatar(radius: 11, child: Icon(Icons.close, size: 14)),
+                  ),
+                ),
+              ]),
+            if (_photos.length < 3)
+              SizedBox(
+                width: 72,
+                height: 72,
+                child: OutlinedButton(
+                  key: const Key('review-photo'),
+                  style: OutlinedButton.styleFrom(
+                      padding: EdgeInsets.zero,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+                  onPressed: _uploading ? null : _addPhoto,
+                  child: _uploading
+                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.add_a_photo_outlined),
+                ),
+              ),
+          ]),
+          const SizedBox(height: 4),
+          Text(tr('Келген жұпты суретке түсіріңіз: басқа сатып алушыларға көп көмектеседі.'),
+              style: theme.textTheme.bodySmall),
+          const SizedBox(height: 12),
           SizedBox(
             width: double.infinity,
             child: FilledButton(
-              onPressed: _rating == 0 || _busy ? null : _submit,
+              onPressed: _rating == 0 || _busy || _uploading ? null : _submit,
               child: Text(tr('Пікір қалдыру')),
             ),
           ),

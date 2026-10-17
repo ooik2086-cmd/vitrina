@@ -259,6 +259,7 @@ class Review(Base):
     rating: Mapped[int] = mapped_column(Integer)
     text: Mapped[str | None] = mapped_column(Text)
     seller_reply: Mapped[str | None] = mapped_column(Text)
+    photos: Mapped[str | None] = mapped_column(Text)  # JSON list of the buyer's own photos of what arrived
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 

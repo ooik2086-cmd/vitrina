@@ -443,12 +443,16 @@ class Review {
         rating = j['rating'] as int,
         text = j['text'] as String?,
         sellerReply = j['seller_reply'] as String?,
+        photos = [for (final p in (j['photos'] as List?) ?? const []) p as String],
         buyerName = j['buyer_name'] as String,
         createdAt = DateTime.parse(j['created_at'] as String).toLocal();
   final int id;
   final int rating;
   final String? text;
   final String? sellerReply;
+
+  /// The buyer's own photos of the pair that arrived.
+  final List<String> photos;
   final String buyerName;
   final DateTime createdAt;
 }
@@ -699,9 +703,19 @@ class Api {
   }
 
   // reviews
-  Future<Review> review(int orderId, int rating, String? text) async =>
-      Review.fromJson(await _send('POST', '/orders/$orderId/review',
-          body: {'rating': rating, if (text != null && text.isNotEmpty) 'text': text}) as Map<String, dynamic>);
+  Future<Review> review(int orderId, int rating, String? text, {List<String> photos = const []}) async =>
+      Review.fromJson(await _send('POST', '/orders/$orderId/review', body: {
+        'rating': rating,
+        if (text != null && text.isNotEmpty) 'text': text,
+        if (photos.isNotEmpty) 'photos': photos,
+      }) as Map<String, dynamic>);
+
+  Future<String> uploadReviewPhoto(int orderId, List<int> bytes, String filename) async {
+    final req = http.MultipartRequest('POST', Uri.parse('$base/orders/$orderId/review/photos'))
+      ..headers.addAll({'Accept': 'application/json', if (token != null) 'Authorization': 'Bearer $token'})
+      ..files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
+    return (_decode(await http.Response.fromStream(await _client.send(req))) as Map)['url'] as String;
+  }
 
   Future<void> reportListing(int id, String reason, {String? text}) => _send('POST', '/listings/$id/report',
       body: {'reason': reason, if (text != null && text.isNotEmpty) 'text': text});

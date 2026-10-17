@@ -21,6 +21,7 @@ import 'package:vitrina/screens/listing_screen.dart';
 import 'package:vitrina/screens/manage_listing_screen.dart';
 import 'package:vitrina/screens/offers_screen.dart';
 import 'package:vitrina/screens/saved_searches_screen.dart';
+import 'package:vitrina/screens/seller_reviews_screen.dart';
 import 'package:vitrina/screens/shop_screen.dart';
 import 'package:vitrina/screens/spin_capture_screen.dart';
 import 'package:vitrina/ru.dart';
@@ -439,6 +440,29 @@ void main() {
     expect(calls.last, startsWith('GET /api/v1/listings'));
     expect(find.text('adidas'), findsOneWidget); // the query box shows the saved search
     expect(find.byKey(const Key('search-saved')), findsOneWidget);
+  });
+
+  testWidgets('reviews show the buyer photos and open one large', (tester) async {
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async => jsonResponse({
+              'items': [
+                {
+                  'id': 1, 'order_id': 5, 'rating': 5, 'text': 'Суреттегідей', 'seller_reply': null,
+                  'photos': ['http://x/media/2/a.jpg', 'http://x/media/2/b.jpg'],
+                  'buyer_name': 'Аян', 'created_at': '2026-10-17T05:00:00+00:00',
+                }
+              ]
+            })));
+    await tester.pumpWidget(SessionScope(
+        session: Session(api),
+        child: const MaterialApp(home: SellerReviewsScreen(sellerId: 3, shopName: 'Qadam Store'))));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('review-photo-http://x/media/2/a.jpg')), findsOneWidget);
+    expect(find.byKey(const Key('review-photo-http://x/media/2/b.jpg')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('review-photo-http://x/media/2/a.jpg')));
+    await tester.pumpAndSettle();
+    expect(find.byType(InteractiveViewer), findsOneWidget);
   });
 
   test('photo upload is multipart with the token and returns the stored url', () async {

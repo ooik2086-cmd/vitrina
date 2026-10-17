@@ -570,6 +570,27 @@ class SocialTests(ApiTestCase):
         kinds = [n["kind"] for n in self.get("/notifications", self.buyer).json()["items"]]
         self.assertIn("review_reply", kinds)
 
+    def test_review_carries_the_buyers_own_photos_only(self):
+        listing, order = self.delivered()
+        oid = order["id"]
+        photo = lambda token: self.c.post(f"/api/v1/orders/{oid}/review/photos", headers=self.h(token),  # noqa: E731
+                                          files={"file": ("p.jpg", jpeg(), "image/jpeg")})
+        self.assertEqual(photo(self.buyer).json()["code"], "review_not_allowed")  # not confirmed yet
+        self.post(f"/orders/{oid}/confirm", self.buyer)
+        self.assertEqual(photo(self.seller).status_code, 404)
+        urls = [photo(self.buyer).json()["url"] for _ in range(2)]
+        seller_photo = self.c.post("/api/v1/media", headers=self.h(self.seller),
+                                   files={"file": ("p.jpg", jpeg(), "image/jpeg")}).json()["url"]
+        bad = self.post(f"/orders/{oid}/review", self.buyer, {"rating": 5, "photos": [seller_photo]})
+        self.assertEqual(bad.json()["code"], "foreign_media")
+        four = self.post(f"/orders/{oid}/review", self.buyer, {"rating": 5, "photos": urls * 2})
+        self.assertEqual(four.status_code, 422)
+        r = self.post(f"/orders/{oid}/review", self.buyer, {"rating": 5, "text": "Суреттегідей", "photos": urls})
+        self.assertEqual(r.json()["photos"], urls)
+        page = self.c.get(f"/api/v1/sellers/{listing['seller']['id']}/reviews").json()
+        self.assertEqual(page["items"][0]["photos"], urls)
+        self.assertEqual(photo(self.buyer).json()["code"], "already_reviewed")
+
     def test_order_history_lists_each_step(self):
         _, order = self.delivered()
         detail = self.get(f"/orders/{order['id']}", self.buyer).json()
