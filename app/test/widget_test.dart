@@ -1596,6 +1596,17 @@ void main() {
     expect(result!.city, 'Шымкент');
   });
 
+  test('packing slip comes back as PDF bytes, or as the server\'s error', () async {
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async => req.url.path == '/api/v1/orders/5/slip.pdf'
+            ? http.Response.bytes([37, 80, 68, 70], 200, headers: {'content-type': 'application/pdf'})
+            : jsonResponse({'code': 'invalid_status', 'message_kk': 'Бұл күйде мүмкін емес.'}, 409)))
+      ..token = 'tok';
+    expect(await api.packingSlip(5), [37, 80, 68, 70]);
+    expect(api.packingSlip(6), throwsA(isA<ApiException>().having((e) => e.code, 'code', 'invalid_status')));
+  });
+
   test('sales export asks for the chosen period and hands back the file, or the server\'s error', () async {
     Uri? asked;
     final api = Api(

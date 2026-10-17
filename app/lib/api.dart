@@ -1159,6 +1159,14 @@ class Api {
     return res.bodyBytes;
   }
 
+  /// The A6 packing slip for a paid order, as PDF bytes; only the seller can get it.
+  Future<List<int>> packingSlip(int orderId) async {
+    final res = await _client.get(Uri.parse('$base/orders/$orderId/slip.pdf'),
+        headers: {if (token != null) 'Authorization': 'Bearer $token'});
+    if (res.statusCode >= 400) _decode(res); // throws the server's error
+    return res.bodyBytes;
+  }
+
   Future<Proofs> proofs(int listingId) async =>
       Proofs.fromJson(await _send('GET', '/listings/$listingId/proofs') as Map<String, dynamic>);
 

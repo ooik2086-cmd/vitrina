@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
 
@@ -57,7 +59,25 @@ class OrderScreen extends StatefulWidget {
   State<OrderScreen> createState() => _OrderScreenState();
 }
 
+/// From payment until the box has left: when a printed slip is useful.
+const _slipStatuses = {'PAID', 'SELLER_ACCEPTED', 'PREPARING', 'SHIPPED'};
+
 class _OrderScreenState extends State<OrderScreen> {
+  /// A6 page with the recipient, address, pair and size, to print and put on the box.
+  Future<void> _slip() async {
+    try {
+      final bytes = await _api.packingSlip(widget.orderId);
+      final name = 'vitrina-${widget.orderId}.pdf';
+      await SharePlus.instance.share(ShareParams(
+        files: [XFile.fromData(Uint8List.fromList(bytes), mimeType: 'application/pdf', name: name)],
+        fileNameOverrides: [name],
+        downloadFallbackEnabled: true,
+      ));
+    } catch (e) {
+      if (mounted) showError(context, e);
+    }
+  }
+
   OrderInfo? _order;
   Object? _error;
   bool _busy = false;
@@ -194,6 +214,16 @@ class _OrderScreenState extends State<OrderScreen> {
                           .push(MaterialPageRoute(builder: (_) => ListingScreen(listingId: o.listingId))),
                       icon: const Icon(Icons.replay),
                       label: Text(tr('Тауар бетін ашу')),
+                    ),
+                  ),
+                if (me?.id == o.sellerId && o.delivery != null && _slipStatuses.contains(o.status))
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: OutlinedButton.icon(
+                      key: const Key('slip'),
+                      onPressed: _slip,
+                      icon: const Icon(Icons.print_outlined),
+                      label: Text(tr('Жіберу парағын жүктеу')),
                     ),
                   ),
                 for (final a in _actionsFor(o, isBuyer: me?.id == o.buyerId))

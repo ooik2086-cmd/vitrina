@@ -268,6 +268,20 @@ class PayoutTests(ApiTestCase):
         self.assertEqual(self.c.delete("/api/v1/me", headers=self.h(self.seller)).json()["code"], "payout_owed")
 
 
+class SlipTests(ApiTestCase):
+    def test_seller_prints_a_slip_only_once_the_order_is_paid(self):
+        _, order = self.ordered()
+        url = f"/api/v1/orders/{order['id']}/slip.pdf"
+        self.assertEqual(self.c.get(url, headers=self.h(self.seller)).json()["code"], "invalid_status")
+        self.post(f"/orders/{order['id']}/pay", self.buyer)
+        self.pay(order)
+        self.assertEqual(self.c.get(url, headers=self.h(self.buyer)).status_code, 404)  # the seller's tool only
+        r = self.c.get(url, headers=self.h(self.seller))
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.headers["content-type"], "application/pdf")
+        self.assertTrue(r.content.startswith(b"%PDF"))
+
+
 class DeliveryEstimateTests(ApiTestCase):
     def test_estimate_adds_the_sellers_shipping_time_to_transit(self):
         from vitrina_api.delivery_eta import known_city, transit_days
