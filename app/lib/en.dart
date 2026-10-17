@@ -647,4 +647,9 @@ const en = <String, String>{
   'Жеңілдік {0} тауарға қосылды.': 'Sale applied to {0} listings.',
   'Бұрынғы баға {0} тауарға қайтарылды.': 'Old price restored on {0} listings.',
   'Сатып алушыға жазу': 'Message buyer',
+  'Аяқталған': 'Finished',
+  'Белсенді': 'Active',
+  'Сай тапсырыс жоқ.': 'No matching orders.',
+  'Сізді күтеді': 'Waiting on you',
+  'Сіздің әрекетіңізді күтетін тапсырыс жоқ.': 'No orders are waiting on you.',
 };

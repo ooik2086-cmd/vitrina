@@ -27,6 +27,7 @@ import 'package:vitrina/screens/notification_settings_screen.dart';
 import 'package:vitrina/screens/onboarding_screen.dart';
 import 'package:vitrina/screens/offers_screen.dart';
 import 'package:vitrina/screens/order_screen.dart';
+import 'package:vitrina/screens/orders_screen.dart';
 import 'package:vitrina/screens/profile_screen.dart';
 import 'package:vitrina/screens/saved_searches_screen.dart';
 import 'package:vitrina/screens/seller_reviews_screen.dart';
@@ -656,6 +657,37 @@ void main() {
     await tester.pumpAndSettle();
     expect(posts, ['/api/v1/orders/5/conversation']);
     expect(find.text('Бұл пайдаланушымен байланысу мүмкін емес.'), findsOneWidget);
+  });
+
+  testWidgets('orders show which ones wait on you and filter to them', (tester) async {
+    Map<String, dynamic> order(int id, String status) => {
+          'id': id,
+          'status': status,
+          'listing_id': 7,
+          'buyer_id': 2,
+          'seller_id': 1,
+          'total_tiyn': 4650000,
+          'listing_title': 'Shoe $id',
+        };
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async => jsonResponse({
+              'items': [order(1, 'PAYMENT_PENDING'), order(2, 'SHIPPED'), order(3, 'COMPLETED')]
+            })))
+      ..token = 't';
+    final session = Session(api)..update(Me.fromJson({'id': 2, 'phone': '+77010000002', 'is_seller': false}));
+    await tester.pumpWidget(SessionScope(session: session, child: const MaterialApp(home: OrdersScreen())));
+    await tester.pumpAndSettle();
+    expect(find.text('Сізді күтеді 1'), findsOneWidget);
+    expect(find.text('Белсенді 2'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('orders-buyer-mine')));
+    await tester.pumpAndSettle();
+    expect(find.text('Shoe 1'), findsOneWidget);
+    expect(find.text('Shoe 2'), findsNothing);
+    await tester.tap(find.byKey(const Key('orders-buyer-done')));
+    await tester.pumpAndSettle();
+    expect(find.text('Shoe 3'), findsOneWidget);
+    expect(find.text('Shoe 1'), findsNothing);
   });
 
   test('order summary lists the price with its promo and says it is not a fiscal receipt', () {

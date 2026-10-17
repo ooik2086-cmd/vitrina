@@ -32,6 +32,14 @@ class OrdersScreen extends StatelessWidget {
   }
 }
 
+const _waitsForBuyer = {'CREATED', 'PAYMENT_PENDING', 'DELIVERED_PENDING_CONFIRMATION'};
+const _waitsForSeller = {'PAID', 'SELLER_ACCEPTED', 'RETURN_REQUESTED'};
+const finishedStatuses = {'COMPLETED', 'CANCELLED', 'REFUNDED'};
+
+/// True when the next step is this side's: pay or confirm for the buyer, accept, ship or answer a return for the seller.
+bool orderWaitsForMe(OrderInfo o, String role) =>
+    (role == 'seller' ? _waitsForSeller : _waitsForBuyer).contains(o.status);
+
 class _OrderList extends StatefulWidget {
   const _OrderList({required this.role});
   final String role;
@@ -42,6 +50,7 @@ class _OrderList extends StatefulWidget {
 
 class _OrderListState extends State<_OrderList> {
   Future<List<OrderInfo>>? _orders;
+  String _filter = 'all';
 
   @override
   void didChangeDependencies() {
@@ -66,16 +75,63 @@ class _OrderListState extends State<_OrderList> {
       builder: (context, snap) {
         if (snap.hasError) return Center(child: Text('${snap.error}'));
         if (!snap.hasData) return const Center(child: CircularProgressIndicator());
-        final items = snap.data!;
+        final all = snap.data!;
+        bool keep(OrderInfo o, String f) => switch (f) {
+              'mine' => orderWaitsForMe(o, widget.role),
+              'active' => !finishedStatuses.contains(o.status),
+              'done' => finishedStatuses.contains(o.status),
+              _ => true,
+            };
+        final items = [
+          for (final o in all)
+            if (keep(o, _filter)) o
+        ];
+        final filters = [
+          ('all', tr('Барлығы')),
+          ('mine', tr('Сізді күтеді')),
+          ('active', tr('Белсенді')),
+          ('done', tr('Аяқталған')),
+        ];
         return RefreshIndicator(
           onRefresh: _reload,
-          child: items.isEmpty
+          child: all.isEmpty
               ? ListView(children: [SizedBox(height: 120), Center(child: Text(tr('Әзірге тапсырыс жоқ.')))])
               : ListView.separated(
-                  itemCount: items.length,
-                  separatorBuilder: (_, __) => const Divider(indent: 96),
-                  itemBuilder: (context, i) {
-                    final o = items[i];
+                  itemCount: items.length + 1,
+                  separatorBuilder: (_, i) => i == 0 ? const SizedBox.shrink() : const Divider(indent: 96),
+                  itemBuilder: (context, index) {
+                    if (index == 0) {
+                      return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                        SizedBox(
+                          height: 56,
+                          child: ListView(
+                            scrollDirection: Axis.horizontal,
+                            padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+                            children: [
+                              for (final (code, name) in filters) ...[
+                                ChoiceChip(
+                                  key: Key('orders-${widget.role}-$code'),
+                                  label: Text('$name ${all.where((o) => keep(o, code)).length}'),
+                                  selected: _filter == code,
+                                  onSelected: (_) => setState(() => _filter = code),
+                                ),
+                                const SizedBox(width: 8),
+                              ],
+                            ],
+                          ),
+                        ),
+                        if (items.isEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 80),
+                            child: Center(
+                                child: Text(_filter == 'mine'
+                                    ? tr('Сіздің әрекетіңізді күтетін тапсырыс жоқ.')
+                                    : tr('Сай тапсырыс жоқ.'))),
+                          ),
+                      ]);
+                    }
+                    final o = items[index - 1];
+                    final waits = orderWaitsForMe(o, widget.role);
                     return ListTile(
                       contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
                       leading: ClipRRect(
@@ -92,7 +148,13 @@ class _OrderListState extends State<_OrderList> {
                       ),
                       title: Text(o.listingTitle ?? trf('Тапсырыс №{0}', [o.id]),
                           maxLines: 1, overflow: TextOverflow.ellipsis),
-                      subtitle: Text(label(orderStatuses, o.status)),
+                      subtitle: Text.rich(TextSpan(children: [
+                        TextSpan(text: label(orderStatuses, o.status)),
+                        if (waits)
+                          TextSpan(
+                              text: ' · ${tr('Сізді күтеді')}',
+                              style: TextStyle(color: Brand.accent, fontWeight: FontWeight.w700)),
+                      ])),
                       trailing: Text(formatTenge(o.totalTiyn), style: const TextStyle(fontWeight: FontWeight.w700)),
                       onTap: () async {
                         await Navigator.of(context).push(MaterialPageRoute(builder: (_) => OrderScreen(orderId: o.id)));
