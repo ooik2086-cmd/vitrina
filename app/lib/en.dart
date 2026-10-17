@@ -656,32 +656,48 @@ const en = <String, String>{
   'Дүкен сілтемесі': 'Shop link',
   'Instagram биосына немесе WhatsApp статусына': 'For your Instagram bio or WhatsApp status',
   '{0} · VITRINA дүкені\n{1}': '{0} · shop on VITRINA\n{1}',
-  '{0} дейін төлемесеңіз, тапсырыс жойылады және өлшем басқаларға ашылады.': "If it isn't paid by {0}, the order is cancelled and the size goes back on sale.",
-  'Сатушы {0} дейін жауап бермесе, ақша сізге өзі қайтарылады.': "If the seller doesn't answer by {0}, your money comes back automatically.",
-  '{0} дейін қабылдаңыз немесе бас тартыңыз. Әйтпесе ақша сатып алушыға қайтарылады.': 'Accept or decline by {0}. Otherwise the money goes back to the buyer.',
-  '360° витрина қосыңыз: сатып алушы аяқкиімді жан-жағынан айналдырып көреді.': 'Add a 360° showcase: buyers can turn the shoe and see every side.',
+  '{0} дейін төлемесеңіз, тапсырыс жойылады және өлшем басқаларға ашылады.':
+      "If it isn't paid by {0}, the order is cancelled and the size goes back on sale.",
+  'Сатушы {0} дейін жауап бермесе, ақша сізге өзі қайтарылады.':
+      "If the seller doesn't answer by {0}, your money comes back automatically.",
+  '{0} дейін қабылдаңыз немесе бас тартыңыз. Әйтпесе ақша сатып алушыға қайтарылады.':
+      'Accept or decline by {0}. Otherwise the money goes back to the buyer.',
+  '360° витрина қосыңыз: сатып алушы аяқкиімді жан-жағынан айналдырып көреді.':
+      'Add a 360° showcase: buyers can turn the shoe and see every side.',
   'Брендін көрсетіңіз: іздеуде сол бойынша табылады.': 'Add the brand: that is what people search by.',
   'Жақсы': 'Good',
-  'Киілгенін не ақауын сипаттаңыз: сұрақ азаяды, қайтару сирейді.': 'Describe the wear or defects: fewer questions and returns.',
+  'Киілгенін не ақауын сипаттаңыз: сұрақ азаяды, қайтару сирейді.':
+      'Describe the wear or defects: fewer questions and returns.',
   'Модель атауын жазыңыз: нақты модельді іздейтіндер табады.': 'Add the model name so people searching for it find it.',
-  'Сипаттамаға 2–3 сөйлем жазыңыз: материалы, қалай отырады, неге сатылады.': 'Write 2–3 sentences: the material, how it fits, why you are selling.',
-  'Табанын, үстінен және өлшем жапсырмасын түсіріңіз: тозуы мен өлшемі көрінеді.': 'Photograph the sole, the top and the size label so wear and size are clear.',
+  'Сипаттамаға 2–3 сөйлем жазыңыз: материалы, қалай отырады, неге сатылады.':
+      'Write 2–3 sentences: the material, how it fits, why you are selling.',
+  'Табанын, үстінен және өлшем жапсырмасын түсіріңіз: тозуы мен өлшемі көрінеді.':
+      'Photograph the sole, the top and the size label so wear and size are clear.',
   'Тауар бетінің толықтығы': 'Listing completeness',
   'Толықтыруға болады': 'Could be fuller',
-  'Түпнұсқалығын дәлелдеңіз: чек, қорап жапсырмасы не бирка фотосы.': 'Prove it is genuine: a receipt, box label or tag photo.',
+  'Түпнұсқалығын дәлелдеңіз: чек, қорап жапсырмасы не бирка фотосы.':
+      'Prove it is genuine: a receipt, box label or tag photo.',
   'Қалдықты жаңартыңыз: қазір сатылымда бірде-бір өлшем жоқ.': 'Update the stock: no size is on sale right now.',
   'Өте жақсы': 'Excellent',
-  '«Құжаты бар» не «Тексерілген» белгісі сатушы чек, қорап жапсырмасы не бирка жіберіп, оны VITRINA қызметкері қарағанын білдіреді. Белгі жоқ тауарда сатушының өз сөзі ғана бар. Күмәндансаңыз, сатып алмай тұрып чатта сұраңыз.': 'A “Has documents” or “Verified” badge means the seller sent a receipt, box label or tag and VITRINA staff looked at it. Without a badge there is only the seller’s word. If in doubt, ask in the chat before you buy.',
-  'Бұл ережелер алдын ала нұсқа: төлем серіктесі қосылып, заңгер тексергеннен кейін нақтыланады.': 'These rules are a draft: they will be finalised once the payment partner is connected and a lawyer has reviewed them.',
-  'Жеткізілгеннен кейін {0} күн ішінде тапсырыс бетінде «Қайтару» батырмасын басып, себебін жазыңыз. Сатушы мақұлдаса, ақша қайтарылады. Келіспесеңіздер, қолдау қызметі шешеді. Келесі жолы қателеспеу үшін профильге табан ұзындығын сантиметрмен енгізіңіз.': 'Within {0} days of delivery, tap “Return” on the order page and write the reason. If the seller approves, the money comes back. If you can’t agree, support decides. To get it right next time, add your foot length in centimetres to your profile.',
-  'Сатушы аяқкиімді айналдыра отырып түсірген шын фотолар. Оларды саусақпен бұрап, тігісі мен табанына дейін көресіз. Жасанды интеллект аяқкиімнің пішіні мен түсін өзгертпейді, тек фонды тазартады.': 'Real photos the seller took while turning the shoe. Spin them with your finger and look at every seam down to the sole. AI never changes the shoe’s shape or colour; it only cleans up the background.',
-  'Тапсырыс бетінде «Дау ашу» басып, себебін жазыңыз, фотосын сатушымен чатқа жіберіңіз. Дау шешілгенше ақша ешкімге өтпейді. Қолдау қызметі екі жақтың да түсіндірмесін және чатты қарап, шешім шығарады.': 'Tap “Open dispute” on the order page and write the reason; send photos to the seller in the chat. Until the dispute is settled the money goes to no one. Support reads both sides and the chat, then decides.',
-  'Тапсырыс жасаған соң {0} минут ішінде төлейсіз, әйтпесе ол жойылып, өлшем басқаларға ашылады. Сатушы {1} сағат ішінде қабылдауы керек, жауап бермесе ақша өзі қайтарылады. Жеткізілген соң тексеруге {2} күн бар: растамасаңыз да, дау ашпасаңыз, тапсырыс өзі аяқталады.': 'After ordering, pay within {0} minutes, or the order is cancelled and the size goes back on sale. The seller has {1} hours to accept; if they don’t answer, the money comes back automatically. After delivery you have {2} days to check: if you neither confirm nor open a dispute, the order completes on its own.',
+  '«Құжаты бар» не «Тексерілген» белгісі сатушы чек, қорап жапсырмасы не бирка жіберіп, оны VITRINA қызметкері қарағанын білдіреді. Белгі жоқ тауарда сатушының өз сөзі ғана бар. Күмәндансаңыз, сатып алмай тұрып чатта сұраңыз.':
+      'A “Has documents” or “Verified” badge means the seller sent a receipt, box label or tag and VITRINA staff looked at it. Without a badge there is only the seller’s word. If in doubt, ask in the chat before you buy.',
+  'Бұл ережелер алдын ала нұсқа: төлем серіктесі қосылып, заңгер тексергеннен кейін нақтыланады.':
+      'These rules are a draft: they will be finalised once the payment partner is connected and a lawyer has reviewed them.',
+  'Жеткізілгеннен кейін {0} күн ішінде тапсырыс бетінде «Қайтару» батырмасын басып, себебін жазыңыз. Сатушы мақұлдаса, ақша қайтарылады. Келіспесеңіздер, қолдау қызметі шешеді. Келесі жолы қателеспеу үшін профильге табан ұзындығын сантиметрмен енгізіңіз.':
+      'Within {0} days of delivery, tap “Return” on the order page and write the reason. If the seller approves, the money comes back. If you can’t agree, support decides. To get it right next time, add your foot length in centimetres to your profile.',
+  'Сатушы аяқкиімді айналдыра отырып түсірген шын фотолар. Оларды саусақпен бұрап, тігісі мен табанына дейін көресіз. Жасанды интеллект аяқкиімнің пішіні мен түсін өзгертпейді, тек фонды тазартады.':
+      'Real photos the seller took while turning the shoe. Spin them with your finger and look at every seam down to the sole. AI never changes the shoe’s shape or colour; it only cleans up the background.',
+  'Тапсырыс бетінде «Дау ашу» басып, себебін жазыңыз, фотосын сатушымен чатқа жіберіңіз. Дау шешілгенше ақша ешкімге өтпейді. Қолдау қызметі екі жақтың да түсіндірмесін және чатты қарап, шешім шығарады.':
+      'Tap “Open dispute” on the order page and write the reason; send photos to the seller in the chat. Until the dispute is settled the money goes to no one. Support reads both sides and the chat, then decides.',
+  'Тапсырыс жасаған соң {0} минут ішінде төлейсіз, әйтпесе ол жойылып, өлшем басқаларға ашылады. Сатушы {1} сағат ішінде қабылдауы керек, жауап бермесе ақша өзі қайтарылады. Жеткізілген соң тексеруге {2} күн бар: растамасаңыз да, дау ашпасаңыз, тапсырыс өзі аяқталады.':
+      'After ordering, pay within {0} minutes, or the order is cancelled and the size goes back on sale. The seller has {1} hours to accept; if they don’t answer, the money comes back automatically. After delivery you have {2} days to check: if you neither confirm nor open a dispute, the order completes on its own.',
   'Толығырақ': 'Learn more',
-  'Төлеген ақшаңыз сатушыға бірден өтпейді, VITRINA-да сақталады. Сатушы оны сіз аяқкиімді алып, «Алдым, бәрі дұрыс» батырмасын басқаннан кейін ғана алады. Бір нәрсе дұрыс болмаса, ақша сізге қайтарылады.': 'The money you pay doesn’t go to the seller straight away; VITRINA holds it. The seller gets it only after you receive the shoes and tap “Received, all good”. If something is wrong, the money comes back to you.',
+  'Төлеген ақшаңыз сатушыға бірден өтпейді, VITRINA-да сақталады. Сатушы оны сіз аяқкиімді алып, «Алдым, бәрі дұрыс» батырмасын басқаннан кейін ғана алады. Бір нәрсе дұрыс болмаса, ақша сізге қайтарылады.':
+      'The money you pay doesn’t go to the seller straight away; VITRINA holds it. The seller gets it only after you receive the shoes and tap “Received, all good”. If something is wrong, the money comes back to you.',
   'Төлем, мерзімдер, қайтару, дау': 'Payment, deadlines, returns, disputes',
   'Қалай жұмыс істейді': 'How it works',
-  'Қорғау тек VITRINA ішінде төленген тапсырысқа жұмыс істейді. Сатушы басқа жерге аударым сұраса, бұл қауіп белгісі: келіспеңіз және тауар бетінен шағым жіберіңіз.': 'Protection covers only orders paid inside VITRINA. If a seller asks you to transfer money anywhere else, that is a warning sign: don’t agree, and report it from the listing page.',
+  'Қорғау тек VITRINA ішінде төленген тапсырысқа жұмыс істейді. Сатушы басқа жерге аударым сұраса, бұл қауіп белгісі: келіспеңіз және тауар бетінен шағым жіберіңіз.':
+      'Protection covers only orders paid inside VITRINA. If a seller asks you to transfer money anywhere else, that is a warning sign: don’t agree, and report it from the listing page.',
   'Ақшам қалай қорғалады?': 'How is my money protected?',
   'Тапсырыс қалай жүреді?': 'How does an order go?',
   'Өлшемі келмесе ше?': 'What if the size doesn’t fit?',
@@ -698,4 +714,24 @@ const en = <String, String>{
   'Төлемді күтетін тапсырыс': 'Orders to pay',
   'Алғаныңызды растау': 'Confirm you received it',
   'Сатушы жауап берген ұсыныс': 'Offers the seller answered',
+  'IBAN және ЖСН/БСН: ақшаны шығару үшін керек.': 'IBAN and IIN/BIN: needed to pay out.',
+  '{0} шотыңызға шығарылсын ба?': 'Pay out {0} to your account?',
+  'Ақша осы шотқа аударылады.': 'Money is sent to this account.',
+  'Банк шоты': 'Bank account',
+  'Банк шотын қосу': 'Add a bank account',
+  'Банк шотыңызға шығарып алуға болады.': 'You can pay this out to your bank account.',
+  'Ең аз шығару сомасы — {0}.': 'The smallest payout is {0}.',
+  'ЖСН не БСН (12 цифр)': 'IIN or BIN (12 digits)',
+  'Төлем тапсырмасы {0}': 'Payment order {0}',
+  'Шот иесі (аты-жөні не ЖК атауы)': 'Account holder (full name or sole proprietor name)',
+  'Шот сіздің не ЖК-ңыздың атында болуы керек. Деректемені тек қолдау қызметі көреді.':
+      'The account must be in your name or your sole proprietorship\'s. Only support sees these details.',
+  'Шотқа шығару': 'Pay out',
+  'Шығару': 'Pay out',
+  'Шығару сұрауыңыз қаралуда.': 'Your payout request is being processed.',
+  'Шығарулар': 'Payouts',
+  'Қолдау қызметі банк аударымымен жібереді. Аударылғанда хабарлама келеді.':
+      'Support sends it by bank transfer. You\'ll get a notification when it\'s sent.',
+  'Қаралуда': 'In review',
+  'Аударылды': 'Sent',
 };

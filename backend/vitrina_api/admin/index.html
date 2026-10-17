@@ -92,7 +92,7 @@ function loginView() {
 }
 
 function shell(content) {
-  const tabs = [['overview','Шолу'],['moderation','Тексеруде'],['authenticity','Түпнұсқа'],['disputes','Даулар'],['reports','Шағымдар'],['orders','Тапсырыстар'],['listings','Тауарлар'],['audit','Аудит']];
+  const tabs = [['overview','Шолу'],['moderation','Тексеруде'],['authenticity','Түпнұсқа'],['disputes','Даулар'],['reports','Шағымдар'],['payouts','Төлемдер'],['orders','Тапсырыстар'],['listings','Тауарлар'],['audit','Аудит']];
   const n = $(`<div><header><b>VITRINA</b><nav>${tabs.map(([k, l]) =>
     `<button data-k="${k}" aria-current="${k === tab}">${l}</button>`).join('')}</nav>
     <span style="flex:1"></span><button class="ghost" id="out">Шығу</button></header><main></main></div>`);
@@ -219,6 +219,26 @@ async function show() {
         f.onsubmit = async (e) => {
           e.preventDefault();
           try { await call('POST', `/admin/reports/${l.id}/close`, { action: e.submitter.value, reason: f.reason.value.trim() }); show(); }
+          catch (x) { f.querySelector('.err').textContent = x.message; }
+        };
+        box.append(n);
+      });
+    } else if (tab === 'payouts') {
+      const r = await call('GET', '/admin/payouts');
+      if (!r.items.length) box.append($(`<div class="card muted">Ақша шығару сұрауы жоқ.</div>`));
+      r.items.forEach(p => {
+        const n = $(`<div class="card"><b>${tenge(p.amount_tiyn)}</b> <span class="pill">${when(p.created_at)}</span>
+          <div class="muted">${esc(p.shop_name)} · ${esc(p.phone)} · сатушы #${p.seller_id}</div>
+          <table><tr><td>Шот иесі</td><td>${esc(p.holder_name)}</td></tr><tr><td>IBAN</td><td><code>${esc(p.iban)}</code></td></tr>
+          <tr><td>ЖСН/БСН</td><td><code>${esc(p.tax_id)}</code></td></tr></table>
+          <form class="inline" style="grid-template-columns:1fr auto auto"><input name="text" placeholder="Төлем тапсырмасының нөмірі, не қайтару себебі (сатушы көреді)" required>
+          <button class="ghost" value="reject">Қайтару</button><button class="primary" value="paid">Аударылды</button>
+          <div class="err" style="grid-column:1/-1"></div></form></div>`);
+        const f = n.querySelector('form');
+        f.onsubmit = async (e) => {
+          e.preventDefault();
+          const text = f.text.value.trim(), paid = e.submitter.value === 'paid';
+          try { await call('POST', `/admin/payouts/${p.id}/${e.submitter.value}`, paid ? { bank_ref: text } : { reason: text }); show(); }
           catch (x) { f.querySelector('.err').textContent = x.message; }
         };
         box.append(n);

@@ -190,6 +190,83 @@ class EarningsTests(ApiTestCase):
         self.assertEqual(e["items"][0]["listing_title"], LISTING["title"])
 
 
+def with_check_digit(first11: str) -> str:
+    """A valid IIN/BIN from its first 11 digits, for tests."""
+    d = [int(c) for c in first11]
+    check = sum(d[i] * (i + 1) for i in range(11)) % 11
+    if check == 10:
+        check = sum(d[i] * w for i, w in enumerate((3, 4, 5, 6, 7, 8, 9, 10, 11, 1, 2))) % 11
+    return first11 + str(check)
+
+
+IBAN = "KZ86125KZT5004100100"  # the IBAN registry's own example for Kazakhstan
+
+
+class PayoutTests(ApiTestCase):
+    def completed(self):
+        _, order = self.delivered()
+        self.post(f"/orders/{order['id']}/confirm", self.buyer)
+        return self.c.get("/api/v1/me/earnings", headers=self.h(self.seller)).json()["payable_tiyn"]
+
+    def account(self, **over):
+        body = {"holder_name": "ЖК Qadam  Store", "iban": "kz86 125K ZT50 0410 0100",
+                "tax_id": with_check_digit("90010130012"), **over}
+        return self.c.put("/api/v1/me/payout-account", json=body, headers=self.h(self.seller))
+
+    def test_bank_details_are_checked_before_they_are_kept(self):
+        self.assertEqual(self.account(iban="KZ87125KZT5004100100").json()["code"], "invalid_iban")
+        self.assertEqual(self.account(iban="RU0204452560040702810412345678901").json()["code"], "invalid_iban")
+        tax = with_check_digit("90010130012")
+        wrong = tax[:11] + str((int(tax[11]) + 1) % 10)
+        self.assertEqual(self.account(tax_id=wrong).json()["code"], "invalid_tax_id")
+        r = self.account()
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["account"], {"holder_name": "ЖК Qadam Store", "iban": IBAN,
+                                               "iban_masked": "KZ86 •••• 0100", "tax_id": tax})
+        self.assertEqual(self.c.get("/api/v1/me/payout-account", headers=self.h(self.buyer)).status_code, 403)
+
+    def test_payout_moves_money_out_once_and_support_pays_or_returns_it(self):
+        self.assertEqual(self.post("/me/payouts", self.seller).json()["code"], "payout_account_required")
+        self.account()
+        self.assertEqual(self.post("/me/payouts", self.seller).json()["code"], "payout_too_small")
+        owed = self.completed()
+        self.assertEqual(self.post("/me/payouts", self.seller, {"amount_tiyn": owed + 1}).json()["code"],
+                         "payout_exceeds")
+        r = self.post("/me/payouts", self.seller, {"amount_tiyn": owed - 100_000})
+        self.assertEqual(r.status_code, 201, r.text)
+        first = r.json()
+        self.assertEqual((first["status"], first["iban_masked"]), ("requested", "KZ86 •••• 0100"))
+        self.assertEqual(self.post("/me/payouts", self.seller).json()["code"], "payout_open")
+        mine = self.c.get("/api/v1/me/payouts", headers=self.h(self.seller)).json()
+        self.assertEqual((mine["payable_tiyn"], mine["open"], mine["has_account"]), (100_000, True, True))
+        # A changed account later does not redirect a request already made.
+        self.account(iban="KZ86125KZT5004100100", holder_name="Басқа адам")
+        staff = self.make_staff()
+        self.assertEqual(self.c.get("/api/v1/admin/payouts", headers=self.h(self.seller)).status_code, 403)
+        queue = self.c.get("/api/v1/admin/payouts", headers=self.h(staff)).json()["items"]
+        self.assertEqual([(q["id"], q["holder_name"], q["shop_name"]) for q in queue],
+                         [(first["id"], "ЖК Qadam Store", "Qadam Store")])
+        r = self.post(f"/admin/payouts/{first['id']}/paid", staff, {"bank_ref": "ПП-1042"})
+        self.assertEqual(r.json()["status"], "paid")
+        self.assertEqual(self.post(f"/admin/payouts/{first['id']}/reject", staff, {"reason": "x"}).json()["code"],
+                         "payout_decided")
+        with self.db() as db:
+            self.assertEqual(balance(db, f"payout:{first['id']}"), 0)
+            self.assertEqual(balance(db, seller_payable("1")), 100_000)
+        # The rest, asked for and sent back, returns to the balance.
+        second = self.post("/me/payouts", self.seller).json()
+        self.assertEqual(second["amount_tiyn"], 100_000)
+        r = self.post(f"/admin/payouts/{second['id']}/reject", staff, {"reason": "Шот иесінің аты сәйкес емес"})
+        self.assertEqual(r.json()["status"], "rejected")
+        mine = self.c.get("/api/v1/me/payouts", headers=self.h(self.seller)).json()
+        self.assertEqual((mine["payable_tiyn"], mine["open"]), (100_000, False))
+        self.assertEqual([i["status"] for i in mine["items"]], ["rejected", "paid"])
+        notes = self.c.get("/api/v1/notifications", headers=self.h(self.seller)).json()["items"]
+        self.assertTrue(any("ПП" not in n["text"] and "KZ86 •••• 0100" in n["text"] for n in notes))
+        # Money still owed keeps the account from being deleted.
+        self.assertEqual(self.c.delete("/api/v1/me", headers=self.h(self.seller)).json()["code"], "payout_owed")
+
+
 class ReportTests(ApiTestCase):
     def report(self, lid, token, reason="fake", text=None):
         return self.post(f"/listings/{lid}/report", token, {"reason": reason, "text": text})

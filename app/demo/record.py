@@ -57,7 +57,7 @@ for o in keep("/orders", buyer, {"role": "buyer"})["items"]:
     keep(f"/orders/{o['id']}", buyer)
 keep("/offers", buyer, {"role": "buyer"})
 # Seller tools show the demo shop's own figures, so the seller screens are not empty.
-for path in ("/me/listings", "/me/earnings", "/me/promo-codes"):
+for path in ("/me/listings", "/me/earnings", "/me/promo-codes", "/me/payouts", "/me/payout-account"):
     keep(path, seller)
 keep("/me/analytics", seller, {"days": "30"})
 keep("/offers", seller, {"role": "seller"})

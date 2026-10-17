@@ -291,6 +291,51 @@ class EarningItem {
   final int feeTiyn;
 }
 
+/// Where a seller's money goes: holder, Kazakh IBAN and IIN/BIN.
+class PayoutAccount {
+  PayoutAccount.fromJson(Map<String, dynamic> j)
+      : holderName = j['holder_name'] as String,
+        iban = j['iban'] as String,
+        ibanMasked = j['iban_masked'] as String,
+        taxId = j['tax_id'] as String;
+  final String holderName;
+  final String iban;
+  final String ibanMasked;
+  final String taxId;
+}
+
+class Payouts {
+  Payouts.fromJson(Map<String, dynamic> j)
+      : payableTiyn = j['payable_tiyn'] as int,
+        minTiyn = j['min_tiyn'] as int,
+        hasAccount = j['has_account'] as bool,
+        open = j['open'] as bool,
+        items = [for (final i in j['items'] as List) PayoutInfo.fromJson(i as Map<String, dynamic>)];
+  final int payableTiyn;
+  final int minTiyn;
+  final bool hasAccount;
+  final bool open;
+  final List<PayoutInfo> items;
+}
+
+class PayoutInfo {
+  PayoutInfo.fromJson(Map<String, dynamic> j)
+      : id = j['id'] as int,
+        amountTiyn = j['amount_tiyn'] as int,
+        status = j['status'] as String,
+        ibanMasked = j['iban_masked'] as String,
+        createdAt = DateTime.parse(j['created_at'] as String),
+        bankRef = j['bank_ref'] as String?,
+        reason = j['reason'] as String?;
+  final int id;
+  final int amountTiyn;
+  final String status; // requested | paid | rejected
+  final String ibanMasked;
+  final DateTime createdAt;
+  final String? bankRef;
+  final String? reason;
+}
+
 /// Catalog refinements beyond text, size and category.
 class CatalogFilter {
   const CatalogFilter({this.sort = 'new', this.conditions = const {}, this.minPriceTiyn, this.maxPriceTiyn});
@@ -844,6 +889,23 @@ class Api {
   /// Counts of what waits on the signed-in person; seller keys appear only for sellers.
   Future<Map<String, int>> todo() async =>
       (await _send('GET', '/me/todo') as Map).map((k, v) => MapEntry(k as String, v as int));
+
+  Future<Payouts> payouts() async => Payouts.fromJson(await _send('GET', '/me/payouts') as Map<String, dynamic>);
+
+  Future<PayoutAccount?> payoutAccount() async {
+    final a = (await _send('GET', '/me/payout-account') as Map)['account'];
+    return a == null ? null : PayoutAccount.fromJson(a as Map<String, dynamic>);
+  }
+
+  Future<PayoutAccount> setPayoutAccount(
+          {required String holderName, required String iban, required String taxId}) async =>
+      PayoutAccount.fromJson(
+          (await _send('PUT', '/me/payout-account', body: {'holder_name': holderName, 'iban': iban, 'tax_id': taxId})
+              as Map)['account'] as Map<String, dynamic>);
+
+  /// Asks for everything owed; support sends it by bank transfer.
+  Future<PayoutInfo> requestPayout() async =>
+      PayoutInfo.fromJson(await _send('POST', '/me/payouts', body: const {}) as Map<String, dynamic>);
 
   Future<Earnings> earnings() async => Earnings.fromJson(await _send('GET', '/me/earnings') as Map<String, dynamic>);
 

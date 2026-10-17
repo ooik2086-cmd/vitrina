@@ -36,7 +36,7 @@ from vitrina_core.orders import Actor, OrderStatus as S
 from vitrina_core.webhooks import WebhookRejected, verify
 
 from . import services
-from . import authenticity, coupons, cutout, jobs, moderation, offers, promo, qa, visual
+from . import authenticity, coupons, cutout, jobs, moderation, offers, payouts, promo, qa, visual
 from .config import Settings, production_problems
 from .deps import current_user, get_db, get_settings, get_storage, now_utc, optional_user, sha256, staff_user
 from .errors import ApiError, api_error_handler
@@ -409,6 +409,9 @@ def delete_me(user: User = Depends(current_user), db: Session = Depends(get_db))
         Order.status.not_in([s.value for s in (S.COMPLETED, S.REFUNDED, S.CANCELLED)])))
     if open_orders:
         raise ApiError(409, "open_orders")
+    from vitrina_core.money import seller_payable
+    if services.balance(db, seller_payable(str(user.id))) > 0 or payouts.open_payout(db, user.id) is not None:
+        raise ApiError(409, "payout_owed")
     now = now_utc()
     for model, column in ((Favorite, Favorite.user_id), (SavedSearch, SavedSearch.user_id),
                           (Follow, Follow.user_id), (Follow, Follow.seller_id), (StockAlert, StockAlert.user_id),
@@ -1883,6 +1886,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(offers.router)
     app.include_router(authenticity.router)
     app.include_router(coupons.router)
+    app.include_router(payouts.router)
     app.include_router(qa.router)
     # Without a bucket, serve uploaded photos from disk (development). With one, the bucket or its CDN serves them.
     if not settings.s3_bucket:

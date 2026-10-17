@@ -162,6 +162,34 @@ class PriceChange(Base):
     at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class PayoutAccount(Base):
+    """Where a seller's money goes: the account holder, a Kazakh IBAN and the holder's IIN or BIN."""
+    __tablename__ = "payout_accounts"
+    seller_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    holder_name: Mapped[str] = mapped_column(String(120))
+    iban: Mapped[str] = mapped_column(String(20))
+    tax_id: Mapped[str] = mapped_column(String(12))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Payout(Base):
+    """A seller's request to send what the platform owes them to their bank. The bank details are copied in, so
+    a later change of account cannot redirect a request support already checked."""
+    __tablename__ = "payouts"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    seller_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    amount_tiyn: Mapped[int] = mapped_column(BigInteger)
+    status: Mapped[str] = mapped_column(String(10), default="requested", index=True)  # requested|paid|rejected
+    holder_name: Mapped[str] = mapped_column(String(120))
+    iban: Mapped[str] = mapped_column(String(20))
+    tax_id: Mapped[str] = mapped_column(String(12))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    decided_by: Mapped[int | None] = mapped_column(Integer)
+    bank_ref: Mapped[str | None] = mapped_column(String(60))  # the bank's payment order number
+    reason: Mapped[str | None] = mapped_column(Text)          # why support sent it back
+
+
 class ListingDailyViews(Base):
     """Product page opens by others, per listing and Almaty calendar day, for the seller's charts."""
     __tablename__ = "listing_daily_views"

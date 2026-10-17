@@ -1568,30 +1568,109 @@ void main() {
   testWidgets('earnings shows owed, held and commission from the ledger', (tester) async {
     final api = Api(
         base: 'http://x/api/v1',
-        client: MockClient((_) async => http.Response(
-            jsonEncode({
-              'held_tiyn': 3440000,
-              'payable_tiyn': 2840500,
-              'fees_tiyn': 149500,
-              'items': [
-                {
-                  'order_id': 2,
-                  'kind': 'completion',
-                  'at': '2026-10-17T00:45:00+00:00',
-                  'listing_title': 'Жеңіл жүгіру кроссовкасы',
-                  'net_tiyn': 2840500,
-                  'fee_tiyn': 149500,
-                }
-              ],
-            }),
-            200,
-            headers: {'content-type': 'application/json; charset=utf-8'})));
+        client: MockClient((req) async => req.url.path.endsWith('/me/payouts')
+            ? jsonResponse({'code': 'not_found'}, 404) // without payouts the money view still shows
+            : http.Response(
+                jsonEncode({
+                  'held_tiyn': 3440000,
+                  'payable_tiyn': 2840500,
+                  'fees_tiyn': 149500,
+                  'items': [
+                    {
+                      'order_id': 2,
+                      'kind': 'completion',
+                      'at': '2026-10-17T00:45:00+00:00',
+                      'listing_title': 'Жеңіл жүгіру кроссовкасы',
+                      'net_tiyn': 2840500,
+                      'fee_tiyn': 149500,
+                    }
+                  ],
+                }),
+                200,
+                headers: {'content-type': 'application/json; charset=utf-8'})));
     await tester.pumpWidget(SessionScope(session: Session(api), child: const MaterialApp(home: EarningsScreen())));
     await tester.pumpAndSettle();
     expect(find.text(formatTenge(2840500)), findsNWidgets(2));
     expect(find.text(formatTenge(3440000)), findsOneWidget);
     expect(find.text(formatTenge(149500)), findsOneWidget);
     expect(find.textContaining('Сатылды'), findsOneWidget);
+  });
+
+  testWidgets('a seller adds a bank account, then pays out what is owed', (tester) async {
+    final calls = <String>[];
+    var payouts = <Map<String, dynamic>>[];
+    var hasAccount = false;
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async {
+          final path = req.url.path.replaceFirst('/api/v1', '');
+          calls.add('${req.method} $path');
+          if (path == '/me/earnings') {
+            return jsonResponse({'held_tiyn': 0, 'payable_tiyn': 2840500, 'fees_tiyn': 0, 'items': []});
+          }
+          if (path == '/me/payout-account' && req.method == 'GET') return jsonResponse({'account': null});
+          if (path == '/me/payout-account') {
+            final b = jsonDecode(req.body) as Map;
+            if (!(b['iban'] as String).startsWith('KZ')) {
+              return jsonResponse({'code': 'invalid_iban', 'message_kk': 'IBAN қате.'}, 422);
+            }
+            hasAccount = true;
+            return jsonResponse({
+              'account': {
+                'holder_name': b['holder_name'],
+                'iban': b['iban'],
+                'iban_masked': 'KZ86 •••• 0100',
+                'tax_id': b['tax_id']
+              }
+            });
+          }
+          if (path == '/me/payouts' && req.method == 'POST') {
+            payouts = [
+              {
+                'id': 7,
+                'amount_tiyn': 2840500,
+                'status': 'requested',
+                'iban_masked': 'KZ86 •••• 0100',
+                'created_at': '2026-10-20T09:00:00+00:00',
+                'bank_ref': null,
+                'reason': null
+              }
+            ];
+            return jsonResponse(payouts.first, 201);
+          }
+          return jsonResponse({
+            'payable_tiyn': payouts.isEmpty ? 2840500 : 0,
+            'min_tiyn': 100000,
+            'has_account': hasAccount,
+            'open': payouts.isNotEmpty,
+            'items': payouts,
+          });
+        }));
+    tester.view.physicalSize = const Size(400, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(SessionScope(session: Session(api), child: const MaterialApp(home: EarningsScreen())));
+    await tester.pumpAndSettle();
+    expect(find.text('Банк шотын қосу'), findsOneWidget);
+    // No account yet: paying out asks for one first, and a wrong IBAN is said in the sheet.
+    await tester.tap(find.byKey(const Key('payout')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('payout-holder')), 'Qadam Store ЖК');
+    await tester.enterText(find.byKey(const Key('payout-iban')), 'RU00');
+    await tester.enterText(find.byKey(const Key('payout-tax')), '900101300125');
+    await tester.tap(find.byKey(const Key('payout-save')));
+    await tester.pumpAndSettle();
+    expect(find.text('IBAN қате.'), findsOneWidget);
+    await tester.enterText(find.byKey(const Key('payout-iban')), 'KZ86125KZT5004100100');
+    await tester.tap(find.byKey(const Key('payout-save')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('payout-confirm')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('payout-confirm')));
+    await tester.pumpAndSettle();
+    expect(calls.where((c) => c == 'POST /me/payouts'), hasLength(1));
+    expect(find.text('Шығару сұрауыңыз қаралуда.'), findsOneWidget);
+    expect(find.byKey(const Key('payout-7')), findsOneWidget);
+    expect(tester.widget<FilledButton>(find.byKey(const Key('payout'))).onPressed, isNull);
   });
 
   testWidgets('typing in search suggests models on sale, and a picked search is remembered', (tester) async {
