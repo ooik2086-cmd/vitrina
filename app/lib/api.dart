@@ -66,6 +66,21 @@ class Promo {
   final String? url;
 }
 
+/// Why the automatic publish checks held a listing back, and what staff wrote when sending it back.
+class Moderation {
+  Moderation.fromJson(Map<String, dynamic> j)
+      : flags = [for (final f in j['flags'] as List) f as String],
+        reasonsKk = [for (final r in j['reasons'] as List) r as String],
+        reasonsRu = [for (final r in (j['reasons_ru'] as List?) ?? j['reasons'] as List) r as String],
+        note = j['note'] as String?;
+  final List<String> flags;
+  final List<String> reasonsKk;
+  final List<String> reasonsRu;
+  final String? note;
+
+  List<String> reasons(String lang) => lang == 'ru' ? reasonsRu : reasonsKk;
+}
+
 /// Brand, model and category read off look-alike listings already on VITRINA. Any field may be null.
 class Suggestion {
   Suggestion.fromJson(Map<String, dynamic> j)
@@ -228,7 +243,9 @@ class Listing {
         sellerRating = ((j['seller'] as Map)['rating'] as num?)?.toDouble(),
         sellerReviews = ((j['seller'] as Map)['reviews'] as int?) ?? 0,
         stats = j['stats'] == null ? null : ListingStats.fromJson(j['stats'] as Map<String, dynamic>),
-        promo = j['promo'] == null ? null : Promo.fromJson(j['promo'] as Map<String, dynamic>);
+        promo = j['promo'] == null ? null : Promo.fromJson(j['promo'] as Map<String, dynamic>),
+        moderation =
+            j['moderation'] == null ? null : Moderation.fromJson(j['moderation'] as Map<String, dynamic>);
 
   final int id;
   final String status;
@@ -255,6 +272,7 @@ class Listing {
   /// Only on the seller's own listings.
   final ListingStats? stats;
   final Promo? promo;
+  final Moderation? moderation;
 
   /// 360° frames in upload order: real photos only, nothing generated in between.
   List<MediaItem> get frames => media.where((m) => m.angle == 'frame').toList();

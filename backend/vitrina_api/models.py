@@ -74,6 +74,11 @@ class Listing(Base):
     views: Mapped[int] = mapped_column(Integer, default=0, server_default="0")  # product page opens by others
     promo_state: Mapped[str | None] = mapped_column(String(12))  # rendering | ready | failed; None = never made
     promo_url: Mapped[str | None] = mapped_column(String(500))
+    # Automatic publish checks (see moderation.py): what they flagged, what staff already cleared, and the
+    # reason staff gave when sending a listing back. Codes are comma-separated.
+    moderation_flags: Mapped[str | None] = mapped_column(String(200))
+    moderation_cleared: Mapped[str | None] = mapped_column(String(200))
+    moderation_note: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     sizes: Mapped[list[ListingSize]] = relationship(cascade="all, delete-orphan", order_by="ListingSize.id")
     media: Mapped[list[Media]] = relationship(cascade="all, delete-orphan", order_by="Media.position")
@@ -96,6 +101,7 @@ class Media(Base):
     processed_url: Mapped[str | None] = mapped_column(String(500))
     angle: Mapped[str] = mapped_column(String(20))  # front|outer|inner|back|top|sole|label|defect|frame
     position: Mapped[int] = mapped_column(Integer, default=0)
+    phash: Mapped[str | None] = mapped_column(String(16), index=True)  # difference hash, for reused photos
 
 
 class Favorite(Base):

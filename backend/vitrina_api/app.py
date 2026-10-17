@@ -31,7 +31,7 @@ from vitrina_core.orders import Actor, OrderStatus as S
 from vitrina_core.webhooks import WebhookRejected, verify
 
 from . import services
-from . import cutout, promo, visual
+from . import cutout, moderation, promo, visual
 from .config import Settings
 from .deps import current_user, get_db, get_settings, get_storage, now_utc, optional_user, sha256, staff_user
 from .errors import ApiError, api_error_handler
@@ -193,8 +193,16 @@ def listing_out(db: Session, listing: Listing, *, owner: bool = False) -> dict:
         "seller": {"id": seller.id, "shop_name": seller.shop_name, "city": seller.city,  # never the phone
                    **seller_rating(db, seller.id)},
         **({"stats": listing_stats(db, listing),
-            "promo": {"state": listing.promo_state, "url": listing.promo_url}} if owner else {}),
+            "promo": {"state": listing.promo_state, "url": listing.promo_url},
+            "moderation": moderation_out(listing)} if owner else {}),
     }
+
+
+def moderation_out(listing: Listing) -> dict:
+    flags = [c for c in (listing.moderation_flags or "").split(",") if c]
+    return {"flags": flags, "reasons": [moderation.REASONS[c][0] for c in flags if c in moderation.REASONS],
+            "reasons_ru": [moderation.REASONS[c][1] for c in flags if c in moderation.REASONS],
+            "note": listing.moderation_note}
 
 
 def order_out(order: Order) -> dict:
@@ -455,10 +463,10 @@ def own_listing(db: Session, listing_id: int, user: User) -> Listing:
 
 @api.post("/listings/{listing_id}/publish")
 def publish_listing(listing_id: int, user: User = Depends(current_user), db: Session = Depends(get_db),
-                    cfg: Settings = Depends(get_settings)):
+                    cfg: Settings = Depends(get_settings), storage: LocalStorage = Depends(get_storage)):
     listing = own_listing(db, listing_id, user)
-    # "hidden" is a moderation decision; only staff can lift it.
-    if listing.status not in ("draft", "paused"):
+    # "hidden" is a moderation decision; only staff can lift it. A "rejected" listing is fixed and sent again.
+    if listing.status not in ("draft", "paused", "rejected"):
         raise ApiError(409, "invalid_status")
     if len(listing.media) < cfg.min_listing_photos:
         raise ApiError(422, "missing_required_photos")
@@ -468,15 +476,29 @@ def publish_listing(listing_id: int, user: User = Depends(current_user), db: Ses
         raise ApiError(422, "defects_required", "a close-up photo of each defect is required")
     if not any(s.quantity > 0 for s in listing.sizes):
         raise ApiError(422, "out_of_stock")
-    # TODO(moderation): route to "moderation" when automated checks flag the listing.
-    listing.status = "published"
+    route_after_checks(db, storage, listing)
     db.commit()
     return listing_out(db, listing, owner=True)
 
 
+def split_codes(text: str | None) -> list[str]:
+    return [c for c in (text or "").split(",") if c]
+
+
+def route_after_checks(db: Session, storage: LocalStorage, listing: Listing) -> None:
+    """Publish, or queue for staff when a check flags something staff have not already cleared."""
+    flags = moderation.check(db, storage, listing)
+    listing.moderation_flags = ",".join(flags) or None
+    if set(flags) - set(split_codes(listing.moderation_cleared)):
+        listing.status = "moderation"
+    else:
+        listing.status = "published"
+        listing.moderation_note = None
+
+
 @api.patch("/listings/{listing_id}")
 def edit_listing(listing_id: int, body: ListingPatch, user: User = Depends(current_user),
-                 db: Session = Depends(get_db)):
+                 db: Session = Depends(get_db), storage: LocalStorage = Depends(get_storage)):
     listing = own_listing(db, listing_id, user)
     if listing.status == "hidden":
         raise ApiError(409, "invalid_status")
@@ -505,6 +527,9 @@ def edit_listing(listing_id: int, body: ListingPatch, user: User = Depends(curre
             listing.status = "sold"
         elif listing.status == "sold" and in_stock:
             listing.status = "paused"  # restocked; the seller republishes when ready
+    if listing.status == "published" and (body.price_tiyn is not None or body.description is not None
+                                          or body.defects is not None):
+        route_after_checks(db, storage, listing)  # a live listing cannot slip a phone number in later
     db.commit()
     return listing_out(db, listing, owner=True)
 
@@ -1057,6 +1082,54 @@ def admin_listings(status: str | None = None, staff: User = Depends(staff_user),
     if status:
         stmt = stmt.where(Listing.status == status)
     return {"items": [listing_out(db, r) for r in db.scalars(stmt).all()]}
+
+
+@api.get("/admin/moderation")
+def admin_moderation(staff: User = Depends(staff_user), db: Session = Depends(get_db)):
+    """Listings the publish checks flagged, oldest first so nobody waits longest."""
+    rows = db.scalars(select(Listing).where(Listing.status == "moderation").order_by(Listing.id)).all()
+    return {"items": [{"listing": listing_out(db, r), "moderation": moderation_out(r)} for r in rows]}
+
+
+class ModerationRejectIn(BaseModel):
+    reason: str = Field(min_length=3, max_length=2000)
+
+
+def queued_listing(db: Session, listing_id: int) -> Listing:
+    listing = db.get(Listing, listing_id)
+    if listing is None:
+        raise ApiError(404, "not_found")
+    if listing.status != "moderation":
+        raise ApiError(409, "invalid_status")
+    return listing
+
+
+@api.post("/admin/moderation/{listing_id}/approve")
+def approve_listing(listing_id: int, staff: User = Depends(staff_user), db: Session = Depends(get_db)):
+    listing = queued_listing(db, listing_id)
+    listing.status = "published"
+    # Remember what was cleared so pausing and republishing does not queue the same listing again.
+    listing.moderation_cleared = ",".join(sorted(set(split_codes(listing.moderation_cleared))
+                                                 | set(split_codes(listing.moderation_flags)))) or None
+    listing.moderation_note = None
+    services.audit(db, staff.id, "approve_listing", f"listing:{listing.id}", listing.moderation_flags or "")
+    services.notify(db, listing.seller_id, "moderation", f"«{listing.title}» тексеруден өтті және сатылымда.",
+                    f"«{listing.title}» прошёл проверку и уже продаётся.", listing_id=listing.id)
+    db.commit()
+    return {"id": listing.id, "status": listing.status}
+
+
+@api.post("/admin/moderation/{listing_id}/reject")
+def reject_listing(listing_id: int, body: ModerationRejectIn, staff: User = Depends(staff_user),
+                   db: Session = Depends(get_db)):
+    listing = queued_listing(db, listing_id)
+    reason = body.reason.strip()
+    listing.status, listing.moderation_note = "rejected", reason
+    services.audit(db, staff.id, "reject_listing", f"listing:{listing.id}", reason)
+    services.notify(db, listing.seller_id, "moderation", f"«{listing.title}» қайтарылды: {reason}",
+                    f"«{listing.title}» возвращён: {reason}", listing_id=listing.id)
+    db.commit()
+    return {"id": listing.id, "status": listing.status}
 
 
 @api.get("/admin/reports")

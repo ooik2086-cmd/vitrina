@@ -422,6 +422,47 @@ void main() {
     expect(find.text('Сақталды'), findsOneWidget);
   });
 
+  testWidgets('a sent-back listing shows the staff note and resends for checking', (tester) async {
+    String? posted;
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async {
+          posted = '${req.method} ${req.url.path}';
+          return http.Response(
+              jsonEncode({
+                ...listingJson(),
+                'status': 'moderation',
+                'moderation': {'flags': ['contacts'], 'reasons': ['Байланыс тек VITRINA чатында.'], 'note': null},
+              }),
+              200,
+              headers: {'content-type': 'application/json; charset=utf-8'});
+        }));
+    final own = {
+      ...listingJson(),
+      'status': 'rejected',
+      'moderation': {
+        'flags': ['contacts'],
+        'reasons': ['Байланыс тек VITRINA чатында.'],
+        'reasons_ru': ['Связь только в чате VITRINA.'],
+        'note': 'Телефонды алып тастаңыз',
+      },
+    };
+    tester.view.physicalSize = const Size(400, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(SessionScope(
+        session: Session(api), child: MaterialApp(home: ManageListingScreen(listing: Listing.fromJson(own)))));
+    expect(find.text('Тауар қайтарылды'), findsOneWidget);
+    expect(find.text('Қызметкердің жазбасы: Телефонды алып тастаңыз'), findsOneWidget);
+    expect(find.text('Байланыс тек VITRINA чатында.'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('publish')));
+    await tester.pumpAndSettle();
+    expect(posted, 'POST /api/v1/listings/7/publish');
+    expect(find.text('Тауар тексерілуде'), findsOneWidget);
+    expect(find.text('Тексеруге жіберілді'), findsOneWidget);
+    expect(find.byKey(const Key('publish')), findsNothing);
+  });
+
   testWidgets('seller starts a promo video and the card follows it until it is ready', (tester) async {
     final calls = <String>[];
     var polls = 0;

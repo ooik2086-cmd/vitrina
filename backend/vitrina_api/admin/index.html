@@ -47,6 +47,7 @@ const STATUS = { CREATED:'Жасалды', PAYMENT_PENDING:'Төлем күті�
 const ACTOR = { buyer:'сатып алушы', seller:'сатушы', system:'жүйе', support:'қолдау' };
 const actor = (a) => ACTOR[String(a).split(':')[0]] || a;
 const REASON = { fake:'Жалған тауар', wrong_photos:'Фото сәйкес емес', prohibited:'Тыйым салынған', contact_details:'Байланыс деректері', other:'Басқа' };
+const FLAG = { contacts:'Байланыс деректері', replica:'Көшірме', low_price:'Күдікті баға', reused_photo:'Бөтен фото' };
 let token = sessionStorage.getItem('vitrina_admin') || '';
 let tab = 'overview';
 const $ = (h) => { const t = document.createElement('template'); t.innerHTML = h.trim(); return t.content; };
@@ -90,7 +91,7 @@ function loginView() {
 }
 
 function shell(content) {
-  const tabs = [['overview','Шолу'],['disputes','Даулар'],['reports','Шағымдар'],['orders','Тапсырыстар'],['listings','Тауарлар'],['audit','Аудит']];
+  const tabs = [['overview','Шолу'],['moderation','Тексеруде'],['disputes','Даулар'],['reports','Шағымдар'],['orders','Тапсырыстар'],['listings','Тауарлар'],['audit','Аудит']];
   const n = $(`<div><header><b>VITRINA</b><nav>${tabs.map(([k, l]) =>
     `<button data-k="${k}" aria-current="${k === tab}">${l}</button>`).join('')}</nav>
     <span style="flex:1"></span><button class="ghost" id="out">Шығу</button></header><main></main></div>`);
@@ -131,7 +132,7 @@ async function show() {
       const o = await call('GET', '/admin/overview');
       const stat = (n, l) => `<div class="card stat"><div class="n">${n}</div><div class="l">${l}</div></div>`;
       box.append($(`<div class="grid">${stat(o.users, 'Пайдаланушы')}${stat(o.sellers, 'Сатушы')}
-        ${stat(o.listings.published || 0, 'Сатылымдағы тауар')}${stat(o.orders.DISPUTED || 0, 'Ашық дау')}
+        ${stat(o.listings.published || 0, 'Сатылымдағы тауар')}${stat(o.listings.moderation || 0, 'Тексеруде')}${stat(o.orders.DISPUTED || 0, 'Ашық дау')}
         ${stat(tenge(o.completed_item_value_tiyn), 'Аяқталған сатылым')}</div>
         <div class="card"><b>Тапсырыстар күйі бойынша</b><table>${Object.entries(o.orders).map(([k, v]) =>
           `<tr><td>${esc(STATUS[k] || k)}</td><td>${v}</td></tr>`).join('') || '<tr><td class="muted">Әзірге жоқ</td></tr>'}</table></div>`));
@@ -152,6 +153,31 @@ async function show() {
         box.append(n);
       });
       if (!r.items.length) box.append($(`<div class="card muted">Сатылымда тауар жоқ.</div>`));
+    } else if (tab === 'moderation') {
+      const r = await call('GET', '/admin/moderation');
+      if (!r.items.length) box.append($(`<div class="card muted">Тексеруді күтіп тұрған тауар жоқ.</div>`));
+      r.items.forEach(({ listing: l, moderation: m }) => {
+        const cover = (l.media.find(x => x.angle !== 'frame') || l.media[0] || {}).original_url;
+        const n = $(`<div class="card"><div class="row">${cover ? `<img src="${esc(cover)}" alt="">` : ''}<div style="flex:1">
+          <b>#${l.id} · ${esc(l.title)}</b> ${m.flags.map(f => `<span class="pill">${esc(FLAG[f] || f)}</span>`).join(' ')}
+          <div class="muted">${tenge(l.price_tiyn)} · ${esc(l.seller.shop_name)} · ${l.media.filter(x => x.angle === 'frame').length} кадр 360°</div>
+          ${l.description ? `<div class="muted">«${esc(l.description)}»</div>` : ''}
+          <ol class="hist">${m.reasons.map(x => `<li>${esc(x)}</li>`).join('')}</ol>
+          <form class="inline" style="grid-template-columns:1fr auto auto"><input name="reason" placeholder="Қайтару себебі (сатушы көреді)">
+          <button class="ghost danger" value="reject">Қайтару</button><button class="primary" value="approve">Мақұлдау</button>
+          <div class="err" style="grid-column:1/-1"></div></form></div></div></div>`);
+        const f = n.querySelector('form');
+        f.onsubmit = async (e) => {
+          e.preventDefault();
+          const reject = e.submitter.value === 'reject';
+          try {
+            if (reject && f.reason.value.trim().length < 3) throw new Error('Сатушыға себебін жазыңыз.');
+            await call('POST', `/admin/moderation/${l.id}/${e.submitter.value}`, reject ? { reason: f.reason.value.trim() } : undefined);
+            show();
+          } catch (x) { f.querySelector('.err').textContent = x.message; }
+        };
+        box.append(n);
+      });
     } else if (tab === 'reports') {
       const r = await call('GET', '/admin/reports');
       if (!r.items.length) box.append($(`<div class="card muted">Ашық шағым жоқ.</div>`));

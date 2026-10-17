@@ -72,6 +72,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                 'message' => Icons.chat_bubble_outline_rounded,
                 'review' || 'review_reply' => Icons.star_outline_rounded,
                 'price_drop' => Icons.trending_down_rounded,
+                'moderation' => Icons.fact_check_outlined,
                 'listing_hidden' || 'report_closed' => Icons.flag_outlined,
                 _ => Icons.local_shipping_outlined,
               };

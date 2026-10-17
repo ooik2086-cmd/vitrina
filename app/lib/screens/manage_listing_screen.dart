@@ -19,6 +19,7 @@ const listingStatuses = {
   'paused': 'Тоқтатылған',
   'sold': 'Сатылды',
   'hidden': 'Модератор жасырды',
+  'rejected': 'Қайтарылды',
 };
 
 /// Seller's own listing: change price, stock and description, pause or put back on sale.
@@ -85,6 +86,25 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
     );
   }
 
+  Future<void> _publish() async {
+    setState(() => _busy = true);
+    try {
+      final l = await SessionScope.of(context).api.publishListing(_l.id);
+      if (!mounted) return;
+      setState(() {
+        _l = l;
+        _changed = true;
+      });
+      final queued = l.status == 'moderation';
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(queued ? tr('Тексеруге жіберілді') : tr('Сатылымға шықты'))));
+    } catch (e) {
+      if (mounted) showError(context, e);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -137,6 +157,10 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
                   child: Text(tr('Тауарды модератор жасырды. Өзгерту үшін қолдау қызметіне жазыңыз.')),
                 ),
               ),
+            ],
+            if (_l.status == 'moderation' || _l.status == 'rejected') ...[
+              const SizedBox(height: 16),
+              ModerationCard(listing: _l),
             ],
             if (_l.stats != null) ...[
               const SizedBox(height: 20),
@@ -233,11 +257,12 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
                           child: Text(tr('Тоқтату')),
                         ),
                       ),
-                    if (_l.status == 'draft' || _l.status == 'paused')
+                    if (_l.status == 'draft' || _l.status == 'paused' || _l.status == 'rejected')
                       Expanded(
                         child: OutlinedButton(
-                          onPressed: _busy ? null : () => _run((api) => api.publishListing(_l.id), tr('Сатылымға шықты')),
-                          child: Text(tr('Сатылымға шығару')),
+                          key: const Key('publish'),
+                          onPressed: _busy ? null : _publish,
+                          child: Text(_l.status == 'rejected' ? tr('Қайта жіберу') : tr('Сатылымға шығару')),
                         ),
                       ),
                     const SizedBox(width: 12),
@@ -251,6 +276,57 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
                   ]),
                 ),
               ),
+      ),
+    );
+  }
+}
+
+/// Tells the seller why a listing is waiting for staff, or why staff sent it back and what to fix.
+class ModerationCard extends StatelessWidget {
+  const ModerationCard({super.key, required this.listing});
+  final Listing listing;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final rejected = listing.status == 'rejected';
+    final m = listing.moderation;
+    final reasons = m?.reasons(appLanguage.value) ?? const <String>[];
+    return Card(
+      key: const Key('moderation-card'),
+      color: rejected ? theme.colorScheme.errorContainer : Brand.studio,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Icon(rejected ? Icons.reply_rounded : Icons.hourglass_top_rounded, size: 20),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(rejected ? tr('Тауар қайтарылды') : tr('Тауар тексерілуде'),
+                  style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
+            ),
+          ]),
+          const SizedBox(height: 8),
+          if (rejected && (m?.note ?? '').isNotEmpty) ...[
+            Text(trf('Қызметкердің жазбасы: {0}', [m!.note!])),
+            const SizedBox(height: 8),
+          ],
+          for (final r in reasons)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('•  '),
+                Expanded(child: Text(r)),
+              ]),
+            ),
+          const SizedBox(height: 4),
+          Text(
+            rejected
+                ? tr('Сипаттаманы түзетіп, «Қайта жіберу» басыңыз.')
+                : tr('Қызметкер қарап шыққанша сатып алушылар көрмейді. Нәтижесі хабарландыруда келеді.'),
+            style: theme.textTheme.bodySmall,
+          ),
+        ]),
       ),
     );
   }

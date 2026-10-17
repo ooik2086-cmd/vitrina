@@ -589,6 +589,118 @@ class SocialTests(ApiTestCase):
         self.assertEqual(self.get("/notifications", self.buyer).json()["unread"], 0)
 
 
+def pattern_jpeg(seed: int, size=(800, 600)) -> bytes:
+    """A photo with real structure, so its difference hash carries information."""
+    import random
+    rnd = random.Random(seed)
+    img = Image.new("RGB", size, (240, 240, 240))
+    from PIL import ImageDraw
+    d = ImageDraw.Draw(img)
+    for _ in range(12):
+        x, y = rnd.randrange(size[0]), rnd.randrange(size[1])
+        d.ellipse((x, y, x + rnd.randrange(80, 300), y + rnd.randrange(60, 200)),
+                  fill=tuple(rnd.randrange(256) for _ in range(3)))
+    out = io.BytesIO()
+    img.save(out, "JPEG", quality=90)
+    return out.getvalue()
+
+
+class ModerationTests(ApiTestCase):
+    def get(self, path, token):
+        return self.c.get(f"/api/v1{path}", headers=self.h(token))
+
+    def draft(self, token=None, **over):
+        r = self.post("/listings", token or self.seller, {**LISTING, **over})
+        self.assertEqual(r.status_code, 201, r.text)
+        return r.json()["id"]
+
+    def test_clean_listing_is_published_straight_away(self):
+        listing = self.publish(description="Бір маусым киілген, таза.")
+        self.assertEqual(listing["status"], "published")
+        self.assertEqual(listing["moderation"]["flags"], [])
+
+    def test_contacts_and_replica_words_go_to_the_queue_with_reasons(self):
+        lid = self.draft(description="Жазыңыз WhatsApp +7 701 123 45 67")
+        r = self.post(f"/listings/{lid}/publish", self.seller).json()
+        self.assertEqual(r["status"], "moderation")
+        self.assertEqual(r["moderation"]["flags"], ["contacts"])
+        self.assertIn("чатында", r["moderation"]["reasons"][0])
+        lid2 = self.draft(title="Найк люкс копия")
+        self.assertEqual(self.post(f"/listings/{lid2}/publish", self.seller).json()["moderation"]["flags"], ["replica"])
+        catalog = self.c.get("/api/v1/listings").json()["items"]
+        self.assertEqual(catalog, [])  # nothing in the queue is visible to buyers
+
+    def test_staff_approve_or_send_back_and_the_seller_is_told(self):
+        lid = self.draft(description="Telegram арқылы жазыңыз")
+        self.post(f"/listings/{lid}/publish", self.seller)
+        self.assertEqual(self.get("/admin/moderation", self.buyer).status_code, 403)
+        staff = self.make_staff()
+        queue = self.get("/admin/moderation", staff).json()["items"]
+        self.assertEqual([(q["listing"]["id"], q["moderation"]["flags"]) for q in queue], [(lid, ["contacts"])])
+        self.assertEqual(self.post(f"/admin/moderation/{lid}/reject", staff, {"reason": "x"}).status_code, 422)
+        r = self.post(f"/admin/moderation/{lid}/reject", staff, {"reason": "Сипаттамадан мессенджерді алып тастаңыз"})
+        self.assertEqual(r.json()["status"], "rejected")
+        mine = self.get(f"/listings/{lid}", self.seller).json()
+        self.assertEqual(mine["moderation"]["note"], "Сипаттамадан мессенджерді алып тастаңыз")
+        notes = self.get("/notifications", self.seller).json()["items"]
+        self.assertEqual((notes[0]["kind"], notes[0]["listing_id"]), ("moderation", lid))
+        self.assertIn("қайтарылды", notes[0]["text"])
+        # The seller fixes the text; the listing passes the checks on its own.
+        self.c.patch(f"/api/v1/listings/{lid}", json={"description": "Жақсы күйде"}, headers=self.h(self.seller))
+        self.assertEqual(self.post(f"/listings/{lid}/publish", self.seller).json()["status"], "published")
+        # Approving clears the same flag for later republishing.
+        lid2 = self.draft(description="www.qadam.kz дүкенімізде көбірек")
+        self.post(f"/listings/{lid2}/publish", self.seller)
+        self.assertEqual(self.post(f"/admin/moderation/{lid2}/approve", staff).json()["status"], "published")
+        self.assertEqual(self.post(f"/admin/moderation/{lid2}/approve", staff).status_code, 409)
+        self.post(f"/listings/{lid2}/pause", self.seller)
+        self.assertEqual(self.post(f"/listings/{lid2}/publish", self.seller).json()["status"], "published")
+        actions = [a["action"] for a in self.get("/admin/audit", staff).json()["items"]]
+        self.assertIn("approve_listing", actions)
+        self.assertIn("reject_listing", actions)
+
+    def test_adding_a_phone_to_a_live_listing_sends_it_back_to_the_queue(self):
+        listing = self.publish()
+        r = self.c.patch(f"/api/v1/listings/{listing['id']}", json={"description": "Қоңырау шалыңыз 87011234567"},
+                         headers=self.h(self.seller))
+        self.assertEqual(r.json()["status"], "moderation")
+
+    def test_a_price_far_below_the_model_is_flagged(self):
+        for _ in range(5):
+            self.publish()
+        lid = self.draft(price_tiyn=900_000)
+        self.assertEqual(self.post(f"/listings/{lid}/publish", self.seller).json()["moderation"]["flags"],
+                         ["low_price"])
+        lid = self.draft(price_tiyn=3_800_000)
+        self.assertEqual(self.post(f"/listings/{lid}/publish", self.seller).json()["status"], "published")
+
+
+class ModerationPhotoTests(ApiTestCase):
+    external_media = False
+
+    def upload(self, token, data):
+        r = self.c.post("/api/v1/media", files={"file": ("p.jpg", data, "image/jpeg")}, headers=self.h(token))
+        self.assertEqual(r.status_code, 201, r.text)
+        return r.json()["url"]
+
+    def listing(self, token, seeds):
+        photos = [{"url": self.upload(token, pattern_jpeg(s)), "angle": a}
+                  for s, a in zip(seeds, ("front", "outer", "inner", "back"))]
+        r = self.post("/listings", token, {**LISTING, "photos": photos})
+        self.assertEqual(r.status_code, 201, r.text)
+        return self.post(f"/listings/{r.json()['id']}/publish", token).json()
+
+    def test_a_photo_taken_from_another_seller_is_flagged(self):
+        self.assertEqual(self.listing(self.seller, (1, 2, 3, 4))["status"], "published")
+        other = self.login("+77010000003")
+        self.post("/me/seller", other, {"shop_name": "Басқа", "city": "Астана"})
+        self.assertEqual(self.listing(other, (5, 6, 7, 8))["status"], "published")
+        stolen = self.listing(other, (9, 10, 11, 2))  # one photo is the first seller's, re-uploaded
+        self.assertEqual(stolen["moderation"]["flags"], ["reused_photo"])
+        # Reusing your own photos is fine.
+        self.assertEqual(self.listing(self.seller, (1, 12, 13, 14))["status"], "published")
+
+
 class AdminTests(ApiTestCase):
     def test_support_console_page_is_served(self):
         r = self.c.get("/admin/")
