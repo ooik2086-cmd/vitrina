@@ -258,11 +258,13 @@ class ChatMessage {
       : id = j['id'] as int,
         senderId = j['sender_id'] as int,
         body = j['body'] as String,
+        photoUrl = j['photo_url'] as String?,
         contactWarning = j['contact_warning'] as bool,
         createdAt = DateTime.parse(j['created_at'] as String).toLocal();
   final int id;
   final int senderId;
   final String body;
+  final String? photoUrl;
   final bool contactWarning;
   final DateTime createdAt;
 }
@@ -506,6 +508,15 @@ class Api {
 
   Future<ChatMessage> sendMessage(int conversationId, String body) async => ChatMessage.fromJson(
       await _send('POST', '/conversations/$conversationId/messages', body: {'body': body}) as Map<String, dynamic>);
+
+  /// A photo in the chat, with an optional caption. Cleaned of metadata on the server like any upload.
+  Future<ChatMessage> sendChatPhoto(int conversationId, List<int> bytes, String filename, {String caption = ''}) async {
+    final req = http.MultipartRequest('POST', Uri.parse('$base/conversations/$conversationId/photos'))
+      ..headers.addAll({'Accept': 'application/json', if (token != null) 'Authorization': 'Bearer $token'})
+      ..fields['caption'] = caption
+      ..files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
+    return ChatMessage.fromJson(_decode(await http.Response.fromStream(await _client.send(req))) as Map<String, dynamic>);
+  }
 
   // reviews
   Future<Review> review(int orderId, int rating, String? text) async =>

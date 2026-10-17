@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
 
 import '../api.dart';
 import '../labels.dart';
@@ -105,27 +104,8 @@ class _CatalogScreenState extends State<CatalogScreen> {
   }
 
   Future<void> _searchByPhoto() async {
-    final source = await showModalBottomSheet<ImageSource>(
-      context: context,
-      builder: (context) => SafeArea(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          ListTile(
-              title: Text(tr('Фотомен іздеу')), subtitle: Text(tr('Ұнаған аяқкиімнің суретін түсіріңіз немесе таңдаңыз'))),
-          ListTile(
-            leading: const Icon(Icons.photo_camera_outlined),
-            title: Text(tr('Камера')),
-            onTap: () => Navigator.pop(context, ImageSource.camera),
-          ),
-          ListTile(
-            leading: const Icon(Icons.photo_library_outlined),
-            title: Text(tr('Галерея')),
-            onTap: () => Navigator.pop(context, ImageSource.gallery),
-          ),
-        ]),
-      ),
-    );
-    if (source == null) return;
-    final file = await ImagePicker().pickImage(source: source, maxWidth: 1600, imageQuality: 90);
+    final file = await pickPhoto(context,
+        title: tr('Фотомен іздеу'), subtitle: tr('Ұнаған аяқкиімнің суретін түсіріңіз немесе таңдаңыз'));
     if (file == null || !mounted) return;
     final bytes = await file.readAsBytes();
     if (!mounted) return;

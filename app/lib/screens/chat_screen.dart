@@ -81,7 +81,9 @@ class _ChatsScreenState extends State<ChatsScreen> {
                         ),
                         title: Text(c.otherName, style: weight(theme.textTheme.titleSmall!, c.unread > 0 ? 750 : 600)),
                         subtitle: Text(
-                          c.lastMessage?.body ?? c.listingTitle,
+                          c.lastMessage == null
+                              ? c.listingTitle
+                              : (c.lastMessage!.body.isEmpty ? tr('📷 Фото') : c.lastMessage!.body),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -192,6 +194,26 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  Future<void> _sendPhoto() async {
+    if (_sending) return;
+    final file = await pickPhoto(context);
+    if (file == null || !mounted) return;
+    setState(() => _sending = true);
+    try {
+      final bytes = await file.readAsBytes();
+      final m = await _api.sendChatPhoto(widget.conversationId, bytes, file.name, caption: _input.text.trim());
+      _input.clear();
+      setState(() {
+        if (!_messages.any((x) => x.id == m.id)) _messages.add(m);
+      });
+      _toBottom();
+    } catch (e) {
+      if (mounted) showError(context, e);
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -238,8 +260,14 @@ class _ChatScreenState extends State<ChatScreen> {
             top: false,
             child: Container(
               decoration: BoxDecoration(border: Border(top: BorderSide(color: scheme.outlineVariant))),
-              padding: const EdgeInsets.fromLTRB(16, 10, 10, 10),
+              padding: const EdgeInsets.fromLTRB(6, 10, 10, 10),
               child: Row(children: [
+                IconButton(
+                  key: const Key('chat-photo'),
+                  tooltip: tr('Фото жіберу'),
+                  onPressed: _sending ? null : _sendPhoto,
+                  icon: const Icon(Icons.add_photo_alternate_outlined),
+                ),
                 Expanded(
                   child: TextField(
                     controller: _input,
@@ -300,7 +328,26 @@ class _Bubble extends StatelessWidget {
           ),
         ),
         child: Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-          Text(message.body, style: theme.textTheme.bodyLarge?.copyWith(color: fg)),
+          if (message.photoUrl != null)
+            Padding(
+              padding: EdgeInsets.only(bottom: message.body.isEmpty ? 4 : 8),
+              child: GestureDetector(
+                onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => _PhotoViewer(url: message.photoUrl!), fullscreenDialog: true)),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Image.network(
+                    message.photoUrl!,
+                    width: 220,
+                    height: 220,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) =>
+                        const SizedBox(width: 220, height: 220, child: Icon(Icons.broken_image_outlined)),
+                  ),
+                ),
+              ),
+            ),
+          if (message.body.isNotEmpty) Text(message.body, style: theme.textTheme.bodyLarge?.copyWith(color: fg)),
           const SizedBox(height: 2),
           Text(_time(message.createdAt), style: theme.textTheme.labelSmall?.copyWith(color: fg.withValues(alpha: 0.6))),
         ]),
@@ -319,5 +366,20 @@ class _Bubble extends StatelessWidget {
           ]),
         ),
     ]);
+  }
+}
+
+/// Full-screen photo from the chat, pinch to zoom.
+class _PhotoViewer extends StatelessWidget {
+  const _PhotoViewer({required this.url});
+  final String url;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(backgroundColor: Colors.black, foregroundColor: Colors.white),
+      body: InteractiveViewer(maxScale: 5, child: Center(child: Image.network(url))),
+    );
   }
 }

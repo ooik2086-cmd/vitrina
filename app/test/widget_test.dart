@@ -101,6 +101,34 @@ void main() {
             .having((e) => e.messageKk, 'message', 'Бұл өлшем таусылды.')));
   });
 
+  test('chat photo goes as multipart with its caption', () async {
+    late http.BaseRequest seen;
+    String? body;
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient.streaming((req, stream) async {
+          seen = req;
+          body = await stream.bytesToString();
+          return http.StreamedResponse(
+              Stream.value(utf8.encode(jsonEncode({
+                'id': 4,
+                'sender_id': 2,
+                'body': 'Табаны',
+                'photo_url': 'http://x/media/2/a.jpg',
+                'contact_warning': false,
+                'created_at': '2026-10-17T10:00:00Z'
+              }))),
+              201,
+              headers: {'content-type': 'application/json; charset=utf-8'});
+        }))
+      ..token = 't';
+    final m = await api.sendChatPhoto(9, [1, 2, 3], 'a.jpg', caption: 'Табаны');
+    expect(seen.url.path, '/api/v1/conversations/9/photos');
+    expect(seen.headers['Authorization'], 'Bearer t');
+    expect(body, contains('name="caption"'));
+    expect(m.photoUrl, 'http://x/media/2/a.jpg');
+  });
+
   test('order creation sends the idempotency key', () async {
     String? key;
     final api = Api(
@@ -259,6 +287,14 @@ void main() {
                   'contact_warning': true,
                   'created_at': '2026-10-17T10:01:00Z'
                 },
+                {
+                  'id': 3,
+                  'sender_id': 3,
+                  'body': '',
+                  'photo_url': 'http://x/media/3/sole.jpg',
+                  'contact_warning': false,
+                  'created_at': '2026-10-17T10:02:00Z'
+                },
               ],
             }),
             200,
@@ -280,6 +316,9 @@ void main() {
     expect(find.text('42 бар ма?'), findsOneWidget);
     expect(find.text('Бар, +7 701 123 45 67'), findsOneWidget);
     expect(find.textContaining('Төлемді тек VITRINA арқылы'), findsOneWidget);
+    expect(find.byWidgetPredicate((w) => w is Image && w.image is NetworkImage
+        && (w.image as NetworkImage).url == 'http://x/media/3/sole.jpg'), findsOneWidget);
+    expect(find.byKey(const Key('chat-photo')), findsOneWidget);
     await tester.pumpWidget(const SizedBox()); // stop polling
   });
 

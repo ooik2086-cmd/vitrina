@@ -227,7 +227,8 @@ class Message(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     conversation_id: Mapped[int] = mapped_column(ForeignKey("conversations.id"), index=True)
     sender_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
-    body: Mapped[str] = mapped_column(Text)
+    body: Mapped[str] = mapped_column(Text)  # may be empty when the message is a photo
+    photo_url: Mapped[str | None] = mapped_column(String(500))
     # Set when the text looks like a phone number or link: the other side sees a reminder to pay only in the app.
     contact_warning: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

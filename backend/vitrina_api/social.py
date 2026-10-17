@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 from datetime import timedelta
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, Form, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
@@ -12,8 +12,9 @@ from sqlalchemy.orm import Session
 from vitrina_core.orders import OrderStatus
 
 from . import services
-from .deps import current_user, get_db, now_utc
+from .deps import current_user, get_db, get_storage, now_utc
 from .errors import ApiError
+from .storage import MAX_UPLOAD_BYTES, LocalStorage, normalize_image
 from .models import Conversation, Listing, Message, Notification, Order, Review, User
 
 router = APIRouter(prefix="/api/v1")
@@ -56,7 +57,8 @@ def conversation_for(db: Session, conversation_id: int, user: User) -> Conversat
 
 
 def message_out(m: Message) -> dict:
-    return {"id": m.id, "sender_id": m.sender_id, "body": m.body, "contact_warning": m.contact_warning,
+    return {"id": m.id, "sender_id": m.sender_id, "body": m.body, "photo_url": m.photo_url,
+            "contact_warning": m.contact_warning,
             "created_at": services.aware(m.created_at).isoformat()}
 
 
@@ -123,11 +125,34 @@ def send_message(conversation_id: int, body: MessageIn, user: User = Depends(cur
     text = body.body.strip()
     if not text:
         raise ApiError(422, "validation", "empty message")
+    return post_message(db, conv, user, text, None)
+
+
+@router.post("/conversations/{conversation_id}/photos", status_code=201)
+async def send_photo(conversation_id: int, file: UploadFile = File(...), caption: str = Form("", max_length=2000),
+                     user: User = Depends(current_user), db: Session = Depends(get_db),
+                     storage: LocalStorage = Depends(get_storage)):
+    """A photo in the chat, e.g. a close-up the buyer asked for. Cleaned of metadata like any upload."""
+    conv = conversation_for(db, conversation_id, user)
+    check_rate(db, user)
+    data = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise ApiError(413, "file_too_large")
+    url = storage.put(normalize_image(data), owner_id=user.id)
+    return post_message(db, conv, user, caption.strip(), url)
+
+
+def check_rate(db: Session, user: User) -> None:
     recent = db.scalar(select(func.count(Message.id)).where(
         Message.sender_id == user.id, Message.created_at >= now_utc() - timedelta(minutes=1)))
     if recent >= MESSAGES_PER_MINUTE:
         raise ApiError(429, "rate_limited")
-    msg = Message(conversation_id=conv.id, sender_id=user.id, body=text, contact_warning=bool(CONTACT_RE.search(text)))
+
+
+def post_message(db: Session, conv: Conversation, user: User, text: str, photo_url: str | None) -> dict:
+    check_rate(db, user)
+    msg = Message(conversation_id=conv.id, sender_id=user.id, body=text, photo_url=photo_url,
+                  contact_warning=bool(CONTACT_RE.search(text)))
     db.add(msg)
     db.flush()
     conv.last_message_at = now_utc()
@@ -136,8 +161,10 @@ def send_message(conversation_id: int, body: MessageIn, user: User = Depends(cur
     else:
         conv.seller_last_read_id = msg.id
     other = conv.seller_id if user.id == conv.buyer_id else conv.buyer_id
-    services.notify(db, other, "message", f"Жаңа хабарлама: {text[:120]}",
-                    f"Новое сообщение: {text[:120]}", conversation_id=conv.id)
+    preview_kk = text[:120] if text else "📷 Фото"
+    preview_ru = text[:120] if text else "📷 Фото"
+    services.notify(db, other, "message", f"Жаңа хабарлама: {preview_kk}",
+                    f"Новое сообщение: {preview_ru}", conversation_id=conv.id)
     db.commit()
     return message_out(msg)
 

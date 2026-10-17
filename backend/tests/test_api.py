@@ -471,6 +471,26 @@ class SocialTests(ApiTestCase):
         self.assertEqual(self.get(f"/conversations/{cid}/messages", stranger).status_code, 404)
         self.assertEqual(self.post(f"/conversations/{cid}/messages", stranger, {"body": "hi"}).status_code, 404)
 
+    def test_either_side_sends_a_clean_photo_in_the_chat(self):
+        listing = self.publish()
+        cid = self.post("/conversations", self.buyer, {"listing_id": listing["id"]}).json()["id"]
+        send = lambda token, **form: self.c.post(  # noqa: E731
+            f"/api/v1/conversations/{cid}/photos", files={"file": ("p.jpg", jpeg(gps=True), "image/jpeg")},
+            data=form, headers=self.h(token))
+        r = send(self.seller, caption="Табанының жақын фотосы")
+        self.assertEqual(r.status_code, 201, r.text)
+        self.assertEqual(r.json()["body"], "Табанының жақын фотосы")
+        stored = os.path.join(self.cfg.media_dir, r.json()["photo_url"].removeprefix("http://test/media/"))
+        with Image.open(stored) as img:
+            self.assertEqual(len(img.getexif()), 0)  # no GPS from the sender's phone
+        self.assertEqual(send(self.buyer).json()["body"], "")  # a photo alone is a message too
+        notes = [n["text"] for n in self.get("/notifications", self.seller).json()["items"]]
+        self.assertIn("Жаңа хабарлама: 📷 Фото", notes)
+        self.assertEqual(send(self.login("+77010000005")).status_code, 404)
+        bad = self.c.post(f"/api/v1/conversations/{cid}/photos", files={"file": ("x.txt", b"hello", "text/plain")},
+                          headers=self.h(self.buyer))
+        self.assertEqual(bad.json()["code"], "unsupported_media")
+
     def test_contact_details_are_flagged_and_spam_limited(self):
         listing = self.publish()
         cid = self.post("/conversations", self.buyer, {"listing_id": listing["id"]}).json()["id"]
