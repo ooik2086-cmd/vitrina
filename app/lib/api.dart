@@ -339,7 +339,10 @@ class Api {
         if (deliveryPriceTiyn != null) 'delivery_price_tiyn': deliveryPriceTiyn,
         if (description != null) 'description': description,
         if (defects != null) 'defects': defects,
-        if (stock != null) 'sizes': [for (final e in stock.entries) {'id': e.key, 'quantity': e.value}],
+        if (stock != null)
+          'sizes': [
+            for (final e in stock.entries) {'id': e.key, 'quantity': e.value}
+          ],
       }) as Map<String, dynamic>);
 
   Future<Listing> pauseListing(int id) async =>
@@ -354,8 +357,15 @@ class Api {
 
   // catalog
   Future<List<Listing>> search(
-      {String? q, String? sizeCm, String? category, CatalogFilter filter = const CatalogFilter()}) async {
+      {String? q,
+      String? sizeCm,
+      String? category,
+      CatalogFilter filter = const CatalogFilter(),
+      int offset = 0,
+      int limit = 20}) async {
     final r = await _send('GET', '/listings', query: {
+      if (offset > 0) 'offset': '$offset',
+      if (limit != 20) 'limit': '$limit',
       if (q != null && q.isNotEmpty) 'q': q,
       if (sizeCm != null && sizeCm.isNotEmpty) 'size_cm': sizeCm,
       if (category != null) 'category': category,

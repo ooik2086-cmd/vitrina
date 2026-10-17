@@ -21,6 +21,10 @@ class _CatalogScreenState extends State<CatalogScreen> {
   String? _category;
   CatalogFilter _filter = const CatalogFilter();
   Future<List<Listing>>? _results;
+  static const _page = 20;
+  final List<Listing> _more = [];
+  bool _hasMore = true;
+  bool _loadingMore = false;
 
   int _unread = 0;
   bool? _countedFor;
@@ -52,10 +56,34 @@ class _CatalogScreenState extends State<CatalogScreen> {
     _countUnread();
   }
 
-  Future<List<Listing>> _load() =>
-      SessionScope.of(context).api.search(q: _query.text.trim(), sizeCm: _sizeCm, category: _category, filter: _filter);
+  Future<List<Listing>> _load({int offset = 0}) => SessionScope.of(context)
+      .api
+      .search(q: _query.text.trim(), sizeCm: _sizeCm, category: _category, filter: _filter, offset: offset);
 
-  void _search() => setState(() => _results = _load());
+  void _search() => setState(() {
+        _more.clear();
+        _hasMore = true;
+        _results = _load();
+      });
+
+  /// Next page when the user nears the end; the first page stays in the FutureBuilder.
+  Future<void> _loadMore(int loaded) async {
+    if (_loadingMore || !_hasMore) return;
+    final current = _results;
+    setState(() => _loadingMore = true);
+    try {
+      final page = await _load(offset: loaded);
+      if (!mounted || current != _results) return; // a new search started meanwhile
+      setState(() {
+        _more.addAll(page);
+        _hasMore = page.length == _page;
+      });
+    } catch (_) {
+      // Pulling to refresh or scrolling again retries.
+    } finally {
+      if (mounted) setState(() => _loadingMore = false);
+    }
+  }
 
   @override
   void dispose() {
@@ -197,7 +225,8 @@ class _CatalogScreenState extends State<CatalogScreen> {
                   ),
                 );
               }
-              final items = snap.data!;
+              final items = [...snap.data!, ..._more];
+              if (snap.data!.length < _page) _hasMore = false;
               if (items.isEmpty) {
                 return const SliverFillRemaining(
                     hasScrollBody: false, child: _Empty(icon: Icons.search_off_rounded, text: 'Ештеңе табылмады.'));
@@ -208,11 +237,20 @@ class _CatalogScreenState extends State<CatalogScreen> {
                   gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
                       maxCrossAxisExtent: 240, mainAxisSpacing: 22, crossAxisSpacing: 14, childAspectRatio: 0.64),
                   itemCount: items.length,
-                  itemBuilder: (_, i) => ListingTile(listing: items[i]),
+                  itemBuilder: (_, i) {
+                    if (i >= items.length - 6 && _hasMore) {
+                      WidgetsBinding.instance.addPostFrameCallback((_) => _loadMore(items.length));
+                    }
+                    return ListingTile(listing: items[i]);
+                  },
                 ),
               );
             },
           ),
+          if (_loadingMore)
+            const SliverToBoxAdapter(
+              child: Padding(padding: EdgeInsets.only(bottom: 32), child: Center(child: CircularProgressIndicator())),
+            ),
         ]),
       ),
     );

@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:vitrina/api.dart';
 import 'package:vitrina/labels.dart';
+import 'package:vitrina/screens/catalog_screen.dart';
 import 'package:vitrina/screens/chat_screen.dart';
 import 'package:vitrina/screens/earnings_screen.dart';
 import 'package:vitrina/screens/listing_editor_screen.dart';
@@ -290,9 +291,7 @@ void main() {
       home: Builder(
         builder: (context) => TextButton(
           onPressed: () async => result = await showModalBottomSheet<CatalogFilter>(
-              context: context,
-              isScrollControlled: true,
-              builder: (_) => const FilterSheet(initial: CatalogFilter())),
+              context: context, isScrollControlled: true, builder: (_) => const FilterSheet(initial: CatalogFilter())),
           child: const Text('open'),
         ),
       ),
@@ -337,5 +336,32 @@ void main() {
     expect(find.text(formatTenge(3440000)), findsOneWidget);
     expect(find.text(formatTenge(149500)), findsOneWidget);
     expect(find.textContaining('Сатылды'), findsOneWidget);
+  });
+
+  testWidgets('catalog loads the next page when scrolled near the end', (tester) async {
+    final offsets = <String?>[];
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async {
+          offsets.add(req.url.queryParameters['offset']);
+          final start = int.parse(req.url.queryParameters['offset'] ?? '0');
+          final count = start == 0 ? 20 : 5;
+          return http.Response(
+              jsonEncode({
+                'items': [
+                  for (var i = 0; i < count; i++) {...listingJson(), 'id': start + i, 'title': 'Тауар ${start + i}'}
+                ]
+              }),
+              200,
+              headers: {'content-type': 'application/json; charset=utf-8'});
+        }));
+    await tester.pumpWidget(
+        SessionScope(session: Session(api), child: const MaterialApp(home: Scaffold(body: CatalogScreen()))));
+    await tester.pumpAndSettle();
+    expect(offsets, [null]);
+    await tester.scrollUntilVisible(find.text('Тауар 24'), 400, scrollable: find.byType(Scrollable).first);
+    await tester.pumpAndSettle();
+    expect(offsets, [null, '20']);
+    expect(find.text('Тауар 24'), findsOneWidget);
   });
 }
