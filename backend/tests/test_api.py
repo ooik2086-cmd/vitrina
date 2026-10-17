@@ -16,7 +16,8 @@ from vitrina_api.app import create_app
 from vitrina_api.config import Settings
 from vitrina_api.models import Base, Conversation, Message, Offer, SavedSearch, User
 from vitrina_api import jobs
-from vitrina_api.services import balance, run_auto_complete, run_expire_orders, run_review_reminders
+from vitrina_api.services import (balance, run_auto_complete, run_expire_orders, run_review_reminders,
+                                   run_stale_listing_tips)
 from vitrina_core.money import PLATFORM_FEE, buyer_refund, escrow, seller_payable
 from vitrina_core.webhooks import sign
 
@@ -266,6 +267,28 @@ class PayoutTests(ApiTestCase):
         self.assertTrue(any("ПП" not in n["text"] and "KZ86 •••• 0100" in n["text"] for n in notes))
         # Money still owed keeps the account from being deleted.
         self.assertEqual(self.c.delete("/api/v1/me", headers=self.h(self.seller)).json()["code"], "payout_owed")
+
+
+class StaleListingTests(ApiTestCase):
+    def test_a_listing_unsold_for_three_weeks_gets_one_tip_that_fits_it(self):
+        from vitrina_api.models import Listing
+        seen, unseen, sold = self.publish()["id"], self.publish()["id"], self.publish()["id"]
+        self.post("/orders", self.buyer, {"listing_id": sold, "size_id": self.c.get(f"/api/v1/listings/{sold}").json()
+                                          ["sizes"][0]["id"]}, **{"Idempotency-Key": "st"})
+        now = datetime.now(timezone.utc)
+        with self.db() as db:
+            for lid in (seen, unseen, sold):
+                db.get(Listing, lid).announced_at = now - timedelta(days=22)
+            db.get(Listing, seen).views = 40
+            db.commit()
+            self.assertEqual(run_stale_listing_tips(db, now=now - timedelta(days=2)), [])  # not three weeks yet
+            self.assertEqual(sorted(run_stale_listing_tips(db, now=now)), sorted([seen, unseen]))
+            self.assertEqual(run_stale_listing_tips(db, now=now + timedelta(days=30)), [])  # once only
+        notes = [n["text"] for n in self.c.get("/api/v1/notifications", headers=self.h(self.seller)).json()["items"]
+                 if n["kind"] == "listing_tip"]
+        self.assertEqual(len(notes), 2)
+        self.assertTrue(any("40 рет қаралды" in t and "5–10%" in t for t in notes))
+        self.assertTrue(any("360°" in t for t in notes))  # the test listings have photos but no 360° frames
 
 
 class SlipTests(ApiTestCase):
@@ -600,7 +623,8 @@ class OrderFlowTests(ApiTestCase):
     def test_jobs_pass_runs_both_jobs(self):
         self.delivered()
         self.assertEqual(jobs.run_once(self.app.state.sessions, self.cfg),
-                         {"cancelled": [], "refunded": [], "completed": [], "review_reminders": []})
+                         {"cancelled": [], "refunded": [], "completed": [], "review_reminders": [],
+                          "listing_tips": []})
 
     def test_unpaid_order_lets_go_of_the_pair_after_half_an_hour(self):
         listing, order = self.ordered()

@@ -89,6 +89,7 @@ class Listing(Base):
     was_price_tiyn: Mapped[int | None] = mapped_column(BigInteger)
     was_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     announced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # saved-search alerts sent
+    stale_nudged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # 'not selling' tip sent
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     sizes: Mapped[list[ListingSize]] = relationship(cascade="all, delete-orphan", order_by="ListingSize.id")
     media: Mapped[list[Media]] = relationship(cascade="all, delete-orphan", order_by="Media.position")

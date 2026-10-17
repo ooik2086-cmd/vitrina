@@ -46,7 +46,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   }
 
   void _open(AppNotification n) {
-    if (n.kind == 'sold_out' && n.listingId != null) {
+    if ((n.kind == 'sold_out' || n.kind == 'listing_tip') && n.listingId != null) {
       _openOwnListing(n.listingId!);
       return;
     }

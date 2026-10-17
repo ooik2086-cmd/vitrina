@@ -248,6 +248,42 @@ def run_review_reminders(db: Session, *, now: datetime, after=REVIEW_REMINDER_AF
     return done
 
 
+STALE_AFTER = timedelta(days=21)
+STALE_FEW_VIEWS = 30  # below this the listing is not being seen; above it, seen but not chosen
+
+
+def run_stale_listing_tips(db: Session, *, now: datetime, after=STALE_AFTER) -> list[int]:
+    """Scheduler job: once per listing, three weeks on sale with no order, the seller gets one concrete tip.
+    Few views means people do not find it (photos, 360°, title); many views and no order usually means price."""
+    started = func.coalesce(Listing.announced_at, Listing.created_at)
+    ordered = select(Order.listing_id).where(Order.status != OrderStatus.CANCELLED.value)
+    rows = db.scalars(select(Listing).where(Listing.status == "published", Listing.stale_nudged_at.is_(None),
+                                            started <= now - after, Listing.id.not_in(ordered))).all()
+    done = []
+    for listing in rows:
+        t = listing.title
+        if listing.views >= STALE_FEW_VIEWS:
+            kk = (f"«{t}» {listing.views} рет қаралды, бірақ әлі сатылмады. Бағаны 5–10% түсіріп көріңіз: "
+                  f"таңдаулыға қосқандарға хабар барады.")
+            ru = (f"«{t}» посмотрели {listing.views} раз, но не купили. Попробуйте снизить цену на 5–10%: "
+                  f"добавившие в избранное получат уведомление.")
+            en = (f"“{t}” was viewed {listing.views} times but has not sold. Try 5–10% off: "
+                  f"people who saved it will be told.")
+        elif not any(m.angle == "frame" for m in listing.media):
+            kk = f"«{t}» 3 аптада аз қаралды. 360° көрініс қосыңыз: ондай тауарларды жиі ашады."
+            ru = f"«{t}» мало смотрели за 3 недели. Добавьте обзор 360°: такие товары открывают чаще."
+            en = f"“{t}” got few views in 3 weeks. Add a 360° view: listings with one get opened more."
+        else:
+            kk = f"«{t}» 3 аптада аз қаралды. Атауына бренд пен модельді жазып, бірінші фотоны жарығырақ етіңіз."
+            ru = f"«{t}» мало смотрели за 3 недели. Укажите бренд и модель в названии и сделайте первое фото светлее."
+            en = f"“{t}” got few views in 3 weeks. Put brand and model in the title and use a brighter first photo."
+        notify(db, listing.seller_id, "listing_tip", kk, ru, en, listing_id=listing.id)
+        listing.stale_nudged_at = now
+        done.append(listing.id)
+    db.commit()
+    return done
+
+
 # How long an order may hold a pair without money behind it. Payment pages of providers expire well within
 # the second limit; a payment that still arrives later is refunded by the payment webhook.
 UNPAID_CREATED_TTL = timedelta(minutes=30)

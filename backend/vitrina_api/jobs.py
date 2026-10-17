@@ -1,5 +1,5 @@
 """Time-based work: unpaid orders let go of their pair, a paid order the seller ignores is refunded, orders the
-buyer never confirmed complete on their own, and the review reminder.
+buyer never confirmed complete on their own, the review reminder, and a tip on listings that do not sell.
 
 Run it from cron with `python -m vitrina_api.jobs` (one pass, then exit), or let the API process do it by
 setting VITRINA_JOBS_INTERVAL to a number of seconds. With several API processes, use cron instead so the
@@ -28,7 +28,9 @@ def run_once(sessions: sessionmaker, settings: Settings) -> dict[str, list[int]]
         completed = services.run_auto_complete(db, now=now, window=settings.confirm_window, rule=settings.commission)
     with sessions() as db:
         reminded = services.run_review_reminders(db, now=now)
-    return {**expired, "completed": completed, "review_reminders": reminded}
+    with sessions() as db:
+        tips = services.run_stale_listing_tips(db, now=now)
+    return {**expired, "completed": completed, "review_reminders": reminded, "listing_tips": tips}
 
 
 async def loop(sessions: sessionmaker, settings: Settings, interval_s: int) -> None:
