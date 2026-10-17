@@ -111,8 +111,7 @@ class _ListingScreenState extends State<ListingScreen> {
     setState(() => _ordering = true);
     try {
       final offer = _offer?.status == 'accepted' && _offer!.sizeId == _sizeId ? _offer : null;
-      final order =
-          await SessionScope.of(context).api.createOrder(listing.id, _sizeId!, _orderKey, offerId: offer?.id);
+      final order = await SessionScope.of(context).api.createOrder(listing.id, _sizeId!, _orderKey, offerId: offer?.id);
       if (offer != null) _offer = null;
       _orderKey = newIdempotencyKey();
       if (!mounted) return;
@@ -260,7 +259,8 @@ class _ListingScreenState extends State<ListingScreen> {
                     const Icon(Icons.beach_access_outlined),
                     const SizedBox(width: 10),
                     Expanded(
-                      child: Text(trf('Сатушы {0} дейін демалыста. Тапсырысты ол оралғанда беруге болады, ал қазір таңдаулыға қосып не сатушыға жаза аласыз.',
+                      child: Text(trf(
+                          'Сатушы {0} дейін демалыста. Тапсырысты ол оралғанда беруге болады, ал қазір таңдаулыға қосып не сатушыға жаза аласыз.',
                           [formatDay(away)])),
                     ),
                   ]),
@@ -276,7 +276,8 @@ class _ListingScreenState extends State<ListingScreen> {
                         name: tr('Баға деңгейі'),
                         value: l.segment == null ? tr('Деректер әлі аз') : label(segments, l.segment)),
                     const Divider(),
-                    _Fact(icon: Icons.auto_awesome_outlined, name: tr('Жағдайы'), value: label(conditions, l.condition)),
+                    _Fact(
+                        icon: Icons.auto_awesome_outlined, name: tr('Жағдайы'), value: label(conditions, l.condition)),
                     const Divider(),
                     _Fact(
                         icon: Icons.verified_outlined,
@@ -305,13 +306,15 @@ class _ListingScreenState extends State<ListingScreen> {
               const SizedBox(height: 24),
               Row(children: [
                 Expanded(child: Text(tr('Өлшем'), style: theme.textTheme.titleMedium)),
-                Text(tr('ұлтарақ ұзындығы'), style: theme.textTheme.labelMedium?.copyWith(color: scheme.onSurfaceVariant)),
+                Text(tr('ұлтарақ ұзындығы'),
+                    style: theme.textTheme.labelMedium?.copyWith(color: scheme.onSurfaceVariant)),
               ]),
               const SizedBox(height: 12),
               Wrap(spacing: 8, runSpacing: 8, children: [
                 for (final s in l.sizes)
                   _SizeTile(size: s, selected: _sizeId == s.id, onTap: () => setState(() => _sizeId = s.id)),
               ]),
+              if (l.sizeFit != null) ...[const SizedBox(height: 12), SizeFitNote(fit: l.sizeFit!)],
               if (mySize.value != null) ...[
                 const SizedBox(height: 10),
                 Row(children: [
@@ -369,7 +372,10 @@ class _ListingScreenState extends State<ListingScreen> {
                       ],
                       Flexible(
                         child: Text(
-                          [if (l.sellerCity != null) l.sellerCity!, trf('{0} пікір', [l.sellerReviews])].join(' · '),
+                          [
+                            if (l.sellerCity != null) l.sellerCity!,
+                            trf('{0} пікір', [l.sellerReviews])
+                          ].join(' · '),
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
@@ -449,11 +455,11 @@ class _ListingScreenState extends State<ListingScreen> {
                       ? tr('Сатылған')
                       : away != null
                           ? trf('{0} бастап', [formatDay(away.add(const Duration(days: 1)))])
-                      : selected == null
-                          ? tr('Өлшемді таңдаңыз')
-                          : deal != null
-                              ? tr('Келісілген бағамен алу')
-                              : tr('Тапсырыс беру')),
+                          : selected == null
+                              ? tr('Өлшемді таңдаңыз')
+                              : deal != null
+                                  ? tr('Келісілген бағамен алу')
+                                  : tr('Тапсырыс беру')),
                 ),
               ),
             ]),
@@ -662,6 +668,63 @@ class _SimilarRow extends StatelessWidget {
           ),
         ]);
       },
+    );
+  }
+}
+
+/// What buyers said about the size, with a three-part bar so the split is visible at a glance.
+class SizeFitNote extends StatelessWidget {
+  const SizeFitNote({super.key, required this.fit});
+  final SizeFit fit;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final (headline, advice) = switch (fit.verdict) {
+      'small' => (tr('Кішілеу келеді'), tr('Жарты өлшем үлкенін алыңыз')),
+      'large' => (tr('Үлкендеу келеді'), tr('Жарты өлшем кішісін алыңыз')),
+      _ => (tr('Өлшеміне сай келеді'), tr('Әдеттегі өлшеміңізді алыңыз')),
+    };
+    Widget part(int n, Color color) =>
+        n == 0 ? const SizedBox.shrink() : Expanded(flex: n, child: Container(height: 6, color: color));
+    Widget legend(String label, int n) =>
+        Text('${tr(label)} $n', style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant));
+    return Container(
+      key: const Key('size-fit'),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+          color: scheme.surface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: scheme.outlineVariant)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.straighten_rounded, size: 20),
+          const SizedBox(width: 8),
+          Expanded(child: Text(headline, style: weight(theme.textTheme.titleSmall!, 700))),
+          Text(trf('{0} сатып алушы', [fit.answers]),
+              style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
+        ]),
+        const SizedBox(height: 4),
+        Text(advice, style: theme.textTheme.bodyMedium),
+        const SizedBox(height: 10),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(3),
+          child: Row(children: [
+            part(fit.small, const Color(0xFFE8A23A)),
+            if (fit.small > 0 && fit.trueToSize > 0) const SizedBox(width: 2),
+            part(fit.trueToSize, const Color(0xFF2E9E6A)),
+            if (fit.large > 0 && fit.small + fit.trueToSize > 0) const SizedBox(width: 2),
+            part(fit.large, const Color(0xFF5B7FD6)),
+          ]),
+        ),
+        const SizedBox(height: 6),
+        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+          legend('Кішілеу', fit.small),
+          legend('Сай', fit.trueToSize),
+          legend('Үлкендеу', fit.large),
+        ]),
+      ]),
     );
   }
 }

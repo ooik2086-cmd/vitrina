@@ -73,3 +73,6 @@ const orderStatuses = {
 };
 
 String label(Map<String, String> table, String? code) => code == null ? '—' : tr(table[code] ?? code);
+
+/// How a size felt, as a buyer picks it in a review.
+const fits = {'small': 'Кішілеу', 'true': 'Өлшеміне сай', 'large': 'Үлкендеу'};

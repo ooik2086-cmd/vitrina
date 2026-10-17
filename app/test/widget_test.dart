@@ -254,6 +254,31 @@ void main() {
     expect(urls, contains(after));
   });
 
+  testWidgets('product page sums up how the size fits, and the verdict needs a clear lead', (tester) async {
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async {
+          if (req.url.path.endsWith('/similar')) return jsonResponse({'items': []});
+          return jsonResponse({
+            ...listingJson(),
+            'size_fit': {'answers': 5, 'small': 3, 'true': 2, 'large': 0},
+          });
+        }));
+    tester.view.physicalSize = const Size(400, 1800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+        SessionScope(session: Session(api), child: const MaterialApp(home: ListingScreen(listingId: 7))));
+    await tester.pumpAndSettle();
+    expect(find.text('Кішілеу келеді'), findsOneWidget);
+    expect(find.text('Жарты өлшем үлкенін алыңыз'), findsOneWidget);
+    expect(find.text('5 сатып алушы'), findsOneWidget);
+    SizeFit fit(int s, int t, int l) => SizeFit.fromJson({'answers': s + t + l, 'small': s, 'true': t, 'large': l});
+    expect(fit(1, 8, 1).verdict, 'true');
+    expect(fit(4, 2, 4).verdict, 'true'); // split both ways: no advice beats wrong advice
+    expect(fit(0, 3, 2).verdict, 'large');
+  });
+
   testWidgets('product page keeps segment, condition and authenticity apart and shows defects', (tester) async {
     final api = Api(
         base: 'http://x/api/v1',

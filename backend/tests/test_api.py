@@ -591,6 +591,30 @@ class SocialTests(ApiTestCase):
         self.assertEqual(page["items"][0]["photos"], urls)
         self.assertEqual(photo(self.buyer).json()["code"], "already_reviewed")
 
+    def test_size_fit_sums_up_what_buyers_said_about_the_model(self):
+        def completed(i):
+            listing, order = self.ordered(key=f"fit{i}")
+            self.post(f"/orders/{order['id']}/pay", self.buyer)
+            self.pay(order, event_id=f"evt_fit_{i}")
+            self.post(f"/orders/{order['id']}/accept", self.seller)
+            self.post(f"/orders/{order['id']}/ship", self.seller, {"tracking_number": f"FIT{i}"})
+            self.deliver(f"FIT{i}", event_id=f"dlv_fit_{i}")
+            self.assertEqual(self.post(f"/orders/{order['id']}/confirm", self.buyer).status_code, 200)
+            return listing, order
+
+        fits = ["small", "small", None, "true"]
+        for i, fit in enumerate(fits):
+            listing, order = completed(i)
+            r = self.post(f"/orders/{order['id']}/review", self.buyer, {"rating": 5, "fit": fit})
+            self.assertEqual(r.json()["fit"], fit)
+            # Two answers are not enough to say anything about the shoe.
+            expected = None if i < 3 else {"answers": 3, "small": 2, "true": 1, "large": 0}
+            self.assertEqual(self.c.get(f"/api/v1/listings/{listing['id']}").json()["size_fit"], expected)
+        other = self.publish(model_name="Trail 02")
+        self.assertIsNone(self.c.get(f"/api/v1/listings/{other['id']}").json()["size_fit"])
+        self.assertEqual(self.post(f"/orders/{order['id']}/review", self.buyer, {"rating": 5, "fit": "huge"}).status_code,
+                         422)
+
     def test_order_history_lists_each_step(self):
         _, order = self.delivered()
         detail = self.get(f"/orders/{order['id']}", self.buyer).json()

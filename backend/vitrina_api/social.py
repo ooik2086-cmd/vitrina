@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re
+from typing import Literal
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile
@@ -41,6 +42,7 @@ class ReviewIn(BaseModel):
     rating: int = Field(ge=1, le=5)
     text: str | None = Field(default=None, max_length=1000)
     photos: list[str] = Field(default_factory=list, max_length=MAX_REVIEW_PHOTOS)
+    fit: Literal["small", "true", "large"] | None = None
 
 
 class ReplyIn(BaseModel):
@@ -175,10 +177,29 @@ def post_message(db: Session, conv: Conversation, user: User, text: str, photo_u
 
 
 # ---------------------------------------------------------------- reviews
+FIT_MIN_ANSWERS = 3  # fewer answers than this say more about one foot than about the shoe
+
+
+def size_fit(db: Session, listing: Listing) -> dict | None:
+    """How buyers said the size felt: for every listing of the same model when brand and model are known,
+    since the last is the same whoever sells it, otherwise for this listing alone."""
+    stmt = select(Review.fit, func.count(Review.id)).join(Order, Order.id == Review.order_id).join(
+        Listing, Listing.id == Order.listing_id).where(Review.fit.is_not(None)).group_by(Review.fit)
+    if listing.brand and listing.model_name:
+        stmt = stmt.where(Listing.brand == listing.brand, Listing.model_name == listing.model_name)
+    else:
+        stmt = stmt.where(Listing.id == listing.id)
+    counts = {"small": 0, "true": 0, "large": 0, **{fit: n for fit, n in db.execute(stmt).all()}}
+    answers = sum(counts.values())
+    if answers < FIT_MIN_ANSWERS:
+        return None
+    return {"answers": answers, **counts}
+
+
 def review_out(db: Session, r: Review) -> dict:
     buyer = db.get(User, r.buyer_id)
     return {"id": r.id, "order_id": r.order_id, "rating": r.rating, "text": r.text, "seller_reply": r.seller_reply,
-            "photos": json.loads(r.photos) if r.photos else [],
+            "photos": json.loads(r.photos) if r.photos else [], "fit": r.fit,
             "buyer_name": buyer.display_name or "Сатып алушы", "created_at": services.aware(r.created_at).isoformat()}
 
 
@@ -213,7 +234,8 @@ def create_review(order_id: int, body: ReviewIn, user: User = Depends(current_us
     if any(not url.startswith(own) for url in body.photos):
         raise ApiError(422, "foreign_media")
     review = Review(order_id=order.id, seller_id=order.seller_id, buyer_id=user.id, rating=body.rating,
-                    text=(body.text or "").strip() or None, photos=json.dumps(body.photos) if body.photos else None)
+                    text=(body.text or "").strip() or None, photos=json.dumps(body.photos) if body.photos else None,
+                    fit=body.fit)
     db.add(review)
     services.notify(db, order.seller_id, "review", f"Жаңа пікір: {body.rating}/5, тапсырыс №{order.id}.",
                     f"Новый отзыв: {body.rating}/5, заказ №{order.id}.",

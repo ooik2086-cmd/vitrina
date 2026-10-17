@@ -264,6 +264,7 @@ class Review(Base):
     text: Mapped[str | None] = mapped_column(Text)
     seller_reply: Mapped[str | None] = mapped_column(Text)
     photos: Mapped[str | None] = mapped_column(Text)  # JSON list of the buyer's own photos of what arrived
+    fit: Mapped[str | None] = mapped_column(String(10))  # "small", "true" or "large": how the size felt
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 

@@ -142,8 +142,7 @@ class _OrderScreenState extends State<OrderScreen> {
                 const SizedBox(height: 16),
                 if (me?.id == o.buyerId && o.status == 'COMPLETED' && !o.reviewed && !_reviewed)
                   _ReviewForm(orderId: o.id, onDone: () => setState(() => _reviewed = true)),
-                if (_reviewed)
-                  Padding(padding: EdgeInsets.only(bottom: 12), child: Text(tr('Пікіріңіз үшін рақмет!'))),
+                if (_reviewed) Padding(padding: EdgeInsets.only(bottom: 12), child: Text(tr('Пікіріңіз үшін рақмет!'))),
                 for (final a in _actionsFor(o, isBuyer: me?.id == o.buyerId))
                   Padding(
                     padding: const EdgeInsets.only(bottom: 8),
@@ -186,7 +185,8 @@ class _OrderHeader extends StatelessWidget {
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(o.listingTitle ?? '',
                   style: theme.textTheme.titleSmall, maxLines: 2, overflow: TextOverflow.ellipsis),
-              if (o.sizeLabel != null) Text(trf('Өлшем {0} · {1} см', [o.sizeLabel, o.sizeCm]), style: theme.textTheme.bodySmall),
+              if (o.sizeLabel != null)
+                Text(trf('Өлшем {0} · {1} см', [o.sizeLabel, o.sizeCm]), style: theme.textTheme.bodySmall),
               const SizedBox(height: 4),
               Text(formatTenge(o.totalTiyn), style: weight(theme.textTheme.titleMedium!, 750)),
             ]),
@@ -315,6 +315,7 @@ class _ReviewFormState extends State<_ReviewForm> {
   int _rating = 0;
   final _text = TextEditingController();
   final List<String> _photos = [];
+  String? _fit;
   bool _busy = false;
   bool _uploading = false;
 
@@ -343,7 +344,7 @@ class _ReviewFormState extends State<_ReviewForm> {
   Future<void> _submit() async {
     setState(() => _busy = true);
     try {
-      await SessionScope.of(context).api.review(widget.orderId, _rating, _text.text.trim(), photos: _photos);
+      await SessionScope.of(context).api.review(widget.orderId, _rating, _text.text.trim(), photos: _photos, fit: _fit);
       widget.onDone();
     } catch (e) {
       if (mounted) showError(context, e);
@@ -370,6 +371,18 @@ class _ReviewFormState extends State<_ReviewForm> {
                     size: 32, color: const Color(0xFFFFB020)),
               ),
           ]),
+          Text(tr('Өлшемі қалай?'), style: theme.textTheme.titleSmall),
+          const SizedBox(height: 6),
+          Wrap(spacing: 8, children: [
+            for (final e in fits.entries)
+              ChoiceChip(
+                key: Key('fit-${e.key}'),
+                label: Text(tr(e.value)),
+                selected: _fit == e.key,
+                onSelected: (on) => setState(() => _fit = on ? e.key : null),
+              ),
+          ]),
+          const SizedBox(height: 12),
           TextField(
             controller: _text,
             maxLines: 3,
@@ -381,7 +394,10 @@ class _ReviewFormState extends State<_ReviewForm> {
               Stack(children: [
                 ClipRRect(
                   borderRadius: BorderRadius.circular(12),
-                  child: Image.network(url, width: 72, height: 72, fit: BoxFit.cover,
+                  child: Image.network(url,
+                      width: 72,
+                      height: 72,
+                      fit: BoxFit.cover,
                       errorBuilder: (_, __, ___) => const SizedBox(width: 72, height: 72)),
                 ),
                 Positioned(
@@ -400,8 +416,7 @@ class _ReviewFormState extends State<_ReviewForm> {
                 child: OutlinedButton(
                   key: const Key('review-photo'),
                   style: OutlinedButton.styleFrom(
-                      padding: EdgeInsets.zero,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+                      padding: EdgeInsets.zero, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
                   onPressed: _uploading ? null : _addPhoto,
                   child: _uploading
                       ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))

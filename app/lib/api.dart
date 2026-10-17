@@ -338,7 +338,8 @@ class Listing {
         sellerReviews = ((j['seller'] as Map)['reviews'] as int?) ?? 0,
         stats = j['stats'] == null ? null : ListingStats.fromJson(j['stats'] as Map<String, dynamic>),
         promo = j['promo'] == null ? null : Promo.fromJson(j['promo'] as Map<String, dynamic>),
-        moderation = j['moderation'] == null ? null : Moderation.fromJson(j['moderation'] as Map<String, dynamic>);
+        moderation = j['moderation'] == null ? null : Moderation.fromJson(j['moderation'] as Map<String, dynamic>),
+        sizeFit = j['size_fit'] == null ? null : SizeFit.fromJson(j['size_fit'] as Map<String, dynamic>);
 
   final int id;
   final String status;
@@ -365,6 +366,9 @@ class Listing {
 
   /// Set while the seller is on holiday: no orders or offers until then.
   final DateTime? sellerAwayUntil;
+
+  /// What buyers of this model said about the size; only on the product page, and only with enough answers.
+  final SizeFit? sizeFit;
   final double? sellerRating;
   final int sellerReviews;
 
@@ -471,6 +475,26 @@ class Conversation {
   final int unread;
 }
 
+/// How buyers said a model's size felt, from their reviews.
+class SizeFit {
+  SizeFit.fromJson(Map<String, dynamic> j)
+      : answers = j['answers'] as int,
+        small = j['small'] as int,
+        trueToSize = j['true'] as int,
+        large = j['large'] as int;
+  final int answers;
+  final int small;
+  final int trueToSize;
+  final int large;
+
+  /// "small", "large" or "true": a side wins only with at least 40% of answers and more than the other side.
+  String get verdict {
+    if (small * 5 >= answers * 2 && small > large) return 'small';
+    if (large * 5 >= answers * 2 && large > small) return 'large';
+    return 'true';
+  }
+}
+
 class Review {
   Review.fromJson(Map<String, dynamic> j)
       : id = j['id'] as int,
@@ -478,6 +502,7 @@ class Review {
         text = j['text'] as String?,
         sellerReply = j['seller_reply'] as String?,
         photos = [for (final p in (j['photos'] as List?) ?? const []) p as String],
+        fit = j['fit'] as String?,
         buyerName = j['buyer_name'] as String,
         createdAt = DateTime.parse(j['created_at'] as String).toLocal();
   final int id;
@@ -487,6 +512,9 @@ class Review {
 
   /// The buyer's own photos of the pair that arrived.
   final List<String> photos;
+
+  /// "small", "true" or "large" when the buyer said how the size felt.
+  final String? fit;
   final String buyerName;
   final DateTime createdAt;
 }
@@ -746,11 +774,12 @@ class Api {
   }
 
   // reviews
-  Future<Review> review(int orderId, int rating, String? text, {List<String> photos = const []}) async =>
+  Future<Review> review(int orderId, int rating, String? text, {List<String> photos = const [], String? fit}) async =>
       Review.fromJson(await _send('POST', '/orders/$orderId/review', body: {
         'rating': rating,
         if (text != null && text.isNotEmpty) 'text': text,
         if (photos.isNotEmpty) 'photos': photos,
+        if (fit != null) 'fit': fit,
       }) as Map<String, dynamic>);
 
   Future<String> uploadReviewPhoto(int orderId, List<int> bytes, String filename) async {

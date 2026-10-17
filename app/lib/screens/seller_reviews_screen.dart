@@ -5,6 +5,7 @@ import '../session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import '../i18n.dart';
+import '../labels.dart';
 
 class Stars extends StatelessWidget {
   const Stars({super.key, required this.value, this.size = 16});
@@ -109,6 +110,11 @@ class _SellerReviewsScreenState extends State<SellerReviewsScreen> {
                       Expanded(child: Text(r.buyerName, style: theme.textTheme.titleSmall)),
                       Stars(value: r.rating.toDouble()),
                     ]),
+                    if (r.fit != null) ...[
+                      const SizedBox(height: 6),
+                      Text(trf('Өлшемі: {0}', [tr(fits[r.fit] ?? r.fit!)]),
+                          style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600)),
+                    ],
                     if (r.text != null) ...[const SizedBox(height: 8), Text(r.text!)],
                     if (r.photos.isNotEmpty) ...[
                       const SizedBox(height: 10),
@@ -134,8 +140,7 @@ class _SellerReviewsScreenState extends State<SellerReviewsScreen> {
                                   width: 84,
                                   height: 84,
                                   fit: BoxFit.cover,
-                                  errorBuilder: (_, __, ___) =>
-                                      Container(width: 84, height: 84, color: Brand.studio)),
+                                  errorBuilder: (_, __, ___) => Container(width: 84, height: 84, color: Brand.studio)),
                             ),
                           ),
                       ]),
@@ -147,7 +152,8 @@ class _SellerReviewsScreenState extends State<SellerReviewsScreen> {
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
                             color: theme.colorScheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(12)),
-                        child: Text(trf('Сатушы: {0}', [r.sellerReply]), style: weight(theme.textTheme.bodyMedium!, 500)),
+                        child:
+                            Text(trf('Сатушы: {0}', [r.sellerReply]), style: weight(theme.textTheme.bodyMedium!, 500)),
                       ),
                     ] else if (isOwner)
                       Align(
