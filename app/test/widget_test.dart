@@ -29,6 +29,7 @@ import 'package:vitrina/screens/onboarding_screen.dart';
 import 'package:vitrina/screens/offers_screen.dart';
 import 'package:vitrina/screens/order_screen.dart';
 import 'package:vitrina/listing_quality.dart';
+import 'package:vitrina/screens/help_screen.dart';
 import 'package:vitrina/screens/orders_screen.dart';
 import 'package:vitrina/screens/profile_screen.dart';
 import 'package:vitrina/screens/saved_searches_screen.dart';
@@ -737,6 +738,19 @@ void main() {
     expect(text, contains('Жиыны: ${formatTenge(1341000)}'));
     expect(text, contains('Сатушы: Qadam Store'));
     expect(text, endsWith('Бұл фискалдық чек емес.'));
+  });
+
+  testWidgets('help screen explains the clocks with the numbers the server uses', (tester) async {
+    await tester.pumpWidget(const MaterialApp(home: HelpScreen()));
+    expect(find.text('Ақшам қалай қорғалады?'), findsOneWidget);
+    expect(find.textContaining('«Алдым, бәрі дұрыс»'), findsOneWidget); // first topic starts open
+    await tester.tap(find.text('Тапсырыс қалай жүреді?'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('$payWithinMinutes минут'), findsOneWidget);
+    expect(find.textContaining('$sellerAnswersWithinHours сағат'), findsOneWidget);
+    expect(payWithinMinutes, 30); // backend/vitrina_api/services.py UNPAID_CREATED_TTL
+    expect(sellerAnswersWithinHours, 48); // SELLER_ANSWER_TTL
+    expect(buyerChecksWithinDays, 5); // config.py confirm_window
   });
 
   test('listing quality counts what the page has and puts the biggest gap first', () {

@@ -8,6 +8,7 @@ import 'analytics_screen.dart';
 import 'blocked_screen.dart';
 import 'earnings_screen.dart';
 import 'following_screen.dart';
+import 'help_screen.dart';
 import 'my_listings_screen.dart';
 import 'notification_settings_screen.dart';
 import 'offers_screen.dart';
@@ -136,6 +137,14 @@ class ProfileScreen extends StatelessWidget {
                 title: Text(tr('Бұғатталғандар')),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const BlockedScreen())),
+              ),
+              ListTile(
+                key: const Key('help'),
+                leading: const Icon(Icons.help_outline_rounded),
+                title: Text(tr('Қалай жұмыс істейді')),
+                subtitle: Text(tr('Төлем, мерзімдер, қайтару, дау')),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const HelpScreen())),
               ),
               ListTile(
                 leading: const Icon(Icons.translate),

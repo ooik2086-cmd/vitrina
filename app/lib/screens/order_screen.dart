@@ -8,6 +8,7 @@ import '../theme.dart';
 import '../widgets/common.dart';
 import '../i18n.dart';
 import 'chat_screen.dart';
+import 'help_screen.dart';
 import 'listing_screen.dart';
 
 /// An action the current user may offer on an order. The server still checks every move.
@@ -437,6 +438,11 @@ class _ProtectionNote extends StatelessWidget {
             tr('Ақша сатушыға сіз тауарды алып, растағаннан кейін ғана өтеді. Бұл схема лицензиясы бар төлем серіктесі қосылғаннан кейін ғана іске қосылады.'),
             style: theme.textTheme.bodySmall,
           ),
+        ),
+        TextButton(
+          key: const Key('protection-more'),
+          onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const HelpScreen())),
+          child: Text(tr('Толығырақ')),
         ),
       ]),
     );
