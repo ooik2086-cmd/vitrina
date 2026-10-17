@@ -656,4 +656,7 @@ const en = <String, String>{
   'Дүкен сілтемесі': 'Shop link',
   'Instagram биосына немесе WhatsApp статусына': 'For your Instagram bio or WhatsApp status',
   '{0} · VITRINA дүкені\n{1}': '{0} · shop on VITRINA\n{1}',
+  '{0} дейін төлемесеңіз, тапсырыс жойылады және өлшем басқаларға ашылады.': "If it isn't paid by {0}, the order is cancelled and the size goes back on sale.",
+  'Сатушы {0} дейін жауап бермесе, ақша сізге өзі қайтарылады.': "If the seller doesn't answer by {0}, your money comes back automatically.",
+  '{0} дейін қабылдаңыз немесе бас тартыңыз. Әйтпесе ақша сатып алушыға қайтарылады.': 'Accept or decline by {0}. Otherwise the money goes back to the buyer.',
 };

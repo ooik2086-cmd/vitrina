@@ -1438,7 +1438,9 @@ def get_order(order_id: int, user: User = Depends(current_user), db: Session = D
     order = order_for(db, order_id, user)
     reviewed = db.scalar(select(Review.id).where(Review.order_id == order.id)) is not None
     events = db.scalars(select(OrderEvent).where(OrderEvent.order_id == order.id).order_by(OrderEvent.id)).all()
+    act_by = services.deadline(db, order)
     return {**order_summary(db, order), "reviewed": reviewed, "delivery": delivery_out(order, user),
+            "deadline": act_by.isoformat() if act_by else None,
             "history": [{"status": e.to_status, "at": services.aware(e.at).isoformat()} for e in events]}
 
 
@@ -1749,6 +1751,14 @@ async def payment_webhook(request: Request, db: Session = Depends(get_db), cfg: 
         if amount != services.total_tiyn(order) or currency != "KZT":
             db.rollback()
             raise ApiError(409, "amount_mismatch")
+        if order.status == S.CANCELLED.value:
+            # Paid after the order was cancelled (by the buyer, or because it waited too long): the money is in,
+            # so it is held and refunded in full. The pair was already put back on sale at the cancel.
+            services.record_payment(db, order, event_id)
+            services.move(db, order, S.REFUND_PENDING, Actor.SYSTEM, reason="paid after cancel")
+            order.pending_refund_tiyn = services.total_tiyn(order)
+            db.commit()
+            return {"result": "refund", "status": order.status}
         if order.status != S.PAYMENT_PENDING.value:
             db.commit()
             return {"result": "duplicate"}

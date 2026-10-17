@@ -544,6 +544,7 @@ class OrderInfo {
         sizeLabel = j['size_label'] as String?,
         sizeCm = j['size_cm'] as String?,
         delivery = j['delivery'] == null ? null : Delivery.fromJson(j['delivery'] as Map<String, dynamic>),
+        deadline = j['deadline'] == null ? null : DateTime.parse(j['deadline'] as String).toLocal(),
         history = [
           for (final h in (j['history'] as List?) ?? const [])
             (status: (h as Map)['status'] as String, at: DateTime.parse(h['at'] as String).toLocal()),
@@ -569,6 +570,9 @@ class OrderInfo {
 
   /// Null for the seller until the order is paid.
   final Delivery? delivery;
+
+  /// When the order cancels itself (unpaid) or refunds itself (seller silent), if nobody acts first.
+  final DateTime? deadline;
   final List<({String status, DateTime at})> history;
 }
 

@@ -32,7 +32,7 @@ class Actor(str, Enum):
     BUYER = "buyer"
     SELLER = "seller"
     SYSTEM = "system"        # verified provider / courier events
-    SCHEDULER = "scheduler"  # timed rules (auto-complete)
+    SCHEDULER = "scheduler"  # timed rules (auto-complete, expiry)
     SUPPORT = "support"
 
 
@@ -41,9 +41,9 @@ S, A = OrderStatus, Actor
 # (from, to) -> actors allowed to make that move
 TRANSITIONS: dict[tuple[OrderStatus, OrderStatus], frozenset[Actor]] = {
     (S.CREATED, S.PAYMENT_PENDING): frozenset({A.BUYER}),
-    (S.CREATED, S.CANCELLED): frozenset({A.BUYER, A.SYSTEM}),
+    (S.CREATED, S.CANCELLED): frozenset({A.BUYER, A.SYSTEM, A.SCHEDULER}),
     (S.PAYMENT_PENDING, S.PAID): frozenset({A.SYSTEM}),
-    (S.PAYMENT_PENDING, S.CANCELLED): frozenset({A.BUYER, A.SYSTEM}),
+    (S.PAYMENT_PENDING, S.CANCELLED): frozenset({A.BUYER, A.SYSTEM, A.SCHEDULER}),
     (S.PAID, S.SELLER_ACCEPTED): frozenset({A.SELLER}),
     (S.PAID, S.REFUND_PENDING): frozenset({A.BUYER, A.SELLER, A.SUPPORT, A.SCHEDULER}),
     (S.SELLER_ACCEPTED, S.PREPARING): frozenset({A.SELLER}),
@@ -64,7 +64,11 @@ TRANSITIONS: dict[tuple[OrderStatus, OrderStatus], frozenset[Actor]] = {
     (S.DISPUTED, S.COMPLETED): frozenset({A.SUPPORT}),
     (S.DISPUTED, S.REFUND_PENDING): frozenset({A.SUPPORT}),
     (S.REFUND_PENDING, S.REFUNDED): frozenset({A.SYSTEM}),
+    # The one way out of a final status: the provider reports a payment for an order that was already cancelled
+    # (the buyer paid in a tab left open). The money is real, so it goes back to the buyer.
+    (S.CANCELLED, S.REFUND_PENDING): frozenset({A.SYSTEM}),
 }
+LATE_PAYMENT = (S.CANCELLED, S.REFUND_PENDING)
 
 TERMINAL = frozenset({S.COMPLETED, S.REFUNDED, S.CANCELLED})
 # Support decisions on money must carry a written reason (audit requirement).
@@ -123,7 +127,7 @@ def transition(
 ) -> Order:
     now = now or datetime.now(timezone.utc)
     frm = order.status
-    if frm in TERMINAL:
+    if frm in TERMINAL and (frm, to) != LATE_PAYMENT:
         raise TransitionError(f"order {order.id} is final ({frm.value})")
     actors = TRANSITIONS.get((frm, to))
     if actors is None:

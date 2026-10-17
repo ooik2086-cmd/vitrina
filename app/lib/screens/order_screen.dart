@@ -159,6 +159,10 @@ class _OrderScreenState extends State<OrderScreen> {
               child: ListView(padding: const EdgeInsets.fromLTRB(20, 8, 20, 24), children: [
                 _OrderHeader(order: o),
                 const SizedBox(height: 16),
+                if (orderDeadlineText(o, me?.id) case final text?) ...[
+                  _DeadlineNote(text: text),
+                  const SizedBox(height: 16),
+                ],
                 if (o.delivery != null) ...[
                   _DeliveryCard(delivery: o.delivery!),
                   const SizedBox(height: 16)
@@ -574,6 +578,47 @@ class _ReviewFormState extends State<_ReviewForm> {
           ),
         ]),
       ),
+    );
+  }
+}
+
+String _clock(DateTime t) => '${t.day.toString().padLeft(2, '0')}.${t.month.toString().padLeft(2, '0')}, '
+    '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+
+/// What happens at the order's deadline, told to whoever can still act on it; null when no clock is running.
+String? orderDeadlineText(OrderInfo o, int? meId) {
+  final at = o.deadline;
+  if (at == null) return null;
+  final buyer = meId == o.buyerId;
+  return switch (o.status) {
+    'CREATED' ||
+    'PAYMENT_PENDING' when buyer =>
+      trf('{0} дейін төлемесеңіз, тапсырыс жойылады және өлшем басқаларға ашылады.', [_clock(at)]),
+    'PAID' when buyer => trf('Сатушы {0} дейін жауап бермесе, ақша сізге өзі қайтарылады.', [_clock(at)]),
+    'PAID' => trf('{0} дейін қабылдаңыз немесе бас тартыңыз. Әйтпесе ақша сатып алушыға қайтарылады.', [_clock(at)]),
+    _ => null,
+  };
+}
+
+class _DeadlineNote extends StatelessWidget {
+  const _DeadlineNote({required this.text});
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      key: const Key('order-deadline'),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Icon(Icons.schedule_rounded, size: 20, color: theme.colorScheme.onSurfaceVariant),
+        const SizedBox(width: 10),
+        Expanded(child: Text(text, style: theme.textTheme.bodyMedium)),
+      ]),
     );
   }
 }

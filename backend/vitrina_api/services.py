@@ -246,3 +246,46 @@ def run_review_reminders(db: Session, *, now: datetime, after=REVIEW_REMINDER_AF
         done.append(order.id)
     db.commit()
     return done
+
+
+# How long an order may hold a pair without money behind it. Payment pages of providers expire well within
+# the second limit; a payment that still arrives later is refunded by the payment webhook.
+UNPAID_CREATED_TTL = timedelta(minutes=30)
+UNPAID_PENDING_TTL = timedelta(hours=2)
+# A paid order the seller neither accepted nor declined goes back to the buyer as a full refund.
+SELLER_ANSWER_TTL = timedelta(hours=48)
+
+
+def entered_at(db: Session, order: Order) -> datetime:
+    """When the order reached its current status."""
+    at = db.scalar(select(func.max(OrderEvent.at)).where(OrderEvent.order_id == order.id,
+                                                         OrderEvent.to_status == order.status))
+    return aware(at or order.created_at)
+
+
+EXPIRY = {OrderStatus.CREATED.value: UNPAID_CREATED_TTL, OrderStatus.PAYMENT_PENDING.value: UNPAID_PENDING_TTL,
+          OrderStatus.PAID.value: SELLER_ANSWER_TTL}
+
+
+def deadline(db: Session, order: Order) -> datetime | None:
+    """When the expiry job acts on this order if nobody does first; None when no clock is running."""
+    ttl = EXPIRY.get(order.status)
+    return entered_at(db, order) + ttl if ttl else None
+
+
+def run_expire_orders(db: Session, *, now: datetime) -> dict[str, list[int]]:
+    """Scheduler job: release pairs held by orders nobody paid for, and refund paid orders the seller ignored."""
+    cancelled, refunded = [], []
+    for order in db.scalars(select(Order).where(Order.status.in_(EXPIRY))).all():
+        if now < deadline(db, order):
+            continue
+        if order.status == OrderStatus.PAID.value:
+            move(db, order, OrderStatus.REFUND_PENDING, Actor.SCHEDULER, now=now, reason="seller did not answer")
+            order.pending_refund_tiyn = total_tiyn(order)
+            refunded.append(order.id)
+        else:
+            move(db, order, OrderStatus.CANCELLED, Actor.SCHEDULER, now=now, reason="not paid in time")
+            cancelled.append(order.id)
+        restock(db, order)
+    db.commit()
+    return {"cancelled": cancelled, "refunded": refunded}

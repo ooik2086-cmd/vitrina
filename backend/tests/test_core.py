@@ -97,6 +97,15 @@ class OrderStateMachineTests(unittest.TestCase):
         transition(o, S.CANCELLED, Actor.BUYER)
         with self.assertRaises(TransitionError):
             transition(o, S.PAYMENT_PENDING, Actor.BUYER)
+        for actor in (Actor.BUYER, Actor.SELLER, Actor.SUPPORT, Actor.SCHEDULER):
+            with self.assertRaises(TransitionError):
+                transition(o, S.REFUND_PENDING, actor)
+
+    def test_payment_arriving_after_cancel_is_refunded(self):
+        o = new_order()
+        transition(o, S.CANCELLED, Actor.SCHEDULER)
+        transition(o, S.REFUND_PENDING, Actor.SYSTEM)
+        self.assertEqual(o.status, S.REFUND_PENDING)
 
     def test_paid_order_is_refunded_not_cancelled(self):
         o = paid_order()

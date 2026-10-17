@@ -738,6 +738,24 @@ void main() {
     expect(text, endsWith('Бұл фискалдық чек емес.'));
   });
 
+  test('order deadline speaks to whoever can still act on it', () {
+    OrderInfo order(String status, String? deadline) => OrderInfo.fromJson({
+          'id': 7,
+          'status': status,
+          'listing_id': 2,
+          'buyer_id': 2,
+          'seller_id': 1,
+          'total_tiyn': 100,
+          'deadline': deadline,
+        });
+    final at = DateTime.utc(2026, 10, 17, 9, 30).toIso8601String();
+    expect(orderDeadlineText(order('PAYMENT_PENDING', at), 2), contains('төлемесеңіз'));
+    expect(orderDeadlineText(order('PAYMENT_PENDING', at), 1), isNull); // the seller has nothing to do yet
+    expect(orderDeadlineText(order('PAID', at), 2), contains('ақша сізге өзі қайтарылады'));
+    expect(orderDeadlineText(order('PAID', at), 1), contains('қабылдаңыз немесе бас тартыңыз'));
+    expect(orderDeadlineText(order('SHIPPED', null), 2), isNull);
+  });
+
   testWidgets('size guide converts and remembers the picked size', (tester) async {
     SharedPreferences.setMockInitialValues({});
     await setMySize(null);

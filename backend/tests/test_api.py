@@ -16,7 +16,7 @@ from vitrina_api.app import create_app
 from vitrina_api.config import Settings
 from vitrina_api.models import Base, Conversation, Message, Offer, SavedSearch, User
 from vitrina_api import jobs
-from vitrina_api.services import balance, run_auto_complete, run_review_reminders
+from vitrina_api.services import balance, run_auto_complete, run_expire_orders, run_review_reminders
 from vitrina_core.money import PLATFORM_FEE, buyer_refund, escrow, seller_payable
 from vitrina_core.webhooks import sign
 
@@ -432,7 +432,52 @@ class OrderFlowTests(ApiTestCase):
 
     def test_jobs_pass_runs_both_jobs(self):
         self.delivered()
-        self.assertEqual(jobs.run_once(self.app.state.sessions, self.cfg), {"completed": [], "review_reminders": []})
+        self.assertEqual(jobs.run_once(self.app.state.sessions, self.cfg),
+                         {"cancelled": [], "refunded": [], "completed": [], "review_reminders": []})
+
+    def test_unpaid_order_lets_go_of_the_pair_after_half_an_hour(self):
+        listing, order = self.ordered()
+        size = listing["sizes"][0]["id"]
+        avail = lambda: next(s for s in self.c.get(f"/api/v1/listings/{listing['id']}").json()["sizes"]
+                             if s["id"] == size)["available"]
+        self.assertFalse(avail())  # the only pair is held by the order
+        got = self.c.get(f"/api/v1/orders/{order['id']}", headers=self.h(self.buyer)).json()
+        self.assertGreater(datetime.fromisoformat(got["deadline"]), datetime.now(timezone.utc) + timedelta(minutes=29))
+        now = datetime.now(timezone.utc)
+        with self.db() as db:
+            self.assertEqual(run_expire_orders(db, now=now + timedelta(minutes=10))["cancelled"], [])
+            self.assertEqual(run_expire_orders(db, now=now + timedelta(minutes=31))["cancelled"], [order["id"]])
+        self.assertTrue(avail())
+        self.assertEqual(self.c.get(f"/api/v1/orders/{order['id']}", headers=self.h(self.buyer)).json()["status"],
+                         "CANCELLED")
+
+    def test_paid_order_the_seller_ignores_is_refunded_after_two_days(self):
+        _, order = self.ordered()
+        self.post(f"/orders/{order['id']}/pay", self.buyer)
+        self.assertEqual(self.pay(order).json()["status"], "PAID")
+        now = datetime.now(timezone.utc)
+        with self.db() as db:
+            self.assertEqual(run_expire_orders(db, now=now + timedelta(hours=47))["refunded"], [])
+            self.assertEqual(run_expire_orders(db, now=now + timedelta(hours=49))["refunded"], [order["id"]])
+        got = self.c.get(f"/api/v1/orders/{order['id']}", headers=self.h(self.buyer)).json()
+        self.assertEqual((got["status"], got["deadline"]), ("REFUND_PENDING", None))
+        refund = self.hook("payments/sandbox", self.cfg.payment_webhook_secret, {
+            "id": "evt_ref_1", "type": "refund.succeeded", "order_id": order["id"],
+            "amount_tiyn": order["total_tiyn"], "currency": "KZT"})
+        self.assertEqual(refund.json()["status"], "REFUNDED")
+
+    def test_payment_after_cancel_is_held_and_refunded(self):
+        _, order = self.ordered()
+        self.post(f"/orders/{order['id']}/pay", self.buyer)
+        self.assertEqual(self.post(f"/orders/{order['id']}/cancel", self.buyer).json()["status"], "CANCELLED")
+        late = self.pay(order)
+        self.assertEqual(late.json(), {"result": "refund", "status": "REFUND_PENDING"})
+        refund = self.hook("payments/sandbox", self.cfg.payment_webhook_secret, {
+            "id": "evt_ref_1", "type": "refund.succeeded", "order_id": order["id"],
+            "amount_tiyn": order["total_tiyn"], "currency": "KZT"})
+        self.assertEqual(refund.json()["status"], "REFUNDED")
+        with self.db() as db:
+            self.assertEqual(balance(db, escrow(str(order["id"]))), 0)
 
 
 def jpeg(size=(800, 600), orientation=None, gps=False) -> bytes:
