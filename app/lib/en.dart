@@ -854,12 +854,12 @@ const en = <String, String>{
   '360° көрініс: {0} кадр': '360° view: {0} frames',
   '360° қосу': 'Add 360°',
   'Атауы кемінде 3 әріп болсын': 'The name needs at least 3 letters',
-  'Атауы мен фотолары': 'Name and photos',
-  'Атауын сақтау': 'Save name',
   'Моделі': 'Model',
   'Санын жазыңыз': 'Enter the quantity',
-  'Сатып алушылар көрген фото, санат және күй өзгермейді. Жаңа фото, 360° және өлшем қосуға болады.': 'Photos buyers have seen, the category and the condition stay. You can add photos, a 360° view and sizes.',
-  'Тауар әлі сатылымға шықпаған, сондықтан бәрін өзгертуге болады.': 'This listing has not been on sale yet, so everything can change.',
+  'Сатып алушылар көрген фото, санат және күй өзгермейді. Жаңа фото, 360° және өлшем қосуға болады.':
+      'Photos buyers have seen, the category and the condition stay. You can add photos, a 360° view and sizes.',
+  'Тауар әлі сатылымға шықпаған, сондықтан бәрін өзгертуге болады.':
+      'This listing has not been on sale yet, so everything can change.',
   'Фото қосу': 'Add photo',
   'Фото қосылды': 'Photo added',
   'Фото өшірілді': 'Photo removed',
@@ -868,4 +868,15 @@ const en = <String, String>{
   'Өлшем қосылды': 'Size added',
   'Өлшемді жазыңыз': 'Enter the size',
   'Ақау, жақыннан': 'Defect, close up',
+  '«{0}» фотосын өшіру керек пе?': 'Delete the “{0}” photo?',
+  'Атауы мен сипаты': 'Name and details',
+  'Сатып алушылар көрген фото өзгермейді. Жаңа фото, 360° және өлшем қосуға болады.':
+      'Photos buyers have seen stay as they are. You can add new photos, a 360° view and sizes.',
+  'Сатып алушылар таңдаған бренд, модель, санат және фото өзгермейді. Күйін тек нашарлатып белгілеуге болады.':
+      'The brand, model, category and photos buyers chose stay fixed. The condition can only be marked worse.',
+  'Түсін жазыңыз': 'Enter the colour',
+  'Фото бар': 'Photo added',
+  'Фото, 360° және өлшемдер': 'Photos, 360° and sizes',
+  'Қосқан әр фото мен өлшем бірден сақталады.': 'Each photo and size you add is saved right away.',
+  'Өшіру: {0}': 'Delete: {0}',
 };

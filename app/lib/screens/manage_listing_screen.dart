@@ -26,8 +26,8 @@ const listingStatuses = {
   'rejected': 'Қайтарылды',
 };
 
-/// Seller's own listing: change price, stock and description, pause or put back on sale.
-/// Photos, title and condition are fixed once created, so buyers always get what they chose.
+/// Seller's own listing: change price, stock, name, photos and sizes, pause or put back on sale.
+/// Once on sale the shoe itself (brand, model, category, photos buyers saw) is fixed, so buyers get what they chose.
 class ManageListingScreen extends StatefulWidget {
   const ManageListingScreen({super.key, required this.listing});
   final Listing listing;
@@ -43,13 +43,19 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
   late final _delivery = TextEditingController(text: '${_l.deliveryPriceTiyn ~/ 100}');
   late final _description = TextEditingController(text: _l.description ?? '');
   late final _defects = TextEditingController(text: _l.defects ?? '');
+  late final _title = TextEditingController(text: _l.title);
+  late final _brand = TextEditingController(text: _l.brand ?? '');
+  late final _model = TextEditingController(text: _l.modelName ?? '');
+  late final _color = TextEditingController(text: _l.color);
+  late String _category = _l.category;
+  late String _condition = _l.condition;
   late final Map<int, int> _stock = {for (final s in _l.sizes) s.id: s.quantity ?? (s.available ? 1 : 0)};
   bool _busy = false;
   bool _changed = false;
 
   @override
   void dispose() {
-    for (final c in [_price, _delivery, _description, _defects]) {
+    for (final c in [_price, _delivery, _description, _defects, _title, _brand, _model, _color]) {
       c.dispose();
     }
     super.dispose();
@@ -77,15 +83,28 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
     }
   }
 
+  /// The new value of a name field, or null when it is unchanged, so Save never touches what the seller left alone.
+  String? _edited(TextEditingController c, String? was) {
+    final v = c.text.trim();
+    return v == (was ?? '') ? null : v;
+  }
+
   void _save() {
     if (!_form.currentState!.validate()) return;
+    final fresh = !_l.everOnSale;
     _run(
       (api) => api.editListing(_l.id,
           priceTiyn: _tiyn(_price.text),
           deliveryPriceTiyn: _tiyn(_delivery.text) ?? 0,
           description: _description.text,
           defects: _defects.text,
-          stock: _stock),
+          stock: _stock,
+          title: _edited(_title, _l.title),
+          brand: fresh ? _edited(_brand, _l.brand) : null,
+          modelName: fresh ? _edited(_model, _l.modelName) : null,
+          color: _edited(_color, _l.color),
+          category: fresh && _category != _l.category ? _category : null,
+          condition: _condition != _l.condition ? _condition : null),
       tr('Сақталды'),
     );
   }
@@ -279,8 +298,19 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
             ),
             if (!locked) ...[
               const SizedBox(height: 24),
+              ListingNameFields(
+                listing: _l,
+                title: _title,
+                brand: _brand,
+                model: _model,
+                color: _color,
+                category: _category,
+                condition: _condition,
+                onCategory: (v) => setState(() => _category = v),
+                onCondition: (v) => setState(() => _condition = v),
+              ),
+              const SizedBox(height: 24),
               ListingContentsCard(
-                key: ValueKey('contents-${_l.media.length}-${_l.sizes.length}-${_l.status}'),
                 listing: _l,
                 onChanged: (l) => setState(() {
                   _l = l;

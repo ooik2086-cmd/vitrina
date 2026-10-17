@@ -325,3 +325,24 @@ class ListingGrid extends StatelessWidget {
     );
   }
 }
+
+/// Asks before an action that cannot be taken back; true only when the person pressed [action].
+Future<bool> confirmAction(BuildContext context,
+    {required String title, required String action, bool destructive = false}) async {
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: Text(title),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Болдырмау'))),
+        FilledButton(
+          key: const Key('confirm-action'),
+          style: destructive ? FilledButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.error) : null,
+          onPressed: () => Navigator.pop(context, true),
+          child: Text(action),
+        ),
+      ],
+    ),
+  );
+  return ok == true;
+}

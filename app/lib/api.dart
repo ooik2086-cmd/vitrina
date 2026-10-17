@@ -437,10 +437,14 @@ class Listing {
         stockAlerts = {for (final id in (j['stock_alerts'] as List?) ?? const []) id as int},
         soldRecently = ((j['popularity'] as Map?)?['sold_30d'] as int?) ?? 0,
         savedBy = ((j['popularity'] as Map?)?['favorites'] as int?) ?? 0,
-        modelName = j['model_name'] as String?;
+        modelName = j['model_name'] as String?,
+        everOnSale = (j['ever_on_sale'] as bool?) ?? false;
 
   final int id;
   final String status;
+
+  /// Owner view only: once on sale the shoe itself (brand, model, category, photos) is fixed for good.
+  final bool everOnSale;
   final String title;
   final String category;
   final String? brand;
@@ -958,6 +962,7 @@ class Api {
           String? title,
           String? brand,
           String? modelName,
+          String? color,
           String? category,
           String? condition,
           List<Map<String, String>>? photos,
@@ -975,6 +980,7 @@ class Api {
         if (title != null) 'title': title,
         if (brand != null) 'brand': brand,
         if (modelName != null) 'model_name': modelName,
+        if (color != null) 'color': color,
         if (category != null) 'category': category,
         if (condition != null) 'condition': condition,
         if (photos != null) 'photos': photos,

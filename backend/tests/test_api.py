@@ -1074,6 +1074,15 @@ class ModerationPhotoTests(ApiTestCase):
         self.assertEqual(stolen["moderation"]["flags"], ["reused_photo"])
         # Reusing your own photos is fine, and the seller whose photo was copied is never held back.
         self.assertEqual(self.listing(self.seller, (1, 12, 13, 14))["status"], "published")
+
+    def test_a_stolen_photo_added_after_publishing_is_caught_too(self):
+        self.assertEqual(self.listing(self.seller, (1, 2, 3, 4))["status"], "published")
+        other = self.login("+77010000003")
+        self.post("/me/seller", other, {"shop_name": "Басқа", "city": "Астана"})
+        lid = self.listing(other, (5, 6, 7, 8))["id"]
+        stolen = [{"url": self.upload(other, pattern_jpeg(3)), "angle": "defect"}]
+        r = self.c.patch(f"/api/v1/listings/{lid}", json={"add_photos": stolen}, headers=self.h(other))
+        self.assertEqual(r.json()["status"], "moderation", r.text)
         mine = self.c.get("/api/v1/me/listings", headers=self.h(self.seller)).json()["items"][-1]
         r = self.c.patch(f"/api/v1/listings/{mine['id']}", json={"price_tiyn": 4_000_000}, headers=self.h(self.seller))
         self.assertEqual(r.json()["status"], "published")
@@ -2105,7 +2114,13 @@ class ListingEditTests(ApiTestCase):
         self.assertEqual(sum(m["angle"] == "frame" for m in got["media"]), 8)
         self.assertEqual(got["media"][0]["original_url"], PHOTOS[0]["url"])  # what buyers saw is still first
         self.assertEqual([s["label"] for s in got["sizes"]], ["EU 42", "EU 43"])
-        self.assertEqual(self.patch(lid, {"add_photos": spin}).json()["code"], "frames_exist")
+        self.assertEqual(self.patch(lid, {"add_photos": spin}).status_code, 200)  # a retry adds nothing twice
+        self.assertEqual(sum(m["angle"] == "frame" for m in self.patch(lid, {}).json()["media"]), 8)
+        other = [{"url": f"https://cdn.example/g{i}.jpg", "angle": "frame"} for i in range(8)]
+        self.assertEqual(self.patch(lid, {"add_photos": other}).json()["code"], "frames_exist")
+        for locked in ({"brand": "Adidas"}, {"model_name": "Samba"}):
+            self.assertEqual(self.patch(lid, locked).json()["code"], "listing_locked")
+        self.assertEqual(self.patch(lid, {"title": "  ab  "}).status_code, 422)
         self.assertEqual(self.patch(lid, {"add_sizes": [{"label": "eu 43", "insole_cm": "27,5", "quantity": 1}]})
                          .json()["code"], "size_exists")
         self.assertEqual(self.patch(lid, {"title": "x"}).status_code, 422)
@@ -2124,6 +2139,58 @@ class ListingEditTests(ApiTestCase):
         self.assertEqual(self.c.get(f"/api/v1/listings/{lid}").json()["status"], "sold")
         got = self.patch(lid, {"add_sizes": [{"label": "EU 41", "insole_cm": "26", "quantity": 1}]}).json()
         self.assertEqual(got["status"], "paused")
+
+    def test_a_condition_can_be_marked_worse_after_sale_but_never_better(self):
+        lid = self.publish()["id"]
+        r = self.patch(lid, {"condition": "used_good", "defects": "Ұлтанында кішкене сызат бар"})
+        self.assertEqual(r.json().get("condition"), "used_good", r.text)
+        self.assertEqual(self.patch(lid, {"condition": "used_excellent"}).json()["code"], "listing_locked")
+        self.assertEqual(self.patch(lid, {"condition": "defective"}).json()["code"], "defects_required")
+
+    def test_a_rejected_listing_that_was_on_sale_stays_the_same_shoe(self):
+        lid = self.publish()["id"]
+        self.assertEqual(self.patch(lid, {"title": "Кроссовка, жазыңыз 87011234567"}).json()["status"], "moderation")
+        staff = self.make_staff()
+        self.assertEqual(self.post(f"/admin/moderation/{lid}/reject", staff, {"reason": "Телефон жазылған"})
+                         .json()["status"], "rejected")
+        for locked in ({"brand": "Adidas"}, {"category": "casual"}, {"photos": PHOTOS[:5]}):
+            self.assertEqual(self.patch(lid, locked).json()["code"], "listing_locked")
+        got = self.patch(lid, {"title": "Күнделікті кроссовка"}).json()
+        self.assertEqual(got["status"], "rejected")  # a clean edit goes back through publish, not straight on sale
+        self.assertTrue(got["ever_on_sale"])
+
+    def test_a_listing_waiting_for_review_is_not_put_on_sale_by_a_clean_edit(self):
+        lid = self.publish()["id"]
+        self.patch(lid, {"title": "Кроссовка, жазыңыз 87011234567"})
+        self.assertEqual(self.patch(lid, {"title": "Күнделікті кроссовка"}).json()["status"], "moderation")
+        self.assertEqual(self.patch(lid, {"sizes": []}).json()["status"], "moderation")
+
+    def test_a_paused_listing_is_checked_too(self):
+        lid = self.publish()["id"]
+        self.post(f"/listings/{lid}/pause", self.seller)
+        got = self.patch(lid, {"title": "Кроссовка, жазыңыз 87011234567"}).json()
+        self.assertEqual(got["status"], "moderation")
+        from vitrina_api.models import AuditLog
+        with self.db() as db:
+            self.assertIn("edit_listing", [a.action for a in db.query(AuditLog).all()])
+
+    def test_removing_one_photo_keeps_the_rest_as_they_were(self):
+        from vitrina_api.models import Listing
+        lid = self.draft()["id"]
+        with self.db() as db:
+            before = {m.original_url: m.id for m in db.get(Listing, lid).media}
+        got = self.patch(lid, {"photos": PHOTOS[:4] + [{"url": "https://cdn.example/new.jpg", "angle": "sole"}]})
+        self.assertEqual(got.status_code, 200, got.text)
+        with self.db() as db:
+            after = {m.original_url: m.id for m in db.get(Listing, lid).media}
+        self.assertEqual([after[p["url"]] for p in PHOTOS[:4]], [before[p["url"]] for p in PHOTOS[:4]])
+        self.assertNotIn(PHOTOS[4]["url"], after)
+
+    def test_an_order_keeps_the_name_the_buyer_bought(self):
+        listing, order = self.ordered()
+        self.patch(listing["id"], {"title": "Жаңа атау, басқа аяқ киім"})
+        got = self.c.get(f"/api/v1/orders/{order['id']}", headers=self.h(self.buyer)).json()
+        self.assertEqual(got["listing_title"], listing["title"])
 
     def test_others_files_cannot_be_added(self):
         lid = self.publish()["id"]

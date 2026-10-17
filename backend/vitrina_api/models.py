@@ -140,6 +140,9 @@ class Order(Base):
     seller_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     listing_id: Mapped[int] = mapped_column(ForeignKey("listings.id"))
     size_id: Mapped[int] = mapped_column(ForeignKey("listing_sizes.id"))
+    # What the buyer ordered, as shown at that moment: the seller may later improve the listing's name or photos.
+    listing_title: Mapped[str | None] = mapped_column(String(120))
+    listing_cover: Mapped[str | None] = mapped_column(String(500))
     status: Mapped[str] = mapped_column(String(40), index=True)
     item_price_tiyn: Mapped[int] = mapped_column(BigInteger)
     delivery_price_tiyn: Mapped[int] = mapped_column(BigInteger)

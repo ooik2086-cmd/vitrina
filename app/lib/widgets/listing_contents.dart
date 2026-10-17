@@ -7,11 +7,110 @@ import '../labels.dart';
 import '../screens/listing_editor_screen.dart';
 import '../screens/spin_capture_screen.dart';
 import '../session.dart';
+import '../theme.dart';
 import 'common.dart';
 
-/// What the listing shows: its name, photos, 360° view and sizes, edited in place on the manage page.
-/// Before the listing was ever on sale everything can change; afterwards the server keeps the category, condition
-/// and the photos buyers already saw, and the seller can still add photos, a 360° view and sizes.
+const photoAngles = {...requiredAngles, ...optionalAngles, 'defect': 'Ақау, жақыннан'};
+
+/// The listing's name fields, owned by the manage page so its one Save button sends them with everything else.
+/// Before the listing was ever on sale everything can change; afterwards the server keeps the brand, model and
+/// category buyers chose, and the condition can only be marked worse.
+class ListingNameFields extends StatelessWidget {
+  const ListingNameFields({
+    super.key,
+    required this.listing,
+    required this.title,
+    required this.brand,
+    required this.model,
+    required this.color,
+    required this.category,
+    required this.condition,
+    required this.onCategory,
+    required this.onCondition,
+  });
+  final Listing listing;
+  final TextEditingController title;
+  final TextEditingController brand;
+  final TextEditingController model;
+  final TextEditingController color;
+  final String category;
+  final String condition;
+  final ValueChanged<String> onCategory;
+  final ValueChanged<String> onCondition;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final fresh = !listing.everOnSale;
+    final order = conditions.keys.toList();
+    // After sale a seller may admit wear that appeared, never claim the shoe got better.
+    final allowed = fresh ? order : order.sublist(order.indexOf(listing.condition).clamp(0, order.length - 1));
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text(tr('Атауы мен сипаты'), style: theme.textTheme.titleMedium),
+      const SizedBox(height: 4),
+      Text(
+        fresh
+            ? tr('Тауар әлі сатылымға шықпаған, сондықтан бәрін өзгертуге болады.')
+            : tr(
+                'Сатып алушылар таңдаған бренд, модель, санат және фото өзгермейді. Күйін тек нашарлатып белгілеуге болады.'),
+        style: theme.textTheme.bodySmall,
+      ),
+      const SizedBox(height: 12),
+      TextFormField(
+        key: const Key('edit-title'),
+        controller: title,
+        decoration: InputDecoration(labelText: tr('Атауы')),
+        validator: (v) => (v ?? '').trim().length < 3 ? tr('Атауы кемінде 3 әріп болсын') : null,
+      ),
+      const SizedBox(height: 12),
+      Row(children: [
+        Expanded(
+            child: TextFormField(
+                key: const Key('edit-brand'),
+                controller: brand,
+                enabled: fresh,
+                decoration: InputDecoration(labelText: tr('Бренді (міндетті емес)')))),
+        const SizedBox(width: 12),
+        Expanded(
+            child: TextFormField(
+                key: const Key('edit-model'),
+                controller: model,
+                enabled: fresh,
+                decoration: InputDecoration(labelText: tr('Моделі')))),
+      ]),
+      const SizedBox(height: 12),
+      TextFormField(
+        key: const Key('edit-color'),
+        controller: color,
+        decoration: InputDecoration(labelText: tr('Түсі')),
+        validator: (v) => (v ?? '').trim().length < 2 ? tr('Түсін жазыңыз') : null,
+      ),
+      if (fresh) ...[
+        const SizedBox(height: 12),
+        DropdownButtonFormField<String>(
+          initialValue: category,
+          isExpanded: true,
+          decoration: InputDecoration(labelText: tr('Санаты')),
+          items: [for (final e in categories.entries) DropdownMenuItem(value: e.key, child: Text(tr(e.value)))],
+          onChanged: (v) => onCategory(v ?? category),
+        ),
+      ],
+      const SizedBox(height: 12),
+      DropdownButtonFormField<String>(
+        key: const Key('edit-condition'),
+        initialValue: condition,
+        isExpanded: true,
+        decoration: InputDecoration(labelText: tr('Жағдайы')),
+        items: [
+          for (final k in allowed) DropdownMenuItem(value: k, child: Text(tr(conditions[k]!))),
+        ],
+        onChanged: (v) => onCondition(v ?? condition),
+      ),
+    ]);
+  }
+}
+
+/// What the listing shows besides its name: photos, 360° view and sizes, each saved the moment it is added.
 class ListingContentsCard extends StatefulWidget {
   const ListingContentsCard({super.key, required this.listing, required this.onChanged});
   final Listing listing;
@@ -21,37 +120,20 @@ class ListingContentsCard extends StatefulWidget {
   State<ListingContentsCard> createState() => _ListingContentsCardState();
 }
 
-const _photoAngles = {...requiredAngles, ...optionalAngles, 'defect': 'Ақау, жақыннан'};
-
 class _ListingContentsCardState extends State<ListingContentsCard> {
-  final _form = GlobalKey<FormState>();
-  late final _title = TextEditingController(text: widget.listing.title);
-  late final _brand = TextEditingController(text: widget.listing.brand ?? '');
-  late final _model = TextEditingController(text: widget.listing.modelName ?? '');
-  late String _category = widget.listing.category;
-  late String _condition = widget.listing.condition;
   final _picker = ImagePicker();
   bool _busy = false;
 
   Listing get _l => widget.listing;
-  bool get _fresh => _l.status == 'draft' || _l.status == 'rejected';
   bool get _hasSpin => _l.media.any((m) => m.angle == 'frame');
-
-  @override
-  void dispose() {
-    for (final c in [_title, _brand, _model]) {
-      c.dispose();
-    }
-    super.dispose();
-  }
 
   Future<void> _run(Future<Listing> Function(Api api) action, String done) async {
     setState(() => _busy = true);
     try {
       final l = await action(SessionScope.of(context).api);
       if (!mounted) return;
-      widget.onChanged(l);
       final queued = l.status == 'moderation' && _l.status != 'moderation';
+      widget.onChanged(l);
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text(queued ? tr('Өзгеріс тексеруге жіберілді') : done)));
     } catch (e) {
@@ -61,37 +143,62 @@ class _ListingContentsCardState extends State<ListingContentsCard> {
     }
   }
 
-  void _saveName() {
-    if (!_form.currentState!.validate()) return;
-    _run(
-      (api) => api.editListing(_l.id,
-          title: _title.text.trim(),
-          brand: _brand.text.trim(),
-          modelName: _model.text.trim(),
-          category: _fresh && _category != _l.category ? _category : null,
-          condition: _fresh && _condition != _l.condition ? _condition : null),
-      tr('Сақталды'),
-    );
+  /// Uploads a few at a time: a 360° set is dozens of frames, one by one it takes minutes on mobile data.
+  Future<List<Map<String, String>>> _upload(Api api, List<XFile> files, String angle) async {
+    final urls = <String>[];
+    for (var i = 0; i < files.length; i += 4) {
+      urls.addAll(await Future.wait([
+        for (final f in files.skip(i).take(4)) f.readAsBytes().then((b) => api.uploadPhoto(b, f.name)),
+      ]));
+    }
+    return [
+      for (final u in urls) {'url': u, 'angle': angle}
+    ];
   }
 
-  Future<List<Map<String, String>>> _upload(Api api, List<XFile> files, String angle) async => [
-        for (final f in files) {'url': await api.uploadPhoto(await f.readAsBytes(), f.name), 'angle': angle}
-      ];
-
   Future<void> _addPhoto() async {
+    final filled = {for (final m in _l.media) m.angle};
     final angle = await showModalBottomSheet<String>(
       context: context,
+      isScrollControlled: true,
       builder: (context) => SafeArea(
         child: ListView(shrinkWrap: true, children: [
           ListTile(title: Text(tr('Қай жағынан?'), style: Theme.of(context).textTheme.titleMedium)),
-          for (final e in _photoAngles.entries)
-            ListTile(key: Key('angle-${e.key}'), title: Text(tr(e.value)), onTap: () => Navigator.pop(context, e.key)),
+          for (final e in photoAngles.entries)
+            ListTile(
+              key: Key('angle-${e.key}'),
+              title: Text(tr(e.value)),
+              trailing: filled.contains(e.key)
+                  ? Icon(Icons.check_circle,
+                      semanticLabel: tr('Фото бар'), color: Theme.of(context).colorScheme.primary)
+                  : null,
+              onTap: () => Navigator.pop(context, e.key),
+            ),
         ]),
       ),
     );
-    if (angle == null) return;
-    final file =
-        await _picker.pickImage(source: ImageSource.gallery, maxWidth: 2000, maxHeight: 2000, imageQuality: 90);
+    if (angle == null || !mounted) return;
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          ListTile(
+            key: const Key('source-camera'),
+            leading: const Icon(Icons.photo_camera_outlined),
+            title: Text(tr('Камерамен түсіру')),
+            onTap: () => Navigator.pop(context, ImageSource.camera),
+          ),
+          ListTile(
+            key: const Key('source-gallery'),
+            leading: const Icon(Icons.photo_library_outlined),
+            title: Text(tr('Галереядан таңдау')),
+            onTap: () => Navigator.pop(context, ImageSource.gallery),
+          ),
+        ]),
+      ),
+    );
+    if (source == null) return;
+    final file = await _picker.pickImage(source: source, maxWidth: 2000, maxHeight: 2000, imageQuality: 90);
     if (file == null) return;
     await _run((api) async => api.editListing(_l.id, addPhotos: await _upload(api, [file], angle)), tr('Фото қосылды'));
   }
@@ -104,12 +211,16 @@ class _ListingContentsCardState extends State<ListingContentsCard> {
         tr('360° көрініс қосылды'));
   }
 
-  void _removePhoto(int index) {
+  Future<void> _removePhoto(int index) async {
+    final name = tr(photoAngles[_l.media[index].angle] ?? 'Фото');
+    final sure = await confirmAction(context,
+        title: trf('«{0}» фотосын өшіру керек пе?', [name]), action: tr('Өшіру'), destructive: true);
+    if (!sure || !mounted) return;
     final keep = [
       for (var i = 0; i < _l.media.length; i++)
         if (i != index) {'url': _l.media[i].originalUrl, 'angle': _l.media[i].angle}
     ];
-    _run((api) => api.editListing(_l.id, photos: keep), tr('Фото өшірілді'));
+    await _run((api) => api.editListing(_l.id, photos: keep), tr('Фото өшірілді'));
   }
 
   Future<void> _addSize() async {
@@ -125,118 +236,95 @@ class _ListingContentsCardState extends State<ListingContentsCard> {
         if (_l.media[i].angle != 'frame') i
     ];
     final frames = _l.media.where((m) => m.angle == 'frame').length;
-    return Form(
-      key: _form,
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(tr('Атауы мен фотолары'), style: theme.textTheme.titleMedium),
-        const SizedBox(height: 4),
-        Text(
-          _fresh
-              ? tr('Тауар әлі сатылымға шықпаған, сондықтан бәрін өзгертуге болады.')
-              : tr('Сатып алушылар көрген фото, санат және күй өзгермейді. Жаңа фото, 360° және өлшем қосуға болады.'),
-          style: theme.textTheme.bodySmall,
-        ),
-        const SizedBox(height: 12),
-        TextFormField(
-          key: const Key('edit-title'),
-          controller: _title,
-          decoration: InputDecoration(labelText: tr('Атауы')),
-          validator: (v) => (v ?? '').trim().length < 3 ? tr('Атауы кемінде 3 әріп болсын') : null,
-        ),
-        const SizedBox(height: 12),
-        Row(children: [
-          Expanded(
-              child: TextFormField(
-                  controller: _brand, decoration: InputDecoration(labelText: tr('Бренді (міндетті емес)')))),
-          const SizedBox(width: 12),
-          Expanded(child: TextFormField(controller: _model, decoration: InputDecoration(labelText: tr('Моделі')))),
-        ]),
-        if (_fresh) ...[
-          const SizedBox(height: 12),
-          DropdownButtonFormField<String>(
-            initialValue: _category,
-            isExpanded: true,
-            decoration: InputDecoration(labelText: tr('Санаты')),
-            items: [for (final e in categories.entries) DropdownMenuItem(value: e.key, child: Text(tr(e.value)))],
-            onChanged: (v) => setState(() => _category = v ?? _category),
-          ),
-          const SizedBox(height: 12),
-          DropdownButtonFormField<String>(
-            initialValue: _condition,
-            isExpanded: true,
-            decoration: InputDecoration(labelText: tr('Жағдайы')),
-            items: [for (final e in conditions.entries) DropdownMenuItem(value: e.key, child: Text(tr(e.value)))],
-            onChanged: (v) => setState(() => _condition = v ?? _condition),
-          ),
-        ],
-        Align(
-          alignment: Alignment.centerRight,
-          child: TextButton(
-              key: const Key('save-name'), onPressed: _busy ? null : _saveName, child: Text(tr('Атауын сақтау'))),
-        ),
-        const SizedBox(height: 4),
-        SizedBox(
-          height: 88,
-          child: ListView(scrollDirection: Axis.horizontal, children: [
-            for (final i in photos)
-              Padding(
-                padding: const EdgeInsets.only(right: 8),
+    final removable = !_l.everOnSale && photos.length > 1;
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text(tr('Фото, 360° және өлшемдер'), style: theme.textTheme.titleMedium),
+      const SizedBox(height: 4),
+      Text(
+        _l.everOnSale
+            ? tr('Сатып алушылар көрген фото өзгермейді. Жаңа фото, 360° және өлшем қосуға болады.')
+            : tr('Қосқан әр фото мен өлшем бірден сақталады.'),
+        style: theme.textTheme.bodySmall,
+      ),
+      const SizedBox(height: 12),
+      SizedBox(
+        height: 96,
+        child: ListView(scrollDirection: Axis.horizontal, children: [
+          for (final i in photos)
+            Padding(
+              padding: const EdgeInsets.only(right: 12),
+              child: SizedBox(
+                width: 96,
+                height: 96,
                 child: Stack(children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(14),
-                    child: Image.network(_l.media[i].processedUrl ?? _l.media[i].originalUrl,
-                        width: 80,
-                        height: 80,
-                        cacheWidth: 240,
-                        fit: BoxFit.cover,
-                        semanticLabel: tr(_photoAngles[_l.media[i].angle] ?? ''),
-                        errorBuilder: (_, __, ___) =>
-                            const SizedBox(width: 80, height: 80, child: Icon(Icons.image_outlined))),
+                  Positioned(
+                    left: 0,
+                    bottom: 0,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(14),
+                      // Cut-outs are transparent: the studio backdrop keeps them readable in dark mode too.
+                      child: ColoredBox(
+                        color: Brand.studio,
+                        child: Image.network(_l.media[i].processedUrl ?? _l.media[i].originalUrl,
+                            width: 80,
+                            height: 80,
+                            cacheWidth: 240,
+                            fit: BoxFit.cover,
+                            semanticLabel: tr(photoAngles[_l.media[i].angle] ?? ''),
+                            errorBuilder: (_, __, ___) => const SizedBox(
+                                width: 80, height: 80, child: Icon(Icons.image_outlined, color: Colors.black54))),
+                      ),
+                    ),
                   ),
-                  if (_fresh && photos.length > 1)
+                  if (removable)
                     Positioned(
-                      top: -8,
-                      right: -8,
+                      top: 0,
+                      right: 0,
                       child: IconButton(
                         key: Key('remove-photo-$i'),
-                        tooltip: tr('Өшіру'),
-                        icon: const CircleAvatar(radius: 12, child: Icon(Icons.close, size: 14)),
+                        tooltip: trf('Өшіру: {0}', [tr(photoAngles[_l.media[i].angle] ?? 'Фото')]),
+                        constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+                        icon: CircleAvatar(
+                          radius: 12,
+                          backgroundColor: theme.colorScheme.inverseSurface,
+                          child: Icon(Icons.close, size: 14, color: theme.colorScheme.onInverseSurface),
+                        ),
                         onPressed: _busy ? null : () => _removePhoto(i),
                       ),
                     ),
                 ]),
               ),
-          ]),
-        ),
-        const SizedBox(height: 8),
-        Wrap(spacing: 8, runSpacing: 8, children: [
-          OutlinedButton.icon(
-            key: const Key('add-photo'),
-            onPressed: _busy ? null : _addPhoto,
-            icon: const Icon(Icons.add_photo_alternate_outlined),
-            label: Text(tr('Фото қосу')),
-          ),
-          if (!_hasSpin)
-            OutlinedButton.icon(
-              key: const Key('add-spin'),
-              onPressed: _busy ? null : _addSpin,
-              icon: const Icon(Icons.threesixty),
-              label: Text(tr('360° қосу')),
             ),
-          OutlinedButton.icon(
-            key: const Key('add-size'),
-            onPressed: _busy ? null : _addSize,
-            icon: const Icon(Icons.straighten_rounded),
-            label: Text(tr('Өлшем қосу')),
-          ),
         ]),
-        if (_hasSpin) ...[
-          const SizedBox(height: 8),
-          Text(trf('360° көрініс: {0} кадр', [frames]), style: theme.textTheme.bodySmall),
-        ],
-        if (_busy) const Padding(padding: EdgeInsets.only(top: 8), child: LinearProgressIndicator()),
+      ),
+      const SizedBox(height: 8),
+      Wrap(spacing: 8, runSpacing: 8, children: [
+        OutlinedButton.icon(
+          key: const Key('add-photo'),
+          onPressed: _busy ? null : _addPhoto,
+          icon: const Icon(Icons.add_photo_alternate_outlined),
+          label: Text(tr('Фото қосу')),
+        ),
+        if (!_hasSpin)
+          OutlinedButton.icon(
+            key: const Key('add-spin'),
+            onPressed: _busy ? null : _addSpin,
+            icon: const Icon(Icons.threesixty),
+            label: Text(tr('360° қосу')),
+          ),
+        OutlinedButton.icon(
+          key: const Key('add-size'),
+          onPressed: _busy ? null : _addSize,
+          icon: const Icon(Icons.straighten_rounded),
+          label: Text(tr('Өлшем қосу')),
+        ),
       ]),
-    );
+      if (_hasSpin) ...[
+        const SizedBox(height: 8),
+        Text(trf('360° көрініс: {0} кадр', [frames]), style: theme.textTheme.bodySmall),
+      ],
+      if (_busy) const Padding(padding: EdgeInsets.only(top: 8), child: LinearProgressIndicator()),
+    ]);
   }
 }
 
@@ -265,6 +353,7 @@ class _NewSizeDialogState extends State<_NewSizeDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       title: Text(tr('Өлшем қосу')),
+      scrollable: true, // the keyboard takes half a small screen; the fields scroll instead of overflowing
       content: Form(
         key: _form,
         child: Column(mainAxisSize: MainAxisSize.min, children: [

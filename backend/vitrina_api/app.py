@@ -239,7 +239,7 @@ def listing_out(db: Session, listing: Listing, *, owner: bool = False) -> dict:
         "seller": {"id": seller.id, "shop_name": seller.shop_name, "city": seller.city,  # never the phone
                    "away_until": away_out(seller),
                    **per_request(db, "seller_rating", seller.id, lambda: seller_rating(db, seller.id))},
-        **({"stats": listing_stats(db, listing),
+        **({"stats": listing_stats(db, listing), "ever_on_sale": listing.announced_at is not None,
             "promo": {"state": listing.promo_state, "url": listing.promo_url},
             "moderation": moderation_out(listing)} if owner else {}),
     }
@@ -315,12 +315,16 @@ def delivery_out(order: Order, viewer: User) -> dict | None:
             "city": order.delivery_city, "address": order.delivery_address, "note": order.delivery_note}
 
 
+def listing_cover(listing: Listing) -> str | None:
+    return next((m.processed_url or m.original_url for m in listing.media if m.angle != "frame"), None)
+
+
 def order_summary(db: Session, order: Order) -> dict:
     """Order plus what a list row needs to be recognisable: the item's title, size and photo."""
     listing = db.get(Listing, order.listing_id)
     size = db.get(ListingSize, order.size_id)
-    cover = next((m.processed_url or m.original_url for m in listing.media if m.angle != "frame"), None)
-    return {**order_out(order), "listing_title": listing.title, "listing_cover": cover,
+    cover = order.listing_cover or listing_cover(listing)
+    return {**order_out(order), "listing_title": order.listing_title or listing.title, "listing_cover": cover,
             "size_label": size.label, "size_cm": mm_to_cm(size.insole_mm),
             "seller_name": db.get(User, order.seller_id).shop_name, "created_at": services.aware(order.created_at).isoformat()}
 
@@ -611,7 +615,7 @@ def my_earnings(user: User = Depends(current_user), db: Session = Depends(get_db
             fee = sum(e.credit - e.debit for e in tx.entries if e.account == PLATFORM_FEE)
             order = orders[tx.order_id]
             items.append({"order_id": order.id, "kind": tx.kind, "at": services.aware(tx.at).isoformat(),
-                          "listing_title": db.get(Listing, order.listing_id).title,
+                          "listing_title": order.listing_title or db.get(Listing, order.listing_id).title,
                           "net_tiyn": net, "fee_tiyn": fee})
     fees = db.scalar(select(func.coalesce(func.sum(LedgerEntry.credit - LedgerEntry.debit), 0))
                      .join(LedgerTx, LedgerTx.id == LedgerEntry.tx_id)
@@ -835,92 +839,133 @@ def edit_listing(listing_id: int, body: ListingPatch, request: Request, backgrou
     listing = own_listing(db, listing_id, user)
     if listing.status == "hidden":
         raise ApiError(409, "invalid_status")
-    shown_changed = edit_contents(db, cfg, storage, listing, body, user)
-    if body.price_tiyn is not None:
+    changed = edit_contents(db, cfg, storage, listing, body, user)
+    if body.price_tiyn is not None and body.price_tiyn != listing.price_tiyn:
         set_price(db, listing, body.price_tiyn)
         listing.pre_sale_price_tiyn = None  # the seller chose a price by hand: ending a sale must not undo it
+        changed.add("price")
     if body.delivery_price_tiyn is not None:
         listing.delivery_price_tiyn = body.delivery_price_tiyn
-    if body.description is not None:
+    if body.description is not None and (body.description.strip() or None) != listing.description:
         listing.description = body.description.strip() or None
+        changed.add("text")
     if body.defects is not None:
         if listing.condition in DEFECT_REQUIRED and not body.defects.strip():
             raise ApiError(422, "defects_required")
-        listing.defects = body.defects.strip() or None
+        if (body.defects.strip() or None) != listing.defects:
+            listing.defects = body.defects.strip() or None
+            changed.add("text")
+    if listing.condition in DEFECT_REQUIRED and not (listing.defects or "").strip():
+        raise ApiError(422, "defects_required")  # a worse condition always comes with what is wrong
+    if (listing.announced_at is not None and listing.condition == Condition.DEFECTIVE.value
+            and not any(m.angle == "defect" for m in listing.media)):
+        raise ApiError(422, "defects_required", "a close-up photo of each defect is required")
     if body.sizes is not None:
         by_id = {s.id: s for s in listing.sizes}
         for item in body.sizes:
             if item.id not in by_id:
                 raise ApiError(422, "validation", f"unknown size {item.id}")
             by_id[item.id].quantity = item.quantity
-        in_stock = any(s.quantity > 0 for s in listing.sizes)
-        if listing.status == "published" and not in_stock:
-            listing.status = "sold"
-        elif listing.status == "sold" and in_stock:
-            listing.status = "paused"  # restocked; the seller republishes when ready
-    if listing.status in ("published", "moderation") and (
-            shown_changed or body.price_tiyn is not None or body.description is not None or body.defects is not None):
-        route_after_checks(db, storage, listing)  # a live listing cannot slip a phone number or a copied photo in
+    if body.sizes is not None or body.add_sizes:
+        settle_stock_status(listing)
+    if changed and listing.announced_at is not None:
+        recheck(db, storage, listing, changed)
+        services.audit(db, user.id, "edit_listing", f"listing:{listing.id}", ",".join(sorted(changed)))
     services.tell_back_in_stock(db, listing)
     db.commit()
-    if body.photos is not None or body.add_photos:
+    if "photos" in changed:
         background.add_task(prepare_listing_media, request.app.state, listing.id)
     return listing_out(db, listing, owner=True)
 
 
-# Listings that never went on sale: nobody has seen them, so nothing about them is fixed yet.
-FULLY_EDITABLE = ("draft", "rejected")
+def settle_stock_status(listing: Listing) -> None:
+    """The one place stock decides status: a live listing with nothing left is sold; a sold one restocked waits,
+    paused, for the seller to put it back on sale."""
+    in_stock = any(s.quantity > 0 for s in listing.sizes)
+    if listing.status == "published" and not in_stock:
+        listing.status = "sold"
+    elif listing.status == "sold" and in_stock:
+        listing.status = "paused"
+
+
+# What staff clearing a flag covered: once that kind of content changes, the clearance no longer applies.
+CLEARANCE_OF = {"text": ("contacts", "replica"), "photos": ("reused_photo",), "price": ("low_price",),
+                "name": ("contacts", "replica", "low_price")}
+
+
+def recheck(db: Session, storage: Storage, listing: Listing, changed: set[str]) -> None:
+    """Checks a change to a listing that has been on sale, whatever its status now (a sold or paused page is
+    public too). A flagged change sends it to staff; a clean one never puts a listing on sale by itself."""
+    stale = {code for part in changed for code in CLEARANCE_OF.get(part, ())}
+    listing.moderation_cleared = ",".join(c for c in split_codes(listing.moderation_cleared) if c not in stale) or None
+    flags = moderation.check(db, storage, listing)
+    listing.moderation_flags = ",".join(flags) or None
+    if set(flags) - set(split_codes(listing.moderation_cleared)):
+        listing.status = "moderation"
+
+
+CONDITION_ORDER = [c.value for c in Condition]  # best first
 
 
 def edit_contents(db: Session, cfg: Settings, storage: Storage, listing: Listing, body: ListingPatch,
-                  user: User) -> bool:
-    """Name, photos and sizes. Returns whether anything a buyer sees on the page changed."""
-    fresh = listing.status in FULLY_EDITABLE
-    if not fresh and (body.category is not None or body.condition is not None or body.photos is not None):
+                  user: User) -> set[str]:
+    """Name, photos and sizes. Returns which kinds of content buyers see actually changed."""
+    fresh = listing.announced_at is None  # never on sale, whatever its status says now
+    if not fresh and (body.category is not None and body.category != listing.category
+                      or body.photos is not None
+                      or body.brand is not None and (body.brand.strip() or None) != listing.brand
+                      or body.model_name is not None and (body.model_name.strip() or None) != listing.model_name):
         raise ApiError(409, "listing_locked")
-    changed = False
+    if (not fresh and body.condition is not None
+            and CONDITION_ORDER.index(body.condition.value) < CONDITION_ORDER.index(listing.condition)):
+        raise ApiError(409, "listing_locked")  # after sale a condition may only be marked worse, never better
+    changed: set[str] = set()
     for field_name in ("title", "brand", "model_name", "color"):
         value = getattr(body, field_name)
-        if value is not None:
-            value = value.strip() or None
-            if field_name in ("title", "color") and value is None:
-                raise ApiError(422, "validation", f"{field_name} cannot be empty")
+        if value is None:
+            continue
+        value = value.strip() or None
+        if field_name == "title" and (value is None or len(value) < 3) or field_name == "color" and (
+                value is None or len(value) < 2):
+            raise ApiError(422, "validation", f"{field_name} is too short")
+        if value != getattr(listing, field_name):
             setattr(listing, field_name, value)
-            changed = True
-    if body.category is not None:
+            changed.add("name")
+    if body.category is not None and body.category != listing.category:
         listing.category = body.category
-        changed = True
-    if body.condition is not None:
+        changed.add("name")
+    if body.condition is not None and body.condition.value != listing.condition:
         listing.condition = body.condition.value
-        changed = True
-    if changed:
+        changed.add("text")
+    if "name" in changed:
         listing.search_text = normalize_query(" ".join(filter(None, [listing.title, listing.brand, listing.model_name,
                                                                       listing.color, listing.category])))
-    new_photos = list(body.photos or []) + list(body.add_photos or [])
+    have = {m.original_url for m in listing.media}
+    # A retry after a lost answer sends the same photos again: those already on the listing are skipped.
+    added = [p for p in body.add_photos or [] if p.url not in have]
+    new_photos = list(body.photos or []) + added
     if new_photos and not cfg.allow_external_media and not all(storage.owns(p.url, user.id) for p in new_photos):
         raise ApiError(422, "foreign_media")
     if body.photos is not None:
         frames = sum(p.angle == "frame" for p in body.photos)
         if 0 < frames < MIN_SPIN_FRAMES:
             raise ApiError(422, "too_few_frames")
-        listing.media.clear()
-        db.flush()
-        listing.media.extend(Media(original_url=p.url, angle=p.angle, position=i) for i, p in enumerate(body.photos))
-        changed = True
-    if body.add_photos:
-        added_frames = sum(p.angle == "frame" for p in body.add_photos)
+        if [(m.original_url, m.angle) for m in listing.media] != [(p.url, p.angle) for p in body.photos]:
+            replace_photos(listing, body.photos)
+            changed.add("photos")
+    if added:
+        added_frames = sum(p.angle == "frame" for p in added)
         if added_frames:
             # A rotation is one set shot in one go: frames are added only to a listing that has none yet.
             if any(m.angle == "frame" for m in listing.media):
                 raise ApiError(409, "frames_exist")
             if added_frames < MIN_SPIN_FRAMES:
                 raise ApiError(422, "too_few_frames")
-        if len(listing.media) + len(body.add_photos) > MAX_LISTING_MEDIA:
+        if len(listing.media) + len(added) > MAX_LISTING_MEDIA:
             raise ApiError(422, "too_many_photos")
         start = max((m.position for m in listing.media), default=-1) + 1
-        listing.media.extend(Media(original_url=p.url, angle=p.angle, position=start + i)
-                             for i, p in enumerate(body.add_photos))
-        changed = True
+        listing.media.extend(Media(original_url=p.url, angle=p.angle, position=start + i) for i, p in enumerate(added))
+        changed.add("photos")
     if body.add_sizes:
         known = {s.label.strip().lower() for s in listing.sizes}
         if len(listing.sizes) + len(body.add_sizes) > MAX_LISTING_SIZES:
@@ -932,9 +977,18 @@ def edit_contents(db: Session, cfg: Settings, storage: Storage, listing: Listing
             listing.sizes.append(ListingSize(label=size.label.strip(), insole_mm=cm_to_mm(size.insole_cm),
                                              quantity=size.quantity))
         db.flush()
-        if listing.status == "sold" and any(s.quantity > 0 for s in listing.sizes):
-            listing.status = "paused"  # back in stock; the seller republishes when ready
     return changed
+
+
+def replace_photos(listing: Listing, photos: list[PhotoIn]) -> None:
+    """The new photo set, keeping the rows (cut-outs, hashes) of photos that stay; only new ones are processed."""
+    kept = {(m.original_url, m.angle): m for m in listing.media}
+    rows = []
+    for i, p in enumerate(photos):
+        row = kept.pop((p.url, p.angle), None) or Media(original_url=p.url, angle=p.angle)
+        row.position = i
+        rows.append(row)
+    listing.media[:] = rows
 
 
 class PromoIn(BaseModel):
@@ -1734,7 +1788,7 @@ def create_order(body: OrderIn, user: User = Depends(current_user), db: Session 
                   delivery_price_tiyn=listing.delivery_price_tiyn, commission_version=cfg.commission.version,
                   recipient_name=delivery["recipient_name"], recipient_phone=delivery["recipient_phone"],
                   delivery_city=delivery["city"], delivery_address=delivery["address"],
-                  delivery_note=delivery["note"])
+                  delivery_note=delivery["note"], listing_title=listing.title, listing_cover=listing_cover(listing))
     user.last_delivery = json.dumps(delivery, ensure_ascii=False)
     db.add(order)
     db.flush()

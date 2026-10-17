@@ -264,7 +264,7 @@ def run_review_reminders(db: Session, *, now: datetime, after=REVIEW_REMINDER_AF
         if age < after or age > REVIEW_REMINDER_UNTIL:
             continue
         listing = db.get(Listing, order.listing_id)
-        title = listing.title if listing else f"№{order.id}"
+        title = order.listing_title or (listing.title if listing else f"№{order.id}")
         notify(db, order.buyer_id, "review_reminder",
                f"«{title}» қалай болды? Пікіріңіз басқа сатып алушыларға таңдауға көмектеседі.",
                f"Как вам «{title}»? Ваш отзыв поможет другим покупателям с выбором.",

@@ -1387,6 +1387,7 @@ void main() {
     expect(sent!['sizes'], [
       {'id': 1, 'quantity': 3}
     ]);
+    expect(sent!.containsKey('title'), isFalse); // name fields left alone are not sent
     expect(find.text('Сақталды'), findsOneWidget);
   });
 
@@ -2472,7 +2473,8 @@ void main() {
   });
 
   group('editing what a listing shows', () {
-    Future<List<Map<String, dynamic>>> show(WidgetTester tester, Map<String, dynamic> listing) async {
+    Future<List<Map<String, dynamic>>> show(WidgetTester tester, Map<String, dynamic> listing,
+        {bool manage = false}) async {
       final sent = <Map<String, dynamic>>[];
       final api = Api(
           base: 'http://x/api/v1',
@@ -2482,15 +2484,17 @@ void main() {
             sent.add(body);
             return jsonResponse({...listing, if (body['title'] != null) 'title': body['title']});
           }));
-      tester.view.physicalSize = const Size(400, 1400);
+      tester.view.physicalSize = const Size(400, 2400);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
       await tester.pumpWidget(SessionScope(
           session: Session(api),
           child: MaterialApp(
-              home: Scaffold(
-                  body: SingleChildScrollView(
-                      child: ListingContentsCard(listing: Listing.fromJson(listing), onChanged: (_) {}))))));
+              home: manage
+                  ? ManageListingScreen(listing: Listing.fromJson(listing))
+                  : Scaffold(
+                      body: SingleChildScrollView(
+                          child: ListingContentsCard(listing: Listing.fromJson(listing), onChanged: (_) {}))))));
       return sent;
     }
 
@@ -2499,28 +2503,45 @@ void main() {
       {'original_url': 'https://cdn/b.jpg', 'processed_url': null, 'angle': 'outer'},
     ];
 
-    testWidgets('a listing on sale keeps category and photos but gets a new name and size', (tester) async {
-      final sent = await show(tester, listingJson(media: photos));
-      expect(find.byKey(const Key('remove-photo-0')), findsNothing);
+    testWidgets('one Save sends only the name fields the seller changed', (tester) async {
+      final sent = await show(
+          tester, {...listingJson(media: photos), 'ever_on_sale': true, 'condition': 'used_excellent'},
+          manage: true);
+      expect(tester.widget<TextFormField>(find.byKey(const Key('edit-brand'))).enabled, isFalse);
       expect(find.text('Санаты'), findsNothing);
-      expect(find.byKey(const Key('add-spin')), findsOneWidget);
+      expect(find.byKey(const Key('save-name')), findsNothing);
       await tester.enterText(find.byKey(const Key('edit-title')), 'x');
-      await tester.tap(find.byKey(const Key('save-name')));
+      await tester.ensureVisible(find.byKey(const Key('save')));
+      await tester.tap(find.byKey(const Key('save')));
       await tester.pump();
       expect(find.text('Атауы кемінде 3 әріп болсын'), findsOneWidget);
       expect(sent, isEmpty);
       await tester.enterText(find.byKey(const Key('edit-title')), 'Nike Air Force 1 ақ');
-      await tester.tap(find.byKey(const Key('save-name')));
+      await tester.tap(find.byKey(const Key('save')));
       await tester.pumpAndSettle();
       expect(sent.single['title'], 'Nike Air Force 1 ақ');
-      expect(sent.single.containsKey('category'), isFalse);
+      for (final k in ['brand', 'model_name', 'color', 'category', 'condition']) {
+        expect(sent.single.containsKey(k), isFalse, reason: k);
+      }
+      // After sale the condition can only be marked worse.
+      await tester.ensureVisible(find.byKey(const Key('edit-condition')));
+      await tester.tap(find.byKey(const Key('edit-condition')));
+      await tester.pumpAndSettle();
+      expect(find.text('Жаңа, қорабымен'), findsNothing);
+      expect(find.text('Ақауы бар'), findsOneWidget);
+    });
+
+    testWidgets('an added size is checked and saved at once; photos buyers saw cannot be removed', (tester) async {
+      final sent = await show(tester, {...listingJson(media: photos), 'ever_on_sale': true});
+      expect(find.byKey(const Key('remove-photo-0')), findsNothing);
+      expect(find.byKey(const Key('add-spin')), findsOneWidget);
       await tester.tap(find.byKey(const Key('add-size')));
       await tester.pumpAndSettle();
       await tester.enterText(find.byKey(const Key('size-label')), 'EU 44');
       await tester.enterText(find.byKey(const Key('size-cm')), '40');
       await tester.tap(find.byKey(const Key('size-add')));
       await tester.pump();
-      expect(sent.length, 1); // 40 cm is not a shoe
+      expect(sent, isEmpty); // 40 cm is not a shoe
       await tester.enterText(find.byKey(const Key('size-cm')), '28.5');
       await tester.tap(find.byKey(const Key('size-add')));
       await tester.pumpAndSettle();
@@ -2529,14 +2550,36 @@ void main() {
       ]);
     });
 
-    testWidgets('a draft can drop a photo and change its category', (tester) async {
+    testWidgets('a draft can drop a photo after confirming which one', (tester) async {
       final sent = await show(tester, {...listingJson(media: photos), 'status': 'draft'});
-      expect(find.text('Санаты'), findsOneWidget);
+      expect(find.byTooltip('Өшіру: Алдынан'), findsOneWidget);
       await tester.tap(find.byKey(const Key('remove-photo-0')));
+      await tester.pumpAndSettle();
+      expect(find.text('«Алдынан» фотосын өшіру керек пе?'), findsOneWidget);
+      await tester.tap(find.text('Болдырмау'));
+      await tester.pumpAndSettle();
+      expect(sent, isEmpty);
+      await tester.tap(find.byKey(const Key('remove-photo-0')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('confirm-action')));
       await tester.pumpAndSettle();
       expect(sent.single['photos'], [
         {'url': 'https://cdn/b.jpg', 'angle': 'outer'}
       ]);
+    });
+
+    testWidgets('the angle picker marks angles that already have a photo', (tester) async {
+      await show(tester, listingJson(media: photos));
+      await tester.tap(find.byKey(const Key('add-photo')));
+      await tester.pumpAndSettle();
+      expect(find.descendant(of: find.byKey(const Key('angle-front')), matching: find.byIcon(Icons.check_circle)),
+          findsOneWidget);
+      expect(find.descendant(of: find.byKey(const Key('angle-sole')), matching: find.byIcon(Icons.check_circle)),
+          findsNothing);
+      await tester.tap(find.byKey(const Key('angle-sole')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('source-camera')), findsOneWidget);
+      expect(find.byKey(const Key('source-gallery')), findsOneWidget);
     });
 
     testWidgets('a listing with a 360° view offers no second one', (tester) async {

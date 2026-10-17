@@ -75,7 +75,7 @@ def render(order: Order, listing: Listing, size: ListingSize | None, seller: Use
                            (order.delivery_city or "", 56, "SemiBold"), (order.delivery_address or "", 46, "Regular")]
           + ([(f"Ескерту: {order.delivery_note}", 38, "Regular")] if order.delivery_note else []))
     block("Кімнен / От", [(seller.shop_name or "", 46, "SemiBold"), (seller.city or "", 40, "Regular")])
-    item = [(listing.title, 44, "SemiBold")]
+    item = [(order.listing_title or listing.title, 44, "SemiBold")]
     if size is not None:
         item.append((f"Өлшем / Размер: {size.label}", 44, "Regular"))
     block("Тауар / Товар", item)

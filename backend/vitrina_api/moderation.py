@@ -32,7 +32,9 @@ CATEGORY_PRICE_RATIO = 0.4
 MODEL_MIN_SAMPLE = 5
 # Two photos whose 64-bit difference hashes are this close are the same picture, even re-saved or resized.
 PHASH_DISTANCE = 6
-CHECKED_ANGLES = ("front", "outer", "inner", "back", "top", "sole", "label")
+CHECKED_ANGLES = ("front", "outer", "inner", "back", "top", "sole", "label", "defect")
+# Of a 360° set every fourth frame is compared: enough to catch a copied rotation without hashing dozens of frames.
+FRAME_SAMPLE = 4
 
 REASONS = {
     "contacts": ("Атауда не сипаттамада телефон, сілтеме не мессенджер бар. Байланыс тек VITRINA чатында.",
@@ -66,8 +68,10 @@ def distance(a: str, b: str) -> int:
 
 
 def ensure_hashes(db: Session, storage, listing: Listing) -> None:
+    frames = [m for m in listing.media if m.angle == "frame"]
+    sampled = {id(m) for m in frames[::FRAME_SAMPLE]}
     for m in listing.media:
-        if m.phash is None and m.angle in CHECKED_ANGLES:
+        if m.phash is None and (m.angle in CHECKED_ANGLES or id(m) in sampled):
             try:
                 m.phash = dhash(storage.read(m.original_url))
             except Exception:  # noqa: BLE001 - a photo we cannot read is not evidence of anything
