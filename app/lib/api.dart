@@ -423,6 +423,21 @@ class Delivery {
 }
 
 /// A listing's proof of authenticity as its seller sees it; the photos are never shown to buyers.
+/// A public question on a listing and the seller's answer.
+class Question {
+  Question.fromJson(Map<String, dynamic> j)
+      : id = j['id'] as int,
+        text = j['text'] as String,
+        answer = j['answer'] as String?,
+        askedAt = DateTime.parse(j['asked_at'] as String).toLocal(),
+        mine = j['mine'] as bool;
+  final int id;
+  final String text;
+  final String? answer;
+  final DateTime askedAt;
+  final bool mine;
+}
+
 /// A seller's discount code, as the seller sees it.
 class PromoCode {
   PromoCode.fromJson(Map<String, dynamic> j)
@@ -932,6 +947,24 @@ class Api {
       ..files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
     return (_decode(await http.Response.fromStream(await _client.send(req))) as Map)['url'] as String;
   }
+
+  /// Answered questions for everyone; the asker's own and, for the seller, all of them. [unanswered] is the
+  /// seller's to-do count, null for anyone else.
+  Future<({List<Question> items, int? unanswered})> questions(int listingId) async {
+    final r = await _send('GET', '/listings/$listingId/questions') as Map;
+    return (
+      items: [for (final j in r['items'] as List) Question.fromJson(j as Map<String, dynamic>)],
+      unanswered: r['unanswered'] as int?,
+    );
+  }
+
+  Future<Question> askQuestion(int listingId, String text) async => Question.fromJson(
+      await _send('POST', '/listings/$listingId/questions', body: {'text': text}) as Map<String, dynamic>);
+
+  Future<Question> answerQuestion(int id, String text) async =>
+      Question.fromJson(await _send('POST', '/questions/$id/answer', body: {'text': text}) as Map<String, dynamic>);
+
+  Future<void> hideQuestion(int id) => _send('DELETE', '/questions/$id');
 
   Future<PromoPreview> checkPromo(int listingId, String code) async => PromoPreview.fromJson(
       await _send('GET', '/listings/$listingId/promo', query: {'code': code}) as Map<String, dynamic>);

@@ -1242,6 +1242,51 @@ class PromoCodeTests(ApiTestCase):
                          "promo_expired")
 
 
+class QuestionTests(ApiTestCase):
+    def get(self, path, token=None):
+        return self.c.get(f"/api/v1{path}", headers=self.h(token) if token else {})
+
+    def test_answered_questions_are_public_and_unanswered_ones_stay_private(self):
+        listing = self.publish()
+        url = f"/listings/{listing['id']}/questions"
+        self.assertEqual(self.post(url, self.seller, {"text": "Өлшемі сай ма?"}).json()["code"], "own_listing")
+        self.assertEqual(self.post(url, self.buyer, {"text": "WhatsApp жазыңыз +7 701 000 00 00"}).json()["code"],
+                         "contacts_not_allowed")
+        r = self.post(url, self.buyer, {"text": "Қорабы бар ма?"})
+        self.assertEqual(r.status_code, 201, r.text)
+        qid = r.json()["id"]
+        self.assertEqual(self.get(url).json()["items"], [])  # nobody else sees it before the answer
+        self.assertTrue(self.get(url, self.buyer).json()["items"][0]["mine"])
+        seller_view = self.get(url, self.seller).json()
+        self.assertEqual(seller_view["unanswered"], 1)
+        kinds = [n["kind"] for n in self.get("/notifications", self.seller).json()["items"]]
+        self.assertIn("question", kinds)
+        other = self.login("+77010000003")
+        self.assertEqual(self.post(f"/questions/{qid}/answer", other, {"text": "Иә"}).status_code, 404)
+        self.assertEqual(self.post(f"/questions/{qid}/answer", self.seller, {"text": "t.me/qadam"}).json()["code"],
+                         "contacts_not_allowed")
+        self.assertEqual(self.post(f"/questions/{qid}/answer", self.seller, {"text": "Иә, түпнұсқа қорабымен"})
+                         .status_code, 200)
+        public = self.get(url).json()
+        self.assertEqual([(q["text"], q["answer"], q["mine"]) for q in public["items"]],
+                         [("Қорабы бар ма?", "Иә, түпнұсқа қорабымен", False)])
+        self.assertIsNone(public["unanswered"])
+        self.post(f"/questions/{qid}/answer", self.seller, {"text": "Иә, қорабы мен чегі бар"})
+        told = [n for n in self.get("/notifications", self.buyer).json()["items"] if n["kind"] == "question_answered"]
+        self.assertEqual(len(told), 1)  # a corrected answer is not a second alert
+        self.assertEqual(self.c.delete(f"/api/v1/questions/{qid}", headers=self.h(self.buyer)).status_code, 404)
+        self.c.delete(f"/api/v1/questions/{qid}", headers=self.h(self.seller))
+        self.assertEqual(self.get(url).json()["items"], [])
+
+    def test_a_buyer_waits_for_answers_before_asking_more(self):
+        listing = self.publish()
+        url = f"/listings/{listing['id']}/questions"
+        ids = [self.post(url, self.buyer, {"text": f"Сұрақ нөмірі {i}"}).json()["id"] for i in range(3)]
+        self.assertEqual(self.post(url, self.buyer, {"text": "Тағы бір сұрақ"}).json()["code"], "too_many_questions")
+        self.c.delete(f"/api/v1/questions/{ids[0]}", headers=self.h(self.buyer))  # takes one back
+        self.assertEqual(self.post(url, self.buyer, {"text": "Тағы бір сұрақ"}).status_code, 201)
+
+
 class AdminTests(ApiTestCase):
     def test_support_console_page_is_served(self):
         r = self.c.get("/admin/")

@@ -26,7 +26,11 @@ class _FollowingScreenState extends State<FollowingScreen> {
 
   Future<void> _open(FollowedShop shop) async {
     await Navigator.of(context).push(MaterialPageRoute(builder: (_) => ShopScreen(sellerId: shop.id)));
-    if (mounted) setState(() => _items = SessionScope.of(context).api.following()); // they may have unfollowed
+    if (!mounted) return;
+    // A block, not an arrow: setState must not be handed the Future. They may have unfollowed.
+    setState(() {
+      _items = SessionScope.of(context).api.following();
+    });
   }
 
   @override

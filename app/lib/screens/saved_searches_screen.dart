@@ -45,7 +45,9 @@ class _SavedSearchesScreenState extends State<SavedSearchesScreen> {
     try {
       await SessionScope.of(context).api.deleteSavedSearch(s.id);
       if (!mounted) return;
-      setState(() => _items = SessionScope.of(context).api.savedSearches());
+      setState(() {
+        _items = SessionScope.of(context).api.savedSearches();
+      });
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr('Іздеу өшірілді'))));
     } catch (e) {
       if (mounted) showError(context, e);

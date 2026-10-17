@@ -331,6 +331,20 @@ class PromoCode(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class Question(Base):
+    """A public question about a listing. Everyone sees it once the seller has answered; until then only the
+    asker and the seller do."""
+    __tablename__ = "questions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    listing_id: Mapped[int] = mapped_column(ForeignKey("listings.id"), index=True)
+    asker_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    text: Mapped[str] = mapped_column(String(500))
+    answer: Mapped[str | None] = mapped_column(String(1000))
+    answered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    hidden: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class StockAlert(Base):
     """A buyer waiting for a sold-out size: told once when it can be ordered again, then the alert is gone."""
     __tablename__ = "stock_alerts"

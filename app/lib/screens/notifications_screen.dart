@@ -8,6 +8,7 @@ import 'listing_screen.dart';
 import 'notification_settings_screen.dart';
 import 'offers_screen.dart';
 import 'order_screen.dart';
+import '../widgets/questions.dart';
 import '../i18n.dart';
 
 String _ago(DateTime t) {
@@ -45,13 +46,15 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   void _open(AppNotification n) {
     final route = n.kind == 'offer'
         ? MaterialPageRoute(builder: (_) => const OffersScreen())
-        : n.conversationId != null
-            ? MaterialPageRoute(builder: (_) => ChatScreen(conversationId: n.conversationId!))
-            : n.orderId != null
-                ? MaterialPageRoute(builder: (_) => OrderScreen(orderId: n.orderId!))
-                : n.listingId != null
-                    ? MaterialPageRoute(builder: (_) => ListingScreen(listingId: n.listingId!))
-                    : null;
+        : n.kind == 'question' && n.listingId != null
+            ? MaterialPageRoute(builder: (_) => QuestionsScreen(listingId: n.listingId!, seller: true))
+            : n.conversationId != null
+                ? MaterialPageRoute(builder: (_) => ChatScreen(conversationId: n.conversationId!))
+                : n.orderId != null
+                    ? MaterialPageRoute(builder: (_) => OrderScreen(orderId: n.orderId!))
+                    : n.listingId != null
+                        ? MaterialPageRoute(builder: (_) => ListingScreen(listingId: n.listingId!))
+                        : null;
     if (route != null) Navigator.of(context).push(route);
   }
 

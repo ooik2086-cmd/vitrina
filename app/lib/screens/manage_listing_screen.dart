@@ -9,6 +9,7 @@ import '../labels.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import '../widgets/questions.dart';
 import 'listing_editor_screen.dart';
 import 'listing_screen.dart';
 import '../i18n.dart';
@@ -176,6 +177,19 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
             if (_l.stats != null) ...[
               const SizedBox(height: 20),
               _StatsRow(stats: _l.stats!),
+            ],
+            if (_l.status == 'published' || _l.status == 'sold') ...[
+              const SizedBox(height: 12),
+              ListTile(
+                key: const Key('listing-questions'),
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.forum_outlined),
+                title: Text(tr('Сұрақ-жауап')),
+                subtitle: Text(tr('Сатып алушылардың сұрақтарына жауап беру')),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.of(context)
+                    .push(MaterialPageRoute(builder: (_) => QuestionsScreen(listingId: _l.id, seller: true))),
+              ),
             ],
             if (!locked) ...[
               const SizedBox(height: 16),

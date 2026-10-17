@@ -68,7 +68,11 @@ class _SellerReviewsScreenState extends State<SellerReviewsScreen> {
     if (answer == null || answer.isEmpty || !mounted) return;
     try {
       await SessionScope.of(context).api.replyToReview(r.id, answer);
-      if (mounted) setState(() => _items = SessionScope.of(context).api.sellerReviews(widget.sellerId));
+      if (mounted) {
+        setState(() {
+          _items = SessionScope.of(context).api.sellerReviews(widget.sellerId);
+        });
+      }
     } catch (e) {
       if (mounted) showError(context, e);
     }

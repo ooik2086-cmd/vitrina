@@ -30,6 +30,7 @@ import 'package:vitrina/ru.dart';
 import 'package:vitrina/session.dart';
 import 'package:vitrina/widgets/common.dart';
 import 'package:vitrina/widgets/delivery_sheet.dart';
+import 'package:vitrina/widgets/questions.dart';
 import 'package:vitrina/widgets/filter_sheet.dart';
 import 'package:vitrina/widgets/spin_viewer.dart';
 
@@ -523,6 +524,55 @@ void main() {
     await tester.pumpAndSettle();
     expect(result?.promoCode, 'QADAM10');
     expect(result?.delivery.recipientPhone, '+77010000002');
+  });
+
+  testWidgets('seller answers a question and the answer shows under it', (tester) async {
+    String? answered;
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async {
+          if (req.method == 'POST') {
+            expect(req.url.path, '/api/v1/questions/5/answer');
+            answered = (jsonDecode(req.body) as Map)['text'] as String;
+            return jsonResponse({
+              'id': 5,
+              'text': 'Қорабы бар ма?',
+              'answer': answered,
+              'asked_at': '2026-10-17T10:00:00Z',
+              'mine': false
+            });
+          }
+          expect(req.url.path, '/api/v1/listings/7/questions');
+          return jsonResponse({
+            'items': [
+              {
+                'id': 5,
+                'text': 'Қорабы бар ма?',
+                'answer': answered,
+                'asked_at': '2026-10-17T10:00:00Z',
+                'answered_at': null,
+                'mine': false
+              }
+            ],
+            'unanswered': answered == null ? 1 : 0,
+          });
+        }))
+      ..token = 'tok';
+    await tester.pumpWidget(SessionScope(
+        session: Session(api), child: const MaterialApp(home: QuestionsScreen(listingId: 7, seller: true))));
+    await tester.pumpAndSettle();
+    expect(find.text('Қорабы бар ма?'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('answer-5')));
+    await tester.pumpAndSettle();
+    FilledButton send() => tester.widget<FilledButton>(find.byKey(const Key('question-send')));
+    expect(send().onPressed, isNull); // nothing to send yet
+    await tester.enterText(find.byKey(const Key('question-text')), 'Иә, түпнұсқа қорабымен');
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('question-send')));
+    await tester.pumpAndSettle();
+    expect(answered, 'Иә, түпнұсқа қорабымен');
+    expect(find.text('Иә, түпнұсқа қорабымен'), findsOneWidget);
+    expect(find.byKey(const Key('answer-5')), findsNothing);
   });
 
   testWidgets('seller answers an offer with their own price', (tester) async {

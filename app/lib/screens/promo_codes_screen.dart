@@ -24,7 +24,9 @@ class _PromoCodesScreenState extends State<PromoCodesScreen> {
     _items = SessionScope.of(context).api.promoCodes();
   }
 
-  void _reload() => setState(() => _items = SessionScope.of(context).api.promoCodes());
+  void _reload() => setState(() {
+        _items = SessionScope.of(context).api.promoCodes();
+      });
 
   Future<void> _create() async {
     final made = await showModalBottomSheet<bool>(

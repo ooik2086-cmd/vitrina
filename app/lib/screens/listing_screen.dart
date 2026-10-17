@@ -7,6 +7,7 @@ import '../session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/delivery_sheet.dart';
+import '../widgets/questions.dart';
 import '../widgets/spin_viewer.dart';
 import 'chat_screen.dart';
 import 'login_screen.dart';
@@ -394,6 +395,7 @@ class _ListingScreenState extends State<ListingScreen> {
                 const SizedBox(height: 8),
                 Text(l.description!, style: theme.textTheme.bodyLarge),
               ],
+              QuestionsSection(listingId: l.id, sellerId: l.sellerId),
               const SizedBox(height: 24),
               Card(
                 child: Column(children: [
