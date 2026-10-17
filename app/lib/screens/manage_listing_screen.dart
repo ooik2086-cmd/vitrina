@@ -9,6 +9,7 @@ import '../labels.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import '../widgets/listing_contents.dart';
 import '../widgets/questions.dart';
 import 'listing_editor_screen.dart';
 import 'listing_screen.dart';
@@ -276,6 +277,20 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
               maxLines: 3,
               decoration: InputDecoration(labelText: tr('Ақаулары')),
             ),
+            if (!locked) ...[
+              const SizedBox(height: 24),
+              ListingContentsCard(
+                key: ValueKey('contents-${_l.media.length}-${_l.sizes.length}-${_l.status}'),
+                listing: _l,
+                onChanged: (l) => setState(() {
+                  _l = l;
+                  for (final s in l.sizes) {
+                    _stock.putIfAbsent(s.id, () => s.quantity ?? (s.available ? 1 : 0));
+                  }
+                  _changed = true;
+                }),
+              ),
+            ],
           ]),
         ),
         bottomNavigationBar: locked

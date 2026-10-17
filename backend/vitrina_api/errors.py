@@ -62,6 +62,21 @@ MESSAGES: dict[str, tuple[str, str, str]] = {  # code: (Kazakh, Russian, English
     "proof_limit": ("Ең көбі 4 дәлел фотосы.",
                     "Не больше 4 фото-доказательств.",
                     "No more than 4 proof photos."),
+    "listing_locked": ("Сатылымға шыққан тауардың санатын, күйін және бар фотоларын өзгертуге болмайды. "
+                       "Фото, 360° немесе өлшем қосуға болады.",
+                       "У товара, который уже был в продаже, нельзя менять категорию, состояние и прежние фото. "
+                       "Можно добавить фото, 360° или размер.",
+                       "Once a listing has been on sale, its category, condition and existing photos stay. "
+                       "You can add photos, a 360° view or a size."),
+    "frames_exist": ("Бұл тауарда 360° көрініс бар. Жаңасы үшін тауарды көшіріп, жаңадан түсіріңіз.",
+                     "У этого товара уже есть 360°. Для нового сделайте копию товара и снимите заново.",
+                     "This listing already has a 360° view. To shoot a new one, duplicate the listing."),
+    "too_many_photos": ("Фото тым көп: бір тауарға ең көбі 60.",
+                        "Слишком много фото: не больше 60 на товар.",
+                        "Too many photos: at most 60 per listing."),
+    "size_exists": ("Бұл өлшем бар. Қалдықты өзгерту үшін оның санын түзетіңіз.",
+                    "Этот размер уже есть. Чтобы изменить остаток, поправьте его количество.",
+                    "This size already exists. Change its quantity instead."),
     "tracking_in_use": ("Бұл трек-нөмір басқа тапсырыста тұр. Нақ осы сәлеменің нөмірін енгізіңіз.",
                         "Этот трек-номер уже указан в другом заказе. Введите номер именно этой посылки.",
                         "This tracking number is already on another order. Enter the number of this parcel."),

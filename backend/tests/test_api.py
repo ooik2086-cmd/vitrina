@@ -2063,5 +2063,74 @@ class ForeignMediaTests(ApiTestCase):
             self.assertEqual(r.json()["code"], "foreign_media", url)
 
 
+class ListingEditTests(ApiTestCase):
+    """Stage 2: a seller fixes and improves a listing instead of duplicating it and losing its history."""
+
+    def patch(self, lid, body, token=None):
+        return self.c.patch(f"/api/v1/listings/{lid}", json=body, headers=self.h(token or self.seller))
+
+    def draft(self, **over):
+        r = self.post("/listings", self.seller, {**LISTING, **over})
+        self.assertEqual(r.status_code, 201, r.text)
+        return r.json()
+
+    def test_a_draft_can_change_everything_and_search_finds_the_new_name(self):
+        lid = self.draft()["id"]
+        photos = [{"url": f"https://cdn.example/n{i}.jpg", "angle": a} for i, a in
+                  enumerate(["front", "outer", "inner", "back", "sole", "label"])]
+        r = self.patch(lid, {"title": "Adidas Samba OG", "brand": "Adidas", "category": "sneakers",
+                             "condition": "new_with_box", "photos": photos})
+        self.assertEqual(r.status_code, 200, r.text)
+        got = r.json()
+        self.assertEqual((got["title"], got["condition"], len(got["media"])), ("Adidas Samba OG", "new_with_box", 6))
+        self.assertEqual(got["media"][0]["original_url"], "https://cdn.example/n0.jpg")
+        self.assertEqual(self.post(f"/listings/{lid}/publish", self.seller).json()["status"], "published")
+        found = self.c.get("/api/v1/listings", params={"q": "samba"}).json()["items"]
+        self.assertEqual([i["id"] for i in found], [lid])
+
+    def test_a_listing_on_sale_keeps_its_shoe_but_gains_photos_a_spin_and_sizes(self):
+        listing = self.publish()
+        lid = listing["id"]
+        for locked in ({"condition": "new_with_box"}, {"category": "casual"}, {"photos": PHOTOS[:5]}):
+            self.assertEqual(self.patch(lid, locked).json()["code"], "listing_locked")
+        few = [{"url": f"https://cdn.example/f{i}.jpg", "angle": "frame"} for i in range(5)]
+        self.assertEqual(self.patch(lid, {"add_photos": few}).json()["code"], "too_few_frames")
+        spin = [{"url": f"https://cdn.example/f{i}.jpg", "angle": "frame"} for i in range(8)]
+        r = self.patch(lid, {"add_photos": spin + [{"url": "https://cdn.example/top.jpg", "angle": "top"}],
+                             "add_sizes": [{"label": "EU 43", "insole_cm": "27,5", "quantity": 2}],
+                             "title": "Күнделікті кроссовка Найк"})
+        self.assertEqual(r.status_code, 200, r.text)
+        got = r.json()
+        self.assertEqual(got["status"], "published")
+        self.assertEqual(sum(m["angle"] == "frame" for m in got["media"]), 8)
+        self.assertEqual(got["media"][0]["original_url"], PHOTOS[0]["url"])  # what buyers saw is still first
+        self.assertEqual([s["label"] for s in got["sizes"]], ["EU 42", "EU 43"])
+        self.assertEqual(self.patch(lid, {"add_photos": spin}).json()["code"], "frames_exist")
+        self.assertEqual(self.patch(lid, {"add_sizes": [{"label": "eu 43", "insole_cm": "27,5", "quantity": 1}]})
+                         .json()["code"], "size_exists")
+        self.assertEqual(self.patch(lid, {"title": "x"}).status_code, 422)
+        self.assertEqual(self.patch(lid, {"title": "Басқа"}, token=self.buyer).status_code, 404)
+
+    def test_a_new_name_with_a_phone_number_goes_back_to_review(self):
+        lid = self.publish()["id"]
+        got = self.patch(lid, {"title": "Кроссовка, жазыңыз 87011234567"}).json()
+        self.assertEqual(got["status"], "moderation")
+
+    def test_a_sold_out_listing_with_a_new_size_comes_back_paused(self):
+        listing, order = self.ordered()
+        self.post(f"/orders/{order['id']}/pay", self.buyer)
+        self.pay(order)
+        lid = listing["id"]
+        self.assertEqual(self.c.get(f"/api/v1/listings/{lid}").json()["status"], "sold")
+        got = self.patch(lid, {"add_sizes": [{"label": "EU 41", "insole_cm": "26", "quantity": 1}]}).json()
+        self.assertEqual(got["status"], "paused")
+
+    def test_others_files_cannot_be_added(self):
+        lid = self.publish()["id"]
+        self.app.state.settings.allow_external_media = False
+        r = self.patch(lid, {"add_photos": [{"url": "http://test/media/999/" + "a" * 32 + ".jpg", "angle": "top"}]})
+        self.assertEqual(r.json()["code"], "foreign_media")
+
+
 if __name__ == "__main__":
     unittest.main()

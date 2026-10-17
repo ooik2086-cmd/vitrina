@@ -947,8 +947,22 @@ class Api {
   Future<Listing> publishListing(int id) async =>
       Listing.fromJson(await _send('POST', '/listings/$id/publish') as Map<String, dynamic>);
 
+  /// Photos are `{'url': ..., 'angle': ...}`. [photos] replaces the whole set and only works before the listing
+  /// was ever on sale; [addPhotos] and [addSizes] work on any listing the seller still controls.
   Future<Listing> editListing(int id,
-          {int? priceTiyn, int? deliveryPriceTiyn, String? description, String? defects, Map<int, int>? stock}) async =>
+          {int? priceTiyn,
+          int? deliveryPriceTiyn,
+          String? description,
+          String? defects,
+          Map<int, int>? stock,
+          String? title,
+          String? brand,
+          String? modelName,
+          String? category,
+          String? condition,
+          List<Map<String, String>>? photos,
+          List<Map<String, String>>? addPhotos,
+          List<Map<String, Object>>? addSizes}) async =>
       Listing.fromJson(await _send('PATCH', '/listings/$id', body: {
         if (priceTiyn != null) 'price_tiyn': priceTiyn,
         if (deliveryPriceTiyn != null) 'delivery_price_tiyn': deliveryPriceTiyn,
@@ -958,6 +972,14 @@ class Api {
           'sizes': [
             for (final e in stock.entries) {'id': e.key, 'quantity': e.value}
           ],
+        if (title != null) 'title': title,
+        if (brand != null) 'brand': brand,
+        if (modelName != null) 'model_name': modelName,
+        if (category != null) 'category': category,
+        if (condition != null) 'condition': condition,
+        if (photos != null) 'photos': photos,
+        if (addPhotos != null) 'add_photos': addPhotos,
+        if (addSizes != null) 'add_sizes': addSizes,
       }) as Map<String, dynamic>);
 
   Future<Suggestion> suggestDetails(String photoUrl) async => Suggestion.fromJson(

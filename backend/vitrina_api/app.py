@@ -52,6 +52,8 @@ PHONE_RE = re.compile(r"^\+7\d{10}$")
 log = logging.getLogger("vitrina.api")
 
 MIN_SPIN_FRAMES = 8  # fewer real frames than this do not read as a rotation
+MAX_LISTING_MEDIA = 60  # the same limit a new listing has
+MAX_LISTING_SIZES = 30
 DEFECT_REQUIRED = {Condition.USED_GOOD.value, Condition.DEFECTIVE.value}
 
 
@@ -108,13 +110,25 @@ class StockIn(BaseModel):
 
 
 class ListingPatch(BaseModel):
-    """What a seller may change after creating a listing. Photos, title and condition stay fixed so that
-    buyers who saved or ordered the item see the same thing they chose."""
+    """What a seller may change after creating a listing.
+    Before it ever sells (draft, rejected) everything can change. Once it is or was on sale, the shoe itself is
+    fixed for buyers who saved, asked about or ordered it: category, condition and the photos already shown stay,
+    but the seller may add photos, a 360° view, sizes, and improve the name. Every change a buyer sees is checked
+    again before it is shown."""
     price_tiyn: int | None = Field(default=None, gt=0, le=10**12)
     delivery_price_tiyn: int | None = Field(default=None, ge=0, le=10**10)
     description: str | None = Field(default=None, max_length=4000)
     defects: str | None = Field(default=None, max_length=2000)
     sizes: list[StockIn] | None = Field(default=None, max_length=30)
+    title: str | None = Field(default=None, min_length=3, max_length=120)
+    brand: str | None = Field(default=None, max_length=60)
+    model_name: str | None = Field(default=None, max_length=80)
+    color: str | None = Field(default=None, min_length=2, max_length=40)
+    category: Literal[CATEGORIES] | None = None  # type: ignore[valid-type]
+    condition: Condition | None = None
+    photos: list[PhotoIn] | None = Field(default=None, max_length=60)  # the whole set; only before it sells
+    add_photos: list[PhotoIn] | None = Field(default=None, max_length=60)
+    add_sizes: list[SizeIn] | None = Field(default=None, max_length=30)
 
 
 class DeliveryIn(BaseModel):
@@ -815,11 +829,13 @@ def route_after_checks(db: Session, storage: Storage, listing: Listing) -> None:
 
 
 @api.patch("/listings/{listing_id}")
-def edit_listing(listing_id: int, body: ListingPatch, user: User = Depends(current_user),
-                 db: Session = Depends(get_db), storage: Storage = Depends(get_storage)):
+def edit_listing(listing_id: int, body: ListingPatch, request: Request, background: BackgroundTasks,
+                 user: User = Depends(current_user), db: Session = Depends(get_db),
+                 cfg: Settings = Depends(get_settings), storage: Storage = Depends(get_storage)):
     listing = own_listing(db, listing_id, user)
     if listing.status == "hidden":
         raise ApiError(409, "invalid_status")
+    shown_changed = edit_contents(db, cfg, storage, listing, body, user)
     if body.price_tiyn is not None:
         set_price(db, listing, body.price_tiyn)
         listing.pre_sale_price_tiyn = None  # the seller chose a price by hand: ending a sale must not undo it
@@ -842,12 +858,83 @@ def edit_listing(listing_id: int, body: ListingPatch, user: User = Depends(curre
             listing.status = "sold"
         elif listing.status == "sold" and in_stock:
             listing.status = "paused"  # restocked; the seller republishes when ready
-    if listing.status == "published" and (body.price_tiyn is not None or body.description is not None
-                                          or body.defects is not None):
-        route_after_checks(db, storage, listing)  # a live listing cannot slip a phone number in later
+    if listing.status in ("published", "moderation") and (
+            shown_changed or body.price_tiyn is not None or body.description is not None or body.defects is not None):
+        route_after_checks(db, storage, listing)  # a live listing cannot slip a phone number or a copied photo in
     services.tell_back_in_stock(db, listing)
     db.commit()
+    if body.photos is not None or body.add_photos:
+        background.add_task(prepare_listing_media, request.app.state, listing.id)
     return listing_out(db, listing, owner=True)
+
+
+# Listings that never went on sale: nobody has seen them, so nothing about them is fixed yet.
+FULLY_EDITABLE = ("draft", "rejected")
+
+
+def edit_contents(db: Session, cfg: Settings, storage: Storage, listing: Listing, body: ListingPatch,
+                  user: User) -> bool:
+    """Name, photos and sizes. Returns whether anything a buyer sees on the page changed."""
+    fresh = listing.status in FULLY_EDITABLE
+    if not fresh and (body.category is not None or body.condition is not None or body.photos is not None):
+        raise ApiError(409, "listing_locked")
+    changed = False
+    for field_name in ("title", "brand", "model_name", "color"):
+        value = getattr(body, field_name)
+        if value is not None:
+            value = value.strip() or None
+            if field_name in ("title", "color") and value is None:
+                raise ApiError(422, "validation", f"{field_name} cannot be empty")
+            setattr(listing, field_name, value)
+            changed = True
+    if body.category is not None:
+        listing.category = body.category
+        changed = True
+    if body.condition is not None:
+        listing.condition = body.condition.value
+        changed = True
+    if changed:
+        listing.search_text = normalize_query(" ".join(filter(None, [listing.title, listing.brand, listing.model_name,
+                                                                      listing.color, listing.category])))
+    new_photos = list(body.photos or []) + list(body.add_photos or [])
+    if new_photos and not cfg.allow_external_media and not all(storage.owns(p.url, user.id) for p in new_photos):
+        raise ApiError(422, "foreign_media")
+    if body.photos is not None:
+        frames = sum(p.angle == "frame" for p in body.photos)
+        if 0 < frames < MIN_SPIN_FRAMES:
+            raise ApiError(422, "too_few_frames")
+        listing.media.clear()
+        db.flush()
+        listing.media.extend(Media(original_url=p.url, angle=p.angle, position=i) for i, p in enumerate(body.photos))
+        changed = True
+    if body.add_photos:
+        added_frames = sum(p.angle == "frame" for p in body.add_photos)
+        if added_frames:
+            # A rotation is one set shot in one go: frames are added only to a listing that has none yet.
+            if any(m.angle == "frame" for m in listing.media):
+                raise ApiError(409, "frames_exist")
+            if added_frames < MIN_SPIN_FRAMES:
+                raise ApiError(422, "too_few_frames")
+        if len(listing.media) + len(body.add_photos) > MAX_LISTING_MEDIA:
+            raise ApiError(422, "too_many_photos")
+        start = max((m.position for m in listing.media), default=-1) + 1
+        listing.media.extend(Media(original_url=p.url, angle=p.angle, position=start + i)
+                             for i, p in enumerate(body.add_photos))
+        changed = True
+    if body.add_sizes:
+        known = {s.label.strip().lower() for s in listing.sizes}
+        if len(listing.sizes) + len(body.add_sizes) > MAX_LISTING_SIZES:
+            raise ApiError(422, "validation", "too many sizes")
+        for size in body.add_sizes:
+            if size.label.strip().lower() in known:
+                raise ApiError(409, "size_exists")
+            known.add(size.label.strip().lower())
+            listing.sizes.append(ListingSize(label=size.label.strip(), insole_mm=cm_to_mm(size.insole_cm),
+                                             quantity=size.quantity))
+        db.flush()
+        if listing.status == "sold" and any(s.quantity > 0 for s in listing.sizes):
+            listing.status = "paused"  # back in stock; the seller republishes when ready
+    return changed
 
 
 class PromoIn(BaseModel):

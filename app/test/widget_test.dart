@@ -24,6 +24,7 @@ import 'package:vitrina/screens/image_search_screen.dart';
 import 'package:vitrina/screens/listing_editor_screen.dart';
 import 'package:vitrina/screens/listing_screen.dart';
 import 'package:vitrina/screens/manage_listing_screen.dart';
+import 'package:vitrina/widgets/listing_contents.dart';
 import 'package:vitrina/screens/my_listings_screen.dart';
 import 'package:vitrina/screens/notification_settings_screen.dart';
 import 'package:vitrina/screens/onboarding_screen.dart';
@@ -2468,5 +2469,83 @@ void main() {
             child: Scaffold(body: ListingGrid(items: items)))));
     await tester.pump();
     expect(tester.takeException(), isNull); // no RenderFlex overflow
+  });
+
+  group('editing what a listing shows', () {
+    Future<List<Map<String, dynamic>>> show(WidgetTester tester, Map<String, dynamic> listing) async {
+      final sent = <Map<String, dynamic>>[];
+      final api = Api(
+          base: 'http://x/api/v1',
+          client: MockClient((req) async {
+            expect((req.method, req.url.path), ('PATCH', '/api/v1/listings/7'));
+            final body = jsonDecode(req.body) as Map<String, dynamic>;
+            sent.add(body);
+            return jsonResponse({...listing, if (body['title'] != null) 'title': body['title']});
+          }));
+      tester.view.physicalSize = const Size(400, 1400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(SessionScope(
+          session: Session(api),
+          child: MaterialApp(
+              home: Scaffold(
+                  body: SingleChildScrollView(
+                      child: ListingContentsCard(listing: Listing.fromJson(listing), onChanged: (_) {}))))));
+      return sent;
+    }
+
+    final photos = [
+      {'original_url': 'https://cdn/a.jpg', 'processed_url': null, 'angle': 'front'},
+      {'original_url': 'https://cdn/b.jpg', 'processed_url': null, 'angle': 'outer'},
+    ];
+
+    testWidgets('a listing on sale keeps category and photos but gets a new name and size', (tester) async {
+      final sent = await show(tester, listingJson(media: photos));
+      expect(find.byKey(const Key('remove-photo-0')), findsNothing);
+      expect(find.text('Санаты'), findsNothing);
+      expect(find.byKey(const Key('add-spin')), findsOneWidget);
+      await tester.enterText(find.byKey(const Key('edit-title')), 'x');
+      await tester.tap(find.byKey(const Key('save-name')));
+      await tester.pump();
+      expect(find.text('Атауы кемінде 3 әріп болсын'), findsOneWidget);
+      expect(sent, isEmpty);
+      await tester.enterText(find.byKey(const Key('edit-title')), 'Nike Air Force 1 ақ');
+      await tester.tap(find.byKey(const Key('save-name')));
+      await tester.pumpAndSettle();
+      expect(sent.single['title'], 'Nike Air Force 1 ақ');
+      expect(sent.single.containsKey('category'), isFalse);
+      await tester.tap(find.byKey(const Key('add-size')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('size-label')), 'EU 44');
+      await tester.enterText(find.byKey(const Key('size-cm')), '40');
+      await tester.tap(find.byKey(const Key('size-add')));
+      await tester.pump();
+      expect(sent.length, 1); // 40 cm is not a shoe
+      await tester.enterText(find.byKey(const Key('size-cm')), '28.5');
+      await tester.tap(find.byKey(const Key('size-add')));
+      await tester.pumpAndSettle();
+      expect(sent.last['add_sizes'], [
+        {'label': 'EU 44', 'insole_cm': '28.5', 'quantity': 1}
+      ]);
+    });
+
+    testWidgets('a draft can drop a photo and change its category', (tester) async {
+      final sent = await show(tester, {...listingJson(media: photos), 'status': 'draft'});
+      expect(find.text('Санаты'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('remove-photo-0')));
+      await tester.pumpAndSettle();
+      expect(sent.single['photos'], [
+        {'url': 'https://cdn/b.jpg', 'angle': 'outer'}
+      ]);
+    });
+
+    testWidgets('a listing with a 360° view offers no second one', (tester) async {
+      final frames = [
+        for (var i = 0; i < 8; i++) {'original_url': 'https://cdn/f$i.jpg', 'processed_url': null, 'angle': 'frame'}
+      ];
+      await show(tester, listingJson(media: [...photos, ...frames]));
+      expect(find.byKey(const Key('add-spin')), findsNothing);
+      expect(find.text('360° көрініс: 8 кадр'), findsOneWidget);
+    });
   });
 }
