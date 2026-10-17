@@ -9,6 +9,7 @@ import '../labels.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import 'listing_editor_screen.dart';
 import 'listing_screen.dart';
 import '../i18n.dart';
 
@@ -116,6 +117,16 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
       },
       child: Scaffold(
         appBar: AppBar(title: Text(tr('Тауарды басқару')), actions: [
+          IconButton(
+            key: const Key('duplicate'),
+            tooltip: tr('Ұқсас тауар қосу'),
+            icon: const Icon(Icons.content_copy_rounded),
+            onPressed: () async {
+              final created = await Navigator.of(context)
+                  .push<bool>(MaterialPageRoute(builder: (_) => ListingEditorScreen(template: _l)));
+              if (created == true) _changed = true; // the seller's list reloads on the way back
+            },
+          ),
           IconButton(
             tooltip: tr('Сатып алушы көретіндей ашу'),
             icon: const Icon(Icons.visibility_outlined),

@@ -344,13 +344,15 @@ class Listing {
         promo = j['promo'] == null ? null : Promo.fromJson(j['promo'] as Map<String, dynamic>),
         moderation = j['moderation'] == null ? null : Moderation.fromJson(j['moderation'] as Map<String, dynamic>),
         sizeFit = j['size_fit'] == null ? null : SizeFit.fromJson(j['size_fit'] as Map<String, dynamic>),
-        stockAlerts = {for (final id in (j['stock_alerts'] as List?) ?? const []) id as int};
+        stockAlerts = {for (final id in (j['stock_alerts'] as List?) ?? const []) id as int},
+        modelName = j['model_name'] as String?;
 
   final int id;
   final String status;
   final String title;
   final String category;
   final String? brand;
+  final String? modelName;
   final String color;
   final int priceTiyn;
 

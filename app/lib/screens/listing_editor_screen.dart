@@ -35,7 +35,10 @@ class _Upload {
 }
 
 class ListingEditorScreen extends StatefulWidget {
-  const ListingEditorScreen({super.key});
+  const ListingEditorScreen({super.key, this.template});
+
+  /// A listing to start from: same model in another colour, say. Its photos are never copied.
+  final Listing? template;
 
   @override
   State<ListingEditorScreen> createState() => _ListingEditorScreenState();
@@ -64,6 +67,36 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
   String? _modelName;
 
   Api get _api => SessionScope.of(context).api;
+
+  @override
+  void initState() {
+    super.initState();
+    final t = widget.template;
+    if (t == null) return;
+    _title.text = t.title;
+    _brand.text = t.brand ?? '';
+    _modelName = t.modelName;
+    _color.text = t.color;
+    _description.text = t.description ?? '';
+    _price.text = '${t.priceTiyn ~/ 100}';
+    _delivery.text = '${t.deliveryPriceTiyn ~/ 100}';
+    _category = t.category;
+    _style = t.showcaseStyle;
+    if (t.condition != 'defective') _condition = t.condition; // a defect belongs to one pair, with its own photos
+    _suggestAsked = true; // brand and model are known already
+    if (t.sizes.isNotEmpty) {
+      _sizes.first.dispose();
+      _sizes
+        ..clear()
+        ..addAll([
+          for (final s in t.sizes)
+            _SizeRow()
+              ..label.text = s.label
+              ..cm.text = s.insoleCm
+              ..qty.text = '${(s.quantity ?? 0) > 0 ? s.quantity : 1}',
+        ]);
+    }
+  }
 
   @override
   void dispose() {
@@ -227,10 +260,28 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
     final uploading =
         [..._photos.values, ..._defectPhotos, ..._frames].where((u) => u.url == null && u.error == null).length;
     return Scaffold(
-      appBar: AppBar(title: Text(tr('Жаңа тауар'))),
+      appBar: AppBar(title: Text(widget.template == null ? tr('Жаңа тауар') : tr('Ұқсас тауар'))),
       body: Form(
         key: _form,
         child: ListView(padding: const EdgeInsets.all(16), children: [
+          if (widget.template != null)
+            Card(
+              key: const Key('template-note'),
+              color: theme.colorScheme.secondaryContainer,
+              margin: const EdgeInsets.only(bottom: 16),
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Row(children: [
+                  const Icon(Icons.content_copy_rounded, size: 20),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(trf(
+                        '«{0}» мәліметтері көшірілді. Фото мен 360° кадрларды осы жұптан жаңадан түсіріңіз.',
+                        [widget.template!.title])),
+                  ),
+                ]),
+              ),
+            ),
           Text(tr('Фото'), style: theme.textTheme.titleMedium),
           const SizedBox(height: 4),
           Text(tr('Жарық жерде, біркелкі фонда түсіріңіз. Фото өзгертілмейді, тек метадеректер өшіріледі.'),

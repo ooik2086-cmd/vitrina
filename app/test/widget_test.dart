@@ -1056,6 +1056,23 @@ void main() {
     expect(session.signedIn, isFalse);
   });
 
+  testWidgets('a similar listing starts from the details of another, without its photos', (tester) async {
+    final api = Api(base: 'http://x/api/v1', client: MockClient((_) async => jsonResponse({})));
+    final template = Listing.fromJson({...listingJson(), 'model_name': 'Air Force 1', 'price_tiyn': 4500000});
+    tester.view.physicalSize = const Size(400, 3000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(SessionScope(
+        session: Session(api), child: MaterialApp(home: ListingEditorScreen(template: template))));
+    await tester.pumpAndSettle();
+    expect(find.text('Ұқсас тауар'), findsOneWidget);
+    expect(find.byKey(const Key('template-note')), findsOneWidget);
+    expect(find.widgetWithText(TextFormField, 'Nike Air Force 1'), findsOneWidget);
+    expect(find.widgetWithText(TextFormField, '45000'), findsOneWidget);
+    expect(find.widgetWithText(TextFormField, '43'), findsOneWidget); // every size row came along
+    expect(find.byType(Image), findsNothing); // photos are of another pair
+  });
+
   testWidgets('catalog loads the next page when scrolled near the end', (tester) async {
     final offsets = <String?>[];
     final api = Api(
