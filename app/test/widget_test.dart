@@ -15,6 +15,7 @@ import 'package:vitrina/recent.dart';
 import 'package:vitrina/screens/analytics_screen.dart';
 import 'package:vitrina/screens/catalog_screen.dart';
 import 'package:vitrina/screens/chat_screen.dart';
+import 'package:vitrina/screens/compare_screen.dart';
 import 'package:vitrina/screens/earnings_screen.dart';
 import 'package:vitrina/screens/image_search_screen.dart';
 import 'package:vitrina/screens/listing_editor_screen.dart';
@@ -499,6 +500,39 @@ void main() {
     expect(listingMatches(other, status: 'all', query: 'af1'), isTrue); // the model name, not the title
     expect(listingMatches(other, status: 'all', query: 'adidas'), isFalse);
     expect(listingMatches(onSale, status: 'all', query: 'AIR'), isTrue);
+  });
+
+  testWidgets('compare marks the cheapest total and checks the buyer\'s size', (tester) async {
+    mySize.value = '27,0';
+    addTearDown(() => mySize.value = null);
+    Listing make(int id, int price, int delivery, String cm) => Listing.fromJson({
+          ...listingJson(),
+          'id': id,
+          'title': 'Shoe $id',
+          'price_tiyn': price,
+          'delivery_price_tiyn': delivery,
+          'sizes': [
+            {'id': id, 'label': 'EU $id', 'insole_cm': cm, 'available': true},
+          ],
+        });
+    final a = make(1, 4500000, 150000, '27,0'), b = make(2, 4400000, 300000, '28,5'), c = make(3, 4650000, 0, '27,0');
+    expect(cheapestIds([a, b, c]), {1, 3});
+    expect(cheapestIds([a]), isEmpty);
+    await tester.pumpWidget(MaterialApp(home: CompareScreen(items: [a, b, c])));
+    expect(find.byKey(const Key('compare-cheapest-1')), findsOneWidget);
+    expect(find.byKey(const Key('compare-total-3')), findsNothing); // only the first two start picked
+    await tester.tap(find.byKey(const Key('compare-pick-3')));
+    await tester.pump();
+    expect(find.byKey(const Key('compare-cheapest-3')), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('Жоқ'), 200, scrollable: find.byType(Scrollable).first);
+    expect(find.text('EU 1'), findsOneWidget);
+    expect(find.text('Жоқ'), findsOneWidget); // b has nothing within half a centimetre of 27,0
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, 2000));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('compare-pick-2')));
+    await tester.tap(find.byKey(const Key('compare-pick-1')));
+    await tester.pump();
+    expect(find.text('Салыстыру үшін кемінде екі тауар таңдаңыз.'), findsOneWidget);
   });
 
   test('order summary lists the price with its promo and says it is not a fiscal receipt', () {
