@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../appearance.dart';
 import '../labels.dart';
 import '../session.dart';
 import '../widgets/common.dart';
@@ -132,6 +133,11 @@ class ProfileScreen extends StatelessWidget {
                 leading: const Icon(Icons.translate),
                 title: Text(tr('Тіл')),
                 trailing: const LanguageSwitch(),
+              ),
+              ListTile(
+                leading: const Icon(Icons.contrast_rounded),
+                title: Text(tr('Көрініс')),
+                trailing: const ThemeSwitch(),
               ),
               ListTile(
                 leading: const Icon(Icons.logout),

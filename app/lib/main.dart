@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'api.dart';
+import 'appearance.dart';
 import 'screens/catalog_screen.dart';
 import 'screens/chat_screen.dart';
 import 'screens/listing_screen.dart';
@@ -23,6 +24,7 @@ Future<void> main() async {
   await restoreRecentSearches();
   await restoreQuickReplies();
   await restoreOnboarded();
+  await restoreThemeMode();
   final session = Session(Api())..restore();
   runApp(VitrinaApp(session: session));
 }
@@ -46,22 +48,26 @@ class VitrinaApp extends StatelessWidget {
       // A language change rebuilds every screen from scratch so no text stays in the old language.
       child: ValueListenableBuilder<String>(
         valueListenable: appLanguage,
-        builder: (context, lang, _) => MaterialApp(
-          key: ValueKey(lang),
-          title: 'VITRINA',
-          debugShowCheckedModeBanner: false,
-          theme: buildTheme(Brightness.light),
-          darkTheme: buildTheme(Brightness.dark),
-          home: ValueListenableBuilder<bool>(
-            valueListenable: onboarded,
-            builder: (context, done, _) => done ? const HomeShell() : const OnboardingScreen(),
+        builder: (context, lang, _) => ValueListenableBuilder<ThemeMode>(
+          valueListenable: themeMode,
+          builder: (context, mode, _) => MaterialApp(
+            key: ValueKey(lang),
+            themeMode: mode,
+            title: 'VITRINA',
+            debugShowCheckedModeBanner: false,
+            theme: buildTheme(Brightness.light),
+            darkTheme: buildTheme(Brightness.dark),
+            home: ValueListenableBuilder<bool>(
+              valueListenable: onboarded,
+              builder: (context, done, _) => done ? const HomeShell() : const OnboardingScreen(),
+            ),
+            // vitrina://open/listing/7 from a shared link's "open in app" button.
+            onGenerateRoute: (settings) {
+              final m = RegExp(r'^/listing/(\d+)$').firstMatch(settings.name ?? '');
+              if (m == null) return null;
+              return MaterialPageRoute(builder: (_) => ListingScreen(listingId: int.parse(m.group(1)!)));
+            },
           ),
-          // vitrina://open/listing/7 from a shared link's "open in app" button.
-          onGenerateRoute: (settings) {
-            final m = RegExp(r'^/listing/(\d+)$').firstMatch(settings.name ?? '');
-            if (m == null) return null;
-            return MaterialPageRoute(builder: (_) => ListingScreen(listingId: int.parse(m.group(1)!)));
-          },
         ),
       ),
     );

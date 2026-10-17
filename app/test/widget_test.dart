@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:vitrina/api.dart';
+import 'package:vitrina/appearance.dart';
 import 'package:vitrina/i18n.dart';
 import 'package:vitrina/labels.dart';
 import 'package:vitrina/my_size.dart';
@@ -561,6 +562,18 @@ void main() {
     onboarded.value = false;
     await restoreOnboarded();
     expect(onboarded.value, isTrue);
+  });
+
+  testWidgets('theme choice applies at once and is remembered', (tester) async {
+    SharedPreferences.setMockInitialValues({'vitrina_theme': 'dark'});
+    await restoreThemeMode();
+    expect(themeMode.value, ThemeMode.dark);
+    addTearDown(() => themeMode.value = ThemeMode.system);
+    await tester.pumpWidget(const MaterialApp(home: Scaffold(body: Center(child: ThemeSwitch()))));
+    await tester.tap(find.byIcon(Icons.light_mode_outlined));
+    await tester.pump();
+    expect(themeMode.value, ThemeMode.light);
+    expect((await SharedPreferences.getInstance()).getString('vitrina_theme'), 'light');
   });
 
   test('order summary lists the price with its promo and says it is not a fiscal receipt', () {
