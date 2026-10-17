@@ -518,6 +518,10 @@ class OrderInfo {
         buyerId = j['buyer_id'] as int,
         sellerId = j['seller_id'] as int,
         totalTiyn = j['total_tiyn'] as int,
+        itemPriceTiyn = (j['item_price_tiyn'] as int?) ?? j['total_tiyn'] as int,
+        deliveryPriceTiyn = (j['delivery_price_tiyn'] as int?) ?? 0,
+        sellerName = j['seller_name'] as String?,
+        createdAt = j['created_at'] == null ? null : DateTime.parse(j['created_at'] as String).toLocal(),
         trackingNumber = j['tracking_number'] as String?,
         promoCode = j['promo_code'] as String?,
         promoDiscountTiyn = (j['promo_discount_tiyn'] as int?) ?? 0,
@@ -537,6 +541,10 @@ class OrderInfo {
   final int buyerId;
   final int sellerId;
   final int totalTiyn;
+  final int itemPriceTiyn;
+  final int deliveryPriceTiyn;
+  final String? sellerName;
+  final DateTime? createdAt;
   final String? trackingNumber;
   final String? promoCode;
   final int promoDiscountTiyn;

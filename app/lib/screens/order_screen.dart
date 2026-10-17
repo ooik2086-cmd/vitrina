@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../api.dart';
 import '../labels.dart';
@@ -6,6 +7,7 @@ import '../session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import '../i18n.dart';
+import 'listing_screen.dart';
 
 /// An action the current user may offer on an order. The server still checks every move.
 class _Action {
@@ -123,7 +125,15 @@ class _OrderScreenState extends State<OrderScreen> {
     final me = SessionScope.of(context).me;
     final o = _order;
     return Scaffold(
-      appBar: AppBar(title: Text(trf('Тапсырыс №{0}', [widget.orderId]))),
+      appBar: AppBar(title: Text(trf('Тапсырыс №{0}', [widget.orderId])), actions: [
+        if (o != null)
+          IconButton(
+            key: const Key('share-order'),
+            tooltip: tr('Тапсырыс мәліметін бөлісу'),
+            icon: const Icon(Icons.ios_share),
+            onPressed: () => SharePlus.instance.share(ShareParams(text: orderSummaryText(o))),
+          ),
+      ]),
       body: o == null
           ? Center(child: _error == null ? const CircularProgressIndicator() : Text('$_error'))
           : RefreshIndicator(
@@ -138,6 +148,8 @@ class _OrderScreenState extends State<OrderScreen> {
                   Text(tr('Мекенжай төлем түскенде көрінеді.'), style: Theme.of(context).textTheme.bodySmall),
                   const SizedBox(height: 16),
                 ],
+                _PriceCard(order: o),
+                const SizedBox(height: 16),
                 _Timeline(order: o),
                 const SizedBox(height: 16),
                 const _ProtectionNote(),
@@ -150,6 +162,17 @@ class _OrderScreenState extends State<OrderScreen> {
                 if (me?.id == o.buyerId && o.status == 'COMPLETED' && !o.reviewed && !_reviewed)
                   _ReviewForm(orderId: o.id, onDone: () => setState(() => _reviewed = true)),
                 if (_reviewed) Padding(padding: EdgeInsets.only(bottom: 12), child: Text(tr('Пікіріңіз үшін рақмет!'))),
+                if (me?.id == o.buyerId && const {'COMPLETED', 'REFUNDED', 'CANCELLED'}.contains(o.status))
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: OutlinedButton.icon(
+                      key: const Key('buy-again'),
+                      onPressed: () => Navigator.of(context)
+                          .push(MaterialPageRoute(builder: (_) => ListingScreen(listingId: o.listingId))),
+                      icon: const Icon(Icons.replay),
+                      label: Text(tr('Тауар бетін ашу')),
+                    ),
+                  ),
                 for (final a in _actionsFor(o, isBuyer: me?.id == o.buyerId))
                   Padding(
                     padding: const EdgeInsets.only(bottom: 8),
@@ -159,6 +182,60 @@ class _OrderScreenState extends State<OrderScreen> {
                   ),
               ]),
             ),
+    );
+  }
+}
+
+/// Plain text of the order for a messenger or a note. Not a fiscal receipt: that comes from the payment partner.
+String orderSummaryText(OrderInfo o) {
+  final lines = [
+    trf('VITRINA · тапсырыс №{0}', [o.id]),
+    if (o.createdAt != null)
+      '${formatDay(o.createdAt!)}.${o.createdAt!.year} ${o.createdAt!.hour.toString().padLeft(2, '0')}:${o.createdAt!.minute.toString().padLeft(2, '0')}',
+    if (o.listingTitle != null) o.listingTitle!,
+    if (o.sizeLabel != null) trf('Өлшем {0} · {1} см', [o.sizeLabel, o.sizeCm]),
+    if (o.sellerName != null) trf('Сатушы: {0}', [o.sellerName]),
+    trf('Тауар: {0}', [formatTenge(o.itemPriceTiyn + o.promoDiscountTiyn)]),
+    if (o.promoCode != null) trf('Промокод {0}: −{1}', [o.promoCode, formatTenge(o.promoDiscountTiyn)]),
+    trf('Жеткізу: {0}', [o.deliveryPriceTiyn == 0 ? tr('тегін') : formatTenge(o.deliveryPriceTiyn)]),
+    trf('Жиыны: {0}', [formatTenge(o.totalTiyn)]),
+    trf('Күйі: {0}', [label(orderStatuses, o.status)]),
+    if (o.trackingNumber != null) trf('Трек-нөмір: {0}', [o.trackingNumber]),
+    tr('Бұл фискалдық чек емес.'),
+  ];
+  return lines.join('\n');
+}
+
+class _PriceCard extends StatelessWidget {
+  const _PriceCard({required this.order});
+  final OrderInfo order;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final o = order;
+    Widget row(String label, String value, {TextStyle? style, Key? key}) => Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Row(children: [
+            Expanded(child: Text(label, style: style ?? theme.textTheme.bodyMedium)),
+            Text(value, key: key, style: style ?? theme.textTheme.bodyMedium),
+          ]),
+        );
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+        child: Column(children: [
+          row(tr('Тауар'), formatTenge(o.itemPriceTiyn + o.promoDiscountTiyn)),
+          if (o.promoCode != null)
+            row(trf('Промокод {0}', [o.promoCode]), '−${formatTenge(o.promoDiscountTiyn)}',
+                style: theme.textTheme.bodyMedium?.copyWith(color: Brand.accent)),
+          row(tr('Жеткізу'), o.deliveryPriceTiyn == 0 ? tr('Тегін') : formatTenge(o.deliveryPriceTiyn)),
+          const Divider(),
+          row(tr('Жиыны'), formatTenge(o.totalTiyn),
+              style: weight(theme.textTheme.titleMedium!, 750), key: const Key('order-total')),
+        ]),
+      ),
     );
   }
 }
@@ -196,9 +273,6 @@ class _OrderHeader extends StatelessWidget {
                 Text(trf('Өлшем {0} · {1} см', [o.sizeLabel, o.sizeCm]), style: theme.textTheme.bodySmall),
               const SizedBox(height: 4),
               Text(formatTenge(o.totalTiyn), style: weight(theme.textTheme.titleMedium!, 750)),
-              if (o.promoCode != null)
-                Text(trf('Промокод {0}: −{1}', [o.promoCode, formatTenge(o.promoDiscountTiyn)]),
-                    key: const Key('order-promo'), style: theme.textTheme.bodySmall?.copyWith(color: Brand.accent)),
             ]),
           ),
         ]),

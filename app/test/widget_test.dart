@@ -22,6 +22,7 @@ import 'package:vitrina/screens/listing_screen.dart';
 import 'package:vitrina/screens/manage_listing_screen.dart';
 import 'package:vitrina/screens/notification_settings_screen.dart';
 import 'package:vitrina/screens/offers_screen.dart';
+import 'package:vitrina/screens/order_screen.dart';
 import 'package:vitrina/screens/profile_screen.dart';
 import 'package:vitrina/screens/saved_searches_screen.dart';
 import 'package:vitrina/screens/seller_reviews_screen.dart';
@@ -479,6 +480,35 @@ void main() {
       },
       'offer_id': 11,
     });
+  });
+
+  test('order summary lists the price with its promo and says it is not a fiscal receipt', () {
+    final o = OrderInfo.fromJson({
+      'id': 1006,
+      'status': 'PAID',
+      'listing_id': 2,
+      'buyer_id': 2,
+      'seller_id': 1,
+      'item_price_tiyn': 1341000,
+      'delivery_price_tiyn': 0,
+      'total_tiyn': 1341000,
+      'tracking_number': null,
+      'promo_code': 'QADAM10',
+      'promo_discount_tiyn': 149000,
+      'listing_title': 'Жеңіл кроссовка',
+      'size_label': '42',
+      'size_cm': '27,0',
+      'seller_name': 'Qadam Store',
+      'created_at': '2026-10-17T06:00:00+00:00',
+    });
+    final text = orderSummaryText(o);
+    expect(text, contains('тапсырыс №1006'));
+    expect(text, contains('Тауар: ${formatTenge(1490000)}'));
+    expect(text, contains('Промокод QADAM10: −${formatTenge(149000)}'));
+    expect(text, contains('Жеткізу: тегін'));
+    expect(text, contains('Жиыны: ${formatTenge(1341000)}'));
+    expect(text, contains('Сатушы: Qadam Store'));
+    expect(text, endsWith('Бұл фискалдық чек емес.'));
   });
 
   testWidgets('size guide converts and remembers the picked size', (tester) async {

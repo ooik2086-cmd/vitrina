@@ -272,7 +272,8 @@ def order_summary(db: Session, order: Order) -> dict:
     size = db.get(ListingSize, order.size_id)
     cover = next((m.processed_url or m.original_url for m in listing.media if m.angle != "frame"), None)
     return {**order_out(order), "listing_title": listing.title, "listing_cover": cover,
-            "size_label": size.label, "size_cm": mm_to_cm(size.insole_mm)}
+            "size_label": size.label, "size_cm": mm_to_cm(size.insole_mm),
+            "seller_name": db.get(User, order.seller_id).shop_name, "created_at": services.aware(order.created_at).isoformat()}
 
 
 def away_until(user: User | None):
