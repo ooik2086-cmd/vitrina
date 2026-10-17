@@ -6,6 +6,7 @@ import '../labels.dart';
 import '../session.dart';
 import '../widgets/common.dart';
 import 'spin_capture_screen.dart';
+import '../i18n.dart';
 
 /// Required angles first; the server refuses to publish with fewer than four photos.
 const requiredAngles = {'front': 'Алдынан', 'outer': 'Сырт бүйірі', 'inner': 'Ішкі бүйірі', 'back': 'Өкшесі'};
@@ -91,11 +92,11 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
         child: Wrap(children: [
           ListTile(
               leading: const Icon(Icons.photo_camera_outlined),
-              title: const Text('Камерамен түсіру'),
+              title: Text(tr('Камерамен түсіру')),
               onTap: () => Navigator.pop(context, ImageSource.camera)),
           ListTile(
               leading: const Icon(Icons.photo_library_outlined),
-              title: const Text('Галереядан таңдау'),
+              title: Text(tr('Галереядан таңдау')),
               onTap: () => Navigator.pop(context, ImageSource.gallery)),
         ]),
       ),
@@ -125,7 +126,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
     if (files.isEmpty) return;
     if (files.length < spinMinFrames) {
       if (mounted) {
-        showError(context, ApiException(422, 'too_few_frames', '360° үшін кемінде $spinMinFrames кадр керек.'));
+        showError(context, ApiException(422, 'too_few_frames', trf('360° үшін кемінде {0} кадр керек.', [spinMinFrames])));
       }
       return;
     }
@@ -139,13 +140,13 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
 
   Future<void> _save({required bool publish}) async {
     if (!_form.currentState!.validate()) return;
-    final missing = requiredAngles.keys.where((a) => _photos[a] == null).map((a) => requiredAngles[a]).toList();
+    final missing = requiredAngles.keys.where((a) => _photos[a] == null).map((a) => tr(requiredAngles[a]!)).toList();
     if (missing.isNotEmpty) {
-      showError(context, ApiException(422, 'missing_required_photos', 'Фото жетіспейді: ${missing.join(', ')}.'));
+      showError(context, ApiException(422, 'missing_required_photos', trf('Фото жетіспейді: {0}.', [missing.join(', ')])));
       return;
     }
     if (_condition == 'defective' && _defectPhotos.isEmpty) {
-      showError(context, ApiException(422, 'defects_required', 'Әр ақаудың жақын фотосын қосыңыз.'));
+      showError(context, ApiException(422, 'defects_required', tr('Әр ақаудың жақын фотосын қосыңыз.')));
       return;
     }
     setState(() => _saving = true);
@@ -181,7 +182,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
     }
   }
 
-  String? _required(String? v) => (v ?? '').trim().isEmpty ? 'Толтырыңыз' : null;
+  String? _required(String? v) => (v ?? '').trim().isEmpty ? tr('Толтырыңыз') : null;
 
   @override
   Widget build(BuildContext context) {
@@ -189,19 +190,19 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
     final uploading =
         [..._photos.values, ..._defectPhotos, ..._frames].where((u) => u.url == null && u.error == null).length;
     return Scaffold(
-      appBar: AppBar(title: const Text('Жаңа тауар')),
+      appBar: AppBar(title: Text(tr('Жаңа тауар'))),
       body: Form(
         key: _form,
         child: ListView(padding: const EdgeInsets.all(16), children: [
-          Text('Фото', style: theme.textTheme.titleMedium),
+          Text(tr('Фото'), style: theme.textTheme.titleMedium),
           const SizedBox(height: 4),
-          Text('Жарық жерде, біркелкі фонда түсіріңіз. Фото өзгертілмейді, тек метадеректер өшіріледі.',
+          Text(tr('Жарық жерде, біркелкі фонда түсіріңіз. Фото өзгертілмейді, тек метадеректер өшіріледі.'),
               style: theme.textTheme.bodySmall),
           const SizedBox(height: 8),
           Wrap(spacing: 8, runSpacing: 8, children: [
             for (final e in {...requiredAngles, ...optionalAngles}.entries)
               _PhotoSlot(
-                label: e.value,
+                label: tr(e.value),
                 required: requiredAngles.containsKey(e.key),
                 upload: _photos[e.key],
                 onTap: () => _pickAngle(e.key),
@@ -215,29 +216,28 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
                 Row(children: [
                   const Icon(Icons.threesixty),
                   const SizedBox(width: 8),
-                  Expanded(child: Text('360° көрініс', style: theme.textTheme.titleSmall)),
+                  Expanded(child: Text(tr('360° көрініс'), style: theme.textTheme.titleSmall)),
                   if (_frames.isNotEmpty)
                     Text('${_frames.where((f) => f.url != null).length}/${_frames.length}',
                         style: theme.textTheme.bodySmall),
                 ]),
                 const SizedBox(height: 4),
                 Text(
-                  'Міндетті емес, бірақ сатып алушы тауарды жан-жағынан көреді. '
-                  'Аяқкиімді аздап бұрып, $spinTargetFrames шақты кадр түсіріңіз.',
+                  trf('Міндетті емес, бірақ сатып алушы тауарды жан-жағынан көреді. Аяқкиімді аздап бұрып, {0} шақты кадр түсіріңіз.', [spinTargetFrames]),
                   style: theme.textTheme.bodySmall,
                 ),
                 if (_frames.any((f) => f.error != null))
-                  Text('Кейбір кадрлар жүктелмеді. Қайта түсіріңіз.', style: TextStyle(color: theme.colorScheme.error)),
+                  Text(tr('Кейбір кадрлар жүктелмеді. Қайта түсіріңіз.'), style: TextStyle(color: theme.colorScheme.error)),
                 const SizedBox(height: 8),
                 Wrap(spacing: 8, children: [
                   FilledButton.tonalIcon(
                       onPressed: _captureSpin,
                       icon: const Icon(Icons.photo_camera_outlined),
-                      label: const Text('Түсіру')),
+                      label: Text(tr('Түсіру'))),
                   OutlinedButton.icon(
                       onPressed: _pickSpinFromGallery,
                       icon: const Icon(Icons.photo_library_outlined),
-                      label: const Text('Галереядан')),
+                      label: Text(tr('Галереядан'))),
                 ]),
               ]),
             ),
@@ -245,51 +245,51 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
           const SizedBox(height: 16),
           TextFormField(
               controller: _title,
-              decoration: const InputDecoration(labelText: 'Атауы'),
+              decoration: InputDecoration(labelText: tr('Атауы')),
               validator: _required,
               maxLength: 120),
           DropdownButtonFormField<String>(
             initialValue: _category,
-            decoration: const InputDecoration(labelText: 'Санаты'),
-            items: [for (final e in categories.entries) DropdownMenuItem(value: e.key, child: Text(e.value))],
+            decoration: InputDecoration(labelText: tr('Санаты')),
+            items: [for (final e in categories.entries) DropdownMenuItem(value: e.key, child: Text(tr(e.value)))],
             onChanged: (v) => setState(() => _category = v!),
           ),
-          TextFormField(controller: _brand, decoration: const InputDecoration(labelText: 'Бренді (міндетті емес)')),
-          TextFormField(controller: _color, decoration: const InputDecoration(labelText: 'Түсі'), validator: _required),
+          TextFormField(controller: _brand, decoration: InputDecoration(labelText: tr('Бренді (міндетті емес)'))),
+          TextFormField(controller: _color, decoration: InputDecoration(labelText: tr('Түсі')), validator: _required),
           DropdownButtonFormField<String>(
             initialValue: _condition,
-            decoration: const InputDecoration(labelText: 'Жағдайы'),
-            items: [for (final e in conditions.entries) DropdownMenuItem(value: e.key, child: Text(e.value))],
+            decoration: InputDecoration(labelText: tr('Жағдайы')),
+            items: [for (final e in conditions.entries) DropdownMenuItem(value: e.key, child: Text(tr(e.value)))],
             onChanged: (v) => setState(() => _condition = v!),
           ),
           if (_defectRequired.contains(_condition)) ...[
             TextFormField(
               controller: _defects,
               maxLines: 3,
-              decoration: const InputDecoration(labelText: 'Ақаулары', hintText: 'Не, қай жерде, қандай көлемде'),
+              decoration: InputDecoration(labelText: tr('Ақаулары'), hintText: tr('Не, қай жерде, қандай көлемде')),
               validator: _required,
             ),
             const SizedBox(height: 8),
             Wrap(spacing: 8, runSpacing: 8, children: [
-              for (final d in _defectPhotos) _PhotoSlot(label: 'Ақау', upload: d, onTap: null),
+              for (final d in _defectPhotos) _PhotoSlot(label: tr('Ақау'), upload: d, onTap: null),
               ActionChip(
                   avatar: const Icon(Icons.add_a_photo_outlined, size: 18),
-                  label: const Text('Ақау фотосы'),
+                  label: Text(tr('Ақау фотосы')),
                   onPressed: _addDefect),
             ]),
           ],
           TextFormField(
               controller: _description,
               maxLines: 3,
-              decoration: const InputDecoration(labelText: 'Сипаттамасы (міндетті емес)')),
+              decoration: InputDecoration(labelText: tr('Сипаттамасы (міндетті емес)'))),
           const SizedBox(height: 8),
           Row(children: [
             Expanded(
               child: TextFormField(
                 controller: _price,
                 keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: 'Бағасы', suffixText: '₸'),
-                validator: (v) => (_tiyn(v ?? '') ?? 0) <= 0 ? 'Бағаны енгізіңіз' : null,
+                decoration: InputDecoration(labelText: tr('Бағасы'), suffixText: '₸'),
+                validator: (v) => (_tiyn(v ?? '') ?? 0) <= 0 ? tr('Бағаны енгізіңіз') : null,
               ),
             ),
             const SizedBox(width: 12),
@@ -297,25 +297,25 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
               child: TextFormField(
                 controller: _delivery,
                 keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: 'Жеткізу', suffixText: '₸'),
+                decoration: InputDecoration(labelText: tr('Жеткізу'), suffixText: '₸'),
               ),
             ),
           ]),
           const SizedBox(height: 16),
-          Text('Өлшемдер', style: theme.textTheme.titleMedium),
+          Text(tr('Өлшемдер'), style: theme.textTheme.titleMedium),
           for (final (i, s) in _sizes.indexed)
             Row(children: [
               Expanded(
                   child: TextFormField(
                       controller: s.label,
-                      decoration: const InputDecoration(labelText: 'Өлшем'),
+                      decoration: InputDecoration(labelText: tr('Өлшем')),
                       validator: _required)),
               const SizedBox(width: 8),
               Expanded(
                 child: TextFormField(
                   controller: s.cm,
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(labelText: 'Ұлтарақ, см'),
+                  decoration: InputDecoration(labelText: tr('Ұлтарақ, см')),
                   validator: _required,
                 ),
               ),
@@ -325,10 +325,10 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
                 child: TextFormField(
                     controller: s.qty,
                     keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(labelText: 'Саны')),
+                    decoration: InputDecoration(labelText: tr('Саны'))),
               ),
               IconButton(
-                tooltip: 'Өшіру',
+                tooltip: tr('Өшіру'),
                 onPressed: _sizes.length > 1 ? () => setState(() => _sizes.removeAt(i).dispose()) : null,
                 icon: const Icon(Icons.remove_circle_outline),
               ),
@@ -338,29 +338,29 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
             child: TextButton.icon(
                 onPressed: () => setState(() => _sizes.add(_SizeRow())),
                 icon: const Icon(Icons.add),
-                label: const Text('Өлшем қосу')),
+                label: Text(tr('Өлшем қосу'))),
           ),
           const SizedBox(height: 8),
-          Text('Витрина фоны', style: theme.textTheme.titleMedium),
+          Text(tr('Витрина фоны'), style: theme.textTheme.titleMedium),
           const SizedBox(height: 8),
           SegmentedButton<String>(
-            segments: const [
-              ButtonSegment(value: 'clean', label: Text('Таза')),
-              ButtonSegment(value: 'premium', label: Text('Премиум')),
-              ButtonSegment(value: 'dynamic', label: Text('Динамик')),
+            segments: [
+              ButtonSegment(value: 'clean', label: Text(tr('Таза'))),
+              ButtonSegment(value: 'premium', label: Text(tr('Премиум'))),
+              ButtonSegment(value: 'dynamic', label: Text(tr('Динамик'))),
             ],
             selected: {_style},
             onSelectionChanged: (v) => setState(() => _style = v.first),
           ),
           const SizedBox(height: 24),
-          if (uploading > 0) Text('Жүктелуде: $uploading фото', style: theme.textTheme.bodySmall),
+          if (uploading > 0) Text(trf('Жүктелуде: {0} фото', [uploading]), style: theme.textTheme.bodySmall),
           FilledButton(
             onPressed: _saving ? null : () => _save(publish: true),
-            child: Text(_saving ? 'Сақталуда…' : 'Жариялау'),
+            child: Text(_saving ? tr('Сақталуда…') : tr('Жариялау')),
           ),
           TextButton(
             onPressed: _saving ? null : () => _save(publish: false),
-            child: const Text('Жоба ретінде сақтау'),
+            child: Text(tr('Жоба ретінде сақтау')),
           ),
         ]),
       ),
@@ -391,7 +391,7 @@ class _PhotoSlot extends StatelessWidget {
     }
     return Semantics(
       button: onTap != null,
-      label: '$label фотосы',
+      label: trf('{0} фотосы', [label]),
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(12),

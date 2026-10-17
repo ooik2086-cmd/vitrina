@@ -11,6 +11,7 @@ import 'login_screen.dart';
 import 'order_screen.dart';
 import 'seller_reviews_screen.dart';
 import 'shop_screen.dart';
+import '../i18n.dart';
 
 const _minSpinFrames = 8;
 
@@ -92,7 +93,7 @@ class _ListingScreenState extends State<ListingScreen> {
     );
     if (sent == true && mounted) {
       ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Шағым жіберілді. Модератор қарап, сізге хабарлайды.')));
+          .showSnackBar(SnackBar(content: Text(tr('Шағым жіберілді. Модератор қарап, сізге хабарлайды.'))));
     }
   }
 
@@ -108,7 +109,7 @@ class _ListingScreenState extends State<ListingScreen> {
             padding: const EdgeInsets.only(right: 10),
             child: _RoundButton(
               onTap: _toggleFavorite,
-              tooltip: 'Таңдаулыға',
+              tooltip: tr('Таңдаулыға'),
               child:
                   Icon(_favorite ? Icons.favorite : Icons.favorite_border, color: _favorite ? Brand.accent : Brand.ink),
             ),
@@ -160,9 +161,9 @@ class _ListingScreenState extends State<ListingScreen> {
               padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
               child: SegmentedButton<bool>(
                 showSelectedIcon: false,
-                segments: const [
+                segments: [
                   ButtonSegment(value: false, icon: Icon(Icons.threesixty), label: Text('360°')),
-                  ButtonSegment(value: true, icon: Icon(Icons.photo_library_outlined), label: Text('Фото')),
+                  ButtonSegment(value: true, icon: Icon(Icons.photo_library_outlined), label: Text(tr('Фото'))),
                 ],
                 selected: {_showPhotos},
                 onSelectionChanged: (v) => setState(() => _showPhotos = v.first),
@@ -176,7 +177,7 @@ class _ListingScreenState extends State<ListingScreen> {
               Text(formatTenge(l.priceTiyn), style: weight(theme.textTheme.headlineSmall!, 800)),
               const SizedBox(height: 4),
               Text(
-                l.deliveryPriceTiyn == 0 ? 'Жеткізу тегін' : 'Жеткізу ${formatTenge(l.deliveryPriceTiyn)}',
+                l.deliveryPriceTiyn == 0 ? tr('Жеткізу тегін') : trf('Жеткізу {0}', [formatTenge(l.deliveryPriceTiyn)]),
                 style: theme.textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
               ),
               const SizedBox(height: 20),
@@ -186,17 +187,17 @@ class _ListingScreenState extends State<ListingScreen> {
                   child: Column(children: [
                     _Fact(
                         icon: Icons.sell_outlined,
-                        name: 'Баға деңгейі',
-                        value: l.segment == null ? 'Деректер әлі аз' : label(segments, l.segment)),
+                        name: tr('Баға деңгейі'),
+                        value: l.segment == null ? tr('Деректер әлі аз') : label(segments, l.segment)),
                     const Divider(),
-                    _Fact(icon: Icons.auto_awesome_outlined, name: 'Жағдайы', value: label(conditions, l.condition)),
+                    _Fact(icon: Icons.auto_awesome_outlined, name: tr('Жағдайы'), value: label(conditions, l.condition)),
                     const Divider(),
                     _Fact(
                         icon: Icons.verified_outlined,
-                        name: 'Түпнұсқалығы',
+                        name: tr('Түпнұсқалығы'),
                         value: label(authenticity, l.authenticity)),
                     const Divider(),
-                    _Fact(icon: Icons.palette_outlined, name: 'Түсі', value: l.color),
+                    _Fact(icon: Icons.palette_outlined, name: tr('Түсі'), value: l.color),
                   ]),
                 ),
               ),
@@ -210,15 +211,15 @@ class _ListingScreenState extends State<ListingScreen> {
                     Icon(Icons.report_outlined, color: scheme.onErrorContainer),
                     const SizedBox(width: 12),
                     Expanded(
-                      child: Text('Ақаулары: ${l.defects}', style: TextStyle(color: scheme.onErrorContainer)),
+                      child: Text(trf('Ақаулары: {0}', [l.defects]), style: TextStyle(color: scheme.onErrorContainer)),
                     ),
                   ]),
                 ),
               ],
               const SizedBox(height: 24),
               Row(children: [
-                Expanded(child: Text('Өлшем', style: theme.textTheme.titleMedium)),
-                Text('ұлтарақ ұзындығы', style: theme.textTheme.labelMedium?.copyWith(color: scheme.onSurfaceVariant)),
+                Expanded(child: Text(tr('Өлшем'), style: theme.textTheme.titleMedium)),
+                Text(tr('ұлтарақ ұзындығы'), style: theme.textTheme.labelMedium?.copyWith(color: scheme.onSurfaceVariant)),
               ]),
               const SizedBox(height: 12),
               Wrap(spacing: 8, runSpacing: 8, children: [
@@ -227,7 +228,7 @@ class _ListingScreenState extends State<ListingScreen> {
               ]),
               if ((l.description ?? '').isNotEmpty) ...[
                 const SizedBox(height: 24),
-                Text('Сипаттама', style: theme.textTheme.titleMedium),
+                Text(tr('Сипаттама'), style: theme.textTheme.titleMedium),
                 const SizedBox(height: 8),
                 Text(l.description!, style: theme.textTheme.bodyLarge),
               ],
@@ -239,9 +240,9 @@ class _ListingScreenState extends State<ListingScreen> {
                     leading: CircleAvatar(
                       backgroundColor: scheme.primary,
                       foregroundColor: scheme.onPrimary,
-                      child: Text((l.shopName ?? 'С').characters.first.toUpperCase()),
+                      child: Text((l.shopName ?? tr('С')).characters.first.toUpperCase()),
                     ),
-                    title: Text(l.shopName ?? 'Сатушы', style: theme.textTheme.titleSmall),
+                    title: Text(l.shopName ?? tr('Сатушы'), style: theme.textTheme.titleSmall),
                     subtitle: Row(children: [
                       if (l.sellerRating != null) ...[
                         Stars(value: l.sellerRating!, size: 14),
@@ -250,7 +251,7 @@ class _ListingScreenState extends State<ListingScreen> {
                       ],
                       Flexible(
                         child: Text(
-                          [if (l.sellerCity != null) l.sellerCity!, '${l.sellerReviews} пікір'].join(' · '),
+                          [if (l.sellerCity != null) l.sellerCity!, trf('{0} пікір', [l.sellerReviews])].join(' · '),
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
@@ -267,7 +268,7 @@ class _ListingScreenState extends State<ListingScreen> {
                         child: OutlinedButton.icon(
                           onPressed: () => _chat(l),
                           icon: const Icon(Icons.chat_bubble_outline_rounded),
-                          label: const Text('Сатушыға жазу'),
+                          label: Text(tr('Сатушыға жазу')),
                         ),
                       ),
                     )
@@ -281,7 +282,7 @@ class _ListingScreenState extends State<ListingScreen> {
                   child: TextButton.icon(
                     onPressed: () => _report(l),
                     icon: const Icon(Icons.flag_outlined, size: 18),
-                    label: const Text('Тауар туралы шағымдану'),
+                    label: Text(tr('Тауар туралы шағымдану')),
                     style: TextButton.styleFrom(foregroundColor: scheme.onSurfaceVariant),
                   ),
                 ),
@@ -295,8 +296,7 @@ class _ListingScreenState extends State<ListingScreen> {
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      'Ақша сатушыға сіз тауарды алып, растағаннан кейін ғана өтеді. '
-                      'Бұл қорғау лицензиясы бар төлем серіктесі қосылғанда іске қосылады.',
+                      tr('Ақша сатушыға сіз тауарды алып, растағаннан кейін ғана өтеді. Бұл қорғау лицензиясы бар төлем серіктесі қосылғанда іске қосылады.'),
                       style: theme.textTheme.bodySmall,
                     ),
                   ),
@@ -316,7 +316,7 @@ class _ListingScreenState extends State<ListingScreen> {
             decoration: BoxDecoration(border: Border(top: BorderSide(color: scheme.outlineVariant))),
             child: Row(children: [
               Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('Барлығы', style: theme.textTheme.labelMedium?.copyWith(color: scheme.onSurfaceVariant)),
+                Text(tr('Жиыны'), style: theme.textTheme.labelMedium?.copyWith(color: scheme.onSurfaceVariant)),
                 Text(formatTenge(l.priceTiyn + l.deliveryPriceTiyn), style: weight(theme.textTheme.titleLarge!, 800)),
               ]),
               const SizedBox(width: 16),
@@ -325,10 +325,10 @@ class _ListingScreenState extends State<ListingScreen> {
                   style: FilledButton.styleFrom(backgroundColor: Brand.accent, foregroundColor: Colors.white),
                   onPressed: l.status == 'published' && selected != null && !_ordering ? () => _order(l) : null,
                   child: Text(l.status != 'published'
-                      ? 'Сатылған'
+                      ? tr('Сатылған')
                       : selected == null
-                          ? 'Өлшемді таңдаңыз'
-                          : 'Тапсырыс беру'),
+                          ? tr('Өлшемді таңдаңыз')
+                          : tr('Тапсырыс беру')),
                 ),
               ),
             ]),
@@ -352,7 +352,7 @@ class _RoundButton extends StatelessWidget {
       color: Colors.white.withValues(alpha: 0.92),
       shape: const CircleBorder(),
       child: IconButton(
-        tooltip: tooltip ?? (back ? 'Артқа' : null),
+        tooltip: tooltip ?? (back ? tr('Артқа') : null),
         color: Brand.ink,
         onPressed: back ? () => Navigator.maybePop(context) : onTap,
         icon: child,
@@ -398,7 +398,7 @@ class _SizeTile extends StatelessWidget {
       button: true,
       selected: selected,
       enabled: size.available,
-      label: 'Өлшем ${size.label}, ${size.insoleCm} см${size.available ? '' : ', қалмады'}',
+      label: trf('Өлшем {0}, {1} см{2}', [size.label, size.insoleCm, size.available ? '' : ', қалмады']),
       child: Material(
         color: selected ? scheme.primary : scheme.surface,
         shape: RoundedRectangleBorder(
@@ -415,7 +415,7 @@ class _SizeTile extends StatelessWidget {
               Text(size.label,
                   style: weight(theme.textTheme.titleSmall!, 700)
                       .copyWith(color: fg, decoration: size.available ? null : TextDecoration.lineThrough)),
-              Text('${size.insoleCm} см', style: theme.textTheme.labelSmall?.copyWith(color: fg)),
+              Text(trf('{0} см', [size.insoleCm]), style: theme.textTheme.labelSmall?.copyWith(color: fg)),
             ]),
           ),
         ),
@@ -473,9 +473,9 @@ class _ReportSheetState extends State<ReportSheet> {
         padding: EdgeInsets.fromLTRB(20, 0, 20, 16 + MediaQuery.viewInsetsOf(context).bottom),
         child: SingleChildScrollView(
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('Шағым себебі', style: theme.textTheme.titleLarge),
+            Text(tr('Шағым себебі'), style: theme.textTheme.titleLarge),
             const SizedBox(height: 4),
-            Text('Модератор тексереді. Сатушы шағым кімнен екенін көрмейді.',
+            Text(tr('Модератор тексереді. Сатушы шағым кімнен екенін көрмейді.'),
                 style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
             const SizedBox(height: 8),
             RadioGroup<String>(
@@ -483,7 +483,7 @@ class _ReportSheetState extends State<ReportSheet> {
               onChanged: (v) => setState(() => _reason = v),
               child: Column(children: [
                 for (final e in reportReasons.entries)
-                  RadioListTile<String>(contentPadding: EdgeInsets.zero, value: e.key, title: Text(e.value)),
+                  RadioListTile<String>(contentPadding: EdgeInsets.zero, value: e.key, title: Text(tr(e.value))),
               ]),
             ),
             TextField(
@@ -491,7 +491,7 @@ class _ReportSheetState extends State<ReportSheet> {
               maxLines: 3,
               maxLength: 1000,
               onChanged: (_) => setState(() {}),
-              decoration: const InputDecoration(labelText: 'Толығырақ (міндетті емес)'),
+              decoration: InputDecoration(labelText: tr('Толығырақ (міндетті емес)')),
             ),
             const SizedBox(height: 8),
             SizedBox(
@@ -499,7 +499,7 @@ class _ReportSheetState extends State<ReportSheet> {
               child: FilledButton(
                 key: const Key('send-report'),
                 onPressed: _reason == null || needsText || _sending ? null : _send,
-                child: const Text('Жіберу'),
+                child: Text(tr('Жіберу')),
               ),
             ),
           ]),
@@ -523,7 +523,7 @@ class _SimilarRow extends StatelessWidget {
         if (list.isEmpty) return const SizedBox.shrink();
         return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           const SizedBox(height: 28),
-          Text('Ұқсас тауарлар', style: Theme.of(context).textTheme.titleMedium),
+          Text(tr('Ұқсас тауарлар'), style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 12),
           SizedBox(
             height: 270,

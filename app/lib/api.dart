@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:http/http.dart' as http;
+import 'i18n.dart';
 
 /// Base URL of the VITRINA API. The Android emulator reaches the host's localhost at 10.0.2.2.
 /// Override with `--dart-define=API_BASE=https://...`.
@@ -9,14 +10,18 @@ const apiBase = String.fromEnvironment('API_BASE', defaultValue: 'http://10.0.2.
 
 /// Error as the API returns it: a stable code plus ready messages in Kazakh and Russian.
 class ApiException implements Exception {
-  ApiException(this.status, this.code, this.messageKk, [this.detail]);
+  ApiException(this.status, this.code, this.messageKk, [this.detail, this.messageRu]);
   final int status;
   final String code;
   final String messageKk;
   final String? detail;
+  final String? messageRu;
+
+  /// The server's message in the interface language.
+  String get message => appLanguage.value == 'ru' ? (messageRu ?? messageKk) : messageKk;
 
   @override
-  String toString() => messageKk;
+  String toString() => message;
 }
 
 class ShoeSize {
@@ -52,7 +57,7 @@ class ListingStats {
 class Shop {
   Shop.fromJson(Map<String, dynamic> j)
       : id = j['id'] as int,
-        shopName = j['shop_name'] as String? ?? 'Сатушы',
+        shopName = j['shop_name'] as String? ?? tr('Сатушы'),
         city = j['city'] as String?,
         since = DateTime.parse(j['since'] as String),
         completedSales = j['completed_sales'] as int,
@@ -332,8 +337,8 @@ class Api {
     final data = res.bodyBytes.isEmpty ? null : jsonDecode(utf8.decode(res.bodyBytes));
     if (res.statusCode >= 400) {
       final m = data is Map ? data : const {};
-      throw ApiException(res.statusCode, (m['code'] ?? 'error') as String, (m['message_kk'] ?? 'Қате.') as String,
-          m['detail'] as String?);
+      throw ApiException(res.statusCode, (m['code'] ?? 'error') as String, (m['message_kk'] ?? tr('Қате.')) as String,
+          m['detail'] as String?, m['message_ru'] as String?);
     }
     return data;
   }

@@ -4,6 +4,7 @@ import '../api.dart';
 import '../labels.dart';
 import '../session.dart';
 import '../theme.dart';
+import '../i18n.dart';
 
 const _kinds = {
   'completion': 'Сатылды',
@@ -38,7 +39,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
-      appBar: AppBar(title: const Text('Табыс')),
+      appBar: AppBar(title: Text(tr('Табыс'))),
       body: FutureBuilder<Earnings>(
         future: _data,
         builder: (context, snap) {
@@ -52,35 +53,35 @@ class _EarningsScreenState extends State<EarningsScreen> {
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(color: Brand.ink, borderRadius: BorderRadius.circular(Brand.radius)),
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  const Text('Сізге тиесілі', style: TextStyle(color: Colors.white70)),
+                  Text(tr('Сізге тиесілі'), style: TextStyle(color: Colors.white70)),
                   const SizedBox(height: 4),
                   Text(formatTenge(e.payableTiyn),
                       style: weight(theme.textTheme.headlineMedium!, 750).copyWith(color: Colors.white)),
                   const SizedBox(height: 4),
-                  const Text('Төлем серіктесі қосылғанда картаңызға аударылады.',
+                  Text(tr('Төлем серіктесі қосылғанда картаңызға аударылады.'),
                       style: TextStyle(color: Colors.white70, fontSize: 13)),
                 ]),
               ),
               const SizedBox(height: 12),
               Row(children: [
-                Expanded(child: _Stat(label: 'Ұсталып тұр', value: formatTenge(e.heldTiyn))),
+                Expanded(child: _Stat(label: tr('Ұсталып тұр'), value: formatTenge(e.heldTiyn))),
                 const SizedBox(width: 12),
-                Expanded(child: _Stat(label: 'Комиссия', value: formatTenge(e.feesTiyn))),
+                Expanded(child: _Stat(label: tr('Комиссия'), value: formatTenge(e.feesTiyn))),
               ]),
               const SizedBox(height: 8),
-              Text('«Ұсталып тұр» — сатып алушы тауарды алып, растағанша сақталатын ақша.',
+              Text(tr('«Ұсталып тұр» — сатып алушы тауарды алып, растағанша сақталатын ақша.'),
                   style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
               const SizedBox(height: 24),
-              Text('Есеп айырысулар', style: theme.textTheme.titleMedium),
+              Text(tr('Есеп айырысулар'), style: theme.textTheme.titleMedium),
               const SizedBox(height: 4),
               if (e.items.isEmpty)
-                const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 24), child: Text('Әзірге аяқталған сатылым жоқ.')),
+                Padding(
+                    padding: EdgeInsets.symmetric(vertical: 24), child: Text(tr('Әзірге аяқталған сатылым жоқ.'))),
               for (final i in e.items)
                 ListTile(
                   contentPadding: EdgeInsets.zero,
                   title: Text(i.listingTitle, maxLines: 1, overflow: TextOverflow.ellipsis),
-                  subtitle: Text('№${i.orderId} · ${_kinds[i.kind] ?? i.kind} · '
+                  subtitle: Text('№${i.orderId} · ${tr(_kinds[i.kind] ?? i.kind)} · '
                       '${i.at.toLocal().day.toString().padLeft(2, '0')}.${i.at.toLocal().month.toString().padLeft(2, '0')}'
                       '${i.feeTiyn > 0 ? ' · комиссия ${formatTenge(i.feeTiyn)}' : ''}'),
                   trailing: Text(formatTenge(i.netTiyn), style: const TextStyle(fontWeight: FontWeight.w700)),

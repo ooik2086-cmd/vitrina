@@ -4,6 +4,7 @@ import '../api.dart';
 import '../session.dart';
 import 'listing_editor_screen.dart';
 import 'manage_listing_screen.dart';
+import '../i18n.dart';
 
 class MyListingsScreen extends StatefulWidget {
   const MyListingsScreen({super.key});
@@ -36,9 +37,9 @@ class _MyListingsScreenState extends State<MyListingsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Менің тауарларым')),
+      appBar: AppBar(title: Text(tr('Менің тауарларым'))),
       floatingActionButton: FloatingActionButton.extended(
-          onPressed: _create, icon: const Icon(Icons.add), label: const Text('Тауар қосу')),
+          onPressed: _create, icon: const Icon(Icons.add), label: Text(tr('Тауар қосу'))),
       body: FutureBuilder<List<Listing>>(
         future: _items,
         builder: (context, snap) {
@@ -48,7 +49,7 @@ class _MyListingsScreenState extends State<MyListingsScreen> {
           return RefreshIndicator(
             onRefresh: _reload,
             child: items.isEmpty
-                ? ListView(children: const [SizedBox(height: 120), Center(child: Text('Әзірге тауар жоқ.'))])
+                ? ListView(children: [SizedBox(height: 120), Center(child: Text(tr('Әзірге тауар жоқ.')))])
                 : ListView.separated(
                     padding: const EdgeInsets.only(bottom: 88),
                     itemCount: items.length,
@@ -67,7 +68,7 @@ class _MyListingsScreenState extends State<MyListingsScreen> {
                                   errorBuilder: (_, __, ___) => const Icon(Icons.broken_image_outlined)),
                         ),
                         title: Text(l.title),
-                        subtitle: Text('${listingStatuses[l.status] ?? l.status} · ${stockSummary(l)}'
+                        subtitle: Text('${tr(listingStatuses[l.status] ?? l.status)} · ${stockSummary(l)}'
                             '${l.frames.isNotEmpty ? ' · 360°' : ''}'),
                         trailing: const Icon(Icons.chevron_right),
                         onTap: () async {

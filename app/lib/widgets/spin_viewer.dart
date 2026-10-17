@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../theme.dart';
+import '../i18n.dart';
 
 /// Backdrop per showcase style. Styles change only what surrounds the photos, never the photos.
 BoxDecoration showcaseBackground(String style) => switch (style) {
@@ -80,7 +81,7 @@ class _SpinViewerState extends State<SpinViewer> {
   Widget build(BuildContext context) {
     final n = widget.frameUrls.length;
     return Semantics(
-      label: '360° көрініс, кадр ${_index + 1} / $n. Айналдыру үшін көлденең сүйреңіз.',
+      label: trf('360° көрініс, кадр {0} / {1}. Айналдыру үшін көлденең сүйреңіз.', [_index + 1, n]),
       child: GestureDetector(
         onHorizontalDragDown: (_) => _intro?.cancel(),
         onHorizontalDragUpdate: _onDrag,
@@ -115,7 +116,7 @@ class _SpinViewerState extends State<SpinViewer> {
                       ),
                     ),
                     const SizedBox(width: 8),
-                    const Text('сүйреңіз',
+                    Text(tr('сүйреңіз'),
                         style: TextStyle(color: Brand.ink, fontSize: 12, fontWeight: FontWeight.w600)),
                   ]),
                 ),

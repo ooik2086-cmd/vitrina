@@ -5,6 +5,7 @@ import '../session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import 'seller_reviews_screen.dart';
+import '../i18n.dart';
 
 const _months = ['қаң', 'ақп', 'нау', 'сәу', 'мам', 'мау', 'шіл', 'там', 'қыр', 'қаз', 'қар', 'жел'];
 
@@ -36,7 +37,7 @@ class _ShopScreenState extends State<ShopScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
-      appBar: AppBar(title: const Text('Дүкен')),
+      appBar: AppBar(title: Text(tr('Дүкен'))),
       body: FutureBuilder<(Shop, List<Listing>)>(
         future: _data,
         builder: (context, snap) {
@@ -64,7 +65,7 @@ class _ShopScreenState extends State<ShopScreen> {
                         Text(
                           [
                             if (shop.city != null) shop.city!,
-                            'VITRINA-да ${_months[shop.since.month - 1]} ${shop.since.year} бастап',
+                            trf('VITRINA-да {0} {1} бастап', [tr(_months[shop.since.month - 1]), shop.since.year]),
                           ].join(' · '),
                           style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                         ),
@@ -75,25 +76,25 @@ class _ShopScreenState extends State<ShopScreen> {
                   Row(children: [
                     _Fact(
                       value: shop.rating?.toStringAsFixed(1) ?? '—',
-                      label: '${shop.reviews} пікір',
+                      label: trf('{0} пікір', [shop.reviews]),
                       icon: Icons.star_rounded,
                       onTap: () => Navigator.of(context).push(MaterialPageRoute(
                           builder: (_) =>
                               SellerReviewsScreen(sellerId: shop.id, shopName: shop.shopName, rating: shop.rating))),
                     ),
                     const SizedBox(width: 10),
-                    _Fact(value: '${shop.completedSales}', label: 'сатылым', icon: Icons.verified_outlined),
+                    _Fact(value: '${shop.completedSales}', label: tr('сатылым'), icon: Icons.verified_outlined),
                     const SizedBox(width: 10),
-                    _Fact(value: '${shop.listings}', label: 'тауар', icon: Icons.inventory_2_outlined),
+                    _Fact(value: '${shop.listings}', label: tr('тауар'), icon: Icons.inventory_2_outlined),
                   ]),
                   const SizedBox(height: 8),
-                  Text('Сатылым саны тек аяқталған, VITRINA арқылы төленген тапсырыстардан саналады.',
+                  Text(tr('Сатылым саны тек аяқталған, VITRINA арқылы төленген тапсырыстардан саналады.'),
                       style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
                 ]),
               ),
             ),
             if (items.isEmpty)
-              const SliverFillRemaining(hasScrollBody: false, child: Center(child: Text('Қазір сатылымда тауар жоқ.')))
+              SliverFillRemaining(hasScrollBody: false, child: Center(child: Text(tr('Қазір сатылымда тауар жоқ.'))))
             else
               SliverPadding(
                 padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),

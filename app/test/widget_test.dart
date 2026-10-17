@@ -1,10 +1,13 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:vitrina/api.dart';
+import 'package:vitrina/i18n.dart';
 import 'package:vitrina/labels.dart';
 import 'package:vitrina/screens/catalog_screen.dart';
 import 'package:vitrina/screens/chat_screen.dart';
@@ -15,7 +18,9 @@ import 'package:vitrina/screens/listing_screen.dart';
 import 'package:vitrina/screens/manage_listing_screen.dart';
 import 'package:vitrina/screens/shop_screen.dart';
 import 'package:vitrina/screens/spin_capture_screen.dart';
+import 'package:vitrina/ru.dart';
 import 'package:vitrina/session.dart';
+import 'package:vitrina/widgets/common.dart';
 import 'package:vitrina/widgets/filter_sheet.dart';
 import 'package:vitrina/widgets/spin_viewer.dart';
 
@@ -44,6 +49,39 @@ Map<String, dynamic> listingJson({List<Map<String, dynamic>>? media}) => {
     };
 
 void main() {
+  test('every Kazakh phrase passed to tr() has a Russian translation', () {
+    final call = RegExp(r"\btrf?\('((?:[^'\\]|\\.)*)'");
+    final missing = <String>{};
+    for (final f in Directory('lib').listSync(recursive: true).whereType<File>()) {
+      if (!f.path.endsWith('.dart')) continue;
+      for (final m in call.allMatches(f.readAsStringSync())) {
+        final key = m.group(1)!.replaceAll(r'\n', '\n').replaceAll(r"\'", "'");
+        if (!ru.containsKey(key)) missing.add(key);
+      }
+    }
+    expect(missing, isEmpty);
+  });
+
+  testWidgets('switching to Russian rebuilds the screen and server errors follow', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    addTearDown(() => appLanguage.value = 'kk');
+    await tester.pumpWidget(ValueListenableBuilder<String>(
+      valueListenable: appLanguage,
+      builder: (_, lang, __) => MaterialApp(
+        key: ValueKey(lang),
+        home: Scaffold(body: ListView(children: const [LanguageSwitch(), FilterSheet(initial: CatalogFilter())])),
+      ),
+    ));
+    expect(find.text('Арзанырақ'), findsOneWidget);
+    await tester.tap(find.text('Русский'));
+    await tester.pumpAndSettle();
+    expect(find.text('Сначала дешевле'), findsOneWidget);
+    expect(find.text('Арзанырақ'), findsNothing);
+    expect((await SharedPreferences.getInstance()).getString('vitrina_lang'), 'ru');
+    expect(ApiException(409, 'out_of_stock', 'Бұл өлшем таусылды.', null, 'Этот размер закончился.').message,
+        'Этот размер закончился.');
+  });
+
   test('tenge formatting keeps integer tiyn', () {
     expect(formatTenge(4500000), '45 000 ₸');
     expect(formatTenge(123), '1,23 ₸');

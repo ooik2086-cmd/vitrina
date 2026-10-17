@@ -7,6 +7,7 @@ import '../labels.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import '../i18n.dart';
 
 String _time(DateTime t) => '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
 
@@ -40,10 +41,10 @@ class _ChatsScreenState extends State<ChatsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    if (_items == null) return const SignInPrompt(text: 'Сатушымен хат алмасу үшін кіріңіз.');
+    if (_items == null) return SignInPrompt(text: tr('Сатушымен хат алмасу үшін кіріңіз.'));
     final theme = Theme.of(context);
     return Scaffold(
-      appBar: AppBar(title: const Text('Хабарламалар')),
+      appBar: AppBar(title: Text(tr('Хабарламалар'))),
       body: FutureBuilder<List<Conversation>>(
         future: _items,
         builder: (context, snap) {
@@ -57,7 +58,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
                     const SizedBox(height: 120),
                     Icon(Icons.chat_bubble_outline_rounded, size: 40, color: theme.colorScheme.onSurfaceVariant),
                     const SizedBox(height: 12),
-                    const Center(child: Text('Әзірге хат жоқ. Тауар бетінен сатушыға жазыңыз.')),
+                    Center(child: Text(tr('Әзірге хат жоқ. Тауар бетінен сатушыға жазыңыз.'))),
                   ])
                 : ListView.separated(
                     itemCount: items.length,
@@ -215,7 +216,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   child: Padding(
                     padding: const EdgeInsets.all(32),
                     child: Text(
-                      conv?.role == 'buyer' ? 'Өлшемі, жағдайы немесе жеткізу туралы сұраңыз.' : 'Хабарлама әлі жоқ.',
+                      conv?.role == 'buyer' ? tr('Өлшемі, жағдайы немесе жеткізу туралы сұраңыз.') : tr('Хабарлама әлі жоқ.'),
                       textAlign: TextAlign.center,
                       style: theme.textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
                     ),
@@ -248,7 +249,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     textInputAction: TextInputAction.send,
                     onSubmitted: (_) => _send(),
                     decoration: InputDecoration(
-                      hintText: 'Хабарлама',
+                      hintText: tr('Хабарлама'),
                       counterText: '',
                       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(24)),
@@ -260,7 +261,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 ),
                 const SizedBox(width: 8),
                 IconButton.filled(
-                  tooltip: 'Жіберу',
+                  tooltip: tr('Жіберу'),
                   onPressed: _sending ? null : _send,
                   icon: const Icon(Icons.arrow_upward_rounded),
                 ),
@@ -312,7 +313,7 @@ class _Bubble extends StatelessWidget {
             Icon(Icons.shield_outlined, size: 14, color: scheme.error),
             const SizedBox(width: 4),
             Flexible(
-              child: Text('Төлемді тек VITRINA арқылы жасаңыз, әйтпесе ақшаңыз қорғалмайды.',
+              child: Text(tr('Төлемді тек VITRINA арқылы жасаңыз, әйтпесе ақшаңыз қорғалмайды.'),
                   style: theme.textTheme.labelSmall?.copyWith(color: scheme.error)),
             ),
           ]),

@@ -9,6 +9,7 @@ import '../widgets/common.dart';
 import '../widgets/filter_sheet.dart';
 import 'image_search_screen.dart';
 import 'notifications_screen.dart';
+import '../i18n.dart';
 
 class CatalogScreen extends StatefulWidget {
   const CatalogScreen({super.key});
@@ -108,16 +109,16 @@ class _CatalogScreenState extends State<CatalogScreen> {
       context: context,
       builder: (context) => SafeArea(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
-          const ListTile(
-              title: Text('Фотомен іздеу'), subtitle: Text('Ұнаған аяқкиімнің суретін түсіріңіз немесе таңдаңыз')),
+          ListTile(
+              title: Text(tr('Фотомен іздеу')), subtitle: Text(tr('Ұнаған аяқкиімнің суретін түсіріңіз немесе таңдаңыз'))),
           ListTile(
             leading: const Icon(Icons.photo_camera_outlined),
-            title: const Text('Камера'),
+            title: Text(tr('Камера')),
             onTap: () => Navigator.pop(context, ImageSource.camera),
           ),
           ListTile(
             leading: const Icon(Icons.photo_library_outlined),
-            title: const Text('Галерея'),
+            title: Text(tr('Галерея')),
             onTap: () => Navigator.pop(context, ImageSource.gallery),
           ),
         ]),
@@ -164,7 +165,7 @@ class _CatalogScreenState extends State<CatalogScreen> {
                   ),
                   if (SessionScope.of(context).signedIn)
                     IconButton(
-                      tooltip: 'Хабарландырулар',
+                      tooltip: tr('Хабарландырулар'),
                       onPressed: _openNotifications,
                       icon: Badge(
                         isLabelVisible: _unread > 0,
@@ -175,7 +176,7 @@ class _CatalogScreenState extends State<CatalogScreen> {
                     ),
                 ]),
                 const SizedBox(height: 2),
-                Text('Аяқкиімді жан-жағынан\nкөріп таңдаңыз', style: theme.textTheme.headlineMedium),
+                Text(tr('Аяқкиімді жан-жағынан\nкөріп таңдаңыз'), style: theme.textTheme.headlineMedium),
                 const SizedBox(height: 16),
                 Row(children: [
                   Expanded(
@@ -186,11 +187,11 @@ class _CatalogScreenState extends State<CatalogScreen> {
                       decoration: InputDecoration(
                         prefixIcon: const Icon(Icons.search),
                         suffixIcon: IconButton(
-                          tooltip: 'Фотомен іздеу',
+                          tooltip: tr('Фотомен іздеу'),
                           icon: const Icon(Icons.photo_camera_outlined),
                           onPressed: _searchByPhoto,
                         ),
-                        hintText: 'Найк, nike, ақ кроссовка…',
+                        hintText: tr('Найк, nike, ақ кроссовка…'),
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(99)),
                         enabledBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(99),
@@ -221,18 +222,18 @@ class _CatalogScreenState extends State<CatalogScreen> {
                       backgroundColor: Brand.accent,
                       label: Text('${_filter.active}'),
                       child: ActionChip(
-                        tooltip: 'Сүзгі',
+                        tooltip: tr('Сүзгі'),
                         avatar: const Icon(Icons.tune_rounded, size: 18),
-                        label: Text(_filter.sort == 'new' ? 'Сүзгі' : sortLabels[_filter.sort]!),
+                        label: Text(_filter.sort == 'new' ? tr('Сүзгі') : tr(sortLabels[_filter.sort]!)),
                         onPressed: _pickFilter,
                       ),
                     ),
                   ),
-                  for (final e in {null: 'Барлығы', ...categories}.entries)
+                  for (final e in {null: tr('Барлығы'), ...categories}.entries)
                     Padding(
                       padding: const EdgeInsets.only(right: 8),
                       child: ChoiceChip(
-                        label: Text(e.value),
+                        label: Text(tr(e.value)),
                         selected: _category == e.key,
                         onSelected: (_) {
                           _category = e.key;
@@ -255,16 +256,16 @@ class _CatalogScreenState extends State<CatalogScreen> {
                   hasScrollBody: false,
                   child: _Empty(
                     icon: Icons.wifi_off_rounded,
-                    text: snap.error is ApiException ? '${snap.error}' : 'Серверге қосылу мүмкін болмады.',
-                    action: TextButton(onPressed: _search, child: const Text('Қайта көру')),
+                    text: snap.error is ApiException ? '${snap.error}' : tr('Серверге қосылу мүмкін болмады.'),
+                    action: TextButton(onPressed: _search, child: Text(tr('Қайта көру'))),
                   ),
                 );
               }
               final items = [...snap.data!, ..._more];
               if (snap.data!.length < _page) _hasMore = false;
               if (items.isEmpty) {
-                return const SliverFillRemaining(
-                    hasScrollBody: false, child: _Empty(icon: Icons.search_off_rounded, text: 'Ештеңе табылмады.'));
+                return SliverFillRemaining(
+                    hasScrollBody: false, child: _Empty(icon: Icons.search_off_rounded, text: tr('Ештеңе табылмады.')));
               }
               return SliverPadding(
                 padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
@@ -312,7 +313,7 @@ class _SizeButton extends StatelessWidget {
           child: Row(children: [
             Icon(Icons.straighten_rounded, size: 20, color: active ? scheme.onPrimary : scheme.onSurface),
             const SizedBox(width: 6),
-            Text(active ? '$sizeCm см' : 'Өлшем',
+            Text(active ? trf('{0} см', [sizeCm]) : tr('Өлшем'),
                 style: TextStyle(color: active ? scheme.onPrimary : scheme.onSurface, fontWeight: FontWeight.w600)),
           ]),
         ),
@@ -334,16 +335,16 @@ class _SizeSheet extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('Ұлтарақ ұзындығы', style: theme.textTheme.titleLarge),
+          Text(tr('Ұлтарақ ұзындығы'), style: theme.textTheme.titleLarge),
           const SizedBox(height: 4),
-          Text('Өкшеден бас бармақтың ұшына дейін өлшеңіз. ±0,5 см аралығы көрсетіледі.',
+          Text(tr('Өкшеден бас бармақтың ұшына дейін өлшеңіз. ±0,5 см аралығы көрсетіледі.'),
               style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
           const SizedBox(height: 16),
           Wrap(spacing: 8, runSpacing: 8, children: [
-            for (final cm in _cm) ActionChip(label: Text('$cm см'), onPressed: () => Navigator.pop(context, cm)),
+            for (final cm in _cm) ActionChip(label: Text(trf('{0} см', [cm])), onPressed: () => Navigator.pop(context, cm)),
           ]),
           const SizedBox(height: 12),
-          TextButton(onPressed: () => Navigator.pop(context, ''), child: const Text('Өлшемді алып тастау')),
+          TextButton(onPressed: () => Navigator.pop(context, ''), child: Text(tr('Өлшемді алып тастау'))),
         ]),
       ),
     );

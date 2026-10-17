@@ -6,6 +6,7 @@ import '../session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import 'order_screen.dart';
+import '../i18n.dart';
 
 class OrdersScreen extends StatelessWidget {
   const OrdersScreen({super.key});
@@ -13,14 +14,14 @@ class OrdersScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final session = SessionScope.of(context);
-    if (!session.signedIn) return const SignInPrompt(text: 'Тапсырыстарыңызды көру үшін кіріңіз.');
+    if (!session.signedIn) return SignInPrompt(text: tr('Тапсырыстарыңызды көру үшін кіріңіз.'));
     final seller = session.me?.isSeller ?? false;
     return DefaultTabController(
       length: seller ? 2 : 1,
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('Тапсырыстар'),
-          bottom: seller ? const TabBar(tabs: [Tab(text: 'Сатып алғаным'), Tab(text: 'Сатқаным')]) : null,
+          title: Text(tr('Тапсырыстар')),
+          bottom: seller ? TabBar(tabs: [Tab(text: tr('Сатып алғаным')), Tab(text: tr('Сатқаным'))]) : null,
         ),
         body: TabBarView(children: [
           const _OrderList(role: 'buyer'),
@@ -67,7 +68,7 @@ class _OrderListState extends State<_OrderList> {
         return RefreshIndicator(
           onRefresh: _reload,
           child: items.isEmpty
-              ? ListView(children: const [SizedBox(height: 120), Center(child: Text('Әзірге тапсырыс жоқ.'))])
+              ? ListView(children: [SizedBox(height: 120), Center(child: Text(tr('Әзірге тапсырыс жоқ.')))])
               : ListView.separated(
                   itemCount: items.length,
                   separatorBuilder: (_, __) => const Divider(indent: 96),
@@ -87,7 +88,7 @@ class _OrderListState extends State<_OrderList> {
                                   fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Icon(Icons.image_outlined)),
                         ),
                       ),
-                      title: Text(o.listingTitle ?? 'Тапсырыс №${o.id}', maxLines: 1, overflow: TextOverflow.ellipsis),
+                      title: Text(o.listingTitle ?? trf('Тапсырыс №{0}', [o.id]), maxLines: 1, overflow: TextOverflow.ellipsis),
                       subtitle: Text(label(orderStatuses, o.status)),
                       trailing: Text(formatTenge(o.totalTiyn), style: const TextStyle(fontWeight: FontWeight.w700)),
                       onTap: () async {

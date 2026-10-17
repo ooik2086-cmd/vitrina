@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../api.dart';
 import '../session.dart';
 import '../widgets/common.dart';
+import '../i18n.dart';
 
 /// Results of a search by photo: the buyer's picture on top, look-alike listings below.
 class ImageSearchScreen extends StatefulWidget {
@@ -29,7 +30,7 @@ class _ImageSearchScreenState extends State<ImageSearchScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
-      appBar: AppBar(title: const Text('Фотомен іздеу')),
+      appBar: AppBar(title: Text(tr('Фотомен іздеу'))),
       body: CustomScrollView(slivers: [
         SliverToBoxAdapter(
           child: Padding(
@@ -41,7 +42,7 @@ class _ImageSearchScreenState extends State<ImageSearchScreen> {
               ),
               const SizedBox(width: 16),
               Expanded(
-                child: Text('Пішіні мен түсі ұқсас тауарлар. Фотоңыз серверде сақталмайды.',
+                child: Text(tr('Пішіні мен түсі ұқсас тауарлар. Фотоңыз серверде сақталмайды.'),
                     style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
               ),
             ]),
@@ -59,7 +60,7 @@ class _ImageSearchScreenState extends State<ImageSearchScreen> {
                 child: Center(
                   child: Padding(
                     padding: const EdgeInsets.all(24),
-                    child: Text(snap.error is ApiException ? '${snap.error}' : 'Серверге қосылу мүмкін болмады.',
+                    child: Text(snap.error is ApiException ? '${snap.error}' : tr('Серверге қосылу мүмкін болмады.'),
                         textAlign: TextAlign.center),
                   ),
                 ),
@@ -67,8 +68,8 @@ class _ImageSearchScreenState extends State<ImageSearchScreen> {
             }
             final items = snap.data!;
             if (items.isEmpty) {
-              return const SliverFillRemaining(
-                  hasScrollBody: false, child: Center(child: Text('Ұқсас тауар табылмады.')));
+              return SliverFillRemaining(
+                  hasScrollBody: false, child: Center(child: Text(tr('Ұқсас тауар табылмады.'))));
             }
             return SliverPadding(
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),

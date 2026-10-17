@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../api.dart';
 import '../session.dart';
 import '../widgets/common.dart';
+import '../i18n.dart';
 
 class FavoritesScreen extends StatefulWidget {
   const FavoritesScreen({super.key});
@@ -27,15 +28,15 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
 
   @override
   Widget build(BuildContext context) {
-    if (_items == null) return const SignInPrompt(text: 'Ұнаған тауарларды сақтау үшін кіріңіз.');
+    if (_items == null) return SignInPrompt(text: tr('Ұнаған тауарларды сақтау үшін кіріңіз.'));
     return Scaffold(
-      appBar: AppBar(title: const Text('Таңдаулылар')),
+      appBar: AppBar(title: Text(tr('Таңдаулылар'))),
       body: FutureBuilder<List<Listing>>(
         future: _items,
         builder: (context, snap) {
           if (snap.hasError) return Center(child: Text('${snap.error}'));
           if (!snap.hasData) return const Center(child: CircularProgressIndicator());
-          if (snap.data!.isEmpty) return const Center(child: Text('Таңдаулы тауар әлі жоқ.'));
+          if (snap.data!.isEmpty) return Center(child: Text(tr('Таңдаулы тауар әлі жоқ.')));
           return RefreshIndicator(
             onRefresh: () async {
               final f = SessionScope.of(context).api.favorites();

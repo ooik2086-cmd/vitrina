@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import '../i18n.dart';
 
 /// Frame count that gives a smooth turn (one frame every 15°). The server accepts 8 or more.
 const spinTargetFrames = 24;
@@ -65,8 +66,8 @@ class _SpinCaptureScreenState extends State<SpinCaptureScreen> with WidgetsBindi
       setState(() => _controller = c);
     } on CameraException catch (e) {
       setState(() => _error = e.code == 'CameraAccessDenied'
-          ? 'Камераға рұқсат берілмеді. Телефон баптауларынан рұқсат беріңіз.'
-          : 'Камераны ашу мүмкін болмады.');
+          ? tr('Камераға рұқсат берілмеді. Телефон баптауларынан рұқсат беріңіз.')
+          : tr('Камераны ашу мүмкін болмады.'));
     }
   }
 
@@ -88,7 +89,7 @@ class _SpinCaptureScreenState extends State<SpinCaptureScreen> with WidgetsBindi
       });
     } on CameraException {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Кадр түспеді, қайталаңыз.')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr('Кадр түспеді, қайталаңыз.'))));
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -111,11 +112,11 @@ class _SpinCaptureScreenState extends State<SpinCaptureScreen> with WidgetsBindi
       appBar: AppBar(
         backgroundColor: Colors.black,
         foregroundColor: Colors.white,
-        title: const Text('360° түсіру'),
+        title: Text(tr('360° түсіру')),
         actions: [
           TextButton(
             onPressed: n >= spinMinFrames ? () => Navigator.pop(context, List<XFile>.of(_frames)) : null,
-            child: Text('Дайын ($n)', style: TextStyle(color: n >= spinMinFrames ? Colors.white : Colors.white38)),
+            child: Text(trf('Дайын ({0})', [n]), style: TextStyle(color: n >= spinMinFrames ? Colors.white : Colors.white38)),
           ),
         ],
       ),
@@ -138,8 +139,8 @@ class _SpinCaptureScreenState extends State<SpinCaptureScreen> with WidgetsBindi
                         top: 12,
                         child: Text(
                           n == 0
-                              ? 'Аяқкиімді жазық жерге қойып, бүйірінен түсіріңіз.'
-                              : 'Аяқкиімді сәл бұрып (шамамен 15°), алдыңғы кадрмен сәйкестендіріп түсіріңіз.',
+                              ? tr('Аяқкиімді жазық жерге қойып, бүйірінен түсіріңіз.')
+                              : tr('Аяқкиімді сәл бұрып (шамамен 15°), алдыңғы кадрмен сәйкестендіріп түсіріңіз.'),
                           textAlign: TextAlign.center,
                           style: const TextStyle(color: Colors.white, shadows: [Shadow(blurRadius: 4)]),
                         ),
@@ -152,7 +153,7 @@ class _SpinCaptureScreenState extends State<SpinCaptureScreen> with WidgetsBindi
                       padding: const EdgeInsets.symmetric(vertical: 16),
                       child: Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
                         IconButton(
-                          tooltip: 'Соңғы кадрды өшіру',
+                          tooltip: tr('Соңғы кадрды өшіру'),
                           onPressed: n > 0 && !_busy ? _undo : null,
                           icon: const Icon(Icons.undo, color: Colors.white),
                         ),

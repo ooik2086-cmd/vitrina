@@ -5,9 +5,10 @@ import '../labels.dart';
 import '../screens/listing_screen.dart';
 import '../screens/login_screen.dart';
 import '../theme.dart';
+import '../i18n.dart';
 
 void showError(BuildContext context, Object error) {
-  final text = error is ApiException ? error.messageKk : 'Байланыс жоқ. Қайта көріңіз.';
+  final text = error is ApiException ? error.message : tr('Байланыс жоқ. Қайта көріңіз.');
   ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
 }
 
@@ -26,10 +27,26 @@ class SignInPrompt extends StatelessWidget {
           const SizedBox(height: 16),
           FilledButton(
             onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LoginScreen())),
-            child: const Text('Кіру'),
+            child: Text(tr('Кіру')),
           ),
         ]),
       ),
+    );
+  }
+}
+
+/// Қазақша / Русский. Every screen is rebuilt in the chosen language.
+class LanguageSwitch extends StatelessWidget {
+  const LanguageSwitch({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return SegmentedButton<String>(
+      key: const Key('language'),
+      showSelectedIcon: false,
+      segments: [for (final e in languages.entries) ButtonSegment(value: e.key, label: Text(e.value))],
+      selected: {appLanguage.value},
+      onSelectionChanged: (s) => setLanguage(s.first),
     );
   }
 }

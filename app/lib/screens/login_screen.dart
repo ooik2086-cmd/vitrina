@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../api.dart';
 import '../session.dart';
 import '../widgets/common.dart';
+import '../i18n.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -56,13 +57,13 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Кіру')),
+      appBar: AppBar(title: Text(tr('Кіру'))),
       body: ListView(padding: const EdgeInsets.all(24), children: [
         TextField(
           controller: _phone,
           enabled: !_codeSent,
           keyboardType: TextInputType.phone,
-          decoration: const InputDecoration(labelText: 'Телефон нөмірі', hintText: '+7 701 000 00 00'),
+          decoration: InputDecoration(labelText: tr('Телефон нөмірі'), hintText: '+7 701 000 00 00'),
         ),
         if (_codeSent) ...[
           const SizedBox(height: 16),
@@ -71,21 +72,21 @@ class _LoginScreenState extends State<LoginScreen> {
             keyboardType: TextInputType.number,
             maxLength: 6,
             autofocus: true,
-            decoration: const InputDecoration(labelText: 'SMS коды'),
+            decoration: InputDecoration(labelText: tr('SMS коды')),
           ),
           if (_devCode != null)
-            Text('Сынақ режимі: SMS жіберілмейді, код $_devCode',
+            Text(trf('Сынақ режимі: SMS жіберілмейді, код {0}', [_devCode]),
                 style: TextStyle(color: Theme.of(context).colorScheme.tertiary)),
         ],
         const SizedBox(height: 24),
         FilledButton(
           onPressed: _busy ? null : (_codeSent ? _verify : _sendCode),
-          child: Text(_codeSent ? 'Растау' : 'Код алу'),
+          child: Text(_codeSent ? tr('Растау') : tr('Код алу')),
         ),
         if (_codeSent)
           TextButton(
             onPressed: _busy ? null : () => setState(() => _codeSent = false),
-            child: const Text('Нөмірді өзгерту'),
+            child: Text(tr('Нөмірді өзгерту')),
           ),
       ]),
     );

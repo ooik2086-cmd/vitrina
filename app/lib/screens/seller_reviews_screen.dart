@@ -4,6 +4,7 @@ import '../api.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import '../i18n.dart';
 
 class Stars extends StatelessWidget {
   const Stars({super.key, required this.value, this.size = 16});
@@ -48,17 +49,17 @@ class _SellerReviewsScreenState extends State<SellerReviewsScreen> {
     final answer = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Пікірге жауап'),
+        title: Text(tr('Пікірге жауап')),
         content: TextField(
           controller: text,
           autofocus: true,
           maxLines: 4,
           maxLength: 1000,
-          decoration: const InputDecoration(hintText: 'Жауабыңызды барлық сатып алушылар көреді'),
+          decoration: InputDecoration(hintText: tr('Жауабыңызды барлық сатып алушылар көреді')),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Болдырмау')),
-          FilledButton(onPressed: () => Navigator.pop(context, text.text.trim()), child: const Text('Жіберу')),
+          TextButton(onPressed: () => Navigator.pop(context), child: Text(tr('Болдырмау'))),
+          FilledButton(onPressed: () => Navigator.pop(context, text.text.trim()), child: Text(tr('Жіберу'))),
         ],
       ),
     );
@@ -91,14 +92,14 @@ class _SellerReviewsScreenState extends State<SellerReviewsScreen> {
               const SizedBox(width: 12),
               Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Stars(value: rating ?? 0, size: 20),
-                Text('${items.length} пікір', style: theme.textTheme.bodyMedium),
+                Text(trf('{0} пікір', [items.length]), style: theme.textTheme.bodyMedium),
               ]),
             ]),
             const SizedBox(height: 8),
-            Text('Пікірді тек осы сатушыдан сатып алып, тапсырысты аяқтаған адам қалдыра алады.',
+            Text(tr('Пікірді тек осы сатушыдан сатып алып, тапсырысты аяқтаған адам қалдыра алады.'),
                 style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
             const SizedBox(height: 16),
-            if (items.isEmpty) const Text('Әзірге пікір жоқ.'),
+            if (items.isEmpty) Text(tr('Әзірге пікір жоқ.')),
             for (final r in items) ...[
               Card(
                 child: Padding(
@@ -116,7 +117,7 @@ class _SellerReviewsScreenState extends State<SellerReviewsScreen> {
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
                             color: theme.colorScheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(12)),
-                        child: Text('Сатушы: ${r.sellerReply}', style: weight(theme.textTheme.bodyMedium!, 500)),
+                        child: Text(trf('Сатушы: {0}', [r.sellerReply]), style: weight(theme.textTheme.bodyMedium!, 500)),
                       ),
                     ] else if (isOwner)
                       Align(
@@ -124,7 +125,7 @@ class _SellerReviewsScreenState extends State<SellerReviewsScreen> {
                         child: TextButton.icon(
                           onPressed: () => _reply(r),
                           icon: const Icon(Icons.reply_rounded, size: 18),
-                          label: const Text('Жауап беру'),
+                          label: Text(tr('Жауап беру')),
                         ),
                       ),
                   ]),

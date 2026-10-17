@@ -1,6 +1,8 @@
 /// Display text in Kazakh for the API's codes, and money formatting.
 library;
 
+import 'i18n.dart';
+
 /// 1 250 000 tiyn -> "12 500 ₸". Amounts stay integers end to end.
 String formatTenge(int tiyn) {
   final tenge = tiyn ~/ 100;
@@ -67,4 +69,4 @@ const orderStatuses = {
   'CANCELLED': 'Бас тартылды',
 };
 
-String label(Map<String, String> table, String? code) => code == null ? '—' : table[code] ?? code;
+String label(Map<String, String> table, String? code) => code == null ? '—' : tr(table[code] ?? code);

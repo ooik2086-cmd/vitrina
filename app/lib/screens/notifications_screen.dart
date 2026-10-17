@@ -5,12 +5,13 @@ import '../session.dart';
 import '../theme.dart';
 import 'chat_screen.dart';
 import 'order_screen.dart';
+import '../i18n.dart';
 
 String _ago(DateTime t) {
   final d = DateTime.now().difference(t);
-  if (d.inMinutes < 1) return 'жаңа ғана';
-  if (d.inHours < 1) return '${d.inMinutes} мин бұрын';
-  if (d.inDays < 1) return '${d.inHours} сағ бұрын';
+  if (d.inMinutes < 1) return tr('жаңа ғана');
+  if (d.inHours < 1) return trf('{0} мин бұрын', [d.inMinutes]);
+  if (d.inDays < 1) return trf('{0} сағ бұрын', [d.inHours]);
   return '${t.day.toString().padLeft(2, '0')}.${t.month.toString().padLeft(2, '0')}';
 }
 
@@ -51,14 +52,14 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
-      appBar: AppBar(title: const Text('Хабарландырулар')),
+      appBar: AppBar(title: Text(tr('Хабарландырулар'))),
       body: FutureBuilder<List<AppNotification>>(
         future: _items,
         builder: (context, snap) {
           if (snap.hasError) return Center(child: Text('${snap.error}'));
           if (!snap.hasData) return const Center(child: CircularProgressIndicator());
           final items = snap.data!;
-          if (items.isEmpty) return const Center(child: Text('Хабарландыру жоқ.'));
+          if (items.isEmpty) return Center(child: Text(tr('Хабарландыру жоқ.')));
           return ListView.separated(
             itemCount: items.length,
             separatorBuilder: (_, __) => const Divider(indent: 72),

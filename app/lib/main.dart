@@ -8,10 +8,21 @@ import 'screens/orders_screen.dart';
 import 'screens/profile_screen.dart';
 import 'session.dart';
 import 'theme.dart';
+import 'i18n.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await restoreLanguage(_deviceLanguage());
   final session = Session(Api())..restore();
   runApp(VitrinaApp(session: session));
+}
+
+String _deviceLanguage() {
+  try {
+    return WidgetsBinding.instance.platformDispatcher.locale.languageCode;
+  } catch (_) {
+    return 'kk'; // some browsers report a locale the engine cannot parse
+  }
 }
 
 class VitrinaApp extends StatelessWidget {
@@ -22,12 +33,17 @@ class VitrinaApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return SessionScope(
       session: session,
-      child: MaterialApp(
-        title: 'VITRINA',
-        debugShowCheckedModeBanner: false,
-        theme: buildTheme(Brightness.light),
-        darkTheme: buildTheme(Brightness.dark),
-        home: const HomeShell(),
+      // A language change rebuilds every screen from scratch so no text stays in the old language.
+      child: ValueListenableBuilder<String>(
+        valueListenable: appLanguage,
+        builder: (context, lang, _) => MaterialApp(
+          key: ValueKey(lang),
+          title: 'VITRINA',
+          debugShowCheckedModeBanner: false,
+          theme: buildTheme(Brightness.light),
+          darkTheme: buildTheme(Brightness.dark),
+          home: const HomeShell(),
+        ),
       ),
     );
   }
@@ -40,8 +56,11 @@ class HomeShell extends StatefulWidget {
   State<HomeShell> createState() => _HomeShellState();
 }
 
+/// Survives the rebuild after a language change, so the person stays on the tab they were on.
+int _lastTab = 0;
+
 class _HomeShellState extends State<HomeShell> {
-  int _tab = 0;
+  int _tab = _lastTab;
 
   @override
   Widget build(BuildContext context) {
@@ -55,19 +74,19 @@ class _HomeShellState extends State<HomeShell> {
       ]),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _tab,
-        onDestinationSelected: (i) => setState(() => _tab = i),
-        destinations: const [
+        onDestinationSelected: (i) => setState(() => _tab = _lastTab = i),
+        destinations: [
           NavigationDestination(
-              icon: Icon(Icons.storefront_outlined), selectedIcon: Icon(Icons.storefront), label: 'Каталог'),
+              icon: Icon(Icons.storefront_outlined), selectedIcon: Icon(Icons.storefront), label: tr('Каталог')),
           NavigationDestination(
-              icon: Icon(Icons.favorite_border), selectedIcon: Icon(Icons.favorite), label: 'Таңдаулы'),
+              icon: Icon(Icons.favorite_border), selectedIcon: Icon(Icons.favorite), label: tr('Таңдаулы')),
           NavigationDestination(
               icon: Icon(Icons.chat_bubble_outline_rounded),
               selectedIcon: Icon(Icons.chat_bubble_rounded),
-              label: 'Чат'),
+              label: tr('Чат')),
           NavigationDestination(
-              icon: Icon(Icons.receipt_long_outlined), selectedIcon: Icon(Icons.receipt_long), label: 'Тапсырыс'),
-          NavigationDestination(icon: Icon(Icons.person_outline), selectedIcon: Icon(Icons.person), label: 'Профиль'),
+              icon: Icon(Icons.receipt_long_outlined), selectedIcon: Icon(Icons.receipt_long), label: tr('Тапсырыс')),
+          NavigationDestination(icon: Icon(Icons.person_outline), selectedIcon: Icon(Icons.person), label: tr('Профиль')),
         ],
       ),
     );

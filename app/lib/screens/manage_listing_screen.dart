@@ -6,6 +6,7 @@ import '../session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import 'listing_screen.dart';
+import '../i18n.dart';
 
 const listingStatuses = {
   'draft': 'Жоба',
@@ -76,7 +77,7 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
           description: _description.text,
           defects: _defects.text,
           stock: _stock),
-      'Сақталды',
+      tr('Сақталды'),
     );
   }
 
@@ -90,9 +91,9 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
         if (!didPop) Navigator.pop(context, _changed);
       },
       child: Scaffold(
-        appBar: AppBar(title: const Text('Тауарды басқару'), actions: [
+        appBar: AppBar(title: Text(tr('Тауарды басқару')), actions: [
           IconButton(
-            tooltip: 'Сатып алушы көретіндей ашу',
+            tooltip: tr('Сатып алушы көретіндей ашу'),
             icon: const Icon(Icons.visibility_outlined),
             onPressed: () =>
                 Navigator.of(context).push(MaterialPageRoute(builder: (_) => ListingScreen(listingId: _l.id))),
@@ -127,9 +128,9 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
               const SizedBox(height: 16),
               Card(
                 color: theme.colorScheme.errorContainer,
-                child: const Padding(
+                child: Padding(
                   padding: EdgeInsets.all(16),
-                  child: Text('Тауарды модератор жасырды. Өзгерту үшін қолдау қызметіне жазыңыз.'),
+                  child: Text(tr('Тауарды модератор жасырды. Өзгерту үшін қолдау қызметіне жазыңыз.')),
                 ),
               ),
             ],
@@ -138,7 +139,7 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
               _StatsRow(stats: _l.stats!),
             ],
             const SizedBox(height: 24),
-            Text('Баға', style: theme.textTheme.titleMedium),
+            Text(tr('Баға'), style: theme.textTheme.titleMedium),
             const SizedBox(height: 8),
             Row(children: [
               Expanded(
@@ -147,8 +148,8 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
                   controller: _price,
                   enabled: !locked,
                   keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: 'Бағасы', suffixText: '₸'),
-                  validator: (v) => (_tiyn(v ?? '') ?? 0) <= 0 ? 'Бағаны енгізіңіз' : null,
+                  decoration: InputDecoration(labelText: tr('Бағасы'), suffixText: '₸'),
+                  validator: (v) => (_tiyn(v ?? '') ?? 0) <= 0 ? tr('Бағаны енгізіңіз') : null,
                 ),
               ),
               const SizedBox(width: 12),
@@ -157,21 +158,21 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
                   controller: _delivery,
                   enabled: !locked,
                   keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: 'Жеткізу', suffixText: '₸'),
+                  decoration: InputDecoration(labelText: tr('Жеткізу'), suffixText: '₸'),
                 ),
               ),
             ]),
             const SizedBox(height: 24),
-            Text('Қалдық', style: theme.textTheme.titleMedium),
+            Text(tr('Қалдық'), style: theme.textTheme.titleMedium),
             const SizedBox(height: 4),
             for (final s in _l.sizes)
               ListTile(
                 contentPadding: EdgeInsets.zero,
                 title: Text(s.label),
-                subtitle: Text('${s.insoleCm} см'),
+                subtitle: Text(trf('{0} см', [s.insoleCm])),
                 trailing: Row(mainAxisSize: MainAxisSize.min, children: [
                   IconButton.outlined(
-                    tooltip: 'Азайту',
+                    tooltip: tr('Азайту'),
                     icon: const Icon(Icons.remove),
                     onPressed: locked || (_stock[s.id] ?? 0) == 0
                         ? null
@@ -183,7 +184,7 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
                         textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.w700)),
                   ),
                   IconButton.outlined(
-                    tooltip: 'Көбейту',
+                    tooltip: tr('Көбейту'),
                     icon: const Icon(Icons.add),
                     onPressed: locked ? null : () => setState(() => _stock[s.id] = (_stock[s.id] ?? 0) + 1),
                   ),
@@ -194,14 +195,14 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
               controller: _description,
               enabled: !locked,
               maxLines: 4,
-              decoration: const InputDecoration(labelText: 'Сипаттамасы'),
+              decoration: InputDecoration(labelText: tr('Сипаттамасы')),
             ),
             const SizedBox(height: 12),
             TextFormField(
               controller: _defects,
               enabled: !locked,
               maxLines: 3,
-              decoration: const InputDecoration(labelText: 'Ақаулары'),
+              decoration: InputDecoration(labelText: tr('Ақаулары')),
             ),
           ]),
         ),
@@ -214,15 +215,15 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
                     if (_l.status == 'published')
                       Expanded(
                         child: OutlinedButton(
-                          onPressed: _busy ? null : () => _run((api) => api.pauseListing(_l.id), 'Сатылым тоқтатылды'),
-                          child: const Text('Тоқтату'),
+                          onPressed: _busy ? null : () => _run((api) => api.pauseListing(_l.id), tr('Сатылым тоқтатылды')),
+                          child: Text(tr('Тоқтату')),
                         ),
                       ),
                     if (_l.status == 'draft' || _l.status == 'paused')
                       Expanded(
                         child: OutlinedButton(
-                          onPressed: _busy ? null : () => _run((api) => api.publishListing(_l.id), 'Сатылымға шықты'),
-                          child: const Text('Сатылымға шығару'),
+                          onPressed: _busy ? null : () => _run((api) => api.publishListing(_l.id), tr('Сатылымға шықты')),
+                          child: Text(tr('Сатылымға шығару')),
                         ),
                       ),
                     const SizedBox(width: 12),
@@ -230,7 +231,7 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
                       child: FilledButton(
                         key: const Key('save'),
                         onPressed: _busy ? null : _save,
-                        child: const Text('Сақтау'),
+                        child: Text(tr('Сақтау')),
                       ),
                     ),
                   ]),
@@ -264,10 +265,10 @@ class _StatsRow extends StatelessWidget {
         border: Border.all(color: theme.colorScheme.outlineVariant),
       ),
       child: Row(children: [
-        cell(Icons.visibility_outlined, stats.views, 'қаралым'),
-        cell(Icons.favorite_border_rounded, stats.favorites, 'таңдаулы'),
-        cell(Icons.chat_bubble_outline_rounded, stats.chats, 'чат'),
-        cell(Icons.shopping_bag_outlined, stats.orders, 'тапсырыс'),
+        cell(Icons.visibility_outlined, stats.views, tr('қаралым')),
+        cell(Icons.favorite_border_rounded, stats.favorites, tr('таңдаулы')),
+        cell(Icons.chat_bubble_outline_rounded, stats.chats, tr('чат')),
+        cell(Icons.shopping_bag_outlined, stats.orders, tr('тапсырыс')),
       ]),
     );
   }
@@ -287,7 +288,7 @@ class _StatusPill extends StatelessWidget {
       ),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-        child: Text(listingStatuses[status] ?? status,
+        child: Text(tr(listingStatuses[status] ?? status),
             style: TextStyle(color: live ? Colors.white : Brand.ink, fontSize: 12, fontWeight: FontWeight.w600)),
       ),
     );
@@ -297,6 +298,6 @@ class _StatusPill extends StatelessWidget {
 /// One-line stock summary for list rows, e.g. "3 дана".
 String stockSummary(Listing l) {
   final total = l.sizes.fold<int>(0, (n, s) => n + (s.quantity ?? 0));
-  final views = l.stats == null ? '' : ' · ${l.stats!.views} қаралым';
-  return '$total дана · ${formatTenge(l.priceTiyn)}$views';
+  final views = l.stats == null ? '' : trf(' · {0} қаралым', [l.stats!.views]);
+  return trf('{0} дана · {1}{2}', [total, formatTenge(l.priceTiyn), views]);
 }

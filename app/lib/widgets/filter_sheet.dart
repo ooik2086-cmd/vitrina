@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../api.dart';
 import '../labels.dart';
+import '../i18n.dart';
 
 const sortLabels = {'new': 'Жаңалары', 'price_asc': 'Арзанырақ', 'price_desc': 'Қымбатырақ'};
 
@@ -48,17 +49,17 @@ class _FilterSheetState extends State<FilterSheet> {
         padding: EdgeInsets.fromLTRB(20, 0, 20, 16 + MediaQuery.viewInsetsOf(context).bottom),
         child: SingleChildScrollView(
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('Сүзгі', style: theme.textTheme.titleLarge),
+            Text(tr('Сүзгі'), style: theme.textTheme.titleLarge),
             const SizedBox(height: 16),
-            Text('Сұрыптау', style: theme.textTheme.titleSmall),
+            Text(tr('Сұрыптау'), style: theme.textTheme.titleSmall),
             const SizedBox(height: 8),
             Wrap(spacing: 8, children: [
               for (final e in sortLabels.entries)
                 ChoiceChip(
-                    label: Text(e.value), selected: _sort == e.key, onSelected: (_) => setState(() => _sort = e.key)),
+                    label: Text(tr(e.value)), selected: _sort == e.key, onSelected: (_) => setState(() => _sort = e.key)),
             ]),
             const SizedBox(height: 20),
-            Text('Баға, ₸', style: theme.textTheme.titleSmall),
+            Text(tr('Баға, ₸'), style: theme.textTheme.titleSmall),
             const SizedBox(height: 8),
             Row(children: [
               Expanded(
@@ -66,7 +67,7 @@ class _FilterSheetState extends State<FilterSheet> {
                     key: const Key('min-price'),
                     controller: _min,
                     keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(labelText: 'бастап')),
+                    decoration: InputDecoration(labelText: tr('бастап'))),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -74,16 +75,16 @@ class _FilterSheetState extends State<FilterSheet> {
                     key: const Key('max-price'),
                     controller: _max,
                     keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(labelText: 'дейін')),
+                    decoration: InputDecoration(labelText: tr('дейін'))),
               ),
             ]),
             const SizedBox(height: 20),
-            Text('Жағдайы', style: theme.textTheme.titleSmall),
+            Text(tr('Жағдайы'), style: theme.textTheme.titleSmall),
             const SizedBox(height: 8),
             Wrap(spacing: 8, runSpacing: 8, children: [
               for (final e in conditions.entries)
                 FilterChip(
-                  label: Text(e.value),
+                  label: Text(tr(e.value)),
                   selected: _conditions.contains(e.key),
                   onSelected: (on) => setState(() => on ? _conditions.add(e.key) : _conditions.remove(e.key)),
                 ),
@@ -92,11 +93,11 @@ class _FilterSheetState extends State<FilterSheet> {
             Row(children: [
               Expanded(
                 child: OutlinedButton(
-                    onPressed: () => Navigator.pop(context, const CatalogFilter()), child: const Text('Тазарту')),
+                    onPressed: () => Navigator.pop(context, const CatalogFilter()), child: Text(tr('Тазарту'))),
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: FilledButton(key: const Key('apply-filter'), onPressed: _apply, child: const Text('Көрсету')),
+                child: FilledButton(key: const Key('apply-filter'), onPressed: _apply, child: Text(tr('Көрсету'))),
               ),
             ]),
           ]),

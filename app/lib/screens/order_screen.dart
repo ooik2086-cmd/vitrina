@@ -5,6 +5,7 @@ import '../labels.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import '../i18n.dart';
 
 /// An action the current user may offer on an order. The server still checks every move.
 class _Action {
@@ -18,28 +19,28 @@ class _Action {
 List<_Action> _actionsFor(OrderInfo o, {required bool isBuyer}) {
   if (isBuyer) {
     return switch (o.status) {
-      'CREATED' => const [_Action('Төлеу', 'pay'), _Action('Бас тарту', 'cancel', destructive: true)],
-      'PAYMENT_PENDING' => const [_Action('Бас тарту', 'cancel', destructive: true)],
-      'PAID' => const [_Action('Бас тарту, ақшаны қайтару', 'cancel', destructive: true)],
-      'SHIPPED' || 'IN_TRANSIT' => const [_Action('Дау ашу', 'dispute', needs: 'reason', destructive: true)],
-      'DELIVERED_PENDING_CONFIRMATION' => const [
-          _Action('Алдым, бәрі дұрыс', 'confirm'),
-          _Action('Қайтару', 'return', needs: 'reason'),
-          _Action('Дау ашу', 'dispute', needs: 'reason', destructive: true),
+      'CREATED' => [_Action(tr('Төлеу'), 'pay'), _Action(tr('Бас тарту'), 'cancel', destructive: true)],
+      'PAYMENT_PENDING' => [_Action(tr('Бас тарту'), 'cancel', destructive: true)],
+      'PAID' => [_Action(tr('Бас тарту, ақшаны қайтару'), 'cancel', destructive: true)],
+      'SHIPPED' || 'IN_TRANSIT' => [_Action(tr('Дау ашу'), 'dispute', needs: 'reason', destructive: true)],
+      'DELIVERED_PENDING_CONFIRMATION' => [
+          _Action(tr('Алдым, бәрі дұрыс'), 'confirm'),
+          _Action(tr('Қайтару'), 'return', needs: 'reason'),
+          _Action(tr('Дау ашу'), 'dispute', needs: 'reason', destructive: true),
         ],
       _ => const [],
     };
   }
   return switch (o.status) {
-    'PAID' => const [
-        _Action('Қабылдау', 'accept'),
-        _Action('Бас тарту', 'decline', needs: 'reason', destructive: true)
+    'PAID' => [
+        _Action(tr('Қабылдау'), 'accept'),
+        _Action(tr('Бас тарту'), 'decline', needs: 'reason', destructive: true)
       ],
-    'SELLER_ACCEPTED' || 'PREPARING' => const [
-        _Action('Жібердім', 'ship', needs: 'tracking'),
-        _Action('Бас тарту', 'decline', needs: 'reason', destructive: true),
+    'SELLER_ACCEPTED' || 'PREPARING' => [
+        _Action(tr('Жібердім'), 'ship', needs: 'tracking'),
+        _Action(tr('Бас тарту'), 'decline', needs: 'reason', destructive: true),
       ],
-    'RETURN_REQUESTED' => const [_Action('Қайтаруды мақұлдау', 'approve-return')],
+    'RETURN_REQUESTED' => [_Action(tr('Қайтаруды мақұлдау'), 'approve-return')],
     _ => const [],
   };
 }
@@ -84,8 +85,8 @@ class _OrderScreenState extends State<OrderScreen> {
         title: Text(title),
         content: TextField(controller: ctrl, autofocus: true, maxLines: 3, decoration: InputDecoration(hintText: hint)),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Жабу')),
-          FilledButton(onPressed: () => Navigator.pop(context, ctrl.text.trim()), child: const Text('Жіберу')),
+          TextButton(onPressed: () => Navigator.pop(context), child: Text(tr('Жабу'))),
+          FilledButton(onPressed: () => Navigator.pop(context, ctrl.text.trim()), child: Text(tr('Жіберу'))),
         ],
       ),
     );
@@ -94,10 +95,10 @@ class _OrderScreenState extends State<OrderScreen> {
   Future<void> _do(_Action a) async {
     String? reason, tracking;
     if (a.needs == 'reason') {
-      reason = await _ask(a.label, 'Себебін жазыңыз');
+      reason = await _ask(a.label, tr('Себебін жазыңыз'));
       if (reason == null || reason.isEmpty) return;
     } else if (a.needs == 'tracking') {
-      tracking = await _ask('Трек-нөмір', 'Мысалы, KZ123456789');
+      tracking = await _ask(tr('Трек-нөмір'), tr('Мысалы, KZ123456789'));
       if (tracking == null || tracking.isEmpty) return;
     }
     setState(() => _busy = true);
@@ -122,7 +123,7 @@ class _OrderScreenState extends State<OrderScreen> {
     final me = SessionScope.of(context).me;
     final o = _order;
     return Scaffold(
-      appBar: AppBar(title: Text('Тапсырыс №${widget.orderId}')),
+      appBar: AppBar(title: Text(trf('Тапсырыс №{0}', [widget.orderId]))),
       body: o == null
           ? Center(child: _error == null ? const CircularProgressIndicator() : Text('$_error'))
           : RefreshIndicator(
@@ -134,15 +135,15 @@ class _OrderScreenState extends State<OrderScreen> {
                 const SizedBox(height: 16),
                 const _ProtectionNote(),
                 if (_paymentStarted && o.status == 'PAYMENT_PENDING')
-                  const Padding(
+                  Padding(
                     padding: EdgeInsets.only(top: 12),
-                    child: Text('Төлем провайдері әлі қосылмаған: сынақ режимінде төлем расталмайды.'),
+                    child: Text(tr('Төлем провайдері әлі қосылмаған: сынақ режимінде төлем расталмайды.')),
                   ),
                 const SizedBox(height: 16),
                 if (me?.id == o.buyerId && o.status == 'COMPLETED' && !o.reviewed && !_reviewed)
                   _ReviewForm(orderId: o.id, onDone: () => setState(() => _reviewed = true)),
                 if (_reviewed)
-                  const Padding(padding: EdgeInsets.only(bottom: 12), child: Text('Пікіріңіз үшін рақмет!')),
+                  Padding(padding: EdgeInsets.only(bottom: 12), child: Text(tr('Пікіріңіз үшін рақмет!'))),
                 for (final a in _actionsFor(o, isBuyer: me?.id == o.buyerId))
                   Padding(
                     padding: const EdgeInsets.only(bottom: 8),
@@ -185,7 +186,7 @@ class _OrderHeader extends StatelessWidget {
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(o.listingTitle ?? '',
                   style: theme.textTheme.titleSmall, maxLines: 2, overflow: TextOverflow.ellipsis),
-              if (o.sizeLabel != null) Text('Өлшем ${o.sizeLabel} · ${o.sizeCm} см', style: theme.textTheme.bodySmall),
+              if (o.sizeLabel != null) Text(trf('Өлшем {0} · {1} см', [o.sizeLabel, o.sizeCm]), style: theme.textTheme.bodySmall),
               const SizedBox(height: 4),
               Text(formatTenge(o.totalTiyn), style: weight(theme.textTheme.titleMedium!, 750)),
             ]),
@@ -201,12 +202,12 @@ class _Timeline extends StatelessWidget {
   const _Timeline({required this.order});
   final OrderInfo order;
 
-  static const _steps = [
-    ('PAID', 'Төленді', Icons.lock_outline_rounded),
-    ('SELLER_ACCEPTED', 'Сатушы қабылдады', Icons.storefront_outlined),
-    ('SHIPPED', 'Жіберілді', Icons.local_shipping_outlined),
-    ('DELIVERED_PENDING_CONFIRMATION', 'Жеткізілді', Icons.inventory_2_outlined),
-    ('COMPLETED', 'Аяқталды', Icons.check_circle_outline_rounded),
+  static final _steps = [
+    ('PAID', tr('Төленді'), Icons.lock_outline_rounded),
+    ('SELLER_ACCEPTED', tr('Сатушы қабылдады'), Icons.storefront_outlined),
+    ('SHIPPED', tr('Жіберілді'), Icons.local_shipping_outlined),
+    ('DELIVERED_PENDING_CONFIRMATION', tr('Жеткізілді'), Icons.inventory_2_outlined),
+    ('COMPLETED', tr('Аяқталды'), Icons.check_circle_outline_rounded),
   ];
   static const _off = {'DISPUTED', 'RETURN_REQUESTED', 'REFUND_PENDING', 'REFUNDED', 'CANCELLED'};
 
@@ -265,7 +266,7 @@ class _Timeline extends StatelessWidget {
                               .copyWith(color: reached.containsKey(code) ? scheme.onSurface : scheme.onSurfaceVariant)),
                       if (reached[code] != null) Text(when(reached[code]!), style: theme.textTheme.labelSmall),
                       if (code == 'SHIPPED' && o.trackingNumber != null)
-                        SelectableText('Трек-нөмір: ${o.trackingNumber}', style: theme.textTheme.labelMedium),
+                        SelectableText(trf('Трек-нөмір: {0}', [o.trackingNumber]), style: theme.textTheme.labelMedium),
                     ]),
                   ),
                 ),
@@ -292,8 +293,7 @@ class _ProtectionNote extends StatelessWidget {
         const SizedBox(width: 12),
         Expanded(
           child: Text(
-            'Ақша сатушыға сіз тауарды алып, растағаннан кейін ғана өтеді. '
-            'Бұл схема лицензиясы бар төлем серіктесі қосылғаннан кейін ғана іске қосылады.',
+            tr('Ақша сатушыға сіз тауарды алып, растағаннан кейін ғана өтеді. Бұл схема лицензиясы бар төлем серіктесі қосылғаннан кейін ғана іске қосылады.'),
             style: theme.textTheme.bodySmall,
           ),
         ),
@@ -341,12 +341,12 @@ class _ReviewFormState extends State<_ReviewForm> {
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('Сатушыны бағалаңыз', style: theme.textTheme.titleMedium),
+          Text(tr('Сатушыны бағалаңыз'), style: theme.textTheme.titleMedium),
           const SizedBox(height: 8),
           Row(children: [
             for (var i = 1; i <= 5; i++)
               IconButton(
-                tooltip: '$i жұлдыз',
+                tooltip: trf('{0} жұлдыз', [i]),
                 onPressed: () => setState(() => _rating = i),
                 icon: Icon(i <= _rating ? Icons.star_rounded : Icons.star_outline_rounded,
                     size: 32, color: const Color(0xFFFFB020)),
@@ -356,13 +356,13 @@ class _ReviewFormState extends State<_ReviewForm> {
             controller: _text,
             maxLines: 3,
             maxLength: 1000,
-            decoration: const InputDecoration(hintText: 'Тауар сипаттамаға сәйкес пе? Жеткізу қалай болды?'),
+            decoration: InputDecoration(hintText: tr('Тауар сипаттамаға сәйкес пе? Жеткізу қалай болды?')),
           ),
           SizedBox(
             width: double.infinity,
             child: FilledButton(
               onPressed: _rating == 0 || _busy ? null : _submit,
-              child: const Text('Пікір қалдыру'),
+              child: Text(tr('Пікір қалдыру')),
             ),
           ),
         ]),
