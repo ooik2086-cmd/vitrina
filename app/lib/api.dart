@@ -35,6 +35,26 @@ class ShoeSize {
   final int? quantity;
 }
 
+class Shop {
+  Shop.fromJson(Map<String, dynamic> j)
+      : id = j['id'] as int,
+        shopName = j['shop_name'] as String? ?? 'Сатушы',
+        city = j['city'] as String?,
+        since = DateTime.parse(j['since'] as String),
+        completedSales = j['completed_sales'] as int,
+        listings = j['listings'] as int,
+        rating = (j['rating'] as num?)?.toDouble(),
+        reviews = j['reviews'] as int;
+  final int id;
+  final String shopName;
+  final String? city;
+  final DateTime since;
+  final int completedSales;
+  final int listings;
+  final double? rating;
+  final int reviews;
+}
+
 class Earnings {
   Earnings.fromJson(Map<String, dynamic> j)
       : heldTiyn = j['held_tiyn'] as int,
@@ -361,6 +381,7 @@ class Api {
       String? sizeCm,
       String? category,
       CatalogFilter filter = const CatalogFilter(),
+      int? sellerId,
       int offset = 0,
       int limit = 20}) async {
     final r = await _send('GET', '/listings', query: {
@@ -369,6 +390,7 @@ class Api {
       if (q != null && q.isNotEmpty) 'q': q,
       if (sizeCm != null && sizeCm.isNotEmpty) 'size_cm': sizeCm,
       if (category != null) 'category': category,
+      if (sellerId != null) 'seller_id': '$sellerId',
       ...filter.query,
     }) as Map;
     return [for (final j in r['items'] as List) Listing.fromJson(j as Map<String, dynamic>)];
@@ -432,6 +454,9 @@ class Api {
   Future<Review> review(int orderId, int rating, String? text) async =>
       Review.fromJson(await _send('POST', '/orders/$orderId/review',
           body: {'rating': rating, if (text != null && text.isNotEmpty) 'text': text}) as Map<String, dynamic>);
+
+  Future<Shop> shop(int sellerId) async =>
+      Shop.fromJson(await _send('GET', '/sellers/$sellerId') as Map<String, dynamic>);
 
   Future<List<Review>> sellerReviews(int sellerId) async {
     final r = await _send('GET', '/sellers/$sellerId/reviews') as Map;

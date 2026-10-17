@@ -12,6 +12,7 @@ import 'package:vitrina/screens/earnings_screen.dart';
 import 'package:vitrina/screens/listing_editor_screen.dart';
 import 'package:vitrina/screens/listing_screen.dart';
 import 'package:vitrina/screens/manage_listing_screen.dart';
+import 'package:vitrina/screens/shop_screen.dart';
 import 'package:vitrina/screens/spin_capture_screen.dart';
 import 'package:vitrina/session.dart';
 import 'package:vitrina/widgets/filter_sheet.dart';
@@ -363,5 +364,40 @@ void main() {
     await tester.pumpAndSettle();
     expect(offsets, [null, '20']);
     expect(find.text('Тауар 24'), findsOneWidget);
+  });
+
+  testWidgets('shop shows platform-counted sales and only that seller\'s items', (tester) async {
+    String? sellerQuery;
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async {
+          final body = req.url.path.endsWith('/sellers/3')
+              ? {
+                  'id': 3,
+                  'shop_name': 'Qadam Store',
+                  'city': 'Алматы',
+                  'since': '2026-10-16',
+                  'completed_sales': 12,
+                  'listings': 1,
+                  'rating': 4.8,
+                  'reviews': 9,
+                }
+              : (() {
+                  sellerQuery = req.url.queryParameters['seller_id'];
+                  return {
+                    'items': [listingJson()]
+                  };
+                })();
+          return http.Response(jsonEncode(body), 200, headers: {'content-type': 'application/json; charset=utf-8'});
+        }));
+    await tester
+        .pumpWidget(SessionScope(session: Session(api), child: const MaterialApp(home: ShopScreen(sellerId: 3))));
+    await tester.pumpAndSettle();
+    expect(sellerQuery, '3');
+    expect(find.text('Qadam Store'), findsOneWidget);
+    expect(find.text('12'), findsOneWidget);
+    expect(find.text('9 пікір'), findsOneWidget);
+    expect(find.textContaining('қаз 2026'), findsOneWidget);
+    expect(find.text('Nike Air Force 1'), findsOneWidget);
   });
 }

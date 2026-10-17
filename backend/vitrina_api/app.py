@@ -401,7 +401,7 @@ def pause_listing(listing_id: int, user: User = Depends(current_user), db: Sessi
 def search_listings(q: str | None = None, category: str | None = None, brand: str | None = None,
                     condition: str | None = None, min_price_tiyn: int | None = None,
                     max_price_tiyn: int | None = None, size_cm: str | None = None,
-                    sort: Literal["new", "price_asc", "price_desc"] = "new",
+                    sort: Literal["new", "price_asc", "price_desc"] = "new", seller_id: int | None = None,
                     limit: int = 20, offset: int = 0, db: Session = Depends(get_db)):
     stmt = select(Listing).where(Listing.status == "published")
     if q:
@@ -409,6 +409,8 @@ def search_listings(q: str | None = None, category: str | None = None, brand: st
             stmt = stmt.where(Listing.search_text.contains(token))
     if category:
         stmt = stmt.where(Listing.category == category)
+    if seller_id is not None:
+        stmt = stmt.where(Listing.seller_id == seller_id)
     if brand:
         stmt = stmt.where(Listing.search_text.contains(normalize_query(brand)))
     if condition:  # one value or a comma-separated list
@@ -425,6 +427,21 @@ def search_listings(q: str | None = None, category: str | None = None, brand: st
              "price_desc": (Listing.price_tiyn.desc(), Listing.id.desc())}[sort]
     rows = db.scalars(stmt.order_by(*order).limit(max(1, min(limit, 50))).offset(max(0, offset))).all()
     return {"items": [listing_out(db, r) for r in rows]}
+
+
+@api.get("/sellers/{seller_id}")
+def seller_profile(seller_id: int, db: Session = Depends(get_db)):
+    """Public shop card. Counts come from the platform's own records, not from what the seller typed."""
+    seller = db.get(User, seller_id)
+    if seller is None or not seller.is_seller or seller.is_blocked:
+        raise ApiError(404, "not_found")
+    sales = db.scalar(select(func.count(Order.id)).where(Order.seller_id == seller.id,
+                                                         Order.status == S.COMPLETED.value))
+    live = db.scalar(select(func.count(Listing.id)).where(Listing.seller_id == seller.id,
+                                                          Listing.status == "published"))
+    return {"id": seller.id, "shop_name": seller.shop_name, "city": seller.city,
+            "since": services.aware(seller.created_at).date().isoformat(),
+            "completed_sales": int(sales or 0), "listings": int(live or 0), **seller_rating(db, seller.id)}
 
 
 @api.get("/listings/{listing_id}")

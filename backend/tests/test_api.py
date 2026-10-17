@@ -183,6 +183,20 @@ class EarningsTests(ApiTestCase):
         self.assertEqual(e["items"][0]["listing_title"], LISTING["title"])
 
 
+class ShopTests(ApiTestCase):
+    def test_shop_profile_counts_and_seller_filter(self):
+        _, order = self.delivered()
+        self.post(f"/orders/{order['id']}/confirm", self.buyer)
+        live = self.publish()["id"]
+        p = self.c.get(f"/api/v1/sellers/{order['seller_id']}").json()
+        self.assertEqual((p["shop_name"], p["city"], p["completed_sales"], p["listings"]),
+                         ("Qadam Store", "Алматы", 1, 1))
+        self.assertNotIn("phone", p)
+        ids = [i["id"] for i in self.c.get("/api/v1/listings", params={"seller_id": order["seller_id"]}).json()["items"]]
+        self.assertEqual(ids, [live])
+        self.assertEqual(self.c.get(f"/api/v1/sellers/{order['buyer_id']}").status_code, 404)
+
+
 class CatalogFilterTests(ApiTestCase):
     def test_sort_and_condition_list(self):
         a = self.publish(price_tiyn=3_000_000, condition="new_with_box")["id"]

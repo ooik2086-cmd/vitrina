@@ -10,6 +10,7 @@ import 'chat_screen.dart';
 import 'login_screen.dart';
 import 'order_screen.dart';
 import 'seller_reviews_screen.dart';
+import 'shop_screen.dart';
 
 const _minSpinFrames = 8;
 
@@ -232,9 +233,8 @@ class _ListingScreenState extends State<ListingScreen> {
                       ),
                     ]),
                     trailing: const Icon(Icons.chevron_right),
-                    onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                        builder: (_) => SellerReviewsScreen(
-                            sellerId: l.sellerId, shopName: l.shopName ?? 'Сатушы', rating: l.sellerRating))),
+                    onTap: () => Navigator.of(context)
+                        .push(MaterialPageRoute(builder: (_) => ShopScreen(sellerId: l.sellerId))),
                   ),
                   if (SessionScope.of(context).me?.id != l.sellerId)
                     Padding(
