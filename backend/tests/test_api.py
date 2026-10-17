@@ -244,6 +244,7 @@ class PayoutTests(ApiTestCase):
         staff = self.make_staff()
         self.assertEqual(self.c.get("/api/v1/admin/payouts", headers=self.h(self.seller)).status_code, 403)
         queue = self.c.get("/api/v1/admin/payouts", headers=self.h(staff)).json()["items"]
+        self.assertEqual(self.c.get("/api/v1/admin/overview", headers=self.h(staff)).json()["queues"]["payouts"], 1)
         self.assertEqual([(q["id"], q["holder_name"], q["shop_name"]) for q in queue],
                          [(first["id"], "ЖК Qadam Store", "Qadam Store")])
         r = self.post(f"/admin/payouts/{first['id']}/paid", staff, {"bank_ref": "ПП-1042"})
@@ -1673,6 +1674,8 @@ class AdminTests(ApiTestCase):
         self.assertEqual(disputes[0]["history"][-1]["reason"], "Өлшемі сәйкес емес")
         overview = self.c.get("/api/v1/admin/overview", headers=self.h(staff)).json()
         self.assertEqual(overview["orders"], {"DISPUTED": 1})
+        self.assertEqual(overview["queues"], {"moderation": 0, "authenticity": 0, "disputes": 1, "reports": 0,
+                                              "payouts": 0})
         self.post(f"/admin/orders/{order['id']}/resolve", staff, {"refund_tiyn": 0, "reason": "Өлшем кестесіне сай"})
         audit = self.c.get("/api/v1/admin/audit", headers=self.h(staff)).json()["items"]
         self.assertEqual(audit[0]["action"], "resolve_dispute")

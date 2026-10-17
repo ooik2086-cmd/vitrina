@@ -51,6 +51,7 @@ const REASON = { fake:'Жалған тауар', wrong_photos:'Фото сәйк
 const FLAG = { contacts:'Байланыс деректері', replica:'Көшірме', low_price:'Күдікті баға', reused_photo:'Бөтен фото' };
 let token = sessionStorage.getItem('vitrina_admin') || '';
 let tab = 'overview';
+let queues = {};
 const $ = (h) => { const t = document.createElement('template'); t.innerHTML = h.trim(); return t.content; };
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const tenge = (t) => Math.floor(t / 100).toLocaleString('ru-RU').replace(/,/g, ' ') + ' ₸';
@@ -94,7 +95,7 @@ function loginView() {
 function shell(content) {
   const tabs = [['overview','Шолу'],['moderation','Тексеруде'],['authenticity','Түпнұсқа'],['disputes','Даулар'],['reports','Шағымдар'],['payouts','Төлемдер'],['orders','Тапсырыстар'],['listings','Тауарлар'],['audit','Аудит']];
   const n = $(`<div><header><b>VITRINA</b><nav>${tabs.map(([k, l]) =>
-    `<button data-k="${k}" aria-current="${k === tab}">${l}</button>`).join('')}</nav>
+    `<button data-k="${k}" aria-current="${k === tab}">${l}${queues[k] ? ` <span class="pill">${queues[k]}</span>` : ''}</button>`).join('')}</nav>
     <span style="flex:1"></span><button class="ghost" id="out">Шығу</button></header><main></main></div>`);
   n.querySelectorAll('nav button').forEach(b => b.onclick = () => { tab = b.dataset.k; show(); });
   n.querySelector('#out').onclick = () => { token = ''; sessionStorage.removeItem('vitrina_admin'); loginView(); };
@@ -129,8 +130,9 @@ async function show() {
   if (!token) return loginView();
   const box = document.createElement('div');
   try {
+    const o = await call('GET', '/admin/overview');
+    queues = o.queues || {};
     if (tab === 'overview') {
-      const o = await call('GET', '/admin/overview');
       const stat = (n, l) => `<div class="card stat"><div class="n">${n}</div><div class="l">${l}</div></div>`;
       box.append($(`<div class="grid">${stat(o.users, 'Пайдаланушы')}${stat(o.sellers, 'Сатушы')}
         ${stat(o.listings.published || 0, 'Сатылымдағы тауар')}${stat(o.listings.moderation || 0, 'Тексеруде')}${stat(o.orders.DISPUTED || 0, 'Ашық дау')}

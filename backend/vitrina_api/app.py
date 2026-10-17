@@ -1631,7 +1631,19 @@ def admin_overview(staff: User = Depends(staff_user), db: Session = Depends(get_
     orders = dict(db.execute(select(Order.status, func.count(Order.id)).group_by(Order.status)).all())
     listings = dict(db.execute(select(Listing.status, func.count(Listing.id)).group_by(Listing.status)).all())
     gmv = db.scalar(select(func.coalesce(func.sum(Order.item_price_tiyn), 0)).where(Order.status == S.COMPLETED.value))
-    return {"orders": orders, "listings": listings, "completed_item_value_tiyn": int(gmv or 0),
+    from .authenticity import SELLER_EVIDENCE
+    from .models import Payout
+    count = lambda stmt: db.scalar(select(func.count()).select_from(stmt.subquery()))  # noqa: E731
+    queues = {  # what waits on support, shown as numbers on the console's tabs
+        "moderation": listings.get("moderation", 0),
+        "authenticity": count(select(Listing.id).where(
+            Listing.authenticity == SELLER_EVIDENCE,
+            Listing.status.in_(("published", "paused", "sold", "moderation")))),
+        "disputes": orders.get(S.DISPUTED.value, 0),
+        "reports": count(select(ListingReport.listing_id).where(ListingReport.status == "open").distinct()),
+        "payouts": count(select(Payout.id).where(Payout.status == "requested")),
+    }
+    return {"orders": orders, "listings": listings, "completed_item_value_tiyn": int(gmv or 0), "queues": queues,
             "users": db.scalar(select(func.count(User.id))), "sellers": db.scalar(
                 select(func.count(User.id)).where(User.is_seller.is_(True)))}
 
