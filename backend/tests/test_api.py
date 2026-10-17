@@ -166,6 +166,23 @@ class ListingTests(ApiTestCase):
         self.assertEqual(self.c.get(f"/api/v1/listings/{lid}", headers=self.h(self.seller)).status_code, 200)
 
 
+class EarningsTests(ApiTestCase):
+    def test_seller_sees_held_then_payable_minus_commission(self):
+        self.assertEqual(self.c.get("/api/v1/me/earnings", headers=self.h(self.buyer)).status_code, 403)
+        _, order = self.delivered()
+        e = self.c.get("/api/v1/me/earnings", headers=self.h(self.seller)).json()
+        self.assertEqual(e["held_tiyn"], order["total_tiyn"])
+        self.assertEqual((e["payable_tiyn"], e["items"]), (0, []))
+        self.post(f"/orders/{order['id']}/confirm", self.buyer)
+        e = self.c.get("/api/v1/me/earnings", headers=self.h(self.seller)).json()
+        self.assertEqual(e["held_tiyn"], 0)
+        self.assertGreater(e["fees_tiyn"], 0)
+        self.assertEqual(e["payable_tiyn"] + e["fees_tiyn"], order["total_tiyn"])
+        self.assertEqual(e["items"][0]["net_tiyn"], e["payable_tiyn"])
+        self.assertEqual(e["items"][0]["kind"], "completion")
+        self.assertEqual(e["items"][0]["listing_title"], LISTING["title"])
+
+
 class CatalogFilterTests(ApiTestCase):
     def test_sort_and_condition_list(self):
         a = self.publish(price_tiyn=3_000_000, condition="new_with_box")["id"]

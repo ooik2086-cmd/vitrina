@@ -274,6 +274,36 @@ def my_listings(user: User = Depends(current_user), db: Session = Depends(get_db
     return {"items": [listing_out(db, r, owner=True) for r in rows]}
 
 
+@api.get("/me/earnings")
+def my_earnings(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """Seller's money, read straight from the ledger: what is held for open orders, what is owed to the
+    seller after completed ones, and the commission taken on each."""
+    if not user.is_seller:
+        raise ApiError(403, "seller_required")
+    from vitrina_core.money import PLATFORM_FEE, escrow, seller_payable
+    from .models import LedgerEntry, LedgerTx
+    orders = {o.id: o for o in db.scalars(select(Order).where(Order.seller_id == user.id)).all()}
+    held = sum(services.balance(db, escrow(str(oid))) for oid in orders)
+    items = []
+    if orders:
+        txs = db.scalars(select(LedgerTx).where(LedgerTx.order_id.in_(orders),
+                                                LedgerTx.idempotency_key.like("settle:%"))
+                         .order_by(LedgerTx.id.desc()).limit(100)).all()
+        mine = seller_payable(str(user.id))
+        for tx in txs:
+            net = sum(e.credit - e.debit for e in tx.entries if e.account == mine)
+            fee = sum(e.credit - e.debit for e in tx.entries if e.account == PLATFORM_FEE)
+            order = orders[tx.order_id]
+            items.append({"order_id": order.id, "kind": tx.kind, "at": services.aware(tx.at).isoformat(),
+                          "listing_title": db.get(Listing, order.listing_id).title,
+                          "net_tiyn": net, "fee_tiyn": fee})
+    fees = db.scalar(select(func.coalesce(func.sum(LedgerEntry.credit - LedgerEntry.debit), 0))
+                     .join(LedgerTx, LedgerTx.id == LedgerEntry.tx_id)
+                     .where(LedgerEntry.account == PLATFORM_FEE, LedgerTx.order_id.in_(orders or [0])))
+    return {"held_tiyn": held, "payable_tiyn": services.balance(db, seller_payable(str(user.id))),
+            "fees_tiyn": int(fees or 0), "items": items}
+
+
 @api.post("/listings", status_code=201)
 def create_listing(body: ListingIn, user: User = Depends(current_user), db: Session = Depends(get_db),
                    cfg: Settings = Depends(get_settings), storage: LocalStorage = Depends(get_storage)):

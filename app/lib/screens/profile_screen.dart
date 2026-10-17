@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../session.dart';
 import '../widgets/common.dart';
+import 'earnings_screen.dart';
 import 'my_listings_screen.dart';
 
 class ProfileScreen extends StatelessWidget {
@@ -34,6 +35,13 @@ class ProfileScreen extends StatelessWidget {
                   title: const Text('Менің тауарларым'),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MyListingsScreen())),
+                ),
+              if (me.isSeller)
+                ListTile(
+                  leading: const Icon(Icons.account_balance_wallet_outlined),
+                  title: const Text('Табыс'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const EarningsScreen())),
                 )
               else
                 ListTile(

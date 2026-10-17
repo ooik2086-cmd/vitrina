@@ -35,6 +35,34 @@ class ShoeSize {
   final int? quantity;
 }
 
+class Earnings {
+  Earnings.fromJson(Map<String, dynamic> j)
+      : heldTiyn = j['held_tiyn'] as int,
+        payableTiyn = j['payable_tiyn'] as int,
+        feesTiyn = j['fees_tiyn'] as int,
+        items = [for (final i in j['items'] as List) EarningItem.fromJson(i as Map<String, dynamic>)];
+  final int heldTiyn;
+  final int payableTiyn;
+  final int feesTiyn;
+  final List<EarningItem> items;
+}
+
+class EarningItem {
+  EarningItem.fromJson(Map<String, dynamic> j)
+      : orderId = j['order_id'] as int,
+        kind = j['kind'] as String,
+        at = DateTime.parse(j['at'] as String),
+        listingTitle = j['listing_title'] as String,
+        netTiyn = j['net_tiyn'] as int,
+        feeTiyn = j['fee_tiyn'] as int;
+  final int orderId;
+  final String kind; // completion | partial_refund | refund_full
+  final DateTime at;
+  final String listingTitle;
+  final int netTiyn;
+  final int feeTiyn;
+}
+
 /// Catalog refinements beyond text, size and category.
 class CatalogFilter {
   const CatalogFilter({this.sort = 'new', this.conditions = const {}, this.minPriceTiyn, this.maxPriceTiyn});
@@ -316,6 +344,8 @@ class Api {
 
   Future<Listing> pauseListing(int id) async =>
       Listing.fromJson(await _send('POST', '/listings/$id/pause') as Map<String, dynamic>);
+
+  Future<Earnings> earnings() async => Earnings.fromJson(await _send('GET', '/me/earnings') as Map<String, dynamic>);
 
   Future<List<Listing>> myListings() async {
     final r = await _send('GET', '/me/listings') as Map;

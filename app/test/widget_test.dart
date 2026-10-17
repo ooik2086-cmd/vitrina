@@ -7,6 +7,7 @@ import 'package:http/testing.dart';
 import 'package:vitrina/api.dart';
 import 'package:vitrina/labels.dart';
 import 'package:vitrina/screens/chat_screen.dart';
+import 'package:vitrina/screens/earnings_screen.dart';
 import 'package:vitrina/screens/listing_editor_screen.dart';
 import 'package:vitrina/screens/listing_screen.dart';
 import 'package:vitrina/screens/manage_listing_screen.dart';
@@ -307,5 +308,34 @@ void main() {
     expect(result!.minPriceTiyn, 2000000);
     expect(result!.maxPriceTiyn, 5000000);
     expect(result!.sort, 'price_asc');
+  });
+
+  testWidgets('earnings shows owed, held and commission from the ledger', (tester) async {
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((_) async => http.Response(
+            jsonEncode({
+              'held_tiyn': 3440000,
+              'payable_tiyn': 2840500,
+              'fees_tiyn': 149500,
+              'items': [
+                {
+                  'order_id': 2,
+                  'kind': 'completion',
+                  'at': '2026-10-17T00:45:00+00:00',
+                  'listing_title': 'Жеңіл жүгіру кроссовкасы',
+                  'net_tiyn': 2840500,
+                  'fee_tiyn': 149500,
+                }
+              ],
+            }),
+            200,
+            headers: {'content-type': 'application/json; charset=utf-8'})));
+    await tester.pumpWidget(SessionScope(session: Session(api), child: const MaterialApp(home: EarningsScreen())));
+    await tester.pumpAndSettle();
+    expect(find.text(formatTenge(2840500)), findsNWidgets(2));
+    expect(find.text(formatTenge(3440000)), findsOneWidget);
+    expect(find.text(formatTenge(149500)), findsOneWidget);
+    expect(find.textContaining('Сатылды'), findsOneWidget);
   });
 }
