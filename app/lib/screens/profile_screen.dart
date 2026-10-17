@@ -70,6 +70,14 @@ class ProfileScreen extends StatelessWidget {
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PromoCodesScreen())),
                 ),
+              if (me.isSeller)
+                ListTile(
+                  key: const Key('shop-link'),
+                  leading: const Icon(Icons.ios_share_rounded),
+                  title: Text(tr('Дүкен сілтемесі')),
+                  subtitle: Text(tr('Instagram биосына немесе WhatsApp статусына')),
+                  onTap: () => shareShop(me.id, me.shopName),
+                ),
               if (me.isSeller) const ShopAboutTile(),
               if (me.isSeller) const AwayTile(),
               ListTile(

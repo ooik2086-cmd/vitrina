@@ -456,6 +456,7 @@ class ShareTests(ApiTestCase):
         self.assertIn('property="og:image"', page)
         self.assertIn("EU 42 · 26,5 см", page)
         self.assertIn(f'href="vitrina://open/listing/{listing["id"]}"', page)
+        self.assertIn('href="/s/1">Сатушы: Qadam Store →', page)
         self.assertNotIn("<b>", page.split("<body>")[1])  # seller text is escaped
         self.assertNotIn("+7701", page)  # never the seller's phone
         self.assertIn("Открыть в приложении", self.c.get(f"/l/{listing['id']}", headers={"Accept-Language": "ru-RU"}).text)
@@ -465,6 +466,26 @@ class ShareTests(ApiTestCase):
         self.post(f"/listings/{listing['id']}/pause", self.seller)
         self.assertEqual(self.c.get(f"/l/{listing['id']}").status_code, 404)
         self.assertEqual(self.c.get("/l/99999").status_code, 404)
+
+    def test_shared_shop_page_lists_what_is_on_sale_with_the_platforms_own_facts(self):
+        on_sale = self.publish(title="Ақ кеды <b>")
+        paused = self.publish(title="Қара етік")
+        self.post(f"/listings/{paused['id']}/pause", self.seller)
+        sid = self.c.get("/api/v1/me", headers=self.h(self.seller)).json()["id"]
+        self.c.put("/api/v1/me/shop-about", json={"text": "Тек түпнұсқа"}, headers=self.h(self.seller))
+        page = self.c.get(f"/s/{sid}").text
+        self.assertIn('<meta property="og:title" content="Qadam Store">', page)
+        self.assertIn('<meta property="og:description" content="Тек түпнұсқа">', page)
+        self.assertIn(f'href="/l/{on_sale["id"]}"', page)
+        self.assertIn("Ақ кеды &lt;b&gt;", page)
+        self.assertNotIn("Қара етік", page)  # paused listings stay off the page
+        self.assertIn("Алматы · 1 тауар", page)
+        self.assertIn(f'href="vitrina://open/shop/{sid}"', page)
+        self.assertNotIn("+7701", page)
+        self.assertIn("Open the shop in the app", self.c.get(f"/s/{sid}?lang=en").text)
+        buyer = self.c.get("/api/v1/me", headers=self.h(self.buyer)).json()["id"]
+        self.assertEqual(self.c.get(f"/s/{buyer}").status_code, 404)  # not a shop
+        self.assertEqual(self.c.get("/s/99999").status_code, 404)
 
 
 class MediaTests(ApiTestCase):

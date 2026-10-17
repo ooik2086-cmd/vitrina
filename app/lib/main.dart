@@ -6,6 +6,7 @@ import 'demo.dart';
 import 'screens/catalog_screen.dart';
 import 'screens/chat_screen.dart';
 import 'screens/listing_screen.dart';
+import 'screens/shop_screen.dart';
 import 'screens/onboarding_screen.dart';
 import 'screens/favorites_screen.dart';
 import 'screens/orders_screen.dart';
@@ -68,11 +69,13 @@ class VitrinaApp extends StatelessWidget {
               valueListenable: onboarded,
               builder: (context, done, _) => done ? const HomeShell() : const OnboardingScreen(),
             ),
-            // vitrina://open/listing/7 from a shared link's "open in app" button.
+            // vitrina://open/listing/7 or vitrina://open/shop/3 from a shared page's "open in app" button.
             onGenerateRoute: (settings) {
-              final m = RegExp(r'^/listing/(\d+)$').firstMatch(settings.name ?? '');
+              final m = RegExp(r'^/(listing|shop)/(\d+)$').firstMatch(settings.name ?? '');
               if (m == null) return null;
-              return MaterialPageRoute(builder: (_) => ListingScreen(listingId: int.parse(m.group(1)!)));
+              final id = int.parse(m.group(2)!);
+              return MaterialPageRoute(
+                  builder: (_) => m.group(1) == 'shop' ? ShopScreen(sellerId: id) : ListingScreen(listingId: id));
             },
           ),
         ),

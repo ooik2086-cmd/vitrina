@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../api.dart';
 import '../session.dart';
@@ -9,6 +10,12 @@ import 'seller_reviews_screen.dart';
 import '../i18n.dart';
 
 const _months = ['қаң', 'ақп', 'нау', 'сәу', 'мам', 'мау', 'шіл', 'там', 'қыр', 'қаз', 'қар', 'жел'];
+
+/// Sends the shop's public page through the phone's share sheet: WhatsApp, Telegram, Instagram.
+Future<void> shareShop(int sellerId, String? name) => SharePlus.instance.share(ShareParams(
+      text: trf('{0} · VITRINA дүкені\n{1}', [name ?? 'VITRINA', shopShareUrl(sellerId)]),
+      subject: name,
+    ));
 
 /// A seller's shop: who they are, what the platform knows about them, and everything they sell now.
 class ShopScreen extends StatefulWidget {
@@ -59,13 +66,22 @@ class _ShopScreenState extends State<ShopScreen> {
     }
   }
 
+  Future<void> _share() async => shareShop(widget.sellerId, (await _data)?.$1.shopName);
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final me = SessionScope.of(context).me;
     return Scaffold(
-      appBar: AppBar(title: Text(tr('Дүкен'))),
+      appBar: AppBar(title: Text(tr('Дүкен')), actions: [
+        IconButton(
+          key: const Key('shop-share'),
+          tooltip: tr('Дүкенмен бөлісу'),
+          icon: const Icon(Icons.ios_share_rounded),
+          onPressed: _share,
+        ),
+      ]),
       body: FutureBuilder<(Shop, List<Listing>)>(
         future: _data,
         builder: (context, snap) {

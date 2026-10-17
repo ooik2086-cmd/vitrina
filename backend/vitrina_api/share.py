@@ -1,4 +1,4 @@
-"""Public page for a shared listing link: /l/{id}.
+"""Public pages for shared links: a listing at /l/{id}, a whole shop at /s/{seller_id}.
 
 Messengers (WhatsApp, Telegram, Instagram DMs) read the Open Graph tags and show the shoe's photo, title and
 price as a preview. Someone without the app can turn the shoe on the page itself, from the seller's real 360°
@@ -8,14 +8,16 @@ from __future__ import annotations
 
 import html
 import json
+from datetime import timedelta, timezone
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from . import promo
-from .deps import get_db
-from .models import Listing, User
+from .deps import get_db, now_utc
+from .models import Listing, Review, User
 
 router = APIRouter()
 
@@ -31,15 +33,22 @@ CONDITIONS = {
 TEXT = {
     "kk": {"open": "Қосымшада ашу", "drag": "Айналдыру үшін сүйреңіз", "sizes": "Өлшемдер", "delivery": "Жеткізу",
            "free": "тегін", "protected": "Ақша сатып алушы тауарды алып, растағанша сақталады.",
-           "gone": "Бұл тауар енді сатылымда жоқ.", "seller": "Сатушы"},
+           "gone": "Бұл тауар енді сатылымда жоқ.", "seller": "Сатушы", "open_shop": "Дүкенді қосымшада ашу",
+           "shop_gone": "Бұл дүкен табылмады.", "empty": "Дүкенде қазір тауар жоқ.", "goods": "тауар",
+           "reviews": "пікір", "away": "Сатушы демалыста, тапсырыстар кейін қабылданады."},
     "ru": {"open": "Открыть в приложении", "drag": "Проведите, чтобы повернуть", "sizes": "Размеры",
            "delivery": "Доставка", "free": "бесплатно",
            "protected": "Деньги хранятся, пока покупатель не получит товар и не подтвердит это.",
-           "gone": "Этот товар больше не продаётся.", "seller": "Продавец"},
+           "gone": "Этот товар больше не продаётся.", "seller": "Продавец", "open_shop": "Открыть магазин в приложении",
+           "shop_gone": "Этот магазин не найден.", "empty": "Сейчас в магазине нет товаров.", "goods": "товаров",
+           "reviews": "отзывов", "away": "Продавец в отпуске, заказы примет позже."},
     "en": {"open": "Open in the app", "drag": "Drag to turn", "sizes": "Sizes", "delivery": "Delivery", "free": "free",
            "protected": "The money is held until the buyer receives the item and confirms it.",
-           "gone": "This listing is no longer on sale.", "seller": "Seller"},
+           "gone": "This listing is no longer on sale.", "seller": "Seller", "open_shop": "Open the shop in the app",
+           "shop_gone": "This shop wasn't found.", "empty": "The shop has nothing on sale right now.",
+           "goods": "items", "reviews": "reviews", "away": "The seller is away and will take orders later."},
 }
+ALMATY = timezone(timedelta(hours=5))
 SHOWCASE = ("front", "outer", "inner", "back", "top")
 BACKDROPS = {
     "premium": "radial-gradient(circle at 50% 45%, #3a3a40, #111114 75%)",
@@ -75,6 +84,12 @@ padding:6px 14px;font-size:13px;white-space:nowrap;box-shadow:0 2px 10px rgba(0,
 .cta{{display:block;text-align:center;background:var(--accent);color:#fff;text-decoration:none;font-weight:700;
 padding:16px;border-radius:16px;font-size:17px}}
 .note{{font-size:13px;margin-top:12px}}
+.grid{{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;padding:0 20px 20px}}
+.card{{color:inherit;text-decoration:none;background:#fff;border-radius:16px;overflow:hidden}}
+.card img{{width:100%;aspect-ratio:1;object-fit:contain;background:var(--studio);display:block}}
+.card div{{padding:8px 10px 12px;font-size:14px}}.card b{{display:block;font-size:16px;margin-top:2px}}
+.was{{color:var(--muted);text-decoration:line-through;font-size:13px;margin-left:6px;font-weight:400}}
+.about{{white-space:pre-line;line-height:1.45;margin:12px 0 0}}
 </style></head><body><main><div class="brand">VITRINA</div>{body}</main></body></html>""", status_code=status)
 
 
@@ -129,8 +144,60 @@ def shared_listing(listing_id: int, request: Request, db: Session = Depends(get_
 <h1>{esc(listing.title)}</h1>
 <div class="price">{esc(price)}</div>
 <div class="muted">{esc(description)} · {t["delivery"]} {esc(delivery)}</div>
+{f'<p><a class="muted" href="/s/{seller.id}">{t["seller"]}: {esc(seller.shop_name or "")} →</a></p>' if seller else ""}
 <h3>{t["sizes"]}</h3><div class="chips">{sizes}</div>
 <a class="cta" href="vitrina://open/listing/{listing.id}">{t["open"]}</a>
 <p class="note muted">{t["protected"]}</p>
 </div>{spin_js}"""
     return page(f"{listing.title} · {price} · VITRINA", body, lang=lang, meta=meta)
+
+
+def cover_url(listing: Listing) -> str | None:
+    media = sorted(listing.media, key=lambda m: m.position)
+    showcase = [m for m in media if m.angle in SHOWCASE]
+    return next((m.original_url for m in showcase), media[0].original_url if media else None)
+
+
+@router.get("/s/{seller_id}", response_class=HTMLResponse, include_in_schema=False)
+def shared_shop(seller_id: int, request: Request, db: Session = Depends(get_db)):
+    """A seller's whole shop as one link for an Instagram bio or a WhatsApp status: what is on sale now, the
+    platform's own rating, and the way into the app. Each card opens the listing's own shared page."""
+    lang = pick_lang(request)
+    t = TEXT[lang]
+    seller = db.get(User, seller_id)
+    if seller is None or not seller.is_seller or seller.is_blocked:
+        return page("VITRINA", f'<div class="info"><h1>{t["shop_gone"]}</h1></div>', lang=lang, status=404)
+    listings = db.scalars(select(Listing).where(Listing.seller_id == seller.id, Listing.status == "published")
+                          .order_by(Listing.id.desc()).limit(60)).all()
+    avg, count = db.execute(select(func.avg(Review.rating), func.count(Review.id))
+                            .where(Review.seller_id == seller.id)).one()
+    esc = html.escape
+    name = seller.shop_name or "VITRINA"
+    facts = [x for x in (
+        seller.city, f"★ {float(avg):.1f} · {count} {t['reviews']}" if count else None,
+        f"{len(listings)} {t['goods']}") if x]
+    description = " · ".join(facts)
+    cover = next((c for c in map(cover_url, listings) if c), None)
+    url = str(request.url.replace(query=""))
+    meta = "".join(f'\n<meta property="{k}" content="{esc(v)}">' for k, v in (
+        ("og:type", "website"), ("og:site_name", "VITRINA"), ("og:title", name),
+        ("og:description", seller.shop_about or description), ("og:url", url),
+        *((("og:image", cover),) if cover else ())))
+    meta += '\n<meta name="twitter:card" content="summary_large_image">'
+    cards = "".join(
+        f'<a class="card" href="/l/{l.id}">'
+        + (f'<img loading="lazy" alt="{esc(l.title)}" src="{esc(c)}">' if (c := cover_url(l)) else "")
+        + f'<div>{esc(l.title)}<b>{esc(promo.format_tenge(l.price_tiyn))}'
+        + (f'<span class="was">{esc(promo.format_tenge(l.was_price_tiyn))}</span>' if l.was_price_tiyn else "")
+        + "</b></div></a>" for l in listings)
+    away = seller.away_until is not None and seller.away_until >= now_utc().astimezone(ALMATY).date()
+    body = f"""<div class="info">
+<h1>{esc(name)}</h1>
+<div class="muted">{esc(description)}</div>
+{f'<p class="about">{esc(seller.shop_about)}</p>' if seller.shop_about else ""}
+{f'<p class="note muted">{t["away"]}</p>' if away else ""}
+</div>
+{f'<div class="grid">{cards}</div>' if listings else f'<p class="info muted">{t["empty"]}</p>'}
+<div class="info"><a class="cta" href="vitrina://open/shop/{seller.id}">{t["open_shop"]}</a>
+<p class="note muted">{t["protected"]}</p></div>"""
+    return page(f"{name} · VITRINA", body, lang=lang, meta=meta)

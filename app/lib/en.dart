@@ -652,4 +652,8 @@ const en = <String, String>{
   'Сай тапсырыс жоқ.': 'No matching orders.',
   'Сізді күтеді': 'Waiting on you',
   'Сіздің әрекетіңізді күтетін тапсырыс жоқ.': 'No orders are waiting on you.',
+  'Дүкенмен бөлісу': 'Share the shop',
+  'Дүкен сілтемесі': 'Shop link',
+  'Instagram биосына немесе WhatsApp статусына': 'For your Instagram bio or WhatsApp status',
+  '{0} · VITRINA дүкені\n{1}': '{0} · shop on VITRINA\n{1}',
 };

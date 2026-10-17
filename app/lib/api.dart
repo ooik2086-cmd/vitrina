@@ -11,6 +11,10 @@ const apiBase = String.fromEnvironment('API_BASE', defaultValue: 'http://10.0.2.
 /// Public page for a listing, as sent to friends: messengers show its photo and price, and it opens the app.
 String listingShareUrl(int id, {String base = apiBase}) => '${base.replaceFirst(RegExp(r'/api/v1/?$'), '')}/l/$id';
 
+/// The shop's public page: everything on sale now, for an Instagram bio or a WhatsApp status.
+String shopShareUrl(int sellerId, {String base = apiBase}) =>
+    '${base.replaceFirst(RegExp(r'/api/v1/?$'), '')}/s/$sellerId';
+
 /// Error as the API returns it: a stable code plus ready messages in Kazakh, Russian and English.
 class ApiException implements Exception {
   ApiException(this.status, this.code, this.messageKk, [this.detail, this.messageRu, this.messageEn]);
