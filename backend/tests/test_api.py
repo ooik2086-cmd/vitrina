@@ -456,6 +456,8 @@ class SocialTests(ApiTestCase):
         page = self.c.get(f"/api/v1/sellers/{seller['id']}/reviews").json()
         self.assertEqual(page["items"][0]["seller_reply"], "Рақмет!")
         self.assertTrue(self.get(f"/orders/{order['id']}", self.buyer).json()["reviewed"])
+        kinds = [n["kind"] for n in self.get("/notifications", self.buyer).json()["items"]]
+        self.assertIn("review_reply", kinds)
 
     def test_order_history_lists_each_step(self):
         _, order = self.delivered()

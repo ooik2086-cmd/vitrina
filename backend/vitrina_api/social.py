@@ -174,6 +174,8 @@ def reply_review(review_id: int, body: ReplyIn, user: User = Depends(current_use
     if review.seller_reply:
         raise ApiError(409, "already_replied")
     review.seller_reply = body.text.strip()
+    services.notify(db, review.buyer_id, "review_reply", f"Сатушы пікіріңізге жауап берді: {review.seller_reply[:120]}",
+                    order_id=review.order_id)
     db.commit()
     return review_out(db, review)
 

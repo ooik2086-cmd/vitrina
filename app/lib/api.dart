@@ -461,6 +461,9 @@ class Api {
   Future<Shop> shop(int sellerId) async =>
       Shop.fromJson(await _send('GET', '/sellers/$sellerId') as Map<String, dynamic>);
 
+  Future<Review> replyToReview(int reviewId, String text) async =>
+      Review.fromJson(await _send('POST', '/reviews/$reviewId/reply', body: {'text': text}) as Map<String, dynamic>);
+
   Future<List<Review>> sellerReviews(int sellerId) async {
     final r = await _send('GET', '/sellers/$sellerId/reviews') as Map;
     return [for (final j in r['items'] as List) Review.fromJson(j as Map<String, dynamic>)];

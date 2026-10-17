@@ -4,6 +4,7 @@ import '../session.dart';
 import '../widgets/common.dart';
 import 'earnings_screen.dart';
 import 'my_listings_screen.dart';
+import 'shop_screen.dart';
 
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({super.key});
@@ -35,6 +36,15 @@ class ProfileScreen extends StatelessWidget {
                   title: const Text('Менің тауарларым'),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MyListingsScreen())),
+                ),
+              if (me.isSeller)
+                ListTile(
+                  leading: const Icon(Icons.storefront_outlined),
+                  title: const Text('Дүкенім және пікірлер'),
+                  subtitle: const Text('Сатып алушылар көретін бет'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () =>
+                      Navigator.of(context).push(MaterialPageRoute(builder: (_) => ShopScreen(sellerId: me.id))),
                 ),
               if (me.isSeller)
                 ListTile(

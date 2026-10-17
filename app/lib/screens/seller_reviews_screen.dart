@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../api.dart';
 import '../session.dart';
 import '../theme.dart';
+import '../widgets/common.dart';
 
 class Stars extends StatelessWidget {
   const Stars({super.key, required this.value, this.size = 16});
@@ -22,19 +23,64 @@ class Stars extends StatelessWidget {
   }
 }
 
-class SellerReviewsScreen extends StatelessWidget {
+class SellerReviewsScreen extends StatefulWidget {
   const SellerReviewsScreen({super.key, required this.sellerId, required this.shopName, this.rating});
   final int sellerId;
   final String shopName;
   final double? rating;
 
   @override
+  State<SellerReviewsScreen> createState() => _SellerReviewsScreenState();
+}
+
+class _SellerReviewsScreenState extends State<SellerReviewsScreen> {
+  Future<List<Review>>? _items;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _items ??= SessionScope.of(context).api.sellerReviews(widget.sellerId);
+  }
+
+  /// The seller answers each review once, in public, under the buyer's words.
+  Future<void> _reply(Review r) async {
+    final text = TextEditingController();
+    final answer = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Пікірге жауап'),
+        content: TextField(
+          controller: text,
+          autofocus: true,
+          maxLines: 4,
+          maxLength: 1000,
+          decoration: const InputDecoration(hintText: 'Жауабыңызды барлық сатып алушылар көреді'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Болдырмау')),
+          FilledButton(onPressed: () => Navigator.pop(context, text.text.trim()), child: const Text('Жіберу')),
+        ],
+      ),
+    );
+    text.dispose();
+    if (answer == null || answer.isEmpty || !mounted) return;
+    try {
+      await SessionScope.of(context).api.replyToReview(r.id, answer);
+      if (mounted) setState(() => _items = SessionScope.of(context).api.sellerReviews(widget.sellerId));
+    } catch (e) {
+      if (mounted) showError(context, e);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final rating = widget.rating;
+    final isOwner = SessionScope.of(context).me?.id == widget.sellerId;
     return Scaffold(
-      appBar: AppBar(title: Text(shopName)),
+      appBar: AppBar(title: Text(widget.shopName)),
       body: FutureBuilder<List<Review>>(
-        future: SessionScope.of(context).api.sellerReviews(sellerId),
+        future: _items,
         builder: (context, snap) {
           if (snap.hasError) return Center(child: Text('${snap.error}'));
           if (!snap.hasData) return const Center(child: CircularProgressIndicator());
@@ -72,7 +118,15 @@ class SellerReviewsScreen extends StatelessWidget {
                             color: theme.colorScheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(12)),
                         child: Text('Сатушы: ${r.sellerReply}', style: weight(theme.textTheme.bodyMedium!, 500)),
                       ),
-                    ],
+                    ] else if (isOwner)
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton.icon(
+                          onPressed: () => _reply(r),
+                          icon: const Icon(Icons.reply_rounded, size: 18),
+                          label: const Text('Жауап беру'),
+                        ),
+                      ),
                   ]),
                 ),
               ),
