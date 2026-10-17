@@ -256,6 +256,7 @@ class Notification(Base):
     text_ru: Mapped[str | None] = mapped_column(String(300))  # None on notices from before Russian was added
     order_id: Mapped[int | None] = mapped_column(Integer)
     conversation_id: Mapped[int | None] = mapped_column(Integer)
+    listing_id: Mapped[int | None] = mapped_column(Integer)  # e.g. a price drop on a favourite
     read: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
 

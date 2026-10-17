@@ -331,6 +331,7 @@ class AppNotification {
         textRu = j['text_ru'] as String?,
         orderId = j['order_id'] as int?,
         conversationId = j['conversation_id'] as int?,
+        listingId = j['listing_id'] as int?,
         read = j['read'] as bool,
         createdAt = DateTime.parse(j['created_at'] as String).toLocal();
   final int id;
@@ -342,6 +343,7 @@ class AppNotification {
   String get shown => appLanguage.value == 'ru' ? (textRu ?? text) : text;
   final int? orderId;
   final int? conversationId;
+  final int? listingId;
   final bool read;
   final DateTime createdAt;
 }

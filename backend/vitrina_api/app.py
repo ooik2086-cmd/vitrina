@@ -483,6 +483,8 @@ def edit_listing(listing_id: int, body: ListingPatch, user: User = Depends(curre
     if body.price_tiyn is not None:
         if body.price_tiyn != listing.price_tiyn and listing.promo_state == "ready":
             listing.promo_state, listing.promo_url = None, None  # the video shows the old price
+        if body.price_tiyn < listing.price_tiyn and listing.status == "published":
+            notify_price_drop(db, listing, listing.price_tiyn, body.price_tiyn)
         listing.price_tiyn = body.price_tiyn
     if body.delivery_price_tiyn is not None:
         listing.delivery_price_tiyn = body.delivery_price_tiyn
@@ -523,6 +525,18 @@ def make_promo(listing_id: int, body: PromoIn, request: Request, background: Bac
     db.commit()
     background.add_task(render_listing_promo, request.app.state, listing.id, body.lang)
     return listing_out(db, listing, owner=True)
+
+
+def notify_price_drop(db: Session, listing: Listing, old: int, new: int) -> None:
+    """Tell everyone who saved the listing that it got cheaper. Small trims (under 1%) are not news."""
+    if (old - new) * 100 < old:
+        return
+    old_text, new_text = promo.format_tenge(old), promo.format_tenge(new)
+    for user_id in db.scalars(select(Favorite.user_id).where(Favorite.listing_id == listing.id)):
+        if user_id != listing.seller_id:
+            services.notify(db, user_id, "price_drop",
+                            f"«{listing.title}» арзандады: {old_text} → {new_text}",
+                            f"«{listing.title}» подешевел: {old_text} → {new_text}", listing_id=listing.id)
 
 
 @api.post("/listings/{listing_id}/pause")

@@ -4,6 +4,7 @@ import '../api.dart';
 import '../session.dart';
 import '../theme.dart';
 import 'chat_screen.dart';
+import 'listing_screen.dart';
 import 'order_screen.dart';
 import '../i18n.dart';
 
@@ -44,7 +45,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         ? MaterialPageRoute(builder: (_) => ChatScreen(conversationId: n.conversationId!))
         : n.orderId != null
             ? MaterialPageRoute(builder: (_) => OrderScreen(orderId: n.orderId!))
-            : null;
+            : n.listingId != null
+                ? MaterialPageRoute(builder: (_) => ListingScreen(listingId: n.listingId!))
+                : null;
     if (route != null) Navigator.of(context).push(route);
   }
 
@@ -67,7 +70,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
               final n = items[i];
               final icon = switch (n.kind) {
                 'message' => Icons.chat_bubble_outline_rounded,
-                'review' => Icons.star_outline_rounded,
+                'review' || 'review_reply' => Icons.star_outline_rounded,
+                'price_drop' => Icons.trending_down_rounded,
+                'listing_hidden' || 'report_closed' => Icons.flag_outlined,
                 _ => Icons.local_shipping_outlined,
               };
               return ListTile(

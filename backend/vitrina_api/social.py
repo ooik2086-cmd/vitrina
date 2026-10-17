@@ -230,6 +230,7 @@ def list_notifications(user: User = Depends(current_user), db: Session = Depends
                                                                  Notification.read.is_(False)))
     return {"unread": int(unread or 0), "items": [
         {"id": n.id, "kind": n.kind, "text": n.text_kk, "text_ru": n.text_ru or n.text_kk, "order_id": n.order_id, "conversation_id": n.conversation_id,
+         "listing_id": n.listing_id,
          "read": n.read, "created_at": services.aware(n.created_at).isoformat()} for n in rows]}
 
 

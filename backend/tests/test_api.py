@@ -284,6 +284,20 @@ class SellerEditTests(ApiTestCase):
         mine = self.c.get("/api/v1/me/listings", headers=self.h(self.seller)).json()["items"][0]
         self.assertEqual(mine["stats"], {"views": 3, "favorites": 1, "chats": 1, "orders": 1, "sold": 0})
 
+    def test_price_drop_tells_people_who_saved_the_listing(self):
+        listing = self.publish()
+        lid = listing["id"]
+        self.post(f"/favorites/{lid}", self.buyer)
+        self.patch(lid, {"price_tiyn": 4_490_000})  # under 1% off: not news
+        self.patch(lid, {"price_tiyn": 4_800_000})  # a rise: not news either
+        self.patch(lid, {"price_tiyn": 3_900_000})
+        notes = [n for n in self.c.get("/api/v1/notifications", headers=self.h(self.buyer)).json()["items"]
+                 if n["kind"] == "price_drop"]
+        self.assertEqual(len(notes), 1)
+        self.assertEqual(notes[0]["listing_id"], lid)
+        self.assertIn("48 000 ₸ → 39 000 ₸", notes[0]["text"])
+        self.assertIn("подешевел", notes[0]["text_ru"])
+
     def test_stock_drives_sold_and_restock(self):
         listing = self.publish()
         lid, size_id = listing["id"], listing["sizes"][0]["id"]

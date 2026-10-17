@@ -47,9 +47,9 @@ STATUS_NOTICES: dict[OrderStatus, tuple[tuple[str, ...], str, str]] = {
 
 
 def notify(db: Session, user_id: int, kind: str, text: str, text_ru: str, *, order_id: int | None = None,
-           conversation_id: int | None = None) -> None:
+           conversation_id: int | None = None, listing_id: int | None = None) -> None:
     db.add(Notification(user_id=user_id, kind=kind, text_kk=text[:300], text_ru=text_ru[:300], order_id=order_id,
-                        conversation_id=conversation_id))
+                        conversation_id=conversation_id, listing_id=listing_id))
 
 
 def notify_status(db: Session, order: Order, actor_user_id: int | None) -> None:
