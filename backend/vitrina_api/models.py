@@ -71,6 +71,7 @@ class Listing(Base):
     delivery_price_tiyn: Mapped[int] = mapped_column(BigInteger, default=0)
     showcase_style: Mapped[str] = mapped_column(String(20), default="clean")
     search_text: Mapped[str] = mapped_column(Text, default="")
+    views: Mapped[int] = mapped_column(Integer, default=0, server_default="0")  # product page opens by others
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     sizes: Mapped[list[ListingSize]] = relationship(cascade="all, delete-orphan", order_by="ListingSize.id")
     media: Mapped[list[Media]] = relationship(cascade="all, delete-orphan", order_by="Media.position")

@@ -260,12 +260,15 @@ void main() {
     own['sizes'] = [
       {'id': 1, 'label': '42', 'insole_cm': '27,0', 'available': true, 'quantity': 2},
     ];
+    own['stats'] = {'views': 15, 'favorites': 4, 'chats': 3, 'orders': 1, 'sold': 0};
     tester.view.physicalSize = const Size(400, 1400);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     await tester.pumpWidget(SessionScope(
         session: Session(api), child: MaterialApp(home: ManageListingScreen(listing: Listing.fromJson(own)))));
     expect(find.text('Сатылымда'), findsOneWidget);
+    expect(find.text('15'), findsOneWidget);
+    expect(find.text('қаралым'), findsOneWidget);
     expect(find.text('2'), findsOneWidget);
     await tester.enterText(find.byKey(const Key('price')), '40000');
     await tester.tap(find.byTooltip('Көбейту'));

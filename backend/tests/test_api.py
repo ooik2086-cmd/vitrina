@@ -268,6 +268,21 @@ class SellerEditTests(ApiTestCase):
         self.assertEqual(r.status_code, 404)
         self.assertEqual(self.post(f"/listings/{lid}/publish", self.seller).json()["status"], "published")
 
+    def test_owner_sees_views_favorites_chats_and_orders(self):
+        listing = self.publish()
+        lid = listing["id"]
+        self.c.get(f"/api/v1/listings/{lid}")
+        self.c.get(f"/api/v1/listings/{lid}", headers=self.h(self.buyer))
+        self.c.get(f"/api/v1/listings/{lid}", headers=self.h(self.seller))  # the seller's own visits don't count
+        self.post(f"/favorites/{lid}", self.buyer)
+        self.post("/conversations", self.buyer, {"listing_id": lid})
+        self.post("/orders", self.buyer, {"listing_id": lid, "size_id": listing["sizes"][0]["id"]},
+                  **{"Idempotency-Key": "s1"})
+        public = self.c.get(f"/api/v1/listings/{lid}").json()
+        self.assertNotIn("stats", public)
+        mine = self.c.get("/api/v1/me/listings", headers=self.h(self.seller)).json()["items"][0]
+        self.assertEqual(mine["stats"], {"views": 3, "favorites": 1, "chats": 1, "orders": 1, "sold": 0})
+
     def test_stock_drives_sold_and_restock(self):
         listing = self.publish()
         lid, size_id = listing["id"], listing["sizes"][0]["id"]

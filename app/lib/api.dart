@@ -35,6 +35,20 @@ class ShoeSize {
   final int? quantity;
 }
 
+class ListingStats {
+  ListingStats.fromJson(Map<String, dynamic> j)
+      : views = j['views'] as int,
+        favorites = j['favorites'] as int,
+        chats = j['chats'] as int,
+        orders = j['orders'] as int,
+        sold = j['sold'] as int;
+  final int views;
+  final int favorites;
+  final int chats;
+  final int orders;
+  final int sold;
+}
+
 class Shop {
   Shop.fromJson(Map<String, dynamic> j)
       : id = j['id'] as int,
@@ -140,7 +154,8 @@ class Listing {
         sellerCity = (j['seller'] as Map)['city'] as String?,
         sellerId = (j['seller'] as Map)['id'] as int,
         sellerRating = ((j['seller'] as Map)['rating'] as num?)?.toDouble(),
-        sellerReviews = ((j['seller'] as Map)['reviews'] as int?) ?? 0;
+        sellerReviews = ((j['seller'] as Map)['reviews'] as int?) ?? 0,
+        stats = j['stats'] == null ? null : ListingStats.fromJson(j['stats'] as Map<String, dynamic>);
 
   final int id;
   final String status;
@@ -163,6 +178,9 @@ class Listing {
   final int sellerId;
   final double? sellerRating;
   final int sellerReviews;
+
+  /// Only on the seller's own listings.
+  final ListingStats? stats;
 
   /// 360° frames in upload order: real photos only, nothing generated in between.
   List<MediaItem> get frames => media.where((m) => m.angle == 'frame').toList();

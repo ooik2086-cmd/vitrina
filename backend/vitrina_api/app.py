@@ -16,7 +16,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -152,8 +152,23 @@ def segment_for(db: Session, listing: Listing) -> str | None:
     return bounds.segment_for(listing.price_tiyn).value if bounds else None
 
 
+def listing_stats(db: Session, listing: Listing) -> dict:
+    """How the listing is doing, for its seller only."""
+    from .models import Conversation
+    count = lambda stmt: int(db.scalar(stmt) or 0)  # noqa: E731
+    return {
+        "views": listing.views,
+        "favorites": count(select(func.count(Favorite.id)).where(Favorite.listing_id == listing.id)),
+        "chats": count(select(func.count(Conversation.id)).where(Conversation.listing_id == listing.id)),
+        "orders": count(select(func.count(Order.id)).where(Order.listing_id == listing.id,
+                                                          Order.status != S.CANCELLED.value)),
+        "sold": count(select(func.count(Order.id)).where(Order.listing_id == listing.id,
+                                                        Order.status == S.COMPLETED.value)),
+    }
+
+
 def listing_out(db: Session, listing: Listing, *, owner: bool = False) -> dict:
-    """owner=True adds stock counts, which only the seller sees."""
+    """owner=True adds stock counts and statistics, which only the seller sees."""
     seller = db.get(User, listing.seller_id)
     return {
         "id": listing.id, "status": listing.status, "title": listing.title, "category": listing.category,
@@ -168,6 +183,7 @@ def listing_out(db: Session, listing: Listing, *, owner: bool = False) -> dict:
                   for m in listing.media],
         "seller": {"id": seller.id, "shop_name": seller.shop_name, "city": seller.city,  # never the phone
                    **seller_rating(db, seller.id)},
+        **({"stats": listing_stats(db, listing)} if owner else {}),
     }
 
 
@@ -580,7 +596,11 @@ def get_listing(listing_id: int, user: User | None = Depends(optional_user), db:
     visible = listing is not None and (listing.status in ("published", "sold") or (user and listing.seller_id == user.id))
     if not visible:
         raise ApiError(404, "not_found")
-    return listing_out(db, listing)
+    owner = bool(user and listing.seller_id == user.id)
+    if not owner:
+        db.execute(update(Listing).where(Listing.id == listing.id).values(views=Listing.views + 1))
+        db.commit()
+    return listing_out(db, listing, owner=owner)
 
 
 @api.post("/favorites/{listing_id}", status_code=204)

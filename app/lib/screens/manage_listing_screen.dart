@@ -133,6 +133,10 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
                 ),
               ),
             ],
+            if (_l.stats != null) ...[
+              const SizedBox(height: 20),
+              _StatsRow(stats: _l.stats!),
+            ],
             const SizedBox(height: 24),
             Text('Баға', style: theme.textTheme.titleMedium),
             const SizedBox(height: 8),
@@ -237,6 +241,38 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
   }
 }
 
+class _StatsRow extends StatelessWidget {
+  const _StatsRow({required this.stats});
+  final ListingStats stats;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    Widget cell(IconData icon, int value, String label) => Expanded(
+          child: Column(children: [
+            Icon(icon, size: 20, color: theme.colorScheme.onSurfaceVariant),
+            const SizedBox(height: 4),
+            Text('$value', style: weight(theme.textTheme.titleMedium!, 700)),
+            Text(label, style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+          ]),
+        );
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 14),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(Brand.radius),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+      ),
+      child: Row(children: [
+        cell(Icons.visibility_outlined, stats.views, 'қаралым'),
+        cell(Icons.favorite_border_rounded, stats.favorites, 'таңдаулы'),
+        cell(Icons.chat_bubble_outline_rounded, stats.chats, 'чат'),
+        cell(Icons.shopping_bag_outlined, stats.orders, 'тапсырыс'),
+      ]),
+    );
+  }
+}
+
 class _StatusPill extends StatelessWidget {
   const _StatusPill({required this.status});
   final String status;
@@ -261,5 +297,6 @@ class _StatusPill extends StatelessWidget {
 /// One-line stock summary for list rows, e.g. "3 дана".
 String stockSummary(Listing l) {
   final total = l.sizes.fold<int>(0, (n, s) => n + (s.quantity ?? 0));
-  return '$total дана · ${formatTenge(l.priceTiyn)}';
+  final views = l.stats == null ? '' : ' · ${l.stats!.views} қаралым';
+  return '$total дана · ${formatTenge(l.priceTiyn)}$views';
 }
