@@ -5,9 +5,9 @@ insert-only: the application never updates or deletes them.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
-from sqlalchemy import (BigInteger, Boolean, DateTime, ForeignKey, Integer, LargeBinary, String, Text,
+from sqlalchemy import (BigInteger, Boolean, Date, DateTime, ForeignKey, Integer, LargeBinary, String, Text,
                         UniqueConstraint, create_engine)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 
@@ -122,6 +122,14 @@ class Order(Base):
     pending_refund_tiyn: Mapped[int | None] = mapped_column(BigInteger)
     dispute_reason: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ListingDailyViews(Base):
+    """Product page opens by others, per listing and Almaty calendar day, for the seller's charts."""
+    __tablename__ = "listing_daily_views"
+    listing_id: Mapped[int] = mapped_column(ForeignKey("listings.id"), primary_key=True)
+    day: Mapped[date] = mapped_column(Date, primary_key=True)
+    views: Mapped[int] = mapped_column(Integer, default=0)
 
 
 class OrderEvent(Base):

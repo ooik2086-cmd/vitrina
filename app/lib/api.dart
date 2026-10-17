@@ -98,6 +98,49 @@ class Shop {
   final int reviews;
 }
 
+class DayStats {
+  DayStats.fromJson(Map<String, dynamic> j)
+      : date = DateTime.parse(j['date'] as String),
+        views = j['views'] as int,
+        orders = j['orders'] as int,
+        soldTiyn = j['sold_tiyn'] as int;
+  final DateTime date;
+  final int views;
+  final int orders;
+  final int soldTiyn;
+}
+
+class TopListing {
+  TopListing.fromJson(Map<String, dynamic> j)
+      : id = j['id'] as int,
+        title = j['title'] as String,
+        status = j['status'] as String,
+        views = j['views'] as int,
+        orders = j['orders'] as int;
+  final int id;
+  final String title;
+  final String status;
+  final int views;
+  final int orders;
+}
+
+/// The seller's last days: views, orders and sales per day (Almaty calendar), and the most viewed listings.
+class Analytics {
+  Analytics.fromJson(Map<String, dynamic> j)
+      : days = [for (final d in j['days'] as List) DayStats.fromJson(d as Map<String, dynamic>)],
+        views = (j['totals'] as Map)['views'] as int,
+        orders = (j['totals'] as Map)['orders'] as int,
+        soldTiyn = (j['totals'] as Map)['sold_tiyn'] as int,
+        conversion = ((j['totals'] as Map)['conversion'] as num?)?.toDouble(),
+        top = [for (final t in j['top'] as List) TopListing.fromJson(t as Map<String, dynamic>)];
+  final List<DayStats> days;
+  final int views;
+  final int orders;
+  final int soldTiyn;
+  final double? conversion;
+  final List<TopListing> top;
+}
+
 class Earnings {
   Earnings.fromJson(Map<String, dynamic> j)
       : heldTiyn = j['held_tiyn'] as int,
@@ -441,6 +484,9 @@ class Api {
 
   Future<Listing> pauseListing(int id) async =>
       Listing.fromJson(await _send('POST', '/listings/$id/pause') as Map<String, dynamic>);
+
+  Future<Analytics> analytics({int days = 14}) async =>
+      Analytics.fromJson(await _send('GET', '/me/analytics', query: {'days': '$days'}) as Map<String, dynamic>);
 
   Future<Earnings> earnings() async => Earnings.fromJson(await _send('GET', '/me/earnings') as Map<String, dynamic>);
 

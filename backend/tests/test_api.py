@@ -298,6 +298,24 @@ class SellerEditTests(ApiTestCase):
         self.assertIn("48 000 ₸ → 39 000 ₸", notes[0]["text"])
         self.assertIn("подешевел", notes[0]["text_ru"])
 
+    def test_seller_analytics_by_day_with_top_listings(self):
+        a, b = self.publish(), self.publish(title="Екінші кроссовка")
+        for _ in range(3):
+            self.c.get(f"/api/v1/listings/{a['id']}", headers=self.h(self.buyer))
+        self.c.get(f"/api/v1/listings/{b['id']}")
+        self.c.get(f"/api/v1/listings/{a['id']}", headers=self.h(self.seller))  # own visits don't count
+        self.post("/orders", self.buyer, {"listing_id": a["id"], "size_id": a["sizes"][0]["id"]},
+                  **{"Idempotency-Key": "an1"})
+        r = self.c.get("/api/v1/me/analytics", headers=self.h(self.seller))
+        self.assertEqual(r.status_code, 200, r.text)
+        data = r.json()
+        self.assertEqual(len(data["days"]), 14)
+        self.assertEqual(data["days"][-1]["views"], 4)
+        self.assertEqual((data["totals"]["views"], data["totals"]["orders"]), (4, 1))
+        self.assertEqual(data["totals"]["conversion"], 0.25)
+        self.assertEqual([t["id"] for t in data["top"]], [a["id"], b["id"]])
+        self.assertEqual(self.c.get("/api/v1/me/analytics", headers=self.h(self.buyer)).status_code, 403)
+
     def test_stock_drives_sold_and_restock(self):
         listing = self.publish()
         lid, size_id = listing["id"], listing["sizes"][0]["id"]

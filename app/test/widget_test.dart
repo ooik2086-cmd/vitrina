@@ -11,6 +11,7 @@ import 'package:vitrina/i18n.dart';
 import 'package:vitrina/labels.dart';
 import 'package:vitrina/my_size.dart';
 import 'package:vitrina/recent.dart';
+import 'package:vitrina/screens/analytics_screen.dart';
 import 'package:vitrina/screens/catalog_screen.dart';
 import 'package:vitrina/screens/chat_screen.dart';
 import 'package:vitrina/screens/earnings_screen.dart';
@@ -458,6 +459,44 @@ void main() {
     expect(find.byKey(const Key('open-promo')), findsOneWidget);
     expect(calls.first, 'POST /api/v1/listings/7/promo {"lang":"kk"}');
     expect(calls.skip(1).every((c) => c.startsWith('GET /api/v1/listings/7')), isTrue);
+  });
+
+  testWidgets('analytics shows totals and a tapped day', (tester) async {
+    final days = [
+      for (var i = 0; i < 14; i++)
+        {'date': '2026-10-${(4 + i).toString().padLeft(2, '0')}', 'views': i == 10 ? 9 : 2, 'orders': i == 10 ? 1 : 0, 'sold_tiyn': 0}
+    ];
+    String? asked;
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async {
+          asked = req.url.queryParameters['days'];
+          return http.Response(
+              jsonEncode({
+                'days': days,
+                'totals': {'views': 35, 'orders': 1, 'sold_tiyn': 4500000, 'conversion': 0.0286},
+                'top': [
+                  {'id': 7, 'title': 'Nike Air Force 1', 'status': 'published', 'views': 20, 'orders': 1}
+                ],
+              }),
+              200,
+              headers: {'content-type': 'application/json; charset=utf-8'});
+        }));
+    tester.view.physicalSize = const Size(420, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(SessionScope(session: Session(api), child: const MaterialApp(home: AnalyticsScreen())));
+    await tester.pumpAndSettle();
+    expect(asked, '14');
+    expect(find.text('35'), findsOneWidget);
+    expect(find.text('2,9%'), findsOneWidget);
+    expect(find.text(formatTenge(4500000)), findsOneWidget);
+    expect(find.text('Nike Air Force 1'), findsOneWidget);
+    expect(find.text('17.10: 2 қаралым, 0 тапсырыс'), findsOneWidget); // the latest active day by default
+    final chart = tester.getRect(find.byType(CustomPaint).last);
+    await tester.tapAt(Offset(chart.left + chart.width * (10.5 / 14), chart.center.dy));
+    await tester.pump();
+    expect(find.text('14.10: 9 қаралым, 1 тапсырыс'), findsOneWidget);
   });
 
   test('catalog filter builds the query and counts what differs from default', () {

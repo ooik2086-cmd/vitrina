@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../session.dart';
 import '../widgets/common.dart';
+import 'analytics_screen.dart';
 import 'earnings_screen.dart';
 import 'my_listings_screen.dart';
 import 'shop_screen.dart';
@@ -52,6 +53,14 @@ class ProfileScreen extends StatelessWidget {
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () =>
                       Navigator.of(context).push(MaterialPageRoute(builder: (_) => ShopScreen(sellerId: me.id))),
+                ),
+              if (me.isSeller)
+                ListTile(
+                  leading: const Icon(Icons.insights_outlined),
+                  title: Text(tr('Аналитика')),
+                  subtitle: Text(tr('Қаралым, тапсырыс, сатылым')),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AnalyticsScreen())),
                 ),
               if (me.isSeller)
                 ListTile(

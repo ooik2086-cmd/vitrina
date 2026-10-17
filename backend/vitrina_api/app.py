@@ -11,7 +11,7 @@ import re
 import secrets
 import threading
 import time
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Literal
@@ -37,7 +37,7 @@ from .deps import current_user, get_db, get_settings, get_storage, now_utc, opti
 from .errors import ApiError, api_error_handler
 from .share import router as share_router
 from .social import router as social_router, seller_rating
-from .models import (AuditLog, ListingEmbedding, ListingReport, AuthToken, Favorite, IdempotencyRecord, Listing, ListingSize, Media, Order, OrderEvent,
+from .models import (AuditLog, ListingDailyViews, ListingEmbedding, ListingReport, AuthToken, Favorite, IdempotencyRecord, Listing, ListingSize, Media, Order, OrderEvent,
                      OtpCode, Review, User, WebhookEvent, make_session_factory)
 from .storage import MAX_UPLOAD_BYTES, LocalStorage, normalize_image
 
@@ -757,8 +757,64 @@ def get_listing(listing_id: int, user: User | None = Depends(optional_user), db:
     owner = bool(user and listing.seller_id == user.id)
     if not owner:
         db.execute(update(Listing).where(Listing.id == listing.id).values(views=Listing.views + 1))
+        count_daily_view(db, listing.id)
         db.commit()
     return listing_out(db, listing, owner=owner)
+
+
+ALMATY = timezone(timedelta(hours=5))  # Kazakhstan has one time zone, UTC+5, since March 2024
+
+
+def count_daily_view(db: Session, listing_id: int) -> None:
+    day = now_utc().astimezone(ALMATY).date()
+    bump = (update(ListingDailyViews).where(ListingDailyViews.listing_id == listing_id, ListingDailyViews.day == day)
+            .values(views=ListingDailyViews.views + 1))
+    if db.execute(bump).rowcount:
+        return
+    try:
+        with db.begin_nested():
+            db.add(ListingDailyViews(listing_id=listing_id, day=day, views=1))
+    except IntegrityError:  # another request created the row a moment ago
+        db.execute(bump)
+
+
+@api.get("/me/analytics")
+def seller_analytics(days: int = 14, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """Day-by-day views, orders and sales for the seller's listings, plus the listings that draw most interest."""
+    if not user.is_seller:
+        raise ApiError(403, "seller_required")
+    days = max(7, min(days, 90))
+    today = now_utc().astimezone(ALMATY).date()
+    first = today - timedelta(days=days - 1)
+    listings = {l.id: l for l in db.scalars(select(Listing).where(Listing.seller_id == user.id))}
+    per_day = {first + timedelta(days=i): {"views": 0, "orders": 0, "sold_tiyn": 0} for i in range(days)}
+    views_by_listing: dict[int, int] = collections.Counter()
+    if listings:
+        for lid, day, views in db.execute(select(ListingDailyViews.listing_id, ListingDailyViews.day,
+                                                 ListingDailyViews.views)
+                                          .where(ListingDailyViews.listing_id.in_(listings),
+                                                 ListingDailyViews.day >= first)):
+            per_day[day]["views"] += views
+            views_by_listing[lid] += views
+    orders_by_listing: dict[int, int] = collections.Counter()
+    since = datetime.combine(first, datetime.min.time(), ALMATY).astimezone(timezone.utc)
+    for order in db.scalars(select(Order).where(Order.seller_id == user.id, Order.created_at >= since,
+                                                Order.status != S.CANCELLED.value)):
+        day = services.aware(order.created_at).astimezone(ALMATY).date()
+        if day in per_day:
+            per_day[day]["orders"] += 1
+            if order.status == S.COMPLETED.value:
+                per_day[day]["sold_tiyn"] += order.item_price_tiyn
+        orders_by_listing[order.listing_id] += 1
+    totals = {k: sum(d[k] for d in per_day.values()) for k in ("views", "orders", "sold_tiyn")}
+    totals["conversion"] = round(totals["orders"] / totals["views"], 4) if totals["views"] else None
+    top = sorted(listings.values(), key=lambda l: (-views_by_listing[l.id], -orders_by_listing[l.id], -l.id))[:5]
+    return {
+        "days": [{"date": d.isoformat(), **v} for d, v in per_day.items()],
+        "totals": totals,
+        "top": [{"id": l.id, "title": l.title, "status": l.status, "views": views_by_listing[l.id],
+                 "orders": orders_by_listing[l.id]} for l in top if views_by_listing[l.id] or orders_by_listing[l.id]],
+    }
 
 
 @api.post("/favorites/{listing_id}", status_code=204)
