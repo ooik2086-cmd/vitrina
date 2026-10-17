@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../api.dart';
 import '../labels.dart';
 import '../session.dart';
+import '../theme.dart';
 import '../widgets/common.dart';
 import 'order_screen.dart';
 
@@ -69,16 +70,28 @@ class _OrderListState extends State<_OrderList> {
               ? ListView(children: const [SizedBox(height: 120), Center(child: Text('Әзірге тапсырыс жоқ.'))])
               : ListView.separated(
                   itemCount: items.length,
-                  separatorBuilder: (_, __) => const Divider(height: 1),
+                  separatorBuilder: (_, __) => const Divider(indent: 96),
                   itemBuilder: (context, i) {
                     final o = items[i];
                     return ListTile(
-                      title: Text(o.listingTitle ?? 'Тапсырыс №${o.id}'),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+                      leading: ClipRRect(
+                        borderRadius: BorderRadius.circular(14),
+                        child: Container(
+                          width: 56,
+                          height: 56,
+                          color: Brand.studio,
+                          child: o.listingCover == null
+                              ? const Icon(Icons.image_outlined)
+                              : Image.network(o.listingCover!,
+                                  fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Icon(Icons.image_outlined)),
+                        ),
+                      ),
+                      title: Text(o.listingTitle ?? 'Тапсырыс №${o.id}', maxLines: 1, overflow: TextOverflow.ellipsis),
                       subtitle: Text(label(orderStatuses, o.status)),
-                      trailing: Text(formatTenge(o.totalTiyn)),
+                      trailing: Text(formatTenge(o.totalTiyn), style: const TextStyle(fontWeight: FontWeight.w700)),
                       onTap: () async {
-                        await Navigator.of(context)
-                            .push(MaterialPageRoute(builder: (_) => OrderScreen(orderId: o.id)));
+                        await Navigator.of(context).push(MaterialPageRoute(builder: (_) => OrderScreen(orderId: o.id)));
                         _reload();
                       },
                     );

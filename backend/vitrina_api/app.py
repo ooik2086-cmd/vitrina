@@ -28,8 +28,8 @@ from .config import Settings
 from .deps import current_user, get_db, get_settings, get_storage, now_utc, optional_user, sha256, staff_user
 from .errors import ApiError, api_error_handler
 from .social import router as social_router, seller_rating
-from .models import (AuthToken, Favorite, IdempotencyRecord, Listing, ListingSize, Media, Order, OtpCode, Review,
-                     User, WebhookEvent, make_session_factory)
+from .models import (AuthToken, Favorite, IdempotencyRecord, Listing, ListingSize, Media, Order, OrderEvent, OtpCode,
+                     Review, User, WebhookEvent, make_session_factory)
 from .storage import MAX_UPLOAD_BYTES, LocalStorage, normalize_image
 
 CATEGORIES = ("sneakers", "sport", "casual", "classic", "boots_winter", "sandals", "kids", "other")
@@ -151,6 +151,15 @@ def order_out(order: Order) -> dict:
         "total_tiyn": services.total_tiyn(order), "tracking_number": order.tracking_number,
         "delivered_at": services.aware(order.delivered_at).isoformat() if order.delivered_at else None,
     }
+
+
+def order_summary(db: Session, order: Order) -> dict:
+    """Order plus what a list row needs to be recognisable: the item's title, size and photo."""
+    listing = db.get(Listing, order.listing_id)
+    size = db.get(ListingSize, order.size_id)
+    cover = next((m.processed_url or m.original_url for m in listing.media if m.angle != "frame"), None)
+    return {**order_out(order), "listing_title": listing.title, "listing_cover": cover,
+            "size_label": size.label, "size_cm": mm_to_cm(size.insole_mm)}
 
 
 def me_out(user: User) -> dict:
@@ -411,14 +420,16 @@ def list_orders(role: Literal["buyer", "seller"] = "buyer", user: User = Depends
                 db: Session = Depends(get_db)):
     column = Order.buyer_id if role == "buyer" else Order.seller_id
     rows = db.scalars(select(Order).where(column == user.id).order_by(Order.id.desc()).limit(100)).all()
-    return {"items": [{**order_out(o), "listing_title": db.get(Listing, o.listing_id).title} for o in rows]}
+    return {"items": [order_summary(db, o) for o in rows]}
 
 
 @api.get("/orders/{order_id}")
 def get_order(order_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
     order = order_for(db, order_id, user)
     reviewed = db.scalar(select(Review.id).where(Review.order_id == order.id)) is not None
-    return {**order_out(order), "listing_title": db.get(Listing, order.listing_id).title, "reviewed": reviewed}
+    events = db.scalars(select(OrderEvent).where(OrderEvent.order_id == order.id).order_by(OrderEvent.id)).all()
+    return {**order_summary(db, order), "reviewed": reviewed,
+            "history": [{"status": e.to_status, "at": services.aware(e.at).isoformat()} for e in events]}
 
 
 @api.post("/orders/{order_id}/pay")

@@ -43,7 +43,9 @@ ThemeData buildTheme(Brightness brightness) {
       elevation: 0,
       scrolledUnderElevation: 0,
       centerTitle: false,
-      titleTextStyle: text.titleLarge?.copyWith(color: scheme.onSurface),
+      // Sizes are only merged into the text theme later by MaterialApp, so give the title its full style here.
+      titleTextStyle:
+          _w(TextStyle(fontFamily: 'Inter', fontSize: 22, color: scheme.onSurface, letterSpacing: -0.4), 700),
     ),
     cardTheme: CardThemeData(
       elevation: 0,
@@ -85,11 +87,12 @@ ThemeData buildTheme(Brightness brightness) {
       filled: true,
       fillColor: scheme.surface,
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: scheme.outlineVariant)),
-      enabledBorder:
-          OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: scheme.outlineVariant)),
-      focusedBorder:
-          OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: scheme.primary, width: 1.5)),
+      border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: scheme.outlineVariant)),
+      enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: scheme.outlineVariant)),
+      focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: scheme.primary, width: 1.5)),
     ),
     navigationBarTheme: NavigationBarThemeData(
       backgroundColor: scheme.surface,
@@ -98,12 +101,13 @@ ThemeData buildTheme(Brightness brightness) {
       height: 68,
       iconTheme: WidgetStateProperty.resolveWith(
           (s) => IconThemeData(color: s.contains(WidgetState.selected) ? scheme.onPrimary : scheme.onSurfaceVariant)),
-      labelTextStyle: WidgetStateProperty.resolveWith((s) => _w(text.labelSmall!, s.contains(WidgetState.selected) ? 650 : 500)),
+      labelTextStyle:
+          WidgetStateProperty.resolveWith((s) => _w(text.labelSmall!, s.contains(WidgetState.selected) ? 650 : 500)),
     ),
     segmentedButtonTheme: SegmentedButtonThemeData(
       style: ButtonStyle(
-        backgroundColor: WidgetStateProperty.resolveWith(
-            (s) => s.contains(WidgetState.selected) ? scheme.primary : scheme.surface),
+        backgroundColor:
+            WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? scheme.primary : scheme.surface),
         foregroundColor: WidgetStateProperty.resolveWith(
             (s) => s.contains(WidgetState.selected) ? scheme.onPrimary : scheme.onSurface),
         side: WidgetStatePropertyAll(BorderSide(color: scheme.outlineVariant)),
@@ -111,14 +115,22 @@ ThemeData buildTheme(Brightness brightness) {
         textStyle: WidgetStatePropertyAll(_w(text.labelLarge!, 600)),
       ),
     ),
+    dialogTheme: DialogThemeData(
+      backgroundColor: scheme.surface,
+      surfaceTintColor: Colors.transparent,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+    ),
+    popupMenuTheme: PopupMenuThemeData(color: scheme.surface, surfaceTintColor: Colors.transparent),
     dividerTheme: DividerThemeData(color: scheme.outlineVariant, space: 1),
     snackBarTheme: SnackBarThemeData(
       behavior: SnackBarBehavior.floating,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
     ),
-    bottomSheetTheme: const BottomSheetThemeData(
+    bottomSheetTheme: BottomSheetThemeData(
+      backgroundColor: scheme.surface,
+      surfaceTintColor: Colors.transparent,
       showDragHandle: true,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(28))),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(28))),
     ),
     listTileTheme: const ListTileThemeData(contentPadding: EdgeInsets.symmetric(horizontal: 20)),
   );

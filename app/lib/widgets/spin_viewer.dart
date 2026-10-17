@@ -6,8 +6,8 @@ import '../theme.dart';
 
 /// Backdrop per showcase style. Styles change only what surrounds the photos, never the photos.
 BoxDecoration showcaseBackground(String style) => switch (style) {
-      'premium' => const BoxDecoration(
-          gradient: RadialGradient(colors: [Color(0xFF3A3A40), Color(0xFF111114)], radius: 0.9)),
+      'premium' =>
+        const BoxDecoration(gradient: RadialGradient(colors: [Color(0xFF3A3A40), Color(0xFF111114)], radius: 0.9)),
       'dynamic' => const BoxDecoration(
           gradient: LinearGradient(
               begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFFFFE3D3), Color(0xFFD9E6FF)])),
@@ -95,8 +95,8 @@ class _SpinViewerState extends State<SpinViewer> {
             bottom: 18,
             child: Center(
               child: DecoratedBox(
-                decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.92), borderRadius: BorderRadius.circular(99)),
+                decoration:
+                    BoxDecoration(color: Colors.white.withValues(alpha: 0.92), borderRadius: BorderRadius.circular(99)),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                   child: Row(mainAxisSize: MainAxisSize.min, children: [

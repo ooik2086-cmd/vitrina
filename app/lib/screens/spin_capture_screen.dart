@@ -120,7 +120,9 @@ class _SpinCaptureScreenState extends State<SpinCaptureScreen> with WidgetsBindi
         ],
       ),
       body: _error != null
-          ? Center(child: Padding(padding: const EdgeInsets.all(24), child: Text(_error!, style: const TextStyle(color: Colors.white))))
+          ? Center(
+              child: Padding(
+                  padding: const EdgeInsets.all(24), child: Text(_error!, style: const TextStyle(color: Colors.white))))
           : c == null
               ? const Center(child: CircularProgressIndicator())
               : Column(children: [
@@ -128,7 +130,8 @@ class _SpinCaptureScreenState extends State<SpinCaptureScreen> with WidgetsBindi
                     child: Stack(fit: StackFit.expand, children: [
                       Center(child: CameraPreview(c)),
                       if (_lastBytes != null)
-                        IgnorePointer(child: Opacity(opacity: 0.35, child: Image.memory(_lastBytes!, fit: BoxFit.contain))),
+                        IgnorePointer(
+                            child: Opacity(opacity: 0.35, child: Image.memory(_lastBytes!, fit: BoxFit.contain))),
                       Positioned(
                         left: 16,
                         right: 16,
@@ -201,8 +204,8 @@ class SpinProgressPainter extends CustomPainter {
         ..strokeWidth = 5
         ..strokeCap = StrokeCap.butt
         ..color = i < captured ? const Color(0xFF4CD964) : Colors.white24;
-      canvas.drawArc(Rect.fromCircle(center: center, radius: radius), -math.pi / 2 + i * sweep + 0.03, sweep - 0.06,
-          false, paint);
+      canvas.drawArc(
+          Rect.fromCircle(center: center, radius: radius), -math.pi / 2 + i * sweep + 0.03, sweep - 0.06, false, paint);
     }
   }
 

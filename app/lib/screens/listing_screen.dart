@@ -93,8 +93,8 @@ class _ListingScreenState extends State<ListingScreen> {
             child: _RoundButton(
               onTap: _toggleFavorite,
               tooltip: 'Таңдаулыға',
-              child: Icon(_favorite ? Icons.favorite : Icons.favorite_border,
-                  color: _favorite ? Brand.accent : Brand.ink),
+              child:
+                  Icon(_favorite ? Icons.favorite : Icons.favorite_border, color: _favorite ? Brand.accent : Brand.ink),
             ),
           ),
         ],
@@ -160,13 +160,17 @@ class _ListingScreenState extends State<ListingScreen> {
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                   child: Column(children: [
-                    _Fact(icon: Icons.sell_outlined, name: 'Баға деңгейі',
+                    _Fact(
+                        icon: Icons.sell_outlined,
+                        name: 'Баға деңгейі',
                         value: l.segment == null ? 'Деректер әлі аз' : label(segments, l.segment)),
                     const Divider(),
                     _Fact(icon: Icons.auto_awesome_outlined, name: 'Жағдайы', value: label(conditions, l.condition)),
                     const Divider(),
                     _Fact(
-                        icon: Icons.verified_outlined, name: 'Түпнұсқалығы', value: label(authenticity, l.authenticity)),
+                        icon: Icons.verified_outlined,
+                        name: 'Түпнұсқалығы',
+                        value: label(authenticity, l.authenticity)),
                     const Divider(),
                     _Fact(icon: Icons.palette_outlined, name: 'Түсі', value: l.color),
                   ]),
@@ -176,8 +180,8 @@ class _ListingScreenState extends State<ListingScreen> {
                 const SizedBox(height: 12),
                 Container(
                   padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                      color: scheme.errorContainer, borderRadius: BorderRadius.circular(Brand.radius)),
+                  decoration:
+                      BoxDecoration(color: scheme.errorContainer, borderRadius: BorderRadius.circular(Brand.radius)),
                   child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Icon(Icons.report_outlined, color: scheme.onErrorContainer),
                     const SizedBox(width: 12),
@@ -194,7 +198,8 @@ class _ListingScreenState extends State<ListingScreen> {
               ]),
               const SizedBox(height: 12),
               Wrap(spacing: 8, runSpacing: 8, children: [
-                for (final s in l.sizes) _SizeTile(size: s, selected: _sizeId == s.id, onTap: () => setState(() => _sizeId = s.id)),
+                for (final s in l.sizes)
+                  _SizeTile(size: s, selected: _sizeId == s.id, onTap: () => setState(() => _sizeId = s.id)),
               ]),
               if ((l.description ?? '').isNotEmpty) ...[
                 const SizedBox(height: 24),
@@ -374,8 +379,8 @@ class _SizeTile extends StatelessWidget {
             height: 58,
             child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
               Text(size.label,
-                  style: weight(theme.textTheme.titleSmall!, 700).copyWith(
-                      color: fg, decoration: size.available ? null : TextDecoration.lineThrough)),
+                  style: weight(theme.textTheme.titleSmall!, 700)
+                      .copyWith(color: fg, decoration: size.available ? null : TextDecoration.lineThrough)),
               Text('${size.insoleCm} см', style: theme.textTheme.labelSmall?.copyWith(color: fg)),
             ]),
           ),

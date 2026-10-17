@@ -65,8 +65,16 @@ void main() {
           key = req.headers['Idempotency-Key'];
           return http.Response(
               jsonEncode({
-                'id': 5, 'status': 'CREATED', 'listing_id': 1, 'size_id': 1, 'buyer_id': 2, 'seller_id': 3,
-                'item_price_tiyn': 100, 'delivery_price_tiyn': 0, 'total_tiyn': 100, 'tracking_number': null,
+                'id': 5,
+                'status': 'CREATED',
+                'listing_id': 1,
+                'size_id': 1,
+                'buyer_id': 2,
+                'seller_id': 3,
+                'item_price_tiyn': 100,
+                'delivery_price_tiyn': 0,
+                'total_tiyn': 100,
+                'tracking_number': null,
                 'delivered_at': null,
               }),
               201);
@@ -79,7 +87,8 @@ void main() {
   testWidgets('spin viewer steps through real frames on drag', (tester) async {
     final urls = [for (var i = 0; i < 12; i++) 'http://x/f$i.jpg'];
     await tester.pumpWidget(MaterialApp(
-        home: SizedBox(width: 300, height: 300, child: SpinViewer(frameUrls: urls, pixelsPerFrame: 10, introSpin: false))));
+        home: SizedBox(
+            width: 300, height: 300, child: SpinViewer(frameUrls: urls, pixelsPerFrame: 10, introSpin: false))));
     Image current() => tester.widget<Image>(find.byType(Image));
     expect((current().image as NetworkImage).url, urls[0]);
     await tester.drag(find.byType(SpinViewer), const Offset(-35, 0));
@@ -138,10 +147,12 @@ void main() {
 
   testWidgets('listing editor will not save without required fields and photos', (tester) async {
     var calls = 0;
-    final api = Api(base: 'http://x/api/v1', client: MockClient((_) async {
-      calls++;
-      return http.Response('{}', 500);
-    }));
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((_) async {
+          calls++;
+          return http.Response('{}', 500);
+        }));
     tester.view.physicalSize = const Size(500, 3000);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -174,8 +185,15 @@ void main() {
 
   testWidgets('chat shows both sides and warns only the reader about contact details', (tester) async {
     final conv = {
-      'id': 9, 'listing_id': 7, 'listing_title': 'Кроссовка', 'listing_cover': null, 'price_tiyn': 2490000,
-      'role': 'buyer', 'other_name': 'Qadam Store', 'last_message': null, 'unread': 0,
+      'id': 9,
+      'listing_id': 7,
+      'listing_title': 'Кроссовка',
+      'listing_cover': null,
+      'price_tiyn': 2490000,
+      'role': 'buyer',
+      'other_name': 'Qadam Store',
+      'last_message': null,
+      'unread': 0,
     };
     final api = Api(
         base: 'http://x/api/v1',
@@ -183,13 +201,33 @@ void main() {
             jsonEncode({
               'conversation': conv,
               'items': [
-                {'id': 1, 'sender_id': 2, 'body': '42 бар ма?', 'contact_warning': false, 'created_at': '2026-10-17T10:00:00Z'},
-                {'id': 2, 'sender_id': 3, 'body': 'Бар, +7 701 123 45 67', 'contact_warning': true, 'created_at': '2026-10-17T10:01:00Z'},
+                {
+                  'id': 1,
+                  'sender_id': 2,
+                  'body': '42 бар ма?',
+                  'contact_warning': false,
+                  'created_at': '2026-10-17T10:00:00Z'
+                },
+                {
+                  'id': 2,
+                  'sender_id': 3,
+                  'body': 'Бар, +7 701 123 45 67',
+                  'contact_warning': true,
+                  'created_at': '2026-10-17T10:01:00Z'
+                },
               ],
             }),
             200,
             headers: {'content-type': 'application/json; charset=utf-8'})));
-    final session = Session(api)..me = Me.fromJson({'id': 2, 'phone': '+77010000002', 'display_name': null, 'city': null, 'is_seller': false, 'shop_name': null});
+    final session = Session(api)
+      ..me = Me.fromJson({
+        'id': 2,
+        'phone': '+77010000002',
+        'display_name': null,
+        'city': null,
+        'is_seller': false,
+        'shop_name': null
+      });
     await tester.pumpWidget(SessionScope(
         session: session,
         child: const MaterialApp(home: ChatScreen(conversationId: 9, pollEvery: Duration(hours: 1)))));

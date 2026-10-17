@@ -186,6 +186,7 @@ class OrderFlowTests(ApiTestCase):
         mine = self.c.get("/api/v1/orders", headers=self.h(self.buyer)).json()["items"]
         self.assertEqual([o["id"] for o in mine], [order["id"]])
         self.assertEqual(mine[0]["listing_title"], LISTING["title"])
+        self.assertEqual((mine[0]["size_label"], mine[0]["size_cm"]), (LISTING["sizes"][0]["label"], "26,5"))
         sold = self.c.get("/api/v1/orders?role=seller", headers=self.h(self.seller)).json()["items"]
         self.assertEqual([o["id"] for o in sold], [order["id"]])
         self.assertEqual(self.c.get("/api/v1/orders?role=seller", headers=self.h(self.buyer)).json()["items"], [])
@@ -332,6 +333,12 @@ class SocialTests(ApiTestCase):
         page = self.c.get(f"/api/v1/sellers/{seller['id']}/reviews").json()
         self.assertEqual(page["items"][0]["seller_reply"], "Рақмет!")
         self.assertTrue(self.get(f"/orders/{order['id']}", self.buyer).json()["reviewed"])
+
+    def test_order_history_lists_each_step(self):
+        _, order = self.delivered()
+        detail = self.get(f"/orders/{order['id']}", self.buyer).json()
+        self.assertEqual([h["status"] for h in detail["history"]],
+                         ["PAYMENT_PENDING", "PAID", "SELLER_ACCEPTED", "SHIPPED", "DELIVERED_PENDING_CONFIRMATION"])
 
     def test_order_steps_notify_the_other_side(self):
         self.delivered()

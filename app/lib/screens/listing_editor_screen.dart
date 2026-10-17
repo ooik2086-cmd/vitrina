@@ -124,7 +124,9 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
     final files = await _picker.pickMultiImage(maxWidth: 2000, maxHeight: 2000, imageQuality: 90);
     if (files.isEmpty) return;
     if (files.length < spinMinFrames) {
-      if (mounted) showError(context, ApiException(422, 'too_few_frames', '360° үшін кемінде $spinMinFrames кадр керек.'));
+      if (mounted) {
+        showError(context, ApiException(422, 'too_few_frames', '360° үшін кемінде $spinMinFrames кадр керек.'));
+      }
       return;
     }
     setState(() => _frames = [for (final f in files) _startUpload(f)]);
@@ -184,7 +186,8 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final uploading = [..._photos.values, ..._defectPhotos, ..._frames].where((u) => u.url == null && u.error == null).length;
+    final uploading =
+        [..._photos.values, ..._defectPhotos, ..._frames].where((u) => u.url == null && u.error == null).length;
     return Scaffold(
       appBar: AppBar(title: const Text('Жаңа тауар')),
       body: Form(
@@ -228,7 +231,9 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
                 const SizedBox(height: 8),
                 Wrap(spacing: 8, children: [
                   FilledButton.tonalIcon(
-                      onPressed: _captureSpin, icon: const Icon(Icons.photo_camera_outlined), label: const Text('Түсіру')),
+                      onPressed: _captureSpin,
+                      icon: const Icon(Icons.photo_camera_outlined),
+                      label: const Text('Түсіру')),
                   OutlinedButton.icon(
                       onPressed: _pickSpinFromGallery,
                       icon: const Icon(Icons.photo_library_outlined),
@@ -239,7 +244,10 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
           ),
           const SizedBox(height: 16),
           TextFormField(
-              controller: _title, decoration: const InputDecoration(labelText: 'Атауы'), validator: _required, maxLength: 120),
+              controller: _title,
+              decoration: const InputDecoration(labelText: 'Атауы'),
+              validator: _required,
+              maxLength: 120),
           DropdownButtonFormField<String>(
             initialValue: _category,
             decoration: const InputDecoration(labelText: 'Санаты'),
@@ -299,7 +307,9 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
             Row(children: [
               Expanded(
                   child: TextFormField(
-                      controller: s.label, decoration: const InputDecoration(labelText: 'Өлшем'), validator: _required)),
+                      controller: s.label,
+                      decoration: const InputDecoration(labelText: 'Өлшем'),
+                      validator: _required)),
               const SizedBox(width: 8),
               Expanded(
                 child: TextFormField(
@@ -313,7 +323,9 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
               SizedBox(
                 width: 56,
                 child: TextFormField(
-                    controller: s.qty, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Саны')),
+                    controller: s.qty,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(labelText: 'Саны')),
               ),
               IconButton(
                 tooltip: 'Өшіру',

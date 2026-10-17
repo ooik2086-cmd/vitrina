@@ -33,8 +33,7 @@ class ProfileScreen extends StatelessWidget {
                   leading: const Icon(Icons.inventory_2_outlined),
                   title: const Text('Менің тауарларым'),
                   trailing: const Icon(Icons.chevron_right),
-                  onTap: () =>
-                      Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MyListingsScreen())),
+                  onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MyListingsScreen())),
                 )
               else
                 ListTile(

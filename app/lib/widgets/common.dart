@@ -43,8 +43,7 @@ class ListingTile extends StatelessWidget {
     final theme = Theme.of(context);
     final cover = listing.coverUrl;
     return GestureDetector(
-      onTap: () => Navigator.of(context)
-          .push(MaterialPageRoute(builder: (_) => ListingScreen(listingId: listing.id))),
+      onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => ListingScreen(listingId: listing.id))),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         AspectRatio(
           aspectRatio: 1,

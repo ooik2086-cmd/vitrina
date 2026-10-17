@@ -37,8 +37,8 @@ class _MyListingsScreenState extends State<MyListingsScreen> {
   }
 
   Future<void> _create() async {
-    final created = await Navigator.of(context)
-        .push<bool>(MaterialPageRoute(builder: (_) => const ListingEditorScreen()));
+    final created =
+        await Navigator.of(context).push<bool>(MaterialPageRoute(builder: (_) => const ListingEditorScreen()));
     if (created == true) _reload();
   }
 
@@ -46,8 +46,8 @@ class _MyListingsScreenState extends State<MyListingsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Менің тауарларым')),
-      floatingActionButton:
-          FloatingActionButton.extended(onPressed: _create, icon: const Icon(Icons.add), label: const Text('Тауар қосу')),
+      floatingActionButton: FloatingActionButton.extended(
+          onPressed: _create, icon: const Icon(Icons.add), label: const Text('Тауар қосу')),
       body: FutureBuilder<List<Listing>>(
         future: _items,
         builder: (context, snap) {
@@ -72,7 +72,8 @@ class _MyListingsScreenState extends State<MyListingsScreen> {
                           child: cover == null
                               ? const Icon(Icons.image_outlined)
                               : Image.network(cover,
-                                  fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Icon(Icons.broken_image_outlined)),
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (_, __, ___) => const Icon(Icons.broken_image_outlined)),
                         ),
                         title: Text(l.title),
                         subtitle: Text('${_listingStatuses[l.status] ?? l.status} · ${formatTenge(l.priceTiyn)}'

@@ -74,8 +74,8 @@ class _ChatsScreenState extends State<ChatsScreen> {
                             color: Brand.studio,
                             child: c.listingCover == null
                                 ? const Icon(Icons.image_outlined)
-                                : Image.network(c.listingCover!, fit: BoxFit.cover,
-                                    errorBuilder: (_, __, ___) => const Icon(Icons.image_outlined)),
+                                : Image.network(c.listingCover!,
+                                    fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Icon(Icons.image_outlined)),
                           ),
                         ),
                         title: Text(c.otherName, style: weight(theme.textTheme.titleSmall!, c.unread > 0 ? 750 : 600)),
@@ -84,16 +84,18 @@ class _ChatsScreenState extends State<ChatsScreen> {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
-                        trailing: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.end,
+                        trailing: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.end,
                             children: [
-                          if (c.lastMessage != null)
-                            Text(_time(c.lastMessage!.createdAt), style: theme.textTheme.labelSmall),
-                          const SizedBox(height: 4),
-                          if (c.unread > 0)
-                            Badge(label: Text('${c.unread}'), backgroundColor: Brand.accent),
-                        ]),
+                              if (c.lastMessage != null)
+                                Text(_time(c.lastMessage!.createdAt), style: theme.textTheme.labelSmall),
+                              const SizedBox(height: 4),
+                              if (c.unread > 0) Badge(label: Text('${c.unread}'), backgroundColor: Brand.accent),
+                            ]),
                         onTap: () async {
-                          await Navigator.of(context).push(MaterialPageRoute(builder: (_) => ChatScreen(conversationId: c.id)));
+                          await Navigator.of(context)
+                              .push(MaterialPageRoute(builder: (_) => ChatScreen(conversationId: c.id)));
                           _reload();
                         },
                       );
@@ -148,7 +150,8 @@ class _ChatScreenState extends State<ChatScreen> {
     if (_loading) return;
     _loading = true;
     try {
-      final (conv, fresh) = await _api.messages(widget.conversationId, afterId: _messages.isEmpty ? 0 : _messages.last.id);
+      final (conv, fresh) =
+          await _api.messages(widget.conversationId, afterId: _messages.isEmpty ? 0 : _messages.last.id);
       if (!mounted) return;
       final known = {for (final m in _messages) m.id};
       setState(() {
@@ -212,9 +215,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   child: Padding(
                     padding: const EdgeInsets.all(32),
                     child: Text(
-                      conv?.role == 'buyer'
-                          ? 'Өлшемі, жағдайы немесе жеткізу туралы сұраңыз.'
-                          : 'Хабарлама әлі жоқ.',
+                      conv?.role == 'buyer' ? 'Өлшемі, жағдайы немесе жеткізу туралы сұраңыз.' : 'Хабарлама әлі жоқ.',
                       textAlign: TextAlign.center,
                       style: theme.textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
                     ),
@@ -252,7 +253,8 @@ class _ChatScreenState extends State<ChatScreen> {
                       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(24)),
                       enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(24), borderSide: BorderSide(color: scheme.outlineVariant)),
+                          borderRadius: BorderRadius.circular(24),
+                          borderSide: BorderSide(color: scheme.outlineVariant)),
                     ),
                   ),
                 ),

@@ -106,7 +106,14 @@ class OrderInfo {
         totalTiyn = j['total_tiyn'] as int,
         trackingNumber = j['tracking_number'] as String?,
         listingTitle = j['listing_title'] as String?,
-        reviewed = (j['reviewed'] as bool?) ?? false;
+        reviewed = (j['reviewed'] as bool?) ?? false,
+        listingCover = j['listing_cover'] as String?,
+        sizeLabel = j['size_label'] as String?,
+        sizeCm = j['size_cm'] as String?,
+        history = [
+          for (final h in (j['history'] as List?) ?? const [])
+            (status: (h as Map)['status'] as String, at: DateTime.parse(h['at'] as String).toLocal()),
+        ];
   final int id;
   final String status;
   final int listingId;
@@ -116,6 +123,10 @@ class OrderInfo {
   final String? trackingNumber;
   final String? listingTitle;
   final bool reviewed;
+  final String? listingCover;
+  final String? sizeLabel;
+  final String? sizeCm;
+  final List<({String status, DateTime at})> history;
 }
 
 class Me {
@@ -157,7 +168,8 @@ class Conversation {
         priceTiyn = j['price_tiyn'] as int,
         role = j['role'] as String,
         otherName = j['other_name'] as String,
-        lastMessage = j['last_message'] == null ? null : ChatMessage.fromJson(j['last_message'] as Map<String, dynamic>),
+        lastMessage =
+            j['last_message'] == null ? null : ChatMessage.fromJson(j['last_message'] as Map<String, dynamic>),
         unread = j['unread'] as int;
   final int id;
   final int listingId;
@@ -228,8 +240,8 @@ class Api {
     final data = res.bodyBytes.isEmpty ? null : jsonDecode(utf8.decode(res.bodyBytes));
     if (res.statusCode >= 400) {
       final m = data is Map ? data : const {};
-      throw ApiException(res.statusCode, (m['code'] ?? 'error') as String,
-          (m['message_kk'] ?? 'Қате.') as String, m['detail'] as String?);
+      throw ApiException(res.statusCode, (m['code'] ?? 'error') as String, (m['message_kk'] ?? 'Қате.') as String,
+          m['detail'] as String?);
     }
     return data;
   }
@@ -247,8 +259,8 @@ class Api {
 
   Future<Me> me() async => Me.fromJson(await _send('GET', '/me') as Map<String, dynamic>);
 
-  Future<Me> becomeSeller(String shopName, String city) async =>
-      Me.fromJson(await _send('POST', '/me/seller', body: {'shop_name': shopName, 'city': city}) as Map<String, dynamic>);
+  Future<Me> becomeSeller(String shopName, String city) async => Me.fromJson(
+      await _send('POST', '/me/seller', body: {'shop_name': shopName, 'city': city}) as Map<String, dynamic>);
 
   // selling
   /// Uploads one photo; the server strips metadata and returns the URL to reference in a listing.
@@ -281,7 +293,8 @@ class Api {
     return [for (final j in r['items'] as List) Listing.fromJson(j as Map<String, dynamic>)];
   }
 
-  Future<Listing> listing(int id) async => Listing.fromJson(await _send('GET', '/listings/$id') as Map<String, dynamic>);
+  Future<Listing> listing(int id) async =>
+      Listing.fromJson(await _send('GET', '/listings/$id') as Map<String, dynamic>);
 
   Future<List<Listing>> favorites() async {
     final r = await _send('GET', '/favorites') as Map;
@@ -302,7 +315,8 @@ class Api {
     return [for (final j in r['items'] as List) OrderInfo.fromJson(j as Map<String, dynamic>)];
   }
 
-  Future<OrderInfo> order(int id) async => OrderInfo.fromJson(await _send('GET', '/orders/$id') as Map<String, dynamic>);
+  Future<OrderInfo> order(int id) async =>
+      OrderInfo.fromJson(await _send('GET', '/orders/$id') as Map<String, dynamic>);
 
   /// Starts a payment with the provider. Only the provider's signed webhook marks the order paid.
   Future<void> startPayment(int id) => _send('POST', '/orders/$id/pay');
@@ -334,9 +348,9 @@ class Api {
       await _send('POST', '/conversations/$conversationId/messages', body: {'body': body}) as Map<String, dynamic>);
 
   // reviews
-  Future<Review> review(int orderId, int rating, String? text) async => Review.fromJson(await _send(
-      'POST', '/orders/$orderId/review', body: {'rating': rating, if (text != null && text.isNotEmpty) 'text': text})
-      as Map<String, dynamic>);
+  Future<Review> review(int orderId, int rating, String? text) async =>
+      Review.fromJson(await _send('POST', '/orders/$orderId/review',
+          body: {'rating': rating, if (text != null && text.isNotEmpty) 'text': text}) as Map<String, dynamic>);
 
   Future<List<Review>> sellerReviews(int sellerId) async {
     final r = await _send('GET', '/sellers/$sellerId/reviews') as Map;
@@ -346,7 +360,10 @@ class Api {
   // notifications
   Future<(int, List<AppNotification>)> notifications() async {
     final r = await _send('GET', '/notifications') as Map;
-    return (r['unread'] as int, [for (final j in r['items'] as List) AppNotification.fromJson(j as Map<String, dynamic>)]);
+    return (
+      r['unread'] as int,
+      [for (final j in r['items'] as List) AppNotification.fromJson(j as Map<String, dynamic>)]
+    );
   }
 
   Future<void> readAllNotifications() => _send('POST', '/notifications/read-all');
