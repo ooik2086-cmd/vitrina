@@ -9,6 +9,7 @@ import '../widgets/common.dart';
 import '../widgets/spin_viewer.dart';
 import 'chat_screen.dart';
 import 'login_screen.dart';
+import 'offers_screen.dart';
 import 'order_screen.dart';
 import 'seller_reviews_screen.dart';
 import 'shop_screen.dart';
@@ -34,6 +35,7 @@ class _ListingScreenState extends State<ListingScreen> {
   bool _favorite = false;
   bool _ordering = false;
   bool _showPhotos = false;
+  Offer? _offer; // the signed-in buyer's latest offer on this listing
   // One key per order attempt: a retried tap after a lost response returns the same order.
   String _orderKey = newIdempotencyKey();
 
@@ -45,6 +47,37 @@ class _ListingScreenState extends State<ListingScreen> {
       if (l.status == 'published') rememberViewed(l);
     }, onError: (_) {});
     _similar ??= SessionScope.of(context).api.similar(widget.listingId).catchError((_) => <Listing>[]);
+    _loadOffer();
+  }
+
+  Future<void> _loadOffer() async {
+    final session = SessionScope.of(context);
+    if (!session.signedIn) return;
+    try {
+      final mine = await session.api.offers(listingId: widget.listingId);
+      if (!mounted || mine.isEmpty) return;
+      setState(() {
+        _offer = mine.first;
+        if (_offerLive) _sizeId = _offer!.sizeId; // the deal is for that size
+      });
+    } catch (_) {}
+  }
+
+  /// An offer the buyer can still act on, or order under.
+  bool get _offerLive => const {'pending', 'countered', 'accepted'}.contains(_offer?.status);
+
+  Future<void> _makeOffer(Listing listing, ShoeSize size) async {
+    if (!await _ensureSignedIn() || !mounted) return;
+    final offer = await showModalBottomSheet<Offer>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) => OfferSheet(listing: listing, size: size),
+    );
+    if (offer == null || !mounted) return;
+    setState(() => _offer = offer);
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(tr('Ұсыныс жіберілді. Сатушы жауап бергенде хабарлаймыз.'))));
   }
 
   Future<bool> _ensureSignedIn() async {
@@ -77,7 +110,10 @@ class _ListingScreenState extends State<ListingScreen> {
     if (!await _ensureSignedIn() || !mounted) return;
     setState(() => _ordering = true);
     try {
-      final order = await SessionScope.of(context).api.createOrder(listing.id, _sizeId!, _orderKey);
+      final offer = _offer?.status == 'accepted' && _offer!.sizeId == _sizeId ? _offer : null;
+      final order =
+          await SessionScope.of(context).api.createOrder(listing.id, _sizeId!, _orderKey, offerId: offer?.id);
+      if (offer != null) _offer = null;
       _orderKey = newIdempotencyKey();
       if (!mounted) return;
       await Navigator.of(context).push(MaterialPageRoute(builder: (_) => OrderScreen(orderId: order.id)));
@@ -162,6 +198,10 @@ class _ListingScreenState extends State<ListingScreen> {
       _sizeId ??= fit?.id;
     }
     final selected = l.sizes.where((s) => s.id == _sizeId).firstOrNull;
+    final me = SessionScope.of(context).me;
+    final canOffer = l.status == 'published' && me?.id != l.sellerId && !_offerLive;
+    final deal = _offer?.status == 'accepted' && _offer!.sizeId == selected?.id ? _offer : null;
+    final itemPrice = deal == null ? l.priceTiyn : (deal.priceTiyn < l.priceTiyn ? deal.priceTiyn : l.priceTiyn);
     return Column(children: [
       Expanded(
         child: ListView(padding: EdgeInsets.zero, children: [
@@ -271,6 +311,22 @@ class _ListingScreenState extends State<ListingScreen> {
                   ),
                 ]),
               ],
+              if (_offer != null && _offer!.status != 'ordered' && _offer!.status != 'withdrawn') ...[
+                const SizedBox(height: 16),
+                OfferStatusCard(offer: _offer!, onChanged: (o) => setState(() => _offer = o)),
+              ],
+              if (canOffer) ...[
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    key: const Key('make-offer'),
+                    onPressed: selected == null ? null : () => _makeOffer(l, selected),
+                    icon: const Icon(Icons.local_offer_outlined),
+                    label: Text(selected == null ? tr('Баға ұсыну үшін өлшемді таңдаңыз') : tr('Баға ұсыну')),
+                  ),
+                ),
+              ],
               if ((l.description ?? '').isNotEmpty) ...[
                 const SizedBox(height: 24),
                 Text(tr('Сипаттама'), style: theme.textTheme.titleMedium),
@@ -362,7 +418,8 @@ class _ListingScreenState extends State<ListingScreen> {
             child: Row(children: [
               Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text(tr('Жиыны'), style: theme.textTheme.labelMedium?.copyWith(color: scheme.onSurfaceVariant)),
-                Text(formatTenge(l.priceTiyn + l.deliveryPriceTiyn), style: weight(theme.textTheme.titleLarge!, 800)),
+                Text(formatTenge(itemPrice + l.deliveryPriceTiyn),
+                    key: const Key('total'), style: weight(theme.textTheme.titleLarge!, 800)),
               ]),
               const SizedBox(width: 16),
               Expanded(
@@ -373,7 +430,9 @@ class _ListingScreenState extends State<ListingScreen> {
                       ? tr('Сатылған')
                       : selected == null
                           ? tr('Өлшемді таңдаңыз')
-                          : tr('Тапсырыс беру')),
+                          : deal != null
+                              ? tr('Келісілген бағамен алу')
+                              : tr('Тапсырыс беру')),
                 ),
               ),
             ]),

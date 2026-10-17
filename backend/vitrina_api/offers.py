@@ -1,0 +1,195 @@
+"""Price offers: a buyer names a price, the seller accepts, declines or answers with their own.
+
+An accepted offer is a promise for that buyer only: they can order that size at that price for a day, through the
+same protected payment as any order. Offers never change the listing's public price.
+"""
+from __future__ import annotations
+
+import math
+from datetime import timedelta
+
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel, Field
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+
+from . import promo, services
+from .deps import current_user, get_db, now_utc
+from .errors import ApiError
+from .models import Listing, ListingSize, Offer, User
+
+router = APIRouter(prefix="/api/v1")
+
+MIN_RATIO = 0.5                      # offers under half the price are not sent to the seller
+ANSWER_WITHIN = timedelta(hours=48)  # a pending or countered offer lapses after this
+BUY_WITHIN = timedelta(hours=24)     # an accepted offer can be ordered for this long
+OFFERS_PER_DAY = 3                   # per buyer per listing, so a seller is not haggled to death
+OPEN = ("pending", "countered", "accepted")
+
+
+class OfferIn(BaseModel):
+    size_id: int
+    amount_tiyn: int = Field(gt=0)
+
+
+class CounterIn(BaseModel):
+    amount_tiyn: int = Field(gt=0)
+
+
+def state(offer: Offer) -> str:
+    if offer.status in OPEN and services.aware(offer.expires_at) <= now_utc():
+        return "expired"
+    return offer.status
+
+
+def price(offer: Offer) -> int:
+    """What the buyer pays for the item once the offer is accepted."""
+    return offer.counter_tiyn if offer.counter_tiyn is not None else offer.amount_tiyn
+
+
+def offer_out(db: Session, offer: Offer) -> dict:
+    listing = db.get(Listing, offer.listing_id)
+    size = db.get(ListingSize, offer.size_id)
+    cover = next((m.original_url for m in listing.media if m.angle != "frame"), None)
+    return {"id": offer.id, "listing_id": listing.id, "listing_title": listing.title, "listing_cover": cover,
+            "list_price_tiyn": listing.price_tiyn, "size_id": size.id, "size_label": size.label,
+            "amount_tiyn": offer.amount_tiyn, "counter_tiyn": offer.counter_tiyn, "price_tiyn": price(offer),
+            "status": state(offer), "buyer_id": offer.buyer_id, "seller_id": offer.seller_id,
+            "expires_at": services.aware(offer.expires_at).isoformat(), "order_id": offer.order_id}
+
+
+def whole_tenge(amount_tiyn: int) -> None:
+    if amount_tiyn % 100:
+        raise ApiError(422, "validation", "amount must be whole tenge")
+
+
+@router.post("/listings/{listing_id}/offers", status_code=201)
+def make_offer(listing_id: int, body: OfferIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    listing = db.get(Listing, listing_id)
+    if listing is None or listing.status != "published":
+        raise ApiError(404, "not_found")
+    if listing.seller_id == user.id:
+        raise ApiError(409, "own_listing")
+    size = db.get(ListingSize, body.size_id)
+    if size is None or size.listing_id != listing.id or size.quantity <= 0:
+        raise ApiError(409, "out_of_stock")
+    whole_tenge(body.amount_tiyn)
+    if body.amount_tiyn >= listing.price_tiyn:
+        raise ApiError(422, "offer_not_lower")
+    if body.amount_tiyn < math.ceil(listing.price_tiyn * MIN_RATIO):
+        raise ApiError(422, "offer_too_low")
+    now = now_utc()
+    recent = db.scalar(select(func.count(Offer.id)).where(Offer.listing_id == listing.id, Offer.buyer_id == user.id,
+                                                          Offer.created_at >= now - timedelta(days=1)))
+    if (recent or 0) >= OFFERS_PER_DAY:
+        raise ApiError(429, "offer_limit")
+    for old in db.scalars(select(Offer).where(Offer.listing_id == listing.id, Offer.buyer_id == user.id,
+                                              Offer.status.in_(OPEN))).all():
+        old.status = "withdrawn"  # one live offer per buyer per listing: the newest one counts
+    offer = Offer(listing_id=listing.id, size_id=size.id, buyer_id=user.id, seller_id=listing.seller_id,
+                  amount_tiyn=body.amount_tiyn, status="pending", created_at=now, expires_at=now + ANSWER_WITHIN)
+    db.add(offer)
+    db.flush()
+    amount = promo.format_tenge(body.amount_tiyn)
+    services.notify(db, listing.seller_id, "offer", f"«{listing.title}», {size.label}: {amount} ұсынды.",
+                    f"«{listing.title}», {size.label}: предложили {amount}.", listing_id=listing.id)
+    db.commit()
+    return offer_out(db, offer)
+
+
+@router.get("/offers")
+def list_offers(role: str = "buyer", listing_id: int | None = None, user: User = Depends(current_user),
+                db: Session = Depends(get_db)):
+    column = Offer.seller_id if role == "seller" else Offer.buyer_id
+    stmt = select(Offer).where(column == user.id).order_by(Offer.id.desc()).limit(100)
+    if listing_id is not None:
+        stmt = stmt.where(Offer.listing_id == listing_id)
+    rows = db.scalars(stmt).all()
+    items = [offer_out(db, o) for o in rows]
+    waiting = sum(1 for o in rows if state(o) == ("pending" if role == "seller" else "countered"))
+    return {"items": items, "waiting": waiting}
+
+
+def own_offer(db: Session, offer_id: int, user: User) -> Offer:
+    offer = db.get(Offer, offer_id)
+    if offer is None or user.id not in (offer.buyer_id, offer.seller_id):
+        raise ApiError(404, "not_found")
+    return offer
+
+
+def answer(offer: Offer, user: User) -> None:
+    """Only the side whose turn it is may answer: the seller a fresh offer, the buyer the seller's price."""
+    turn = {"pending": offer.seller_id, "countered": offer.buyer_id}.get(state(offer))
+    if turn != user.id:
+        raise ApiError(409, "invalid_status")
+
+
+def tell_other(db: Session, offer: Offer, user: User, kk: str, ru: str) -> None:
+    listing = db.get(Listing, offer.listing_id)
+    other = offer.buyer_id if user.id == offer.seller_id else offer.seller_id
+    kind = "offer" if other == offer.seller_id else "offer_reply"  # the app opens the seller's inbox for "offer"
+    services.notify(db, other, kind, f"«{listing.title}»: {kk}", f"«{listing.title}»: {ru}", listing_id=listing.id)
+
+
+@router.post("/offers/{offer_id}/accept")
+def accept_offer(offer_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    offer = own_offer(db, offer_id, user)
+    answer(offer, user)
+    offer.status, offer.expires_at = "accepted", now_utc() + BUY_WITHIN
+    amount = promo.format_tenge(price(offer))
+    if user.id == offer.seller_id:
+        tell_other(db, offer, user, f"сатушы {amount} бағаны қабылдады. Тәулік ішінде рәсімдеңіз.",
+                   f"продавец принял цену {amount}. Оформите заказ в течение суток.")
+    else:
+        tell_other(db, offer, user, f"сатып алушы {amount} бағаңызға келісті.",
+                   f"покупатель согласился на вашу цену {amount}.")
+    db.commit()
+    return offer_out(db, offer)
+
+
+@router.post("/offers/{offer_id}/decline")
+def decline_offer(offer_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    offer = own_offer(db, offer_id, user)
+    answer(offer, user)
+    offer.status = "declined"
+    tell_other(db, offer, user, "ұсыныс қабылданбады.", "предложение отклонено.")
+    db.commit()
+    return offer_out(db, offer)
+
+
+@router.post("/offers/{offer_id}/counter")
+def counter_offer(offer_id: int, body: CounterIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    offer = own_offer(db, offer_id, user)
+    if user.id != offer.seller_id:
+        raise ApiError(409, "invalid_status")
+    answer(offer, user)
+    listing = db.get(Listing, offer.listing_id)
+    whole_tenge(body.amount_tiyn)
+    if not offer.amount_tiyn < body.amount_tiyn < listing.price_tiyn:
+        raise ApiError(422, "counter_out_of_range")
+    offer.status, offer.counter_tiyn, offer.expires_at = "countered", body.amount_tiyn, now_utc() + ANSWER_WITHIN
+    amount = promo.format_tenge(body.amount_tiyn)
+    tell_other(db, offer, user, f"сатушы {amount} баға ұсынды.", f"продавец предлагает {amount}.")
+    db.commit()
+    return offer_out(db, offer)
+
+
+@router.post("/offers/{offer_id}/withdraw")
+def withdraw_offer(offer_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    offer = own_offer(db, offer_id, user)
+    if user.id != offer.buyer_id or state(offer) not in OPEN:
+        raise ApiError(409, "invalid_status")
+    offer.status = "withdrawn"
+    db.commit()
+    return offer_out(db, offer)
+
+
+def offer_for_order(db: Session, offer_id: int, user: User, listing: Listing, size_id: int) -> Offer:
+    """The accepted offer an order is placed under; anything else about it is a client error."""
+    offer = db.get(Offer, offer_id)
+    if (offer is None or offer.buyer_id != user.id or offer.listing_id != listing.id
+            or offer.size_id != size_id):
+        raise ApiError(404, "not_found")
+    if state(offer) != "accepted":
+        raise ApiError(409, "offer_not_active")
+    return offer

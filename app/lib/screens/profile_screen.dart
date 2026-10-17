@@ -5,6 +5,7 @@ import '../widgets/common.dart';
 import 'analytics_screen.dart';
 import 'earnings_screen.dart';
 import 'my_listings_screen.dart';
+import 'offers_screen.dart';
 import 'shop_screen.dart';
 import '../i18n.dart';
 
@@ -54,6 +55,15 @@ class ProfileScreen extends StatelessWidget {
                   onTap: () =>
                       Navigator.of(context).push(MaterialPageRoute(builder: (_) => ShopScreen(sellerId: me.id))),
                 ),
+              ListTile(
+                key: const Key('offers'),
+                leading: const Icon(Icons.local_offer_outlined),
+                title: Text(tr('Баға ұсыныстары')),
+                subtitle: Text(me.isSeller ? tr('Сатып алушылардың ұсыныстарына жауап беру') : tr('Сіздің ұсыныстарыңыз')),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.of(context)
+                    .push(MaterialPageRoute(builder: (_) => OffersScreen(seller: me.isSeller))),
+              ),
               if (me.isSeller)
                 ListTile(
                   leading: const Icon(Icons.insights_outlined),

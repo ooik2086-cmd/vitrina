@@ -261,6 +261,23 @@ class Review(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class Offer(Base):
+    """A buyer's price offer on one size of a listing. The seller accepts, declines or names their own price;
+    an accepted offer lets that buyer order at that price for a limited time."""
+    __tablename__ = "offers"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    listing_id: Mapped[int] = mapped_column(ForeignKey("listings.id"), index=True)
+    size_id: Mapped[int] = mapped_column(ForeignKey("listing_sizes.id"))
+    buyer_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    seller_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    amount_tiyn: Mapped[int] = mapped_column(BigInteger)          # what the buyer offered
+    counter_tiyn: Mapped[int | None] = mapped_column(BigInteger)  # the seller's price, when they countered
+    status: Mapped[str] = mapped_column(String(12), default="pending")  # pending|countered|accepted|declined|withdrawn|ordered
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    order_id: Mapped[int | None] = mapped_column(ForeignKey("orders.id"))
+
+
 class Notification(Base):
     __tablename__ = "notifications"
     id: Mapped[int] = mapped_column(primary_key=True)

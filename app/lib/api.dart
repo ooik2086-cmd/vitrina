@@ -66,6 +66,35 @@ class Promo {
   final String? url;
 }
 
+/// A buyer's price offer on one size; `priceTiyn` is what they pay once it is accepted.
+class Offer {
+  Offer.fromJson(Map<String, dynamic> j)
+      : id = j['id'] as int,
+        listingId = j['listing_id'] as int,
+        listingTitle = j['listing_title'] as String,
+        listingCover = j['listing_cover'] as String?,
+        listPriceTiyn = j['list_price_tiyn'] as int,
+        sizeId = j['size_id'] as int,
+        sizeLabel = j['size_label'] as String,
+        amountTiyn = j['amount_tiyn'] as int,
+        counterTiyn = j['counter_tiyn'] as int?,
+        priceTiyn = j['price_tiyn'] as int,
+        status = j['status'] as String,
+        expiresAt = DateTime.parse(j['expires_at'] as String);
+  final int id;
+  final int listingId;
+  final String listingTitle;
+  final String? listingCover;
+  final int listPriceTiyn;
+  final int sizeId;
+  final String sizeLabel;
+  final int amountTiyn;
+  final int? counterTiyn;
+  final int priceTiyn;
+  final String status; // pending | countered | accepted | declined | withdrawn | ordered | expired
+  final DateTime expiresAt;
+}
+
 /// Why the automatic publish checks held a listing back, and what staff wrote when sending it back.
 class Moderation {
   Moderation.fromJson(Map<String, dynamic> j)
@@ -551,10 +580,27 @@ class Api {
 
   // orders
   /// [idempotencyKey] must stay the same when the same tap is retried, so a lost response never creates two orders.
-  Future<OrderInfo> createOrder(int listingId, int sizeId, String idempotencyKey) async =>
+  Future<OrderInfo> createOrder(int listingId, int sizeId, String idempotencyKey, {int? offerId}) async =>
       OrderInfo.fromJson(await _send('POST', '/orders',
-          body: {'listing_id': listingId, 'size_id': sizeId},
+          body: {'listing_id': listingId, 'size_id': sizeId, if (offerId != null) 'offer_id': offerId},
           headers: {'Idempotency-Key': idempotencyKey}) as Map<String, dynamic>);
+
+  Future<Offer> makeOffer(int listingId, int sizeId, int amountTiyn) async => Offer.fromJson(
+      await _send('POST', '/listings/$listingId/offers', body: {'size_id': sizeId, 'amount_tiyn': amountTiyn})
+          as Map<String, dynamic>);
+
+  Future<List<Offer>> offers({String role = 'buyer', int? listingId}) async {
+    final r = await _send('GET', '/offers',
+        query: {'role': role, if (listingId != null) 'listing_id': '$listingId'}) as Map;
+    return [for (final j in r['items'] as List) Offer.fromJson(j as Map<String, dynamic>)];
+  }
+
+  /// accept | decline | withdraw
+  Future<Offer> answerOffer(int id, String action) async =>
+      Offer.fromJson(await _send('POST', '/offers/$id/$action') as Map<String, dynamic>);
+
+  Future<Offer> counterOffer(int id, int amountTiyn) async => Offer.fromJson(
+      await _send('POST', '/offers/$id/counter', body: {'amount_tiyn': amountTiyn}) as Map<String, dynamic>);
 
   Future<List<OrderInfo>> orders({String role = 'buyer'}) async {
     final r = await _send('GET', '/orders', query: {'role': role}) as Map;

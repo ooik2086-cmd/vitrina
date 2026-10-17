@@ -19,6 +19,7 @@ import 'package:vitrina/screens/image_search_screen.dart';
 import 'package:vitrina/screens/listing_editor_screen.dart';
 import 'package:vitrina/screens/listing_screen.dart';
 import 'package:vitrina/screens/manage_listing_screen.dart';
+import 'package:vitrina/screens/offers_screen.dart';
 import 'package:vitrina/screens/shop_screen.dart';
 import 'package:vitrina/screens/spin_capture_screen.dart';
 import 'package:vitrina/ru.dart';
@@ -50,6 +51,24 @@ Map<String, dynamic> listingJson({List<Map<String, dynamic>>? media}) => {
       'media': media ?? [],
       'seller': {'id': 3, 'shop_name': 'Qadam Store', 'city': 'Алматы'},
     };
+
+Map<String, dynamic> offerJson({String status = 'pending', int amount = 4000000, int? counter}) => {
+      'id': 11,
+      'listing_id': 7,
+      'listing_title': 'Nike Air Force 1',
+      'listing_cover': null,
+      'list_price_tiyn': 4500000,
+      'size_id': 1,
+      'size_label': '42',
+      'amount_tiyn': amount,
+      'counter_tiyn': counter,
+      'price_tiyn': counter ?? amount,
+      'status': status,
+      'expires_at': '2026-10-18T10:00:00+00:00',
+    };
+
+http.Response jsonResponse(Object body, [int status = 200]) =>
+    http.Response(jsonEncode(body), status, headers: {'content-type': 'application/json; charset=utf-8'});
 
 void main() {
   test('every Kazakh phrase passed to tr() has a Russian translation', () {
@@ -255,6 +274,108 @@ void main() {
     await tester.tap(find.text('42'));
     await tester.pump();
     expect(find.text('Тапсырыс беру'), findsOneWidget);
+  });
+
+  testWidgets('buyer offers a price from the product page and sees it waiting', (tester) async {
+    Map<String, dynamic>? sent;
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async {
+          if (req.url.path == '/api/v1/offers') return jsonResponse({'items': [], 'waiting': 0});
+          if (req.url.path == '/api/v1/listings/7/offers') {
+            sent = jsonDecode(req.body) as Map<String, dynamic>;
+            return jsonResponse(offerJson(amount: sent!['amount_tiyn'] as int), 201);
+          }
+          if (req.url.path.endsWith('/similar')) return jsonResponse({'items': []});
+          return jsonResponse(listingJson());
+        }))
+      ..token = 'tok';
+    tester.view.physicalSize = const Size(400, 1800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+        SessionScope(session: Session(api), child: const MaterialApp(home: ListingScreen(listingId: 7))));
+    await tester.pumpAndSettle();
+    expect(find.text('Баға ұсыну үшін өлшемді таңдаңыз'), findsOneWidget);
+    await tester.tap(find.text('42'));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('make-offer')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('offer-amount')), '20000');
+    await tester.tap(find.byKey(const Key('offer-send')));
+    await tester.pump();
+    expect(find.textContaining('Кемінде'), findsOneWidget); // under half the price never leaves the phone
+    expect(sent, isNull);
+    await tester.tap(find.byKey(const Key('offer-10')));
+    await tester.tap(find.byKey(const Key('offer-send')));
+    await tester.pumpAndSettle();
+    expect(sent, {'size_id': 1, 'amount_tiyn': 4050000});
+    expect(find.byKey(const Key('offer-card')), findsOneWidget);
+    expect(find.textContaining('Сіздің ұсынысыңыз'), findsOneWidget);
+    expect(find.byKey(const Key('make-offer')), findsNothing);
+  });
+
+  testWidgets('an accepted offer orders at the agreed price', (tester) async {
+    Map<String, dynamic>? ordered;
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async {
+          if (req.url.path == '/api/v1/offers') {
+            return jsonResponse({'items': [offerJson(status: 'accepted')], 'waiting': 0});
+          }
+          if (req.url.path == '/api/v1/orders') {
+            ordered = jsonDecode(req.body) as Map<String, dynamic>;
+            return jsonResponse({'code': 'offer_not_active', 'message_kk': 'Мерзімі өтті', 'message_ru': 'Истёк'}, 409);
+          }
+          if (req.url.path.endsWith('/similar')) return jsonResponse({'items': []});
+          return jsonResponse(listingJson());
+        }))
+      ..token = 'tok';
+    tester.view.physicalSize = const Size(400, 1800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+        SessionScope(session: Session(api), child: const MaterialApp(home: ListingScreen(listingId: 7))));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('бағасы қабылданды'), findsOneWidget);
+    await tester.tap(find.text('42'));
+    await tester.pump();
+    expect(tester.widget<Text>(find.byKey(const Key('total'))).data, formatTenge(4000000 + 150000));
+    await tester.tap(find.text('Келісілген бағамен алу'));
+    await tester.pumpAndSettle();
+    expect(ordered, {'listing_id': 7, 'size_id': 1, 'offer_id': 11});
+  });
+
+  testWidgets('seller answers an offer with their own price', (tester) async {
+    final calls = <String>[];
+    var status = 'pending';
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async {
+          calls.add('${req.method} ${req.url.path}${req.body.isEmpty ? '' : ' ${req.body}'}');
+          if (req.method == 'POST') {
+            status = 'countered';
+            return jsonResponse(offerJson(status: status, counter: 4300000));
+          }
+          expect(req.url.queryParameters['role'], 'seller');
+          return jsonResponse({
+            'items': [offerJson(status: status, counter: status == 'countered' ? 4300000 : null)],
+            'waiting': 1
+          });
+        }))
+      ..token = 'tok';
+    await tester.pumpWidget(SessionScope(session: Session(api), child: const MaterialApp(home: OffersScreen())));
+    await tester.pumpAndSettle();
+    expect(find.text('−11%'), findsOneWidget);
+    expect(find.text('Жауап күтуде'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('counter-11')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('counter-amount')), '43000');
+    await tester.tap(find.byKey(const Key('counter-send')));
+    await tester.pumpAndSettle();
+    expect(calls, contains('POST /api/v1/offers/11/counter {"amount_tiyn":4300000}'));
+    expect(find.text('Сатушы баға ұсынды'), findsOneWidget);
+    expect(find.byKey(const Key('accept-11')), findsNothing); // now it is the buyer's turn
   });
 
   test('photo upload is multipart with the token and returns the stored url', () async {

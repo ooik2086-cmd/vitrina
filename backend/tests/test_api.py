@@ -14,7 +14,7 @@ from sqlalchemy import create_engine
 from vitrina_api import promo
 from vitrina_api.app import create_app
 from vitrina_api.config import Settings
-from vitrina_api.models import Base, User
+from vitrina_api.models import Base, Offer, User
 from vitrina_api.services import balance, run_auto_complete
 from vitrina_core.money import PLATFORM_FEE, buyer_refund, escrow, seller_payable
 from vitrina_core.webhooks import sign
@@ -699,6 +699,75 @@ class ModerationPhotoTests(ApiTestCase):
         self.assertEqual(stolen["moderation"]["flags"], ["reused_photo"])
         # Reusing your own photos is fine.
         self.assertEqual(self.listing(self.seller, (1, 12, 13, 14))["status"], "published")
+
+
+class OfferTests(ApiTestCase):
+    def get(self, path, token):
+        return self.c.get(f"/api/v1{path}", headers=self.h(token))
+
+    def offer(self, listing, amount, token=None):
+        return self.post(f"/listings/{listing['id']}/offers", token or self.buyer,
+                         {"size_id": listing["sizes"][0]["id"], "amount_tiyn": amount})
+
+    def test_offer_bounds_and_daily_limit(self):
+        listing = self.publish()  # 45 000 ₸
+        self.assertEqual(self.offer(listing, 4_500_000).json()["code"], "offer_not_lower")
+        self.assertEqual(self.offer(listing, 2_000_000).json()["code"], "offer_too_low")
+        self.assertEqual(self.offer(listing, 4_000_050).json()["code"], "validation")
+        self.assertEqual(self.offer(listing, 4_000_000, self.seller).json()["code"], "own_listing")
+        first = self.offer(listing, 3_800_000)
+        self.assertEqual(first.status_code, 201, first.text)
+        second = self.offer(listing, 3_900_000).json()
+        mine = self.get("/offers", self.buyer).json()["items"]
+        self.assertEqual([(o["id"], o["status"]) for o in mine],
+                         [(second["id"], "pending"), (first.json()["id"], "withdrawn")])
+        self.offer(listing, 4_000_000)
+        self.assertEqual(self.offer(listing, 4_100_000).json()["code"], "offer_limit")
+
+    def test_accepted_offer_orders_at_the_offer_price_once(self):
+        listing = self.publish()
+        offer = self.offer(listing, 4_000_000).json()
+        seller_view = self.get("/offers?role=seller", self.seller).json()
+        self.assertEqual((seller_view["waiting"], seller_view["items"][0]["size_label"]), (1, "EU 42"))
+        self.assertEqual(self.post(f"/offers/{offer['id']}/accept", self.buyer).status_code, 409)  # not their turn
+        accepted = self.post(f"/offers/{offer['id']}/accept", self.seller).json()
+        self.assertEqual((accepted["status"], accepted["price_tiyn"]), ("accepted", 4_000_000))
+        note = self.get("/notifications", self.buyer).json()["items"][0]
+        self.assertEqual((note["kind"], note["listing_id"]), ("offer_reply", listing["id"]))
+        self.assertIn("40 000 ₸", note["text"])
+        body = {"listing_id": listing["id"], "size_id": listing["sizes"][0]["id"], "offer_id": offer["id"]}
+        stranger = self.login("+77010000005")
+        self.assertEqual(self.post("/orders", stranger, body, **{"Idempotency-Key": "s"}).status_code, 404)
+        order = self.post("/orders", self.buyer, body, **{"Idempotency-Key": "o1"}).json()
+        self.assertEqual(order["item_price_tiyn"], 4_000_000)
+        self.assertEqual(self.get("/offers", self.buyer).json()["items"][0]["status"], "ordered")
+
+    def test_counter_offer_and_expiry(self):
+        listing = self.publish()
+        offer = self.offer(listing, 3_000_000).json()
+        self.assertEqual(self.post(f"/offers/{offer['id']}/counter", self.seller,
+                                   {"amount_tiyn": 4_600_000}).json()["code"], "counter_out_of_range")
+        self.assertEqual(self.post(f"/offers/{offer['id']}/counter", self.buyer,
+                                   {"amount_tiyn": 4_000_000}).status_code, 409)
+        countered = self.post(f"/offers/{offer['id']}/counter", self.seller, {"amount_tiyn": 4_000_000}).json()
+        self.assertEqual((countered["status"], countered["price_tiyn"]), ("countered", 4_000_000))
+        self.assertEqual(self.post(f"/offers/{offer['id']}/accept", self.seller).status_code, 409)
+        self.assertEqual(self.post(f"/offers/{offer['id']}/accept", self.buyer).json()["status"], "accepted")
+        with self.db() as db:
+            row = db.get(Offer, offer["id"])
+            row.expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+            db.commit()
+        self.assertEqual(self.get("/offers", self.buyer).json()["items"][0]["status"], "expired")
+        body = {"listing_id": listing["id"], "size_id": listing["sizes"][0]["id"], "offer_id": offer["id"]}
+        self.assertEqual(self.post("/orders", self.buyer, body, **{"Idempotency-Key": "late"}).json()["code"],
+                         "offer_not_active")
+
+    def test_declined_offer_tells_the_buyer(self):
+        listing = self.publish()
+        offer = self.offer(listing, 3_500_000).json()
+        self.assertEqual(self.post(f"/offers/{offer['id']}/decline", self.seller).json()["status"], "declined")
+        self.assertIn("қабылданбады", self.get("/notifications", self.buyer).json()["items"][0]["text"])
+        self.assertEqual(self.post(f"/offers/{offer['id']}/withdraw", self.buyer).status_code, 409)
 
 
 class AdminTests(ApiTestCase):

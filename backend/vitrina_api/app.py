@@ -31,7 +31,7 @@ from vitrina_core.orders import Actor, OrderStatus as S
 from vitrina_core.webhooks import WebhookRejected, verify
 
 from . import services
-from . import cutout, moderation, promo, visual
+from . import cutout, moderation, offers, promo, visual
 from .config import Settings
 from .deps import current_user, get_db, get_settings, get_storage, now_utc, optional_user, sha256, staff_user
 from .errors import ApiError, api_error_handler
@@ -114,6 +114,7 @@ class ListingPatch(BaseModel):
 class OrderIn(BaseModel):
     listing_id: int
     size_id: int
+    offer_id: int | None = None  # an accepted price offer for this listing and size
 
 
 class ShipIn(BaseModel):
@@ -896,6 +897,7 @@ def create_order(body: OrderIn, user: User = Depends(current_user), db: Session 
         raise ApiError(404, "not_found")
     if listing.seller_id == user.id:
         raise ApiError(409, "own_listing")
+    offer = offers.offer_for_order(db, body.offer_id, user, listing, body.size_id) if body.offer_id else None
     size = db.scalar(select(ListingSize).where(ListingSize.id == body.size_id,
                                                ListingSize.listing_id == listing.id).with_for_update())
     if size is None or size.quantity <= 0:
@@ -904,10 +906,14 @@ def create_order(body: OrderIn, user: User = Depends(current_user), db: Session 
     if not any(s.quantity > 0 for s in listing.sizes):
         listing.status = "sold"
     order = Order(buyer_id=user.id, seller_id=listing.seller_id, listing_id=listing.id, size_id=size.id,
-                  status=S.CREATED.value, item_price_tiyn=listing.price_tiyn,
+                  status=S.CREATED.value,
+                  # The listing may have got cheaper than the offer since; the buyer always pays the lower.
+                  item_price_tiyn=min(listing.price_tiyn, offers.price(offer)) if offer else listing.price_tiyn,
                   delivery_price_tiyn=listing.delivery_price_tiyn, commission_version=cfg.commission.version)
     db.add(order)
     db.flush()
+    if offer:
+        offer.status, offer.order_id = "ordered", order.id
     db.add(IdempotencyRecord(user_id=user.id, scope="create_order", key=idempotency_key, order_id=order.id))
     db.commit()
     return order_out(order)
@@ -1283,6 +1289,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(hooks)
     app.include_router(social_router)
     app.include_router(share_router)
+    app.include_router(offers.router)
     # Development only: serve uploaded photos from disk. Production serves them from the bucket/CDN.
     app.mount("/media", StaticFiles(directory=settings.media_dir), name="media")
     # Support console: a static page that talks to the same staff-only API; the page itself holds no data.
