@@ -701,7 +701,8 @@ class Conversation {
         otherName = j['other_name'] as String,
         lastMessage =
             j['last_message'] == null ? null : ChatMessage.fromJson(j['last_message'] as Map<String, dynamic>),
-        unread = j['unread'] as int;
+        unread = j['unread'] as int,
+        sellerAwayUntil = j['seller_away_until'] == null ? null : DateTime.parse(j['seller_away_until'] as String);
   final int id;
   final int listingId;
   final String listingTitle;
@@ -711,6 +712,9 @@ class Conversation {
   final String otherName;
   final ChatMessage? lastMessage;
   final int unread;
+
+  /// The seller's last holiday day while it lasts.
+  final DateTime? sellerAwayUntil;
 }
 
 /// How buyers said a model's size felt, from their reviews.

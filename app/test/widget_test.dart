@@ -1756,6 +1756,31 @@ void main() {
     expect(dateRange(DateTime(2026, 10, 20), DateTime(2026, 10, 22)), '20–22 қаз');
   });
 
+  testWidgets('a buyer sees in the chat that the seller is away', (tester) async {
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async => jsonResponse({
+              'conversation': {
+                'id': 9,
+                'listing_id': 7,
+                'listing_title': 'Кроссовка',
+                'listing_cover': null,
+                'price_tiyn': 2490000,
+                'role': 'buyer',
+                'other_name': 'Qadam Store',
+                'last_message': null,
+                'unread': 0,
+                'seller_away_until': '2026-10-25',
+              },
+              'items': [],
+            })));
+    await tester.pumpWidget(SessionScope(
+        session: Session(api),
+        child: const MaterialApp(home: ChatScreen(conversationId: 9, pollEvery: Duration(hours: 1)))));
+    await tester.pumpAndSettle();
+    expect(find.text('Сатушы 25.10 дейін демалыста, жауабы кешігуі мүмкін.'), findsOneWidget);
+  });
+
   testWidgets('typing in search suggests models on sale, and a picked search is remembered', (tester) async {
     SharedPreferences.setMockInitialValues({});
     await restoreRecentSearches();

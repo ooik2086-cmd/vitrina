@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import re
 import statistics
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Literal
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile
@@ -85,7 +85,16 @@ def conversation_out(db: Session, conv: Conversation, user: User) -> dict:
         # Names only, never phone numbers.
         "other_name": (other.shop_name if me_buyer else other.display_name) or ("Сатушы" if me_buyer else "Сатып алушы"),
         "last_message": message_out(last) if last else None, "unread": int(unread or 0),
+        "seller_away_until": seller_away(db.get(User, conv.seller_id)),
     }
+
+
+def seller_away(seller: User | None) -> str | None:
+    """The last day of the seller's holiday while it lasts, so a buyer knows why an answer may be slow."""
+    today = now_utc().astimezone(timezone(timedelta(hours=5))).date()
+    if seller is None or seller.away_until is None or seller.away_until < today:
+        return None
+    return seller.away_until.isoformat()
 
 
 @router.post("/conversations", status_code=201)

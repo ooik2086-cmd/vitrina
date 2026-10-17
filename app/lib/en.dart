@@ -767,4 +767,5 @@ const en = <String, String>{
   'Әдетте төлемнен кейін бір күнде жібереді': 'Usually ships within a day of payment',
   'Әдетте төлемнен кейін екі күнде жібереді': 'Usually ships within two days of payment',
   'Жіберуі екі күннен ұзаққа созылады': 'Shipping takes more than two days',
+  'Сатушы {0} дейін демалыста, жауабы кешігуі мүмкін.': "The seller is away until {0}, so the answer may take longer.",
 };

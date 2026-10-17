@@ -1206,6 +1206,15 @@ class AwayTests(ApiTestCase):
     def put(self, path, token, body):
         return self.c.put(f"/api/v1{path}", json=body, headers=self.h(token))
 
+    def test_buyer_sees_in_the_chat_that_the_seller_is_away(self):
+        listing = self.publish()
+        conv = self.post("/conversations", self.buyer, {"listing_id": listing["id"]}).json()
+        self.assertIsNone(conv["seller_away_until"])
+        back = (date.today() + timedelta(days=10)).isoformat()
+        self.assertEqual(self.put("/me/away", self.seller, {"until": back}).status_code, 200)
+        items = self.c.get("/api/v1/conversations", headers=self.h(self.buyer)).json()["items"]
+        self.assertEqual(items[0]["seller_away_until"], back)
+
     def test_holiday_blocks_orders_and_offers_until_the_seller_is_back(self):
         listing = self.publish()
         today = datetime.now(timezone(timedelta(hours=5))).date()

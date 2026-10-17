@@ -277,6 +277,22 @@ class _ChatScreenState extends State<ChatScreen> {
         ]),
       ),
       body: Column(children: [
+        if (conv?.role == 'buyer' && conv?.sellerAwayUntil != null)
+          Container(
+            key: const Key('chat-away'),
+            width: double.infinity,
+            color: Brand.studio,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            child: Row(children: [
+              const Icon(Icons.beach_access_outlined, size: 18, color: Brand.ink),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                    trf('Сатушы {0} дейін демалыста, жауабы кешігуі мүмкін.', [formatDay(conv!.sellerAwayUntil!)]),
+                    style: theme.textTheme.bodyMedium?.copyWith(color: Brand.ink)),
+              ),
+            ]),
+          ),
         Expanded(
           child: _messages.isEmpty
               ? Center(
