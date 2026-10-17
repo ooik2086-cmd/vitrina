@@ -1,4 +1,8 @@
-# Фонды алып тастау моделі
+# Модельдер
+
+Екі модель де міндетті емес: олар болмаса сервер жұмыс істей береді, тек тиісті мүмкіндік өшіп тұрады.
+
+## Фонды алып тастау
 
 Сервер тауар фотосының фонын мөлдір етеді, сонда 360° көрініс сатушы таңдаған витрина стилінде көрінеді.
 Модель тек мөлдірлікті өзгертеді: аяқкиімнің түсі мен пішіні түпнұсқа фотодағыдай қалады (`tests/test_cutout.py`).
@@ -19,4 +23,19 @@ VITRINA_CUTOUT_MODEL=models/isnet-general-use.onnx python3 -m unittest tests.tes
 ```
 
 Модель болмаса, сервер әдеттегідей жұмыс істейді, тек фотолар түпнұсқа күйінде көрсетіледі.
-Бар тауарларды өңдеу: `python3 scripts/cutout_backfill.py`.
+Бар тауарларды өңдеу (фон және іздеу векторы): `python3 scripts/cutout_backfill.py`.
+
+## Сурет арқылы іздеу
+
+Сатып алушы фото жібереді, сервер ұқсас тауарларды табады (`POST /api/v1/search/image`). Фото сақталмайды.
+Әр тауардың негізгі фотосынан (фоны алынған нұсқасынан) вектор жасалады: пішін мен текстура
+MobileNetV2-нің классификатор алдындағы қабатынан, түс аяқкиімнің өз пикселдерінің гистограммасынан.
+
+| Модель | Лицензия | Дереккөз | SHA-256 |
+| --- | --- | --- | --- |
+| `mobilenetv2-12.onnx` | Apache-2.0, [ONNX Model Zoo](https://github.com/onnx/models) | https://media.githubusercontent.com/media/onnx/models/main/validated/vision/classification/mobilenet/model/mobilenetv2-12.onnx | `c0c3f76d93fa3fd6580652a45618618a220fced18babf65774ed169de0432ad5` |
+
+```
+export VITRINA_SEARCH_MODEL=models/mobilenetv2-12.onnx
+VITRINA_SEARCH_MODEL=models/mobilenetv2-12.onnx python3 -m unittest tests.test_visual   # нақты модельмен тексеру
+```

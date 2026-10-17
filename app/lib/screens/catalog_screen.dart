@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../api.dart';
 import '../labels.dart';
@@ -6,6 +7,7 @@ import '../session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/filter_sheet.dart';
+import 'image_search_screen.dart';
 import 'notifications_screen.dart';
 
 class CatalogScreen extends StatefulWidget {
@@ -101,6 +103,34 @@ class _CatalogScreenState extends State<CatalogScreen> {
     _search();
   }
 
+  Future<void> _searchByPhoto() async {
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const ListTile(
+              title: Text('Фотомен іздеу'), subtitle: Text('Ұнаған аяқкиімнің суретін түсіріңіз немесе таңдаңыз')),
+          ListTile(
+            leading: const Icon(Icons.photo_camera_outlined),
+            title: const Text('Камера'),
+            onTap: () => Navigator.pop(context, ImageSource.camera),
+          ),
+          ListTile(
+            leading: const Icon(Icons.photo_library_outlined),
+            title: const Text('Галерея'),
+            onTap: () => Navigator.pop(context, ImageSource.gallery),
+          ),
+        ]),
+      ),
+    );
+    if (source == null) return;
+    final file = await ImagePicker().pickImage(source: source, maxWidth: 1600, imageQuality: 90);
+    if (file == null || !mounted) return;
+    final bytes = await file.readAsBytes();
+    if (!mounted) return;
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => ImageSearchScreen(bytes: bytes, filename: file.name)));
+  }
+
   Future<void> _pickFilter() async {
     final picked = await showModalBottomSheet<CatalogFilter>(
       context: context,
@@ -155,6 +185,11 @@ class _CatalogScreenState extends State<CatalogScreen> {
                       onSubmitted: (_) => _search(),
                       decoration: InputDecoration(
                         prefixIcon: const Icon(Icons.search),
+                        suffixIcon: IconButton(
+                          tooltip: 'Фотомен іздеу',
+                          icon: const Icon(Icons.photo_camera_outlined),
+                          onPressed: _searchByPhoto,
+                        ),
                         hintText: 'Найк, nike, ақ кроссовка…',
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(99)),
                         enabledBorder: OutlineInputBorder(

@@ -9,6 +9,7 @@ import 'package:vitrina/labels.dart';
 import 'package:vitrina/screens/catalog_screen.dart';
 import 'package:vitrina/screens/chat_screen.dart';
 import 'package:vitrina/screens/earnings_screen.dart';
+import 'package:vitrina/screens/image_search_screen.dart';
 import 'package:vitrina/screens/listing_editor_screen.dart';
 import 'package:vitrina/screens/listing_screen.dart';
 import 'package:vitrina/screens/manage_listing_screen.dart';
@@ -410,8 +411,8 @@ void main() {
           sent = jsonDecode(req.body) as Map<String, dynamic>;
           return http.Response('{"reported": true}', 201);
         }));
-    await tester.pumpWidget(SessionScope(
-        session: Session(api), child: const MaterialApp(home: Scaffold(body: ReportSheet(listingId: 7)))));
+    await tester.pumpWidget(
+        SessionScope(session: Session(api), child: const MaterialApp(home: Scaffold(body: ReportSheet(listingId: 7)))));
     FilledButton send() => tester.widget<FilledButton>(find.byKey(const Key('send-report')));
     expect(send().onPressed, isNull);
     await tester.tap(find.text('Басқа себеп'));
@@ -422,5 +423,30 @@ void main() {
     await tester.tap(find.byKey(const Key('send-report')));
     await tester.pumpAndSettle();
     expect(sent, {'reason': 'contact_details'});
+  });
+
+  testWidgets('search by photo uploads the picture and lists look-alikes in order', (tester) async {
+    String? path;
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient.streaming((req, body) async {
+          path = req.url.path;
+          return http.StreamedResponse(
+              Stream.value(utf8.encode(jsonEncode({
+                'items': [
+                  {...listingJson(), 'id': 1, 'title': 'Ең ұқсас', 'similarity': 0.91},
+                  {...listingJson(), 'id': 2, 'title': 'Екінші', 'similarity': 0.6},
+                ]
+              }))),
+              200,
+              headers: {'content-type': 'application/json; charset=utf-8'});
+        }));
+    final png = base64Decode(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==');
+    await tester.pumpWidget(SessionScope(
+        session: Session(api), child: MaterialApp(home: ImageSearchScreen(bytes: png, filename: 'q.png'))));
+    await tester.pumpAndSettle();
+    expect(path, '/api/v1/search/image');
+    expect(tester.getTopLeft(find.text('Ең ұқсас')).dx, lessThan(tester.getTopLeft(find.text('Екінші')).dx));
   });
 }

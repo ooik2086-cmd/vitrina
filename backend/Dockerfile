@@ -15,6 +15,15 @@ RUN if [ -n "$CUTOUT_MODEL" ]; then \
       && echo "$CUTOUT_SHA256  models/$CUTOUT_MODEL.onnx" | sha256sum -c -; fi
 ENV VITRINA_CUTOUT_MODEL=/app/models/${CUTOUT_MODEL}.onnx
 
+# Search-by-photo model: MobileNetV2 from the ONNX model zoo (Apache-2.0). Build with --build-arg SEARCH_MODEL= to skip.
+ARG SEARCH_MODEL=mobilenetv2-12
+ARG SEARCH_SHA256=c0c3f76d93fa3fd6580652a45618618a220fced18babf65774ed169de0432ad5
+RUN if [ -n "$SEARCH_MODEL" ]; then \
+      python -c "import urllib.request,sys; urllib.request.urlretrieve(sys.argv[1], sys.argv[2])" \
+        "https://media.githubusercontent.com/media/onnx/models/main/validated/vision/classification/mobilenet/model/$SEARCH_MODEL.onnx" "models/$SEARCH_MODEL.onnx" \
+      && echo "$SEARCH_SHA256  models/$SEARCH_MODEL.onnx" | sha256sum -c -; fi
+ENV VITRINA_SEARCH_MODEL=/app/models/${SEARCH_MODEL}.onnx
+
 # Run as an unprivileged user; uploaded photos live in a mounted volume.
 RUN useradd --create-home vitrina && mkdir -p /data/media && chown -R vitrina /data
 USER vitrina

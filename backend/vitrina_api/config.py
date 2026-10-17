@@ -34,4 +34,6 @@ class Settings:
     # Browser origins allowed to call the API (the Flutter web build during development). Empty = none.
     # Path to a background-removal model (backend/models/README.md). Empty = keep original photos only.
     cutout_model: str = field(default_factory=lambda: os.environ.get("VITRINA_CUTOUT_MODEL", ""))
+    # Search-by-photo model (backend/models/README.md). Empty = search by photo answers 503.
+    search_model: str = field(default_factory=lambda: os.environ.get("VITRINA_SEARCH_MODEL", ""))
     cors_origins: list[str] = field(default_factory=lambda: [o for o in os.environ.get("VITRINA_CORS_ORIGINS", "").split(",") if o])

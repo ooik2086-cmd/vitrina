@@ -346,6 +346,15 @@ class Api {
     return (data as Map)['url'] as String;
   }
 
+  /// Listings that look like the photo, most similar first. The photo is not stored on the server.
+  Future<List<Listing>> searchByImage(List<int> bytes, String filename) async {
+    final req = http.MultipartRequest('POST', Uri.parse('$base/search/image'))
+      ..headers['Accept'] = 'application/json'
+      ..files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
+    final data = _decode(await http.Response.fromStream(await _client.send(req))) as Map;
+    return [for (final j in data['items'] as List) Listing.fromJson(j as Map<String, dynamic>)];
+  }
+
   Future<Listing> createListing(Map<String, dynamic> body) async =>
       Listing.fromJson(await _send('POST', '/listings', body: body) as Map<String, dynamic>);
 

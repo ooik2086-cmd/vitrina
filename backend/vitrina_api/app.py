@@ -25,12 +25,12 @@ from vitrina_core.orders import Actor, OrderStatus as S
 from vitrina_core.webhooks import WebhookRejected, verify
 
 from . import services
-from . import cutout
+from . import cutout, visual
 from .config import Settings
 from .deps import current_user, get_db, get_settings, get_storage, now_utc, optional_user, sha256, staff_user
 from .errors import ApiError, api_error_handler
 from .social import router as social_router, seller_rating
-from .models import (AuditLog, ListingReport, AuthToken, Favorite, IdempotencyRecord, Listing, ListingSize, Media, Order, OrderEvent,
+from .models import (AuditLog, ListingEmbedding, ListingReport, AuthToken, Favorite, IdempotencyRecord, Listing, ListingSize, Media, Order, OrderEvent,
                      OtpCode, Review, User, WebhookEvent, make_session_factory)
 from .storage import MAX_UPLOAD_BYTES, LocalStorage, normalize_image
 
@@ -335,6 +335,34 @@ def cutout_listing(state, listing_id: int) -> int:
         return done
 
 
+def embed_listing(state, listing_id: int) -> bool:
+    """Background job: store the search-by-photo vector of a listing's main photo."""
+    embed, storage = state.embedder, state.storage
+    if embed is None:
+        return False
+    with state.sessions() as db:
+        listing = db.get(Listing, listing_id)
+        if listing is None:
+            return False
+        photos = sorted((m for m in listing.media if m.angle in ("front", "outer", "inner", "back")),
+                        key=lambda m: ("front", "outer", "inner", "back").index(m.angle))
+        photo = next((m for m in photos if storage.owns(m.processed_url or m.original_url)), None)
+        if photo is None:
+            return False
+        vector = embed(storage.read(photo.processed_url or photo.original_url))
+        row = db.get(ListingEmbedding, listing.id) or ListingEmbedding(listing_id=listing.id)
+        row.model, row.vector, row.updated_at = visual.MODEL_NAME, vector.tobytes(), now_utc()
+        db.merge(row)
+        db.commit()
+        return True
+
+
+def prepare_listing_media(state, listing_id: int) -> None:
+    # Cut-outs first, so the search vector is computed on the shoe without its backdrop.
+    cutout_listing(state, listing_id)
+    embed_listing(state, listing_id)
+
+
 @api.post("/listings", status_code=201)
 def create_listing(body: ListingIn, request: Request, background: BackgroundTasks,
                    user: User = Depends(current_user), db: Session = Depends(get_db),
@@ -357,7 +385,7 @@ def create_listing(body: ListingIn, request: Request, background: BackgroundTask
     )
     db.add(listing)
     db.commit()
-    background.add_task(cutout_listing, request.app.state, listing.id)
+    background.add_task(prepare_listing_media, request.app.state, listing.id)
     return listing_out(db, listing, owner=True)
 
 
@@ -497,6 +525,32 @@ def seller_profile(seller_id: int, db: Session = Depends(get_db)):
     return {"id": seller.id, "shop_name": seller.shop_name, "city": seller.city,
             "since": services.aware(seller.created_at).date().isoformat(),
             "completed_sales": int(sales or 0), "listings": int(live or 0), **seller_rating(db, seller.id)}
+
+
+@api.post("/search/image")
+async def search_by_image(request: Request, file: UploadFile = File(...), category: str | None = None,
+                          size_cm: str | None = None, limit: int = 20, db: Session = Depends(get_db)):
+    """Listings that look like the uploaded photo, most similar first. The photo is not stored."""
+    embed = request.app.state.embedder
+    if embed is None:
+        raise ApiError(503, "image_search_off")
+    data = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise ApiError(413, "file_too_large")
+    import numpy as np
+    query = embed(normalize_image(data))
+    stmt = (select(Listing, ListingEmbedding.vector).join(ListingEmbedding, ListingEmbedding.listing_id == Listing.id)
+            .where(Listing.status == "published", ListingEmbedding.model == visual.MODEL_NAME))
+    if category:
+        stmt = stmt.where(Listing.category == category)
+    if size_cm:
+        mm = cm_to_mm(size_cm)
+        stmt = stmt.where(Listing.id.in_(select(ListingSize.listing_id).where(
+            ListingSize.quantity > 0, ListingSize.insole_mm.between(mm - 5, mm + 5))))
+    # Brute force is fine at MVP scale; move to pgvector once the catalogue passes ~50k listings.
+    scored = sorted(((float(np.frombuffer(vec, np.float32) @ query), listing) for listing, vec in db.execute(stmt)),
+                    key=lambda t: -t[0])[:max(1, min(limit, 50))]
+    return {"items": [{**listing_out(db, listing), "similarity": round(score, 3)} for score, listing in scored]}
 
 
 @api.get("/listings/{listing_id}")
@@ -886,6 +940,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.sessions = make_session_factory(settings.database_url, create_schema=settings.auto_create_schema)
     app.state.storage = LocalStorage(settings.media_dir, settings.public_media_url)
     app.state.segmenter = cutout.load_segmenter(settings.cutout_model)
+    app.state.embedder = visual.load_embedder(settings.search_model)
     app.add_exception_handler(ApiError, api_error_handler)
 
     async def validation_handler(request: Request, exc: RequestValidationError):

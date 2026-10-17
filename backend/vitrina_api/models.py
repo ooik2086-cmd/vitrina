@@ -7,8 +7,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import (BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint,
-                        create_engine)
+from sqlalchemy import (BigInteger, Boolean, DateTime, ForeignKey, Integer, LargeBinary, String, Text,
+                        UniqueConstraint, create_engine)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 
 
@@ -181,6 +181,15 @@ class AuditLog(Base):
     target: Mapped[str] = mapped_column(String(80))
     reason: Mapped[str | None] = mapped_column(Text)
     at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ListingEmbedding(Base):
+    """Search-by-photo vector of a listing's main photo (see visual.py). Rebuilt when the model changes."""
+    __tablename__ = "listing_embeddings"
+    listing_id: Mapped[int] = mapped_column(ForeignKey("listings.id"), primary_key=True)
+    model: Mapped[str] = mapped_column(String(40))
+    vector: Mapped[bytes] = mapped_column(LargeBinary)  # float32, little-endian
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class ListingReport(Base):
