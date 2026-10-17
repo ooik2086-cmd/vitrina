@@ -124,11 +124,19 @@ class _ListingScreenState extends State<ListingScreen> {
             aspectRatio: 1,
             child: Hero(
               tag: 'listing-${l.id}',
-              child: Material(
-                color: Brand.studio,
-                child: hasSpin && !_showPhotos
-                    ? SpinViewer(frameUrls: [for (final f in frames) f.url])
-                    : PhotoGallery(urls: [for (final p in l.photos) p.url]),
+              // The 360° view uses cut-out frames over the seller's showcase style; the photo tab always shows
+              // the photos exactly as taken, so buyers can check the unedited originals.
+              child: DecoratedBox(
+                decoration: showcaseBackground(l.showcaseStyle),
+                child: Material(
+                  type: MaterialType.transparency,
+                  child: hasSpin && !_showPhotos
+                      ? SpinViewer(frameUrls: [for (final f in frames) f.url])
+                      : ColoredBox(
+                          color: Brand.studio,
+                          child: PhotoGallery(urls: [for (final p in l.photos) p.originalUrl]),
+                        ),
+                ),
               ),
             ),
           ),

@@ -11,7 +11,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter, Depends, FastAPI, File, Header, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, File, Header, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -25,6 +25,7 @@ from vitrina_core.orders import Actor, OrderStatus as S
 from vitrina_core.webhooks import WebhookRejected, verify
 
 from . import services
+from . import cutout
 from .config import Settings
 from .deps import current_user, get_db, get_settings, get_storage, now_utc, optional_user, sha256, staff_user
 from .errors import ApiError, api_error_handler
@@ -304,8 +305,29 @@ def my_earnings(user: User = Depends(current_user), db: Session = Depends(get_db
             "fees_tiyn": int(fees or 0), "items": items}
 
 
+# Labels and defect close-ups stay as taken: their surroundings are part of what they prove.
+CUTOUT_ANGLES = {"front", "outer", "inner", "back", "top", "sole", "frame"}
+
+
+def cutout_listing(state, listing_id: int) -> int:
+    """Background job: add a transparent-background version of each showcase photo of one listing."""
+    segment, storage = state.segmenter, state.storage
+    if segment is None:
+        return 0
+    with state.sessions() as db:
+        listing = db.get(Listing, listing_id)
+        if listing is None:
+            return 0
+        media = [m for m in listing.media if m.angle in CUTOUT_ANGLES and storage.owns(m.original_url)]
+        done = cutout.process_listing_media(
+            media, storage.read, lambda data: storage.put(data, owner_id=listing.seller_id, ext="webp"), segment)
+        db.commit()
+        return done
+
+
 @api.post("/listings", status_code=201)
-def create_listing(body: ListingIn, user: User = Depends(current_user), db: Session = Depends(get_db),
+def create_listing(body: ListingIn, request: Request, background: BackgroundTasks,
+                   user: User = Depends(current_user), db: Session = Depends(get_db),
                    cfg: Settings = Depends(get_settings), storage: LocalStorage = Depends(get_storage)):
     if not user.is_seller:
         raise ApiError(403, "seller_required")
@@ -325,6 +347,7 @@ def create_listing(body: ListingIn, user: User = Depends(current_user), db: Sess
     )
     db.add(listing)
     db.commit()
+    background.add_task(cutout_listing, request.app.state, listing.id)
     return listing_out(db, listing, owner=True)
 
 
@@ -791,6 +814,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
     app.state.sessions = make_session_factory(settings.database_url, create_schema=settings.auto_create_schema)
     app.state.storage = LocalStorage(settings.media_dir, settings.public_media_url)
+    app.state.segmenter = cutout.load_segmenter(settings.cutout_model)
     app.add_exception_handler(ApiError, api_error_handler)
 
     async def validation_handler(request: Request, exc: RequestValidationError):

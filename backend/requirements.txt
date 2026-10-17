@@ -6,3 +6,5 @@ python-multipart==0.0.20
 Pillow==12.3.0
 alembic==1.14.0
 psycopg[binary]==3.2.3
+onnxruntime==1.31.0
+numpy==2.5.3

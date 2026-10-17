@@ -51,8 +51,8 @@ class LocalStorage:
         self.root.mkdir(parents=True, exist_ok=True)
         self.public_base = public_base.rstrip("/")
 
-    def put(self, data: bytes, *, owner_id: int) -> str:
-        name = f"{owner_id}/{secrets.token_hex(16)}.jpg"
+    def put(self, data: bytes, *, owner_id: int, ext: str = "jpg") -> str:
+        name = f"{owner_id}/{secrets.token_hex(16)}.{ext}"
         path = self.root / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data)
@@ -60,3 +60,11 @@ class LocalStorage:
 
     def owns(self, url: str) -> bool:
         return url.startswith(self.public_base + "/")
+
+    def read(self, url: str) -> bytes:
+        if not self.owns(url):
+            raise ValueError("not stored here")
+        path = (self.root / url[len(self.public_base) + 1:]).resolve()
+        if self.root.resolve() not in path.parents:
+            raise ValueError("outside storage root")
+        return path.read_bytes()

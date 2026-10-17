@@ -32,4 +32,6 @@ class Settings:
     # Listings may only reference photos uploaded through /media, so sellers cannot embed tracking pixels or hotlinks.
     allow_external_media: bool = field(default_factory=lambda: os.environ.get("VITRINA_ALLOW_EXTERNAL_MEDIA", "0") == "1")
     # Browser origins allowed to call the API (the Flutter web build during development). Empty = none.
+    # Path to a background-removal model (backend/models/README.md). Empty = keep original photos only.
+    cutout_model: str = field(default_factory=lambda: os.environ.get("VITRINA_CUTOUT_MODEL", ""))
     cors_origins: list[str] = field(default_factory=lambda: [o for o in os.environ.get("VITRINA_CORS_ORIGINS", "").split(",") if o])
