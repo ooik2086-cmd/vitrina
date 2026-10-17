@@ -98,7 +98,7 @@ class _SellerReviewsScreenState extends State<SellerReviewsScreen> {
           }
           if (!snap.hasData) return const Center(child: CircularProgressIndicator());
           final items = snap.data!;
-          return ListView(padding: const EdgeInsets.all(20), children: [
+          return ListView(padding: contentPadding(context, const EdgeInsets.all(20)), children: [
             Row(children: [
               Text(rating?.toStringAsFixed(1) ?? '—', style: theme.textTheme.headlineMedium),
               const SizedBox(width: 12),

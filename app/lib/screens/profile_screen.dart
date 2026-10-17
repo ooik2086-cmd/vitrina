@@ -35,141 +35,147 @@ class ProfileScreen extends StatelessWidget {
       appBar: AppBar(title: Text(tr('Профиль'))),
       body: me == null
           ? const Center(child: CircularProgressIndicator())
-          : ListView(children: [
-              const TodoCard(),
-              ListTile(
-                leading: const Icon(Icons.person_outline),
-                title: Text(me.displayName ?? tr('Аты көрсетілмеген')),
-                subtitle: Text(me.phone),
-              ),
-              if (me.isSeller)
-                ListTile(
-                  leading: const Icon(Icons.store_outlined),
-                  title: Text(me.shopName ?? ''),
-                  subtitle: Text(trf('Сатушы · {0}', [me.city ?? ''])),
-                ),
-              if (me.isSeller)
-                ListTile(
-                  leading: const Icon(Icons.inventory_2_outlined),
-                  title: Text(tr('Менің тауарларым')),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MyListingsScreen())),
-                ),
-              if (me.isSeller)
-                ListTile(
-                  leading: const Icon(Icons.storefront_outlined),
-                  title: Text(tr('Дүкенім және пікірлер')),
-                  subtitle: Text(tr('Сатып алушылар көретін бет')),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () =>
-                      Navigator.of(context).push(MaterialPageRoute(builder: (_) => ShopScreen(sellerId: me.id))),
-                ),
-              if (me.isSeller)
-                ListTile(
-                  key: const Key('promo-codes'),
-                  leading: const Icon(Icons.confirmation_number_outlined),
-                  title: Text(tr('Промокодтар')),
-                  subtitle: Text(tr('Instagram мен WhatsApp-қа жеңілдік коды')),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PromoCodesScreen())),
-                ),
-              if (me.isSeller)
-                ListTile(
-                  key: const Key('shop-link'),
-                  leading: const Icon(Icons.ios_share_rounded),
-                  title: Text(tr('Дүкен сілтемесі')),
-                  subtitle: Text(tr('Instagram биосына немесе WhatsApp статусына')),
-                  onTap: () => shareShop(me.id, me.shopName),
-                ),
-              if (me.isSeller) const ShopAboutTile(),
-              if (me.isSeller) const AwayTile(),
-              ListTile(
-                key: const Key('offers'),
-                leading: const Icon(Icons.local_offer_outlined),
-                title: Text(tr('Баға ұсыныстары')),
-                subtitle:
-                    Text(me.isSeller ? tr('Сатып алушылардың ұсыныстарына жауап беру') : tr('Сіздің ұсыныстарыңыз')),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () =>
-                    Navigator.of(context).push(MaterialPageRoute(builder: (_) => OffersScreen(seller: me.isSeller))),
-              ),
-              ListTile(
-                key: const Key('following'),
-                leading: const Icon(Icons.storefront_outlined),
-                title: Text(tr('Жазылымдар')),
-                subtitle: Text(tr('Жаңа тауарын хабарлайтын дүкендер')),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const FollowingScreen())),
-              ),
-              if (me.isSeller)
-                ListTile(
-                  leading: const Icon(Icons.insights_outlined),
-                  title: Text(tr('Аналитика')),
-                  subtitle: Text(tr('Қаралым, тапсырыс, сатылым')),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AnalyticsScreen())),
-                ),
-              if (me.isSeller)
-                ListTile(
-                  leading: const Icon(Icons.account_balance_wallet_outlined),
-                  title: Text(tr('Табыс')),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const EarningsScreen())),
-                )
-              else
-                ListTile(
-                  leading: const Icon(Icons.add_business_outlined),
-                  title: Text(tr('Сатушы болу')),
-                  subtitle: Text(tr('Дүкен атауы мен қаланы көрсетіңіз')),
-                  onTap: () => _becomeSeller(context),
-                ),
-              const Divider(),
-              ListTile(
-                key: const Key('notification-settings'),
-                leading: const Icon(Icons.notifications_outlined),
-                title: Text(tr('Хабарлама баптаулары')),
-                subtitle: Text(tr('Қандай хабарлама келетінін таңдаңыз')),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () =>
-                    Navigator.of(context).push(MaterialPageRoute(builder: (_) => const NotificationSettingsScreen())),
-              ),
-              ListTile(
-                key: const Key('blocked'),
-                leading: const Icon(Icons.block),
-                title: Text(tr('Бұғатталғандар')),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const BlockedScreen())),
-              ),
-              ListTile(
-                key: const Key('help'),
-                leading: const Icon(Icons.help_outline_rounded),
-                title: Text(tr('Қалай жұмыс істейді')),
-                subtitle: Text(tr('Төлем, мерзімдер, қайтару, дау')),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const HelpScreen())),
-              ),
-              ListTile(
-                leading: const Icon(Icons.translate),
-                title: Text(tr('Тіл')),
-                trailing: const LanguageSwitch(),
-              ),
-              ListTile(
-                leading: const Icon(Icons.contrast_rounded),
-                title: Text(tr('Көрініс')),
-                trailing: const ThemeSwitch(),
-              ),
-              ListTile(
-                leading: const Icon(Icons.logout),
-                title: Text(tr('Шығу')),
-                onTap: session.signOut,
-              ),
-              ListTile(
-                key: const Key('delete-account'),
-                leading: Icon(Icons.delete_forever_outlined, color: Theme.of(context).colorScheme.error),
-                title: Text(tr('Аккаунтты жою'), style: TextStyle(color: Theme.of(context).colorScheme.error)),
-                onTap: () => _deleteAccount(context),
-              ),
-            ]),
+          : ListView(
+              padding: contentPadding(context, EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom)),
+              children: [
+                  const TodoCard(),
+                  ListTile(
+                    leading: const Icon(Icons.person_outline),
+                    title: Text(me.displayName ?? tr('Аты көрсетілмеген')),
+                    subtitle: Text(me.phone),
+                  ),
+                  if (me.isSeller)
+                    ListTile(
+                      leading: const Icon(Icons.store_outlined),
+                      title: Text(me.shopName ?? ''),
+                      subtitle: Text(trf('Сатушы · {0}', [me.city ?? ''])),
+                    ),
+                  if (me.isSeller)
+                    ListTile(
+                      leading: const Icon(Icons.inventory_2_outlined),
+                      title: Text(tr('Менің тауарларым')),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () =>
+                          Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MyListingsScreen())),
+                    ),
+                  if (me.isSeller)
+                    ListTile(
+                      leading: const Icon(Icons.storefront_outlined),
+                      title: Text(tr('Дүкенім және пікірлер')),
+                      subtitle: Text(tr('Сатып алушылар көретін бет')),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () =>
+                          Navigator.of(context).push(MaterialPageRoute(builder: (_) => ShopScreen(sellerId: me.id))),
+                    ),
+                  if (me.isSeller)
+                    ListTile(
+                      key: const Key('promo-codes'),
+                      leading: const Icon(Icons.confirmation_number_outlined),
+                      title: Text(tr('Промокодтар')),
+                      subtitle: Text(tr('Instagram мен WhatsApp-қа жеңілдік коды')),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () =>
+                          Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PromoCodesScreen())),
+                    ),
+                  if (me.isSeller)
+                    ListTile(
+                      key: const Key('shop-link'),
+                      leading: const Icon(Icons.ios_share_rounded),
+                      title: Text(tr('Дүкен сілтемесі')),
+                      subtitle: Text(tr('Instagram биосына немесе WhatsApp статусына')),
+                      onTap: () => shareShop(me.id, me.shopName),
+                    ),
+                  if (me.isSeller) const ShopAboutTile(),
+                  if (me.isSeller) const AwayTile(),
+                  ListTile(
+                    key: const Key('offers'),
+                    leading: const Icon(Icons.local_offer_outlined),
+                    title: Text(tr('Баға ұсыныстары')),
+                    subtitle: Text(
+                        me.isSeller ? tr('Сатып алушылардың ұсыныстарына жауап беру') : tr('Сіздің ұсыныстарыңыз')),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => Navigator.of(context)
+                        .push(MaterialPageRoute(builder: (_) => OffersScreen(seller: me.isSeller))),
+                  ),
+                  ListTile(
+                    key: const Key('following'),
+                    leading: const Icon(Icons.storefront_outlined),
+                    title: Text(tr('Жазылымдар')),
+                    subtitle: Text(tr('Жаңа тауарын хабарлайтын дүкендер')),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const FollowingScreen())),
+                  ),
+                  if (me.isSeller)
+                    ListTile(
+                      leading: const Icon(Icons.insights_outlined),
+                      title: Text(tr('Аналитика')),
+                      subtitle: Text(tr('Қаралым, тапсырыс, сатылым')),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () =>
+                          Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AnalyticsScreen())),
+                    ),
+                  if (me.isSeller)
+                    ListTile(
+                      leading: const Icon(Icons.account_balance_wallet_outlined),
+                      title: Text(tr('Табыс')),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () =>
+                          Navigator.of(context).push(MaterialPageRoute(builder: (_) => const EarningsScreen())),
+                    )
+                  else
+                    ListTile(
+                      leading: const Icon(Icons.add_business_outlined),
+                      title: Text(tr('Сатушы болу')),
+                      subtitle: Text(tr('Дүкен атауы мен қаланы көрсетіңіз')),
+                      onTap: () => _becomeSeller(context),
+                    ),
+                  const Divider(),
+                  ListTile(
+                    key: const Key('notification-settings'),
+                    leading: const Icon(Icons.notifications_outlined),
+                    title: Text(tr('Хабарлама баптаулары')),
+                    subtitle: Text(tr('Қандай хабарлама келетінін таңдаңыз')),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => Navigator.of(context)
+                        .push(MaterialPageRoute(builder: (_) => const NotificationSettingsScreen())),
+                  ),
+                  ListTile(
+                    key: const Key('blocked'),
+                    leading: const Icon(Icons.block),
+                    title: Text(tr('Бұғатталғандар')),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const BlockedScreen())),
+                  ),
+                  ListTile(
+                    key: const Key('help'),
+                    leading: const Icon(Icons.help_outline_rounded),
+                    title: Text(tr('Қалай жұмыс істейді')),
+                    subtitle: Text(tr('Төлем, мерзімдер, қайтару, дау')),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const HelpScreen())),
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.translate),
+                    title: Text(tr('Тіл')),
+                    trailing: const LanguageSwitch(),
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.contrast_rounded),
+                    title: Text(tr('Көрініс')),
+                    trailing: const ThemeSwitch(),
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.logout),
+                    title: Text(tr('Шығу')),
+                    onTap: session.signOut,
+                  ),
+                  ListTile(
+                    key: const Key('delete-account'),
+                    leading: Icon(Icons.delete_forever_outlined, color: Theme.of(context).colorScheme.error),
+                    title: Text(tr('Аккаунтты жою'), style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                    onTap: () => _deleteAccount(context),
+                  ),
+                ]),
     );
   }
 

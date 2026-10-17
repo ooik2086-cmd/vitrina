@@ -104,6 +104,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           final items = snap.data!;
           if (items.isEmpty) return Center(child: Text(tr('Хабарландыру жоқ.')));
           return ListView.separated(
+            padding: contentPadding(context, EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom)),
             itemCount: items.length,
             separatorBuilder: (_, __) => const Divider(indent: 72),
             itemBuilder: (context, i) {

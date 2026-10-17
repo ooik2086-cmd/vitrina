@@ -65,29 +65,31 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
           ? (_error != null
               ? ErrorRetry(error: _error, onRetry: _retry)
               : const Center(child: CircularProgressIndicator()))
-          : ListView(children: [
-              for (final e in optionalAlerts.entries)
-                if (on.containsKey(e.key))
-                  SwitchListTile(
-                    key: Key('alert-${e.key}'),
-                    title: Text(tr(e.value.$1)),
-                    subtitle: Text(tr(e.value.$2)),
-                    value: on[e.key]!,
-                    onChanged: (v) => _set(e.key, v),
-                  ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-                child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Icon(Icons.info_outline, size: 18, color: theme.colorScheme.onSurfaceVariant),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                        tr('Тапсырыс, төлем, чат және баға ұсынысы туралы хабарламалар әрқашан келеді: олар сіздің ақшаңыз бен тауарыңызға қатысты.'),
-                        style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+          : ListView(
+              padding: contentPadding(context, EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom)),
+              children: [
+                  for (final e in optionalAlerts.entries)
+                    if (on.containsKey(e.key))
+                      SwitchListTile(
+                        key: Key('alert-${e.key}'),
+                        title: Text(tr(e.value.$1)),
+                        subtitle: Text(tr(e.value.$2)),
+                        value: on[e.key]!,
+                        onChanged: (v) => _set(e.key, v),
+                      ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+                    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Icon(Icons.info_outline, size: 18, color: theme.colorScheme.onSurfaceVariant),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                            tr('Тапсырыс, төлем, чат және баға ұсынысы туралы хабарламалар әрқашан келеді: олар сіздің ақшаңыз бен тауарыңызға қатысты.'),
+                            style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+                      ),
+                    ]),
                   ),
                 ]),
-              ),
-            ]),
     );
   }
 }

@@ -21,6 +21,8 @@ class Settings:
     otp_ttl: timedelta = timedelta(minutes=5)
     otp_max_attempts: int = 5
     otp_per_phone_per_hour: int = 5
+    # A second code for the same phone waits this long: people tap "send again" before the first SMS arrives.
+    otp_resend_after: timedelta = timedelta(seconds=60)
     token_ttl: timedelta = timedelta(days=30)
     # Buyer confirmation window before auto-complete. Hypothesis: the real value needs legal review.
     confirm_window: timedelta = timedelta(days=5)

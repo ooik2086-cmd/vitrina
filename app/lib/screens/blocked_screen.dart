@@ -63,19 +63,21 @@ class _BlockedScreenState extends State<BlockedScreen> {
               ),
             );
           }
-          return ListView(children: [
-            for (final b in items)
-              ListTile(
-                leading: const Icon(Icons.block),
-                title: Text(b.name),
-                subtitle: Text(trf('{0} бастап', [formatDay(b.since)])),
-                trailing: TextButton(
-                  key: Key('unblock-${b.userId}'),
-                  onPressed: () => _unblock(b),
-                  child: Text(tr('Бұғаттан шығару')),
-                ),
-              ),
-          ]);
+          return ListView(
+              padding: contentPadding(context, EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom)),
+              children: [
+                for (final b in items)
+                  ListTile(
+                    leading: const Icon(Icons.block),
+                    title: Text(b.name),
+                    subtitle: Text(trf('{0} бастап', [formatDay(b.since)])),
+                    trailing: TextButton(
+                      key: Key('unblock-${b.userId}'),
+                      onPressed: () => _unblock(b),
+                      child: Text(tr('Бұғаттан шығару')),
+                    ),
+                  ),
+              ]);
         },
       ),
     );

@@ -92,7 +92,7 @@ class _PromoCodesScreenState extends State<PromoCodesScreen> {
             );
           }
           return ListView.separated(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
+            padding: contentPadding(context, const EdgeInsets.fromLTRB(16, 8, 16, 96)),
             itemCount: items.length,
             separatorBuilder: (_, __) => const SizedBox(height: 10),
             itemBuilder: (context, i) => _PromoCard(promo: items[i], onEnd: () => _end(items[i])),

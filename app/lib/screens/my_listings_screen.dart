@@ -107,7 +107,7 @@ class _MyListingsScreenState extends State<MyListingsScreen> {
           return Column(children: [
             if (all.length > 5)
               Padding(
-                padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+                padding: contentPadding(context, const EdgeInsets.fromLTRB(16, 4, 16, 0)),
                 child: TextField(
                   key: const Key('my-listings-search'),
                   controller: _query,
@@ -129,7 +129,7 @@ class _MyListingsScreenState extends State<MyListingsScreen> {
               height: 52,
               child: ListView(
                 scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+                padding: contentPadding(context, const EdgeInsets.fromLTRB(16, 8, 16, 4)),
                 children: [
                   for (final (code, name) in filters)
                     Padding(
@@ -150,7 +150,7 @@ class _MyListingsScreenState extends State<MyListingsScreen> {
                 child: items.isEmpty
                     ? ListView(children: [SizedBox(height: 80), Center(child: Text(tr('Сай тауар жоқ.')))])
                     : ListView.separated(
-                        padding: const EdgeInsets.only(bottom: 88),
+                        padding: contentPadding(context, const EdgeInsets.only(bottom: 88)),
                         itemCount: items.length,
                         separatorBuilder: (_, __) => const Divider(height: 1),
                         itemBuilder: (context, i) {

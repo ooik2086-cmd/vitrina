@@ -58,7 +58,7 @@ class _CompareScreenState extends State<CompareScreen> {
     ];
     return Scaffold(
       appBar: AppBar(title: Text(tr('Салыстыру'))),
-      body: ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 32), children: [
+      body: ListView(padding: contentPadding(context, const EdgeInsets.fromLTRB(16, 4, 16, 32)), children: [
         Text(trf('Таңдаулылардан {0} тауарға дейін таңдаңыз', [maxCompared]),
             style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
         const SizedBox(height: 8),

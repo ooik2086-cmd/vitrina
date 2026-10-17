@@ -100,123 +100,130 @@ class _ShopScreenState extends State<ShopScreen> {
             SliverToBoxAdapter(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Row(children: [
-                    CircleAvatar(
-                      radius: 30,
-                      backgroundColor: Theme.of(context).colorScheme.primary,
-                      foregroundColor: Theme.of(context).colorScheme.onPrimary,
-                      child: Text(shop.shopName.characters.first.toUpperCase(),
-                          style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w700)),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Text(shop.shopName, style: theme.textTheme.titleLarge),
-                        const SizedBox(height: 2),
-                        Text(
-                          [
-                            if (shop.city != null) shop.city!,
-                            trf('VITRINA-да {0} {1} бастап', [tr(_months[shop.since.month - 1]), shop.since.year]),
-                          ].join(' · '),
-                          style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                // The grid below widens on big screens; the shop's text and the follow button stay together.
+                child: Align(
+                  alignment: Alignment.topLeft,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: maxContentWidth),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Row(children: [
+                        CircleAvatar(
+                          radius: 30,
+                          backgroundColor: Theme.of(context).colorScheme.primary,
+                          foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                          child: Text(shop.shopName.characters.first.toUpperCase(),
+                              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w700)),
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                            Text(shop.shopName, style: theme.textTheme.titleLarge),
+                            const SizedBox(height: 2),
+                            Text(
+                              [
+                                if (shop.city != null) shop.city!,
+                                trf('VITRINA-да {0} {1} бастап', [tr(_months[shop.since.month - 1]), shop.since.year]),
+                              ].join(' · '),
+                              style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                            ),
+                          ]),
                         ),
                       ]),
-                    ),
-                  ]),
-                  if (shop.replyBucket != null) ...[
-                    const SizedBox(height: 14),
-                    Row(key: const Key('reply-time'), children: [
-                      Icon(Icons.bolt_rounded,
-                          size: 18,
-                          color: shop.replyBucket == 'hour' ? const Color(0xFF2E9E6A) : scheme.onSurfaceVariant),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          tr(switch (shop.replyBucket) {
-                            'hour' => 'Әдетте бір сағат ішінде жауап береді',
-                            'hours' => 'Әдетте бірнеше сағатта жауап береді',
-                            'day' => 'Әдетте бір күн ішінде жауап береді',
-                            _ => 'Жауап беруі бір күннен ұзаққа созылады',
-                          }),
-                          style: theme.textTheme.bodyMedium,
-                        ),
-                      ),
-                    ]),
-                  ],
-                  if (shop.shipBucket != null) ...[
-                    const SizedBox(height: 8),
-                    Row(key: const Key('ship-time'), children: [
-                      Icon(Icons.local_shipping_outlined,
-                          size: 18,
-                          color: shop.shipBucket == 'day' ? const Color(0xFF2E9E6A) : scheme.onSurfaceVariant),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          tr(switch (shop.shipBucket) {
-                            'day' => 'Әдетте төлемнен кейін бір күнде жібереді',
-                            'two_days' => 'Әдетте төлемнен кейін екі күнде жібереді',
-                            _ => 'Жіберуі екі күннен ұзаққа созылады',
-                          }),
-                          style: theme.textTheme.bodyMedium,
-                        ),
-                      ),
-                    ]),
-                  ],
-                  if (shop.about != null) ...[
-                    const SizedBox(height: 14),
-                    Container(
-                      key: const Key('shop-about'),
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(14),
-                      decoration:
-                          BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(14)),
-                      child: Text(shop.about!, style: theme.textTheme.bodyMedium),
-                    ),
-                  ],
-                  const SizedBox(height: 16),
-                  Row(children: [
-                    Icon(Icons.people_outline, size: 18, color: theme.colorScheme.onSurfaceVariant),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(trf('{0} жазылушы', [_follow?.$2 ?? shop.followers]),
-                          key: const Key('followers'),
-                          style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
-                    ),
-                    if (me?.id != shop.id)
-                      (_follow?.$1 ?? shop.following)
-                          ? OutlinedButton.icon(
-                              key: const Key('unfollow'),
-                              onPressed: _busy ? null : () => _toggleFollow(shop),
-                              icon: const Icon(Icons.check_rounded, size: 18),
-                              label: Text(tr('Жазылдыңыз')),
-                            )
-                          : FilledButton.icon(
-                              key: const Key('follow'),
-                              onPressed: _busy ? null : () => _toggleFollow(shop),
-                              icon: const Icon(Icons.add_rounded, size: 18),
-                              label: Text(tr('Жазылу')),
+                      if (shop.replyBucket != null) ...[
+                        const SizedBox(height: 14),
+                        Row(key: const Key('reply-time'), children: [
+                          Icon(Icons.bolt_rounded,
+                              size: 18,
+                              color: shop.replyBucket == 'hour' ? const Color(0xFF2E9E6A) : scheme.onSurfaceVariant),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              tr(switch (shop.replyBucket) {
+                                'hour' => 'Әдетте бір сағат ішінде жауап береді',
+                                'hours' => 'Әдетте бірнеше сағатта жауап береді',
+                                'day' => 'Әдетте бір күн ішінде жауап береді',
+                                _ => 'Жауап беруі бір күннен ұзаққа созылады',
+                              }),
+                              style: theme.textTheme.bodyMedium,
                             ),
-                  ]),
-                  const SizedBox(height: 16),
-                  Row(children: [
-                    _Fact(
-                      value: shop.rating?.toStringAsFixed(1) ?? '—',
-                      label: trf('{0} пікір', [shop.reviews]),
-                      icon: Icons.star_rounded,
-                      onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                          builder: (_) =>
-                              SellerReviewsScreen(sellerId: shop.id, shopName: shop.shopName, rating: shop.rating))),
-                    ),
-                    const SizedBox(width: 10),
-                    _Fact(value: '${shop.completedSales}', label: tr('сатылым'), icon: Icons.verified_outlined),
-                    const SizedBox(width: 10),
-                    _Fact(value: '${shop.listings}', label: tr('тауар'), icon: Icons.inventory_2_outlined),
-                  ]),
-                  const SizedBox(height: 8),
-                  Text(tr('Сатылым саны тек аяқталған, VITRINA арқылы төленген тапсырыстардан саналады.'),
-                      style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
-                ]),
+                          ),
+                        ]),
+                      ],
+                      if (shop.shipBucket != null) ...[
+                        const SizedBox(height: 8),
+                        Row(key: const Key('ship-time'), children: [
+                          Icon(Icons.local_shipping_outlined,
+                              size: 18,
+                              color: shop.shipBucket == 'day' ? const Color(0xFF2E9E6A) : scheme.onSurfaceVariant),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              tr(switch (shop.shipBucket) {
+                                'day' => 'Әдетте төлемнен кейін бір күнде жібереді',
+                                'two_days' => 'Әдетте төлемнен кейін екі күнде жібереді',
+                                _ => 'Жіберуі екі күннен ұзаққа созылады',
+                              }),
+                              style: theme.textTheme.bodyMedium,
+                            ),
+                          ),
+                        ]),
+                      ],
+                      if (shop.about != null) ...[
+                        const SizedBox(height: 14),
+                        Container(
+                          key: const Key('shop-about'),
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                              color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(14)),
+                          child: Text(shop.about!, style: theme.textTheme.bodyMedium),
+                        ),
+                      ],
+                      const SizedBox(height: 16),
+                      Row(children: [
+                        Icon(Icons.people_outline, size: 18, color: theme.colorScheme.onSurfaceVariant),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(trf('{0} жазылушы', [_follow?.$2 ?? shop.followers]),
+                              key: const Key('followers'),
+                              style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+                        ),
+                        if (me?.id != shop.id)
+                          (_follow?.$1 ?? shop.following)
+                              ? OutlinedButton.icon(
+                                  key: const Key('unfollow'),
+                                  onPressed: _busy ? null : () => _toggleFollow(shop),
+                                  icon: const Icon(Icons.check_rounded, size: 18),
+                                  label: Text(tr('Жазылдыңыз')),
+                                )
+                              : FilledButton.icon(
+                                  key: const Key('follow'),
+                                  onPressed: _busy ? null : () => _toggleFollow(shop),
+                                  icon: const Icon(Icons.add_rounded, size: 18),
+                                  label: Text(tr('Жазылу')),
+                                ),
+                      ]),
+                      const SizedBox(height: 16),
+                      Row(children: [
+                        _Fact(
+                          value: shop.rating?.toStringAsFixed(1) ?? '—',
+                          label: trf('{0} пікір', [shop.reviews]),
+                          icon: Icons.star_rounded,
+                          onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                              builder: (_) => SellerReviewsScreen(
+                                  sellerId: shop.id, shopName: shop.shopName, rating: shop.rating))),
+                        ),
+                        const SizedBox(width: 10),
+                        _Fact(value: '${shop.completedSales}', label: tr('сатылым'), icon: Icons.verified_outlined),
+                        const SizedBox(width: 10),
+                        _Fact(value: '${shop.listings}', label: tr('тауар'), icon: Icons.inventory_2_outlined),
+                      ]),
+                      const SizedBox(height: 8),
+                      Text(tr('Сатылым саны тек аяқталған, VITRINA арқылы төленген тапсырыстардан саналады.'),
+                          style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+                    ]),
+                  ),
+                ),
               ),
             ),
             if (items.isEmpty)

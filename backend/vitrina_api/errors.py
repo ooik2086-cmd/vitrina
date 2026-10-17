@@ -14,6 +14,8 @@ MESSAGES: dict[str, tuple[str, str, str]] = {  # code: (Kazakh, Russian, English
     "not_found": ("Табылмады.",
                   "Не найдено.",
                   "Not found."),
+    "otp_too_soon": ("Код жіберілді. Жаңасын сәл кейін сұраңыз.", "Код уже отправлен. Новый можно запросить чуть позже.",
+                     "A code was just sent. You can ask for a new one shortly."),
     "rate_limited": ("Тым көп сұрау. Кейінірек қайталаңыз.",
                      "Слишком много запросов. Повторите позже.",
                      "Too many requests. Try again later."),

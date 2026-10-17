@@ -277,7 +277,7 @@ class _OffersScreenState extends State<OffersScreen> {
       appBar: AppBar(title: Text(tr('Баға ұсыныстары'))),
       body: Column(children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+          padding: contentPadding(context, const EdgeInsets.fromLTRB(20, 4, 20, 8)),
           child: SizedBox(
             width: double.infinity,
             child: SegmentedButton<bool>(
@@ -323,7 +323,7 @@ class _OffersScreenState extends State<OffersScreen> {
                   await _items;
                 },
                 child: ListView.separated(
-                  padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+                  padding: contentPadding(context, const EdgeInsets.fromLTRB(20, 4, 20, 24)),
                   itemCount: items.length,
                   separatorBuilder: (_, __) => const SizedBox(height: 12),
                   itemBuilder: (context, i) => _OfferTile(

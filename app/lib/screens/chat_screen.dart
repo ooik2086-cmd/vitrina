@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
 
@@ -66,6 +67,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
                     Center(child: Text(tr('Әзірге хат жоқ. Тауар бетінен сатушыға жазыңыз.'))),
                   ])
                 : ListView.separated(
+                    padding: contentPadding(context, EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom)),
                     itemCount: items.length,
                     separatorBuilder: (_, __) => const Divider(indent: 88),
                     itemBuilder: (context, i) {
@@ -319,7 +321,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             key: const Key('chat-away'),
             width: double.infinity,
             color: Brand.studio,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            padding: contentPadding(context, const EdgeInsets.symmetric(horizontal: 16, vertical: 10)),
             child: Row(children: [
               const Icon(Icons.beach_access_outlined, size: 18, color: Brand.ink),
               const SizedBox(width: 8),
@@ -348,7 +350,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     )
                   : ListView.builder(
                       controller: _scroll,
-                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                      padding: contentPadding(context, const EdgeInsets.fromLTRB(16, 12, 16, 12)),
                       itemCount: _messages.length,
                       itemBuilder: (context, i) {
                         final m = _messages[i];
@@ -363,7 +365,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             top: false,
             child: Container(
               decoration: BoxDecoration(border: Border(top: BorderSide(color: scheme.outlineVariant))),
-              padding: const EdgeInsets.fromLTRB(6, 10, 10, 10),
+              padding: contentPadding(context, const EdgeInsets.fromLTRB(6, 10, 10, 10)),
               child: Row(children: [
                 IconButton(
                   key: const Key('chat-photo'),
@@ -419,7 +421,8 @@ class _Bubble extends StatelessWidget {
       Container(
         margin: const EdgeInsets.symmetric(vertical: 3),
         padding: const EdgeInsets.fromLTRB(14, 10, 14, 8),
-        constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.78),
+        // Relative to the capped message column, not the whole window.
+        constraints: BoxConstraints(maxWidth: min(MediaQuery.sizeOf(context).width, maxContentWidth) * 0.78),
         decoration: BoxDecoration(
           color: mine ? scheme.primary : scheme.surface,
           border: mine ? null : Border.all(color: scheme.outlineVariant),
@@ -502,7 +505,7 @@ class _QuickReplies extends StatelessWidget {
           child: ListView(
             key: const Key('quick-replies'),
             scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+            padding: contentPadding(context, const EdgeInsets.fromLTRB(12, 6, 12, 6)),
             children: [
               // First, so it is never scrolled out of reach.
               Padding(

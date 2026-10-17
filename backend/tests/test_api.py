@@ -45,7 +45,7 @@ class ApiTestCase(unittest.TestCase):
             engine = create_engine(url)
             Base.metadata.drop_all(engine)
             engine.dispose()
-        self.cfg = Settings(database_url=url or f"sqlite:///{os.path.join(self.tmp.name, 't.db')}", debug_otp=True,
+        self.cfg = Settings(database_url=url or f"sqlite:///{os.path.join(self.tmp.name, 't.db')}", debug_otp=True, otp_resend_after=timedelta(0),
                             media_dir=os.path.join(self.tmp.name, "media"), public_media_url="http://test/media",
                             allow_external_media=self.external_media)
         self.app = create_app(self.cfg)
@@ -140,6 +140,15 @@ class AuthTests(ApiTestCase):
         for _ in range(self.cfg.otp_per_phone_per_hour):
             self.assertEqual(self.c.post("/api/v1/auth/otp", json={"phone": "+77010000004"}).status_code, 200)
         self.assertEqual(self.c.post("/api/v1/auth/otp", json={"phone": "+77010000004"}).status_code, 429)
+
+    def test_a_second_code_waits_a_minute_and_says_how_long(self):
+        self.app.state.settings.otp_resend_after = timedelta(seconds=60)
+        first = self.c.post("/api/v1/auth/otp", json={"phone": "+77010000006"}).json()
+        self.assertEqual(first["resend_after"], 60)
+        again = self.c.post("/api/v1/auth/otp", json={"phone": "+77010000006"})
+        self.assertEqual((again.status_code, again.json()["code"]), (429, "otp_too_soon"))
+        self.assertTrue(0 < int(again.json()["detail"]) <= 60)
+        self.assertEqual(self.c.post("/api/v1/auth/otp", json={"phone": "+77010000007"}).status_code, 200)
 
     def test_requests_without_token_rejected(self):
         self.assertEqual(self.c.get("/api/v1/me").status_code, 401)

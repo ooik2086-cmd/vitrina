@@ -254,45 +254,57 @@ class _CatalogScreenState extends State<CatalogScreen> {
                 const SizedBox(height: 2),
                 Text(tr('Аяқкиімді жан-жағынан\nкөріп таңдаңыз'), style: theme.textTheme.headlineMedium),
                 const SizedBox(height: 16),
-                Row(children: [
-                  Expanded(
-                    child: TextField(
-                      key: const Key('search-field'),
-                      controller: _query,
-                      focusNode: _focus,
-                      textInputAction: TextInputAction.search,
-                      onChanged: _onTyped,
-                      onTap: () => setState(() {}), // show recent searches
-                      onSubmitted: (_) => _search(),
-                      decoration: InputDecoration(
-                        prefixIcon: const Icon(Icons.search),
-                        suffixIcon: IconButton(
-                          tooltip: tr('Фотомен іздеу'),
-                          icon: const Icon(Icons.photo_camera_outlined),
-                          onPressed: _searchByPhoto,
+                // The grid widens on big screens; the search field and its hints stay a readable width.
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: maxContentWidth),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    LayoutBuilder(builder: (context, box) {
+                      final field = TextField(
+                        key: const Key('search-field'),
+                        controller: _query,
+                        focusNode: _focus,
+                        textInputAction: TextInputAction.search,
+                        onChanged: _onTyped,
+                        onTap: () => setState(() {}), // show recent searches
+                        onSubmitted: (_) => _search(),
+                        decoration: InputDecoration(
+                          prefixIcon: const Icon(Icons.search),
+                          suffixIcon: IconButton(
+                            tooltip: tr('Фотомен іздеу'),
+                            icon: const Icon(Icons.photo_camera_outlined),
+                            onPressed: _searchByPhoto,
+                          ),
+                          hintText: tr('Найк, nike, ақ кроссовка…'),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(99)),
+                          enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(99),
+                              borderSide: BorderSide(color: theme.colorScheme.outlineVariant)),
+                          focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(99),
+                              borderSide: BorderSide(color: theme.colorScheme.primary, width: 1.5)),
                         ),
-                        hintText: tr('Найк, nike, ақ кроссовка…'),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(99)),
-                        enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(99),
-                            borderSide: BorderSide(color: theme.colorScheme.outlineVariant)),
-                        focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(99),
-                            borderSide: BorderSide(color: theme.colorScheme.primary, width: 1.5)),
+                      );
+                      final size = _SizeButton(sizeCm: _sizeCm, onTap: _pickSize);
+                      // Side by side the field would be crushed on a narrow phone with large text: stack them then.
+                      if (box.maxWidth < 160 + 110 * MediaQuery.textScalerOf(context).scale(1)) {
+                        return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          field,
+                          const SizedBox(height: 8),
+                          size,
+                        ]);
+                      }
+                      return Row(children: [Expanded(child: field), const SizedBox(width: 10), size]);
+                    }),
+                    ListenableBuilder(
+                      listenable: Listenable.merge([_focus, recentSearches]),
+                      builder: (context, _) => _SearchHints(
+                        typing: _query.text.trim().isNotEmpty,
+                        focused: _focus.hasFocus,
+                        suggestions: _suggestions,
+                        onPick: _searchFor,
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 10),
-                  _SizeButton(sizeCm: _sizeCm, onTap: _pickSize),
-                ]),
-                ListenableBuilder(
-                  listenable: Listenable.merge([_focus, recentSearches]),
-                  builder: (context, _) => _SearchHints(
-                    typing: _query.text.trim().isNotEmpty,
-                    focused: _focus.hasFocus,
-                    suggestions: _suggestions,
-                    onPick: _searchFor,
-                  ),
+                  ]),
                 ),
               ]),
             ),

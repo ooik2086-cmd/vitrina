@@ -1,0 +1,239 @@
+"""Sign-in by SMS code, sessions, the profile and becoming a seller."""
+from __future__ import annotations
+
+import hashlib
+import hmac
+import math
+import secrets
+import time
+from datetime import date, timedelta
+
+from fastapi import Depends, Header, Request
+from pydantic import BaseModel, Field
+from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy.orm import Session
+
+from vitrina_core.orders import OrderStatus as S
+
+from . import services
+from . import offers, payouts
+from .config import Settings
+from .deps import current_user, get_db, get_settings, now_utc, sha256
+from .errors import ApiError
+from .social import CONTACT_RE
+from .models import (Block, Follow, Notification, Offer, SavedSearch, StockAlert, AuthToken, Favorite, Listing, Order,
+                     OtpCode, User)
+from .api_common import ALMATY, PHONE_RE, api
+from .schemas import OtpRequest, OtpVerify, ProfilePatch, SellerOn
+from .serializers import me_out
+
+
+OTP_REQUESTS_PER_ADDRESS_PER_HOUR = 20
+OTP_FAILURES_PER_DAY = 15
+STAFF_TOKEN_TTL = timedelta(hours=12)
+
+
+@api.post("/auth/otp")
+def request_otp(body: OtpRequest, request: Request, db: Session = Depends(get_db),
+                cfg: Settings = Depends(get_settings)):
+    if not PHONE_RE.match(body.phone):
+        raise ApiError(422, "invalid_phone")
+    # Per address as well as per phone: one script walking through many numbers is what makes SMS bills explode.
+    client = request.client.host if request.client else "unknown"
+    if not request.app.state.otp_limiter.allow(client, time.monotonic()):
+        raise ApiError(429, "rate_limited")
+    now = now_utc()
+    recent = db.scalar(select(func.count(OtpCode.id)).where(OtpCode.phone == body.phone,
+                                                            OtpCode.created_at > now - timedelta(hours=1)))
+    # A fresh code resets the attempt counter, so wrong guesses are also capped per phone per day.
+    failed_today = db.scalar(select(func.coalesce(func.sum(OtpCode.attempts), 0)).where(
+        OtpCode.phone == body.phone, OtpCode.created_at > now - timedelta(days=1)))
+    if recent >= cfg.otp_per_phone_per_hour or failed_today >= OTP_FAILURES_PER_DAY:
+        raise ApiError(429, "rate_limited")
+    last = db.scalar(select(func.max(OtpCode.created_at)).where(OtpCode.phone == body.phone))
+    wait = 0 if last is None else math.ceil((services.aware(last) + cfg.otp_resend_after - now).total_seconds())
+    if wait > 0:
+        raise ApiError(429, "otp_too_soon", str(wait))  # detail: seconds left, so the app can count down
+    code = f"{secrets.randbelow(10**6):06d}"
+    digest = hmac.new(cfg.otp_secret, f"{body.phone}:{code}".encode(), hashlib.sha256).hexdigest()
+    db.add(OtpCode(phone=body.phone, code_hash=digest, expires_at=now_utc() + cfg.otp_ttl))
+    db.commit()
+    # TODO(sms): send `code` through the SMS provider once one is contracted.
+    return {"sent": True, "resend_after": int(cfg.otp_resend_after.total_seconds()),
+            **({"dev_code": code} if cfg.debug_otp else {})}
+
+
+@api.post("/auth/verify")
+def verify_otp(body: OtpVerify, db: Session = Depends(get_db), cfg: Settings = Depends(get_settings)):
+    otp = db.scalar(select(OtpCode).where(OtpCode.phone == body.phone, OtpCode.used.is_(False))
+                    .order_by(OtpCode.id.desc()))
+    if otp is None or services.aware(otp.expires_at) < now_utc() or otp.attempts >= cfg.otp_max_attempts:
+        raise ApiError(400, "otp_expired")
+    digest = hmac.new(cfg.otp_secret, f"{body.phone}:{body.code}".encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(digest, otp.code_hash):
+        # One atomic step, so parallel guesses cannot all pass the attempts check read above.
+        db.execute(update(OtpCode).where(OtpCode.id == otp.id, OtpCode.attempts < cfg.otp_max_attempts)
+                   .values(attempts=OtpCode.attempts + 1))
+        db.commit()
+        raise ApiError(400, "otp_invalid")
+    claimed = db.execute(update(OtpCode).where(OtpCode.id == otp.id, OtpCode.used.is_(False),
+                                               OtpCode.attempts < cfg.otp_max_attempts).values(used=True))
+    if claimed.rowcount != 1:  # used or locked by a request that got there first
+        db.rollback()
+        raise ApiError(400, "otp_expired")
+    otp.used = True
+    user = db.scalar(select(User).where(User.phone == body.phone))
+    if user is None:
+        user = User(phone=body.phone)
+        db.add(user)
+        db.flush()
+    if user.is_blocked:
+        db.commit()
+        raise ApiError(403, "forbidden", "account blocked")
+    raw = secrets.token_urlsafe(32)
+    # Staff can move money and hide listings, so a leaked staff token is worth far less if it dies within a shift.
+    ttl = STAFF_TOKEN_TTL if user.role in ("support", "admin") else cfg.token_ttl
+    db.add(AuthToken(token_hash=sha256(raw), user_id=user.id, expires_at=now_utc() + ttl))
+    db.commit()
+    return {"token": raw, "user": me_out(user)}
+
+
+@api.post("/auth/logout")
+def logout(everywhere: bool = False, authorization: str | None = Header(default=None),
+           user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """Ends this session on the server, not only on the phone; with everywhere, every session of the account."""
+    which = (AuthToken.user_id == user.id if everywhere
+             else AuthToken.token_hash == sha256((authorization or "")[7:].strip()))
+    db.execute(update(AuthToken).where(which).values(revoked=True))
+    db.commit()
+    return {"ok": True}
+
+
+@api.get("/health")
+def health(db: Session = Depends(get_db)):
+    """For the load balancer and uptime checks: the process answers and the database does too."""
+    try:
+        db.execute(select(1))
+    except Exception:
+        raise ApiError(503, "unavailable")
+    return {"ok": True}
+
+
+@api.get("/me")
+def get_me(user: User = Depends(current_user)):
+    return me_out(user)
+
+
+def notification_settings(user: User) -> dict:
+    off = services.muted(user)
+    return {"items": [{"kind": k, "on": k not in off} for k in services.OPTIONAL_KINDS]}
+
+
+@api.get("/me/notification-settings")
+def get_notification_settings(user: User = Depends(current_user)):
+    return notification_settings(user)
+
+
+@api.put("/me/notification-settings")
+def put_notification_settings(body: dict[str, bool], user: User = Depends(current_user),
+                              db: Session = Depends(get_db)):
+    """Turns optional alerts on or off, e.g. {"price_drop": false}. Kinds that always arrive cannot be listed."""
+    unknown = set(body) - set(services.OPTIONAL_KINDS)
+    if unknown:
+        raise ApiError(422, "validation", f"cannot mute {sorted(unknown)}")
+    off = services.muted(user)
+    for kind, on in body.items():
+        (off.discard if on else off.add)(kind)
+    user.muted_kinds = ",".join(sorted(off)) or None
+    db.commit()
+    return notification_settings(user)
+
+
+@api.delete("/me")
+def delete_me(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """Deletes the account: personal data goes, the person is signed out everywhere and their listings leave the
+    catalog. Orders, payments and the ledger stay, without the name, because the law requires keeping them."""
+    open_orders = db.scalar(select(func.count(Order.id)).where(
+        or_(Order.buyer_id == user.id, Order.seller_id == user.id),
+        Order.status.not_in([s.value for s in (S.COMPLETED, S.REFUNDED, S.CANCELLED)])))
+    if open_orders:
+        raise ApiError(409, "open_orders")
+    from vitrina_core.money import seller_payable
+    if services.balance(db, seller_payable(str(user.id))) > 0 or payouts.open_payout(db, user.id) is not None:
+        raise ApiError(409, "payout_owed")
+    now = now_utc()
+    for model, column in ((Favorite, Favorite.user_id), (SavedSearch, SavedSearch.user_id),
+                          (Follow, Follow.user_id), (Follow, Follow.seller_id), (StockAlert, StockAlert.user_id),
+                          (Notification, Notification.user_id), (Block, Block.user_id), (Block, Block.blocked_id)):
+        db.execute(delete(model).where(column == user.id))
+    db.execute(update(AuthToken).where(AuthToken.user_id == user.id).values(revoked=True))
+    db.execute(update(Offer).where(or_(Offer.buyer_id == user.id, Offer.seller_id == user.id),
+                                   Offer.status.in_(offers.OPEN)).values(status="withdrawn"))
+    db.execute(update(Listing).where(Listing.seller_id == user.id, Listing.status.not_in(("sold", "hidden")))
+               .values(status="paused"))
+    services.audit(db, user.id, "delete_account", f"user:{user.id}")
+    user.phone = f"deleted:{user.id}"  # frees the number: signing in with it again starts a new account
+    user.display_name = user.city = user.shop_name = user.last_delivery = user.away_until = None
+    user.is_blocked, user.deleted_at = True, now
+    db.commit()
+    return {"deleted": True}
+
+
+@api.patch("/me")
+def patch_me(body: ProfilePatch, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    user = db.merge(user)
+    for k, v in body.model_dump(exclude_unset=True).items():
+        setattr(user, k, v)
+    db.commit()
+    return me_out(user)
+
+
+MAX_AWAY_DAYS = 60
+
+
+class AwayIn(BaseModel):
+    until: date | None = None  # None ends the holiday
+
+
+@api.put("/me/away")
+def set_away(body: AwayIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """Holiday mode: listings stay visible with a note, but nobody can order or make an offer until the seller
+    is back, so no one pays and then waits for a shop that is closed."""
+    if not user.is_seller:
+        raise ApiError(403, "seller_required")
+    today = now_utc().astimezone(ALMATY).date()
+    if body.until is not None and not today <= body.until <= today + timedelta(days=MAX_AWAY_DAYS):
+        raise ApiError(422, "validation", f"until must be within {MAX_AWAY_DAYS} days from today")
+    user = db.merge(user)
+    user.away_until = body.until
+    db.commit()
+    return me_out(user)
+
+
+MAX_SHOP_ABOUT = 500
+
+
+class ShopAboutIn(BaseModel):
+    text: str | None = Field(default=None, max_length=MAX_SHOP_ABOUT)
+
+
+@api.put("/me/shop-about")
+def set_shop_about(body: ShopAboutIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """A few lines on the shop page: how the seller ships, returns, answers. Contacts stay in the app's chat."""
+    if not user.is_seller:
+        raise ApiError(403, "seller_required")
+    text = (body.text or "").strip() or None
+    if text and CONTACT_RE.search(text):
+        raise ApiError(422, "contacts_not_allowed")
+    user = db.merge(user)
+    user.shop_about = text
+    db.commit()
+    return me_out(user)
+
+
+@api.post("/me/seller")
+def become_seller(body: SellerOn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    user = db.merge(user)
+    user.is_seller, user.shop_name, user.city = True, body.shop_name, body.city
+    db.commit()
+    return me_out(user)

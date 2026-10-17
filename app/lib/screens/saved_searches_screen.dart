@@ -90,7 +90,7 @@ class _SavedSearchesScreenState extends State<SavedSearchesScreen> {
             );
           }
           return ListView.separated(
-            padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
+            padding: contentPadding(context, const EdgeInsets.fromLTRB(12, 8, 12, 24)),
             itemCount: items.length,
             separatorBuilder: (_, __) => const Divider(height: 1),
             itemBuilder: (context, i) => ListTile(

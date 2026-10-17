@@ -135,7 +135,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
           final muted = scheme.onPrimary.withValues(alpha: 0.7);
           return RefreshIndicator(
             onRefresh: _reload,
-            child: ListView(padding: const EdgeInsets.fromLTRB(20, 8, 20, 24), children: [
+            child: ListView(padding: contentPadding(context, const EdgeInsets.fromLTRB(20, 8, 20, 24)), children: [
               Container(
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(color: scheme.primary, borderRadius: BorderRadius.circular(Brand.radius)),

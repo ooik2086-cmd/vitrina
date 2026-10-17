@@ -158,7 +158,7 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
         ]),
         body: Form(
           key: _form,
-          child: ListView(padding: const EdgeInsets.fromLTRB(20, 8, 20, 120), children: [
+          child: ListView(padding: contentPadding(context, const EdgeInsets.fromLTRB(20, 8, 20, 120)), children: [
             Row(children: [
               ClipRRect(
                 borderRadius: BorderRadius.circular(16),
@@ -327,7 +327,7 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
             ? null
             : SafeArea(
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
+                  padding: contentPadding(context, const EdgeInsets.fromLTRB(20, 8, 20, 12)),
                   child: Row(children: [
                     if (_l.status == 'published')
                       Expanded(

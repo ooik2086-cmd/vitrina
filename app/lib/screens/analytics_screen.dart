@@ -44,7 +44,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
           }
           if (!snap.hasData) return const Center(child: CircularProgressIndicator());
           final a = snap.data!;
-          return ListView(padding: const EdgeInsets.fromLTRB(20, 4, 20, 32), children: [
+          return ListView(padding: contentPadding(context, const EdgeInsets.fromLTRB(20, 4, 20, 32)), children: [
             SegmentedButton<int>(
               showSelectedIcon: false,
               segments: [

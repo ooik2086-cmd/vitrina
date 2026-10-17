@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../i18n.dart';
 import '../theme.dart';
+import '../widgets/common.dart';
 
 // The same clocks the server runs (backend/vitrina_api/services.py and config.py); change both together.
 const payWithinMinutes = 30;
@@ -71,7 +72,7 @@ class HelpScreen extends StatelessWidget {
     final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(title: Text(tr('Қалай жұмыс істейді'))),
-      body: ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 32), children: [
+      body: ListView(padding: contentPadding(context, const EdgeInsets.fromLTRB(16, 4, 16, 32)), children: [
         for (final (i, t) in _topics.indexed)
           Card(
             margin: const EdgeInsets.only(bottom: 10),

@@ -23,6 +23,7 @@ import 'package:vitrina/screens/earnings_screen.dart';
 import 'package:vitrina/screens/image_search_screen.dart';
 import 'package:vitrina/screens/listing_editor_screen.dart';
 import 'package:vitrina/screens/listing_screen.dart';
+import 'package:vitrina/screens/login_screen.dart';
 import 'package:vitrina/screens/manage_listing_screen.dart';
 import 'package:vitrina/widgets/listing_contents.dart';
 import 'package:vitrina/screens/my_listings_screen.dart';
@@ -2590,5 +2591,112 @@ void main() {
       expect(find.byKey(const Key('add-spin')), findsNothing);
       expect(find.text('360° көрініс: 8 кадр'), findsOneWidget);
     });
+  });
+
+  testWidgets('a new code can be asked for only after the countdown', (tester) async {
+    var asked = 0;
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async {
+          expect(req.url.path, '/api/v1/auth/otp');
+          asked++;
+          return jsonResponse({'sent': true, 'resend_after': 3, 'dev_code': '123456'});
+        }));
+    await tester.pumpWidget(SessionScope(session: Session(api), child: const MaterialApp(home: LoginScreen())));
+    await tester.enterText(find.byType(TextField).first, '+77010000001');
+    await tester.tap(find.text('Код алу'));
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('Кодты қайта жіберу: 3 сек'), findsOneWidget);
+    expect(tester.widget<TextButton>(find.byKey(const Key('resend-code'))).onPressed, isNull);
+    await tester.pump(const Duration(seconds: 3));
+    expect(find.text('Кодты қайта жіберу'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('resend-code')));
+    await tester.pump();
+    expect(asked, 2);
+    await tester.pumpWidget(const SizedBox()); // stops the timer
+  });
+
+  testWidgets('on a wide window list rows stay a readable width, but the catalog grid uses it all', (tester) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async => switch (req.url.path) {
+              '/api/v1/me/notification-settings' => jsonResponse({
+                  'items': [
+                    {'kind': 'price_drop', 'on': true}
+                  ]
+                }),
+              '/api/v1/saved-searches' => jsonResponse({
+                  'items': [
+                    {
+                      'id': 9,
+                      'q': 'adidas',
+                      'category': null,
+                      'size_cm': null,
+                      'condition': null,
+                      'min_price_tiyn': null,
+                      'max_price_tiyn': null
+                    }
+                  ]
+                }),
+              _ => jsonResponse({
+                  'items': [
+                    for (var i = 0; i < 8; i++) {...listingJson(), 'id': i + 1}
+                  ]
+                }),
+            }))
+      ..token = 'tok';
+    Future<void> show(Widget screen) async {
+      await tester.pumpWidget(SessionScope(session: Session(api), child: MaterialApp(home: screen)));
+      await tester.pumpAndSettle();
+    }
+
+    await show(const NotificationSettingsScreen());
+    final alert = tester.getRect(find.byKey(const Key('alert-price_drop')));
+    expect(alert.width, lessThanOrEqualTo(maxContentWidth));
+    expect(alert.center.dx, moreOrLessEquals(600)); // centred, not stuck to one side
+
+    await show(const SavedSearchesScreen());
+    expect(tester.getSize(find.byKey(const Key('saved-9'))).width, lessThanOrEqualTo(maxContentWidth));
+
+    mySize.value = null;
+    await show(const Scaffold(body: CatalogScreen()));
+    expect(tester.getSize(find.byKey(const Key('search-field'))).width, lessThanOrEqualTo(maxContentWidth));
+    // The grid is not capped: a wide window gets more columns instead.
+    final columns = {
+      for (final e in find.text('Nike Air Force 1').evaluate())
+        tester.getTopLeft(find.byElementPredicate((x) => x == e)).dx
+    };
+    expect(columns.length, greaterThan(3));
+    expect(tester.getTopRight(find.text('Nike Air Force 1').last).dx, greaterThan(maxContentWidth));
+  });
+
+  testWidgets('the catalog search field stays usable on a 320 dp phone at the largest text size', (tester) async {
+    tester.view.physicalSize = const Size(320, 640);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async => req.url.path == '/api/v1/notifications'
+            ? jsonResponse({'unread': 3, 'items': []})
+            : jsonResponse({'items': []})))
+      ..token = 'tok'; // signed in: the header also carries the saved-search and bell buttons
+    mySize.value = '27,5'; // the longest size label
+    addTearDown(() => mySize.value = null);
+    await tester.pumpWidget(SessionScope(
+        session: Session(api),
+        child: MaterialApp(
+            home: MediaQuery(
+                data: const MediaQueryData(size: Size(320, 640), textScaler: TextScaler.linear(2)),
+                child: const Scaffold(body: CatalogScreen())))));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull); // no RenderFlex overflow
+    final field = tester.getRect(find.byKey(const Key('search-field')));
+    expect(field.right, lessThanOrEqualTo(320));
+    expect(field.width, greaterThan(200)); // not squeezed to a sliver beside the size button
+    expect(find.text('27,5 см'), findsOneWidget);
   });
 }

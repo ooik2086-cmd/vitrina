@@ -107,7 +107,9 @@ class _OrderListState extends State<_OrderList> {
               ? ListView(children: [SizedBox(height: 120), Center(child: Text(tr('Әзірге тапсырыс жоқ.')))])
               : ListView.separated(
                   itemCount: items.length + 1,
-                  separatorBuilder: (_, i) => i == 0 ? const SizedBox.shrink() : const Divider(indent: 96),
+                  // Rows are capped one by one, so the filter chips above can still scroll the full width.
+                  separatorBuilder: (_, i) =>
+                      i == 0 ? const SizedBox.shrink() : const ContentWidth(child: Divider(indent: 96)),
                   itemBuilder: (context, index) {
                     if (index == 0) {
                       return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -115,7 +117,7 @@ class _OrderListState extends State<_OrderList> {
                           height: 56,
                           child: ListView(
                             scrollDirection: Axis.horizontal,
-                            padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+                            padding: contentPadding(context, const EdgeInsets.fromLTRB(16, 10, 16, 6)),
                             children: [
                               for (final (code, name) in filters) ...[
                                 ChoiceChip(
@@ -141,7 +143,8 @@ class _OrderListState extends State<_OrderList> {
                     }
                     final o = items[index - 1];
                     final waits = orderWaitsForMe(o, widget.role);
-                    return ListTile(
+                    return ContentWidth(
+                        child: ListTile(
                       contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
                       leading: ClipRRect(
                         borderRadius: BorderRadius.circular(14),
@@ -169,7 +172,7 @@ class _OrderListState extends State<_OrderList> {
                         await Navigator.of(context).push(MaterialPageRoute(builder: (_) => OrderScreen(orderId: o.id)));
                         _reload();
                       },
-                    );
+                    ));
                   },
                 ),
         );

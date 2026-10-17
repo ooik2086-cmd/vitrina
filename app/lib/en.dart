@@ -879,4 +879,6 @@ const en = <String, String>{
   'Фото, 360° және өлшемдер': 'Photos, 360° and sizes',
   'Қосқан әр фото мен өлшем бірден сақталады.': 'Each photo and size you add is saved right away.',
   'Өшіру: {0}': 'Delete: {0}',
+  'Кодты қайта жіберу': 'Send the code again',
+  'Кодты қайта жіберу: {0} сек': 'Send again in {0} s',
 };

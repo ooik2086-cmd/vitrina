@@ -881,8 +881,11 @@ class Api {
 
   // auth
   /// Returns the code itself only while the server runs without a real SMS provider.
-  Future<String?> requestOtp(String phone) async =>
-      (await _send('POST', '/auth/otp', body: {'phone': phone}) as Map)['dev_code'] as String?;
+  /// Asks for an SMS code. [resendAfter] is how many seconds the server makes a second request wait.
+  Future<({String? devCode, int resendAfter})> requestOtp(String phone) async {
+    final r = await _send('POST', '/auth/otp', body: {'phone': phone}) as Map;
+    return (devCode: r['dev_code'] as String?, resendAfter: (r['resend_after'] as int?) ?? 60);
+  }
 
   Future<Me> verifyOtp(String phone, String code) async {
     final r = await _send('POST', '/auth/verify', body: {'phone': phone, 'code': code}) as Map<String, dynamic>;
