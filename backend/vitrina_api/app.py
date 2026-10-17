@@ -718,12 +718,7 @@ def edit_listing(listing_id: int, body: ListingPatch, user: User = Depends(curre
     if listing.status == "hidden":
         raise ApiError(409, "invalid_status")
     if body.price_tiyn is not None:
-        if body.price_tiyn != listing.price_tiyn and listing.promo_state == "ready":
-            listing.promo_state, listing.promo_url = None, None  # the video shows the old price
-        if body.price_tiyn < listing.price_tiyn and listing.status == "published":
-            notify_price_drop(db, listing, listing.price_tiyn, body.price_tiyn)
-        mark_price_change(listing, body.price_tiyn)
-        listing.price_tiyn = body.price_tiyn
+        set_price(db, listing, body.price_tiyn)
     if body.delivery_price_tiyn is not None:
         listing.delivery_price_tiyn = body.delivery_price_tiyn
     if body.description is not None:
@@ -780,6 +775,50 @@ def notify_price_drop(db: Session, listing: Listing, old: int, new: int) -> None
                             f"«{listing.title}» арзандады: {old_text} → {new_text}",
                             f"«{listing.title}» подешевел: {old_text} → {new_text}",
                             f"“{listing.title}” is cheaper: {old_text} → {new_text}", listing_id=listing.id)
+
+
+class ShopSaleIn(BaseModel):
+    percent: int = Field(ge=5, le=70)
+
+
+def set_price(db: Session, listing: Listing, new: int) -> None:
+    """One price change, the way the edit screen makes it: followers of a cut hear it, the old video goes."""
+    if new == listing.price_tiyn:
+        return
+    if listing.promo_state == "ready":
+        listing.promo_state, listing.promo_url = None, None  # the video shows the old price
+    if new < listing.price_tiyn and listing.status == "published":
+        notify_price_drop(db, listing, listing.price_tiyn, new)
+    mark_price_change(listing, new)
+    listing.price_tiyn = new
+
+
+@api.post("/me/shop-sale")
+def start_shop_sale(body: ShopSaleIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """The same cut on every listing on sale, rounded to whole tenge. Each shows its old price crossed out."""
+    if not user.is_seller:
+        raise ApiError(403, "seller_required")
+    changed = 0
+    for listing in db.scalars(select(Listing).where(Listing.seller_id == user.id, Listing.status == "published")):
+        new = max(100, (listing.price_tiyn * (100 - body.percent) + 5000) // 10000 * 100)  # half up, as the app
+        if new < listing.price_tiyn:
+            set_price(db, listing, new)
+            changed += 1
+    db.commit()
+    return {"changed": changed}
+
+
+@api.delete("/me/shop-sale")
+def end_shop_sale(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """Puts back the crossed-out price on every listing that still shows one."""
+    changed = 0
+    for listing in db.scalars(select(Listing).where(Listing.seller_id == user.id)):
+        old = was_price(listing)
+        if old is not None:
+            set_price(db, listing, old)
+            changed += 1
+    db.commit()
+    return {"changed": changed}
 
 
 @api.post("/listings/{listing_id}/pause")

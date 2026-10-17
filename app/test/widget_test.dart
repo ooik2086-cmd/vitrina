@@ -32,6 +32,7 @@ import 'package:vitrina/screens/saved_searches_screen.dart';
 import 'package:vitrina/screens/seller_reviews_screen.dart';
 import 'package:vitrina/screens/shop_screen.dart';
 import 'package:vitrina/screens/spin_capture_screen.dart';
+import 'package:vitrina/widgets/shop_sale.dart';
 import 'package:vitrina/en.dart';
 import 'package:vitrina/ru.dart';
 import 'package:vitrina/session.dart';
@@ -592,6 +593,37 @@ void main() {
     await tester.pump();
     expect(themeMode.value, ThemeMode.light);
     expect((await SharedPreferences.getInstance()).getString('vitrina_theme'), 'light');
+  });
+
+  testWidgets('shop sale previews the cut, sends the percent, and offers to end a running sale', (tester) async {
+    final sent = <String>[];
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async {
+          sent.add('${req.method} ${req.url.path} ${req.body}');
+          return jsonResponse({'changed': 2});
+        }));
+    final onSale = Listing.fromJson({...listingJson(), 'id': 8, 'was_price_tiyn': 5000000});
+    final items = [Listing.fromJson(listingJson()), onSale];
+    await tester.pumpWidget(SessionScope(
+        session: Session(api),
+        child: MaterialApp(
+            home: Scaffold(
+                body: Builder(
+                    builder: (context) =>
+                        TextButton(onPressed: () => showShopSale(context, items), child: const Text('open')))))));
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    expect(find.text('Мысалы: ${formatTenge(4500000)} → ${formatTenge(3825000)}'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('sale-20')));
+    await tester.pump();
+    expect(find.text('Барлығына −20%'), findsOneWidget);
+    expect(find.text('Жеңілдікті аяқтау (1 тауар)'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('sale-start')));
+    await tester.pumpAndSettle();
+    expect(sent, ['POST /api/v1/me/shop-sale {"percent":20}']);
+    expect(find.text('Жеңілдік 2 тауарға қосылды.'), findsOneWidget);
+    expect(salePrice(1299000, 15), 1104200);
   });
 
   test('order summary lists the price with its promo and says it is not a fiscal receipt', () {

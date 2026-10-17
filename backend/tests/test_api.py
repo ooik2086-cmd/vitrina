@@ -977,6 +977,22 @@ class AwayTests(ApiTestCase):
         items = self.c.get("/api/v1/notifications", headers=self.h(self.seller)).json()["items"]
         self.assertIn("is sold out", next(n for n in items if n["kind"] == "sold_out")["text_en"])
 
+    def test_shop_sale_cuts_every_listing_and_ending_it_puts_prices_back(self):
+        a = self.publish()
+        b = self.publish(price_tiyn=1_299_000)
+        self.assertEqual(self.post("/me/shop-sale", self.buyer, {"percent": 10}).json()["code"], "seller_required")
+        self.assertEqual(self.post("/me/shop-sale", self.seller, {"percent": 80}).status_code, 422)
+        self.assertEqual(self.c.post(f"/api/v1/favorites/{a['id']}", headers=self.h(self.buyer)).status_code, 204)
+        self.assertEqual(self.post("/me/shop-sale", self.seller, {"percent": 15}).json(), {"changed": 2})
+        shown = {i: self.c.get(f"/api/v1/listings/{i}").json() for i in (a["id"], b["id"])}
+        self.assertEqual((shown[a["id"]]["price_tiyn"], shown[a["id"]]["was_price_tiyn"]), (3_825_000, 4_500_000))
+        self.assertEqual(shown[b["id"]]["price_tiyn"], 1_104_200)  # 11 041,50 ₸ rounded to whole tenge
+        kinds = [n["kind"] for n in self.c.get("/api/v1/notifications", headers=self.h(self.buyer)).json()["items"]]
+        self.assertEqual(kinds, ["price_drop"])
+        self.assertEqual(self.c.delete("/api/v1/me/shop-sale", headers=self.h(self.seller)).json(), {"changed": 2})
+        back = self.c.get(f"/api/v1/listings/{a['id']}").json()
+        self.assertEqual((back["price_tiyn"], back["was_price_tiyn"]), (4_500_000, None))
+
 class FollowTests(ApiTestCase):
     def test_followers_hear_about_each_new_listing_once(self):
         first = self.publish()

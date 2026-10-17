@@ -638,4 +638,12 @@ const en = <String, String>{
   'Көрініс': 'Appearance',
   'Телефондағыдай': 'System default',
   'Қараңғы': 'Dark',
+  'Барлығына −{0}%': '−{0}% on everything',
+  'Дүкен жеңілдігі': 'Shop sale',
+  'Жеңілдікті аяқтау ({0} тауар)': 'End the sale ({0} listings)',
+  'Мысалы: {0} → {1}': 'For example: {0} → {1}',
+  'Сатылымдағы {0} тауардың бәрі арзандайды. Ескі бағасы сызылып көрсетіледі, таңдаулыларға қосқандарға хабар барады.':
+      'All {0} listings on sale get cheaper. The old price shows crossed out, and people who saved them are notified.',
+  'Жеңілдік {0} тауарға қосылды.': 'Sale applied to {0} listings.',
+  'Бұрынғы баға {0} тауарға қайтарылды.': 'Old price restored on {0} listings.',
 };

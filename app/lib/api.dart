@@ -768,6 +768,13 @@ class Api {
   /// Deletes the account for good; refused while an order is still open.
   Future<void> deleteAccount() => _send('DELETE', '/me');
 
+  /// The same percent off every listing on sale; returns how many changed.
+  Future<int> startShopSale(int percent) async =>
+      ((await _send('POST', '/me/shop-sale', body: {'percent': percent}) as Map)['changed'] as int);
+
+  /// Puts back the crossed-out price everywhere it still shows; returns how many changed.
+  Future<int> endShopSale() async => ((await _send('DELETE', '/me/shop-sale') as Map)['changed'] as int);
+
   /// Null or blank clears it.
   Future<Me> setShopAbout(String? text) async =>
       Me.fromJson(await _send('PUT', '/me/shop-about', body: {'text': text}) as Map<String, dynamic>);

@@ -5,6 +5,7 @@ import '../session.dart';
 import 'listing_editor_screen.dart';
 import 'manage_listing_screen.dart';
 import '../i18n.dart';
+import '../widgets/shop_sale.dart';
 
 class MyListingsScreen extends StatefulWidget {
   const MyListingsScreen({super.key});
@@ -58,10 +59,23 @@ class _MyListingsScreenState extends State<MyListingsScreen> {
     if (created == true) _reload();
   }
 
+  Future<void> _sale() async {
+    final items = await _items;
+    if (items == null || !mounted) return;
+    if (await showShopSale(context, items) == true && mounted) _reload();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(tr('Менің тауарларым'))),
+      appBar: AppBar(title: Text(tr('Менің тауарларым')), actions: [
+        IconButton(
+          key: const Key('shop-sale'),
+          tooltip: tr('Дүкен жеңілдігі'),
+          icon: const Icon(Icons.percent_rounded),
+          onPressed: _sale,
+        ),
+      ]),
       floatingActionButton:
           FloatingActionButton.extended(onPressed: _create, icon: const Icon(Icons.add), label: Text(tr('Тауар қосу'))),
       body: FutureBuilder<List<Listing>>(
