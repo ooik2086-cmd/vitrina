@@ -73,7 +73,8 @@ def main() -> None:
             if shoe is None or angle in have or not source.exists():
                 continue
             clean = normalize_image(source.read_bytes(), DETAIL_SIDE_PX)
-            processed = cutout.process_photo(clean, segment) if cut else None
+            # Close-ups fill the photo: nothing to cut away, as on the server (listing_routes.CUTOUT_ANGLES).
+            processed = cutout.process_photo(clean, segment) if cut and angle != "detail" else None
             stops.append({"original_url": put(clean, folder, "jpg"),
                           "processed_url": put(processed, folder, "webp") if processed else None, "angle": angle})
         # The stops follow the four sides, before any defect photo and the frames, as the server orders them.

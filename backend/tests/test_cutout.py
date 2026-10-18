@@ -140,13 +140,17 @@ class CutoutApiTests(MediaTests):
         self.assertEqual(r.status_code, 200, r.text)
         self.assertEqual(self.mine(lid)["backdrop"], "dark")
 
-    def test_a_close_up_photo_is_cut_out_like_the_top_and_sole(self):
-        url = self.upload(self.seller, jpeg()).json()["url"]
+    def test_a_close_up_photo_stays_as_taken_but_is_kept_large(self):
+        url = self.c.post("/api/v1/media?detail=true", headers=self.h(self.seller),
+                          files={"file": ("d.jpg", solid((120, 90, 60), (3600, 2400)), "image/jpeg")}).json()["url"]
         photos = self.four((120, 90, 60)) + [{"url": url, "angle": "detail"}]
         r = self.post("/listings", self.seller, {**LISTING, "photos": photos})
         self.assertEqual(r.status_code, 201, r.text)
         detail = next(m for m in self.mine(r.json()["id"])["media"] if m["angle"] == "detail")
-        self.assertTrue(detail["processed_url"].endswith(".webp"))
+        self.assertIsNone(detail["processed_url"])  # nothing around it to remove
+        self.assertTrue(detail["thumb_url"])
+        img = Image.open(io.BytesIO(self.c.get(detail["original_url"].replace("http://test", "")).content))
+        self.assertEqual(max(img.size), 3000)
 
     def test_a_cut_out_made_later_replaces_the_small_copy(self):
         from vitrina_api.listing_routes import cutout_listing, thumb_listing

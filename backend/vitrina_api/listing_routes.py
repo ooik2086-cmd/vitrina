@@ -49,8 +49,9 @@ def upload_photo(file: UploadFile = File(...), detail: bool = False, user: User 
     return {"url": storage.put(normalize_image(data, DETAIL_SIDE_PX if detail else MAX_SIDE_PX), owner_id=user.id)}
 
 
-# Labels and defect close-ups stay as taken: their surroundings are part of what they prove.
-CUTOUT_ANGLES = {"front", "outer", "inner", "back", "top", "sole", "detail", "frame"}
+# Labels and defect close-ups stay as taken: their surroundings are part of what they prove. A close-up of the
+# stitching fills the photo, so there is no background to remove and the model would only eat into the shoe.
+CUTOUT_ANGLES = {"front", "outer", "inner", "back", "top", "sole", "frame"}
 
 
 def cutout_listing(state, listing_id: int) -> int:
