@@ -176,7 +176,12 @@ ThemeData buildTheme(Brightness brightness) {
       selectedColor: scheme.primary,
       secondarySelectedColor: scheme.primary,
       checkmarkColor: scheme.onPrimary,
-      labelStyle: _w(text.labelLarge!, 550).copyWith(color: scheme.onSurface),
+      // Light text on a picked chip for every kind of chip: a FilterChip does not take secondaryLabelStyle.
+      labelStyle: _w(text.labelLarge!, 550).copyWith(
+          color: WidgetStateColor.resolveWith((s) =>
+              s.contains(WidgetState.selected) && !s.contains(WidgetState.disabled)
+                  ? scheme.onPrimary
+                  : scheme.onSurface)),
       secondaryLabelStyle: _w(text.labelLarge!, 600).copyWith(color: scheme.onPrimary),
       showCheckmark: false,
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),

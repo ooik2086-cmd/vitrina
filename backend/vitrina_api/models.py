@@ -375,6 +375,7 @@ class SavedSearch(Base):
     min_price_tiyn: Mapped[int | None] = mapped_column(BigInteger)
     max_price_tiyn: Mapped[int | None] = mapped_column(BigInteger)
     size_cm: Mapped[str | None] = mapped_column(String(8))
+    color: Mapped[str | None] = mapped_column(String(300))  # stored colour names, comma-separated
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 

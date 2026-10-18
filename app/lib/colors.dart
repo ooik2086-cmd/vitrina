@@ -4,7 +4,7 @@ import 'i18n.dart';
 
 /// The shoe colours a seller picks from, by the Kazakh name the server stores (backend vitrina_core/colors.py, which
 /// also turns "черный" or "black" typed by hand into "қара"). Each with the colour of its dot in the picker; the
-/// two-tone and many-colour ones are drawn by [_Dot].
+/// two-tone and many-colour ones are drawn by [ColorDot].
 const shoeColors = <String, Color>{
   'қара': Color(0xFF1B1B1F),
   'ақ': Color(0xFFF7F7F4),
@@ -88,7 +88,7 @@ class _ColorFieldState extends State<ColorField> {
         Widget chip(String name) => ChoiceChip(
               key: Key('color-$name'),
               showCheckmark: false, // the dot stays: the chip's own colour says it is picked
-              avatar: _Dot(name, onPicked: !_other && picked == name),
+              avatar: ColorDot(name, onPicked: !_other && picked == name),
               label: Text(tr(name)),
               selected: !_other && picked == name,
               onSelected: widget.enabled
@@ -134,7 +134,7 @@ class _ColorFieldState extends State<ColorField> {
                   Flexible(
                     child: Chip(
                       key: const Key('color-picked'),
-                      avatar: _other ? const Icon(Icons.edit_outlined, size: 18) : _Dot(picked),
+                      avatar: _other ? const Icon(Icons.edit_outlined, size: 18) : ColorDot(picked),
                       label: Text(colorName(picked), overflow: TextOverflow.ellipsis),
                     ),
                   ),
@@ -181,8 +181,8 @@ class _ColorFieldState extends State<ColorField> {
 }
 
 /// The colour itself, in a ring so white and silver show on a white chip and dark colours on a dark picked chip.
-class _Dot extends StatelessWidget {
-  const _Dot(this.name, {this.onPicked = false});
+class ColorDot extends StatelessWidget {
+  const ColorDot(this.name, {super.key, this.onPicked = false});
   final String name;
   final bool onPicked;
 

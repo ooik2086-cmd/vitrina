@@ -746,6 +746,10 @@ void main() {
     await api.setFavorite(all.last.id, true);
     expect((await api.favorites()).first.id, all.last.id);
     await expectLater(api.startPayment(1), throwsA(isA<ApiException>().having((e) => e.code, 'code', 'demo')));
+    final black = await api.search(filter: const CatalogFilter(colors: {'қара'}));
+    expect(black, isNotEmpty);
+    expect(black.every((l) => l.color == 'қара'), isTrue);
+    expect(black.length, lessThan(all.length));
   });
 
   test('the demo offers each colour as the server would: closest condition, the same order on every colour', () async {
@@ -1032,6 +1036,16 @@ void main() {
     final saved = SavedSearch.fromJson({'id': 1, ...body});
     expect(saved.asBody, body);
     expect(savedSearchLabel(saved), startsWith('«nike» · Кроссовкалар · 26,5 см · ${formatTenge(5000000)} дейін'));
+  });
+
+  test('a saved search keeps its colours in one order and names them in the interface language', () {
+    final body = SavedSearch.body(filter: const CatalogFilter(colors: {'қара', 'ақ'}));
+    expect(body, {'color': 'ақ,қара'});
+    final saved = SavedSearch.fromJson({'id': 1, 'color': 'ақ,қара,мраморный'});
+    expect(saved.colors, {'ақ', 'қара', 'мраморный'});
+    expect(savedSearchLabel(saved), 'ақ, қара, мраморный');
+    expect(const CatalogFilter(colors: {'қара', 'көк'}).query, {'color': 'көк,қара'});
+    expect(const CatalogFilter(colors: {'қара', 'көк'}).active, 1);
   });
 
   testWidgets('catalog saves the current search and opens a saved one', (tester) async {
@@ -1683,6 +1697,41 @@ void main() {
     await tester.tap(find.byKey(const Key('apply-filter')));
     await tester.pumpAndSettle();
     expect(result!.city, 'Шымкент');
+  });
+
+  testWidgets('filter sheet picks colours and shows the ones already picked', (tester) async {
+    CatalogFilter? result;
+    var initial = const CatalogFilter();
+    await tester.pumpWidget(MaterialApp(
+      home: Builder(
+        builder: (context) => TextButton(
+          onPressed: () async => result = await showModalBottomSheet<CatalogFilter>(
+              context: context, isScrollControlled: true, builder: (_) => FilterSheet(initial: initial)),
+          child: const Text('open'),
+        ),
+      ),
+    ));
+    Future<void> tap(String key) async {
+      await tester.ensureVisible(find.byKey(Key(key)));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(Key(key)));
+      await tester.pumpAndSettle();
+    }
+
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    await tap('filter-color-қара');
+    await tap('filter-color-көк');
+    await tap('apply-filter');
+    expect(result!.colors, {'қара', 'көк'});
+    initial = result!;
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    FilterChip chip(String name) => tester.widget<FilterChip>(find.byKey(Key('filter-color-$name')));
+    expect([chip('қара').selected, chip('көк').selected, chip('ақ').selected], [true, true, false]);
+    await tap('filter-color-қара');
+    await tap('apply-filter');
+    expect(result!.colors, {'көк'});
   });
 
   test('packing slip comes back as PDF bytes, or as the server\'s error', () async {

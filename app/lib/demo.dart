@@ -132,6 +132,7 @@ class DemoClient extends http.BaseClient {
   List<Map<String, dynamic>> _catalog(Map<String, String> q) {
     final words = (q['q'] ?? '').toLowerCase().split(RegExp(r'\s+')).where((w) => w.isNotEmpty);
     final conditions = q['condition']?.split(',').toSet();
+    final colors = q['color']?.split(',').map((c) => c.trim()).where((c) => c.isNotEmpty).toSet();
     final minP = int.tryParse(q['min_price_tiyn'] ?? ''), maxP = int.tryParse(q['max_price_tiyn'] ?? '');
     final cm = double.tryParse((q['size_cm'] ?? '').replaceAll(',', '.'));
     var items = _all.where((l) {
@@ -142,6 +143,7 @@ class DemoClient extends http.BaseClient {
       if (q['seller_id'] != null && '${(l['seller'] as Map)['id']}' != q['seller_id']) return false;
       if (q['sale'] == 'true' && l['was_price_tiyn'] == null) return false;
       if (conditions != null && !conditions.contains(l['condition'])) return false;
+      if (colors != null && colors.isNotEmpty && !colors.contains(l['color'])) return false;
       if ((minP != null && price < minP) || (maxP != null && price > maxP)) return false;
       if (cm != null &&
           !(l['sizes'] as List).any((s) =>

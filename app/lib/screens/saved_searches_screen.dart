@@ -1,13 +1,14 @@
 import 'package:flutter/material.dart';
 
 import '../api.dart';
+import '../colors.dart';
 import '../i18n.dart';
 import '../labels.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 
-/// One readable line for a saved search, e.g. «nike» · Кроссовка · 26,5 см · 50 000 ₸ дейін.
+/// One readable line for a saved search, e.g. «nike» · Кроссовка · 26,5 см · 50 000 ₸ дейін · қара, ақ.
 String savedSearchLabel(SavedSearch s) {
   final parts = <String>[
     if (s.q != null) '«${s.q}»',
@@ -20,6 +21,7 @@ String savedSearchLabel(SavedSearch s) {
     else if (s.minPriceTiyn != null)
       trf('{0} бастап', [formatTenge(s.minPriceTiyn!)]),
     for (final c in (s.condition ?? '').split(',').where((c) => c.isNotEmpty)) tr(conditions[c] ?? c),
+    if (s.colors.isNotEmpty) s.colors.map(colorName).join(', '),
   ];
   return parts.join(' · ');
 }

@@ -8,7 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from vitrina_core.catalog import normalize_query
-from vitrina_core.colors import color_query
+from vitrina_core.colors import canonical_color, color_query
 
 from . import services
 from . import promo
@@ -23,7 +23,7 @@ router = APIRouter(prefix="/api/v1")
 
 def catalog_filter(stmt, *, q: str | None = None, category: str | None = None, brand: str | None = None,
                    condition: str | None = None, min_price_tiyn: int | None = None,
-                   max_price_tiyn: int | None = None, size_cm: str | None = None):
+                   max_price_tiyn: int | None = None, size_cm: str | None = None, color: str | None = None):
     """The catalog's filters, shared by search and by saved-search alerts so both agree on what matches."""
     if q:
         # Colour words become the stored Kazakh name first: "черные" and "black" find "қара".
@@ -39,6 +39,8 @@ def catalog_filter(stmt, *, q: str | None = None, category: str | None = None, b
         stmt = stmt.where(Listing.price_tiyn >= min_price_tiyn)
     if max_price_tiyn is not None:
         stmt = stmt.where(Listing.price_tiyn <= max_price_tiyn)
+    if color:  # one colour or a comma-separated list, in any of the words the colour list knows
+        stmt = stmt.where(Listing.color.in_(colors_of(color)))
     if size_cm:
         mm = cm_to_mm(size_cm)
         stmt = stmt.where(Listing.id.in_(select(ListingSize.listing_id).where(
@@ -47,7 +49,7 @@ def catalog_filter(stmt, *, q: str | None = None, category: str | None = None, b
 
 
 MAX_SAVED_SEARCHES = 10
-SEARCH_FIELDS = ("q", "category", "brand", "condition", "min_price_tiyn", "max_price_tiyn", "size_cm")
+SEARCH_FIELDS = ("q", "category", "brand", "condition", "min_price_tiyn", "max_price_tiyn", "size_cm", "color")
 
 
 class SavedSearchIn(BaseModel):
@@ -58,11 +60,20 @@ class SavedSearchIn(BaseModel):
     min_price_tiyn: int | None = Field(default=None, ge=0)
     max_price_tiyn: int | None = Field(default=None, ge=0)
     size_cm: str | None = Field(default=None, max_length=8)
+    color: str | None = Field(default=None, max_length=300)
+
+
+def colors_of(color: str) -> list[str]:
+    """The stored names of a comma-separated colour list: "черный,Blue" is "қара" and "көк"."""
+    return sorted({canonical_color(c) for c in color.split(",") if c.strip()})
 
 
 def search_values(source) -> dict:
     values = {f: getattr(source, f) for f in SEARCH_FIELDS}
-    return {k: (v.strip() or None) if isinstance(v, str) else v for k, v in values.items()}
+    values = {k: (v.strip() or None) if isinstance(v, str) else v for k, v in values.items()}
+    if values["color"]:
+        values["color"] = ",".join(colors_of(values["color"])) or None  # one spelling, so equal searches compare equal
+    return values
 
 
 def saved_search_out(s: SavedSearch) -> dict:

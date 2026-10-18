@@ -39,11 +39,12 @@ def search_listings(q: str | None = None, category: str | None = None, brand: st
                     condition: str | None = None, min_price_tiyn: int | None = None,
                     max_price_tiyn: int | None = None, size_cm: str | None = None,
                     sort: Literal["new", "price_asc", "price_desc"] = "new", seller_id: int | None = None,
-                    sale: bool = False, city: str | None = Query(default=None, max_length=60), limit: int = 20,
+                    sale: bool = False, city: str | None = Query(default=None, max_length=60),
+                    color: str | None = Query(default=None, max_length=300), limit: int = 20,
                     offset: int = 0, db: Session = Depends(get_db)):
     stmt = catalog_filter(select(Listing).where(Listing.status == "published"), q=q, category=category,
                           brand=brand, condition=condition, min_price_tiyn=min_price_tiyn,
-                          max_price_tiyn=max_price_tiyn, size_cm=size_cm)
+                          max_price_tiyn=max_price_tiyn, size_cm=size_cm, color=color)
     if seller_id is not None:
         stmt = stmt.where(Listing.seller_id == seller_id)
     if sale:

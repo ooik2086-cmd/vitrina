@@ -92,7 +92,8 @@ class SavedSearch {
         condition = j['condition'] as String?,
         minPriceTiyn = j['min_price_tiyn'] as int?,
         maxPriceTiyn = j['max_price_tiyn'] as int?,
-        sizeCm = j['size_cm'] as String?;
+        sizeCm = j['size_cm'] as String?,
+        color = j['color'] as String?;
   final int id;
   final String? q;
   final String? category;
@@ -100,6 +101,9 @@ class SavedSearch {
   final int? minPriceTiyn;
   final int? maxPriceTiyn;
   final String? sizeCm;
+
+  /// The stored colour names, comma-separated, in the server's order.
+  final String? color;
 
   /// The same filters as the catalog sends, for saving and comparing.
   static Map<String, Object> body(
@@ -111,7 +115,11 @@ class SavedSearch {
         if (filter.conditions.isNotEmpty) 'condition': (filter.conditions.toList()..sort()).join(','),
         if (filter.minPriceTiyn != null) 'min_price_tiyn': filter.minPriceTiyn!,
         if (filter.maxPriceTiyn != null) 'max_price_tiyn': filter.maxPriceTiyn!,
+        if (filter.colors.isNotEmpty) 'color': (filter.colors.toList()..sort()).join(','),
       };
+
+  /// The colours of [color] as a set, for the catalog filter.
+  Set<String> get colors => {...?color?.split(',').where((c) => c.isNotEmpty)};
 
   Map<String, Object> get asBody => body(
       q: q,
@@ -120,7 +128,8 @@ class SavedSearch {
       filter: CatalogFilter(
           conditions: {...?condition?.split(',').where((c) => c.isNotEmpty)},
           minPriceTiyn: minPriceTiyn,
-          maxPriceTiyn: maxPriceTiyn));
+          maxPriceTiyn: maxPriceTiyn,
+          colors: colors));
 }
 
 /// A buyer's price offer on one size; `priceTiyn` is what they pay once it is accepted.
@@ -367,19 +376,29 @@ class DeliveryEstimate {
 
 /// Catalog refinements beyond text, size and category.
 class CatalogFilter {
-  const CatalogFilter({this.sort = 'new', this.conditions = const {}, this.minPriceTiyn, this.maxPriceTiyn, this.city});
+  const CatalogFilter(
+      {this.sort = 'new',
+      this.conditions = const {},
+      this.minPriceTiyn,
+      this.maxPriceTiyn,
+      this.city,
+      this.colors = const {}});
   final String sort; // new | price_asc | price_desc
   final String? city; // the seller's city: nearby pairs come sooner and cost less to send
   final Set<String> conditions;
   final int? minPriceTiyn;
   final int? maxPriceTiyn;
 
+  /// The stored colour names asked for; none means every colour.
+  final Set<String> colors;
+
   /// How many refinements differ from the default, for the badge on the filter button.
   int get active =>
       (sort != 'new' ? 1 : 0) +
       (conditions.isNotEmpty ? 1 : 0) +
       (minPriceTiyn != null || maxPriceTiyn != null ? 1 : 0) +
-      (city != null ? 1 : 0);
+      (city != null ? 1 : 0) +
+      (colors.isNotEmpty ? 1 : 0);
 
   Map<String, String> get query => {
         if (sort != 'new') 'sort': sort,
@@ -387,6 +406,7 @@ class CatalogFilter {
         if (minPriceTiyn != null) 'min_price_tiyn': '$minPriceTiyn',
         if (maxPriceTiyn != null) 'max_price_tiyn': '$maxPriceTiyn',
         if (city != null) 'city': city!,
+        if (colors.isNotEmpty) 'color': (colors.toList()..sort()).join(','),
       };
 }
 

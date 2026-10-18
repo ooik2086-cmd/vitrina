@@ -177,7 +177,8 @@ class _CatalogScreenState extends State<CatalogScreen> {
     _filter = CatalogFilter(
         conditions: {...?picked.condition?.split(',').where((c) => c.isNotEmpty)},
         minPriceTiyn: picked.minPriceTiyn,
-        maxPriceTiyn: picked.maxPriceTiyn);
+        maxPriceTiyn: picked.maxPriceTiyn,
+        colors: picked.colors);
     _savedKey = jsonEncode(picked.asBody);
     _search();
   }

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../api.dart';
+import '../colors.dart';
 import '../labels.dart';
 import '../i18n.dart';
 import 'delivery_eta.dart';
@@ -20,6 +21,7 @@ class _FilterSheetState extends State<FilterSheet> {
   late String _sort = widget.initial.sort;
   late String? _city = widget.initial.city;
   late final Set<String> _conditions = {...widget.initial.conditions};
+  late final Set<String> _colors = {...widget.initial.colors};
   late final _min = TextEditingController(text: _tenge(widget.initial.minPriceTiyn));
   late final _max = TextEditingController(text: _tenge(widget.initial.maxPriceTiyn));
 
@@ -40,8 +42,10 @@ class _FilterSheetState extends State<FilterSheet> {
   void _apply() {
     var min = _tiyn(_min.text), max = _tiyn(_max.text);
     if (min != null && max != null && min > max) (min, max) = (max, min);
-    Navigator.pop(context,
-        CatalogFilter(sort: _sort, conditions: _conditions, minPriceTiyn: min, maxPriceTiyn: max, city: _city));
+    Navigator.pop(
+        context,
+        CatalogFilter(
+            sort: _sort, conditions: _conditions, minPriceTiyn: min, maxPriceTiyn: max, city: _city, colors: _colors));
   }
 
   @override
@@ -94,6 +98,24 @@ class _FilterSheetState extends State<FilterSheet> {
                   onSelected: (on) => setState(() => on ? _conditions.add(e.key) : _conditions.remove(e.key)),
                 ),
             ]),
+            const SizedBox(height: 20),
+            Text(tr('Түсі'), style: theme.textTheme.titleSmall),
+            const SizedBox(height: 8),
+            Semantics(
+              container: true,
+              label: tr('Түсі'),
+              child: Wrap(spacing: 8, runSpacing: 8, children: [
+                for (final name in shoeColors.keys)
+                  FilterChip(
+                    key: Key('filter-color-$name'),
+                    showCheckmark: false, // the dot stays: the chip's own colour says it is picked
+                    avatar: ColorDot(name, onPicked: _colors.contains(name)),
+                    label: Text(tr(name)),
+                    selected: _colors.contains(name),
+                    onSelected: (on) => setState(() => on ? _colors.add(name) : _colors.remove(name)),
+                  ),
+              ]),
+            ),
             const SizedBox(height: 20),
             Text(tr('Сатушының қаласы'), style: theme.textTheme.titleSmall),
             const SizedBox(height: 8),

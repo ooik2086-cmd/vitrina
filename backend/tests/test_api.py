@@ -535,6 +535,17 @@ class ColorwayTests(ApiTestCase):
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.json()["colors"], [])
 
+    def test_the_catalog_shows_only_the_colours_asked_for_in_any_of_their_words(self):
+        black, blue = self.publish(color="қара"), self.publish(color="көк")
+        self.publish(color="қызыл")
+        marble = self.publish(color="мраморный")
+        find = lambda color: sorted(i["id"] for i in self.c.get(  # noqa: E731
+            "/api/v1/listings", params={"color": color}).json()["items"])
+        self.assertEqual(find("қара,Blue"), sorted([black["id"], blue["id"]]))
+        self.assertEqual(find("черные"), [black["id"]])
+        self.assertEqual(find(" , мраморный"), [marble["id"]])  # a typed colour, as typed
+        self.assertEqual(len(find("")), 4)  # no colour: every colour
+
 
 class DidYouMeanTests(ApiTestCase):
     def test_an_empty_search_offers_the_nearest_spelling_on_sale(self):
@@ -1383,6 +1394,17 @@ class SavedSearchTests(ApiTestCase):
         self.assertEqual(self.get("/notifications", self.buyer).json()["items"], [])
         self.post(f"/admin/moderation/{r.json()['id']}/approve", self.make_staff())
         self.assertEqual(self.get("/notifications", self.buyer).json()["items"][0]["kind"], "saved_search")
+
+    def test_a_search_for_colours_is_told_only_about_those_colours(self):
+        r = self.post("/saved-searches", self.buyer, {"color": "Blue, черный"})
+        self.assertEqual((r.status_code, r.json()["color"]), (201, "көк,қара"))
+        again = self.post("/saved-searches", self.buyer, {"color": "қара,көк"})
+        self.assertEqual(again.json()["id"], r.json()["id"])  # the same colours in other words: one search
+        self.publish(color="қызыл")
+        self.assertEqual(self.get("/notifications", self.buyer).json()["items"], [])
+        blue = self.publish(color="синий")
+        self.assertEqual([n["listing_id"] for n in self.get("/notifications", self.buyer).json()["items"]],
+                         [blue["id"]])
 
     def test_list_delete_and_limit(self):
         ids = [self.post("/saved-searches", self.buyer, {"q": f"model {i}"}).json()["id"] for i in range(10)]
