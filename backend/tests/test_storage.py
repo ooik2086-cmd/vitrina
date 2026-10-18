@@ -31,12 +31,29 @@ class FakeBucket:
         if not request.headers.get("authorization", "").startswith("AWS4-HMAC-SHA256 Credential=key/"):
             return httpx.Response(403)
         path = request.url.path
+        if request.method == "GET" and path == "/vitrina" and request.url.params.get("list-type") == "2":
+            return self.listing(request.url.params.get("continuation-token"))
+        if request.method == "DELETE":
+            self.objects.pop(path, None)
+            return httpx.Response(204)
         if request.method == "PUT":
             self.objects[path] = (request.content, request.headers["content-type"])
             return httpx.Response(200)
         if path in self.objects:
             return httpx.Response(200, content=self.objects[path][0])
         return httpx.Response(404)
+
+    def listing(self, token):
+        """ListObjectsV2, one object per page so the client has to follow the continuation token."""
+        keys = sorted(p.removeprefix("/vitrina/") for p in self.objects) + ["notes/readme.txt"]
+        at = int(token or 0)
+        more = at + 1 < len(keys)
+        body = ('<?xml version="1.0" encoding="UTF-8"?><ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">'
+                f'<IsTruncated>{"true" if more else "false"}</IsTruncated>'
+                + (f"<NextContinuationToken>{at + 1}</NextContinuationToken>" if more else "")
+                + f"<Contents><Key>{keys[at]}</Key><LastModified>2026-10-01T08:00:00.000Z</LastModified></Contents>"
+                "</ListBucketResult>")
+        return httpx.Response(200, content=body.encode())
 
 
 class S3StorageTests(unittest.TestCase):
@@ -63,6 +80,35 @@ class S3StorageTests(unittest.TestCase):
             self.s3.read("https://cdn.example.kz/7/../../secret")
         with self.assertRaises(RuntimeError):
             self.s3.read("https://cdn.example.kz/7/" + "0" * 32 + ".jpg")
+
+
+    def test_lists_every_page_of_our_files_and_deletes_one(self):
+        a, b = self.s3.put(b"a", owner_id=7), self.s3.put(b"b", owner_id=8)
+        found = dict(self.s3.keys())
+        key_a, key_b = a.split("cdn.example.kz/")[1], b.split("cdn.example.kz/")[1]
+        self.assertEqual(set(found), {key_a, key_b})  # notes/readme.txt is not ours
+        self.assertEqual(found[key_a], datetime(2026, 10, 1, 8, tzinfo=timezone.utc))
+        self.s3.delete(key_a)
+        self.assertEqual(set(dict(self.s3.keys())), {key_b})
+        with self.assertRaises(ValueError):
+            self.s3.delete("7/../../secret")
+
+
+class LocalListingTests(unittest.TestCase):
+    def test_lists_and_deletes_only_files_in_our_key_shape(self):
+        import os
+        import tempfile
+        with tempfile.TemporaryDirectory() as root:
+            disk = LocalStorage(root, "http://test/media")
+            url = disk.put(b"a", owner_id=3)
+            os.makedirs(os.path.join(root, "3", "sub"))
+            open(os.path.join(root, "3", "notes.txt"), "w").close()
+            key = url.split("/media/")[1]
+            self.assertEqual([k for k, _ in disk.keys()], [key])
+            disk.delete(key)
+            self.assertEqual(list(disk.keys()), [])
+            with self.assertRaises(ValueError):
+                disk.delete("../outside.jpg")
 
 
 class ChoiceTests(unittest.TestCase):

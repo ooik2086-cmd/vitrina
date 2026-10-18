@@ -16,7 +16,7 @@ os.environ.setdefault("VITRINA_LOG_LEVEL", "WARNING")  # keep test output to wha
 from vitrina_api import promo
 from vitrina_api.app import create_app
 from vitrina_api.config import Settings
-from vitrina_api.models import Base, Conversation, Message, Offer, SavedSearch, User
+from vitrina_api.models import Base, Conversation, Listing, Message, Offer, SavedSearch, User
 from vitrina_api import jobs
 from vitrina_api.services import (balance, run_auto_complete, run_expire_orders, run_review_reminders,
                                    run_stale_listing_tips)
@@ -2542,6 +2542,45 @@ class DisputeEvidenceTests(ApiTestCase):
         r = self.post(f"/admin/orders/{order['id']}/resolve", staff, {"refund_tiyn": 0, "reason": "  "})
         self.assertEqual(r.json()["code"], "reason_required")
         self.assertEqual(self.get(f"/orders/{order['id']}", self.buyer).json()["status"], "DISPUTED")
+
+
+class OrphanSweepTests(ApiTestCase):
+    def test_only_old_files_no_row_points_at_are_removed(self):
+        from vitrina_api import orphans
+        storage, now = self.app.state.storage, datetime.now(timezone.utc)
+        jpeg = io.BytesIO()
+        Image.new("RGB", (8, 8)).save(jpeg, "JPEG")
+        listed, ordered, moved, young, lost = (storage.put(jpeg.getvalue(), owner_id=1) for _ in range(5))
+        photos = [{**p, "url": listed} if p["angle"] == "front" else p for p in PHOTOS]
+        listing = self.publish(photos=photos)
+        with self.db() as db:
+            u = db.query(User).filter_by(phone="+77010000002").one()
+            # Inside a JSON text, and under an address saved before the public media URL changed.
+            u.last_delivery = json.dumps({"photos": [ordered, "https://old-cdn.example/" + moved.split("/media/")[1]]})
+            db.commit()
+        two_days_ago = (now - timedelta(days=3)).timestamp()
+        for url in (listed, ordered, moved, lost):
+            os.utime(os.path.join(self.cfg.media_dir, url.split("/media/")[1]), (two_days_ago, two_days_ago))
+        self.assertEqual(orphans.sweep(self.app.state.sessions, storage, now=now), [lost.split("/media/")[1]])
+        self.assertTrue(storage.read(lost))  # a dry run deletes nothing
+        orphans.sweep(self.app.state.sessions, storage, now=now, delete=True)
+        with self.assertRaises(FileNotFoundError):
+            storage.read(lost)
+        for url in (listed, ordered, moved, young):
+            self.assertEqual(storage.read(url), jpeg.getvalue())
+        with self.db() as db:  # the listing's photo is still there
+            self.assertIn(listed, json.dumps([m.original_url for m in db.get(Listing, listing["id"]).media]))
+
+    def test_refuses_to_sweep_when_the_database_points_at_nothing(self):
+        from vitrina_api import orphans
+        from vitrina_api.storage import LocalStorage
+        empty = LocalStorage(os.path.join(self.tmp.name, "other"), "http://test/media")
+        empty.put(b"x", owner_id=1)
+        with self.db() as db:
+            db.execute(Base.metadata.tables["media"].delete())
+            db.commit()
+        with self.assertRaises(RuntimeError):
+            orphans.sweep(self.app.state.sessions, empty, now=datetime.now(timezone.utc), delete=True)
 
 
 if __name__ == "__main__":

@@ -14,8 +14,9 @@ import tempfile
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Protocol
+from typing import Iterator, Protocol
 from urllib.parse import quote, urlsplit
+from xml.etree import ElementTree
 
 import httpx
 
@@ -132,6 +133,12 @@ class Storage(Protocol):
 
     def read(self, url: str) -> bytes: ...
 
+    def keys(self) -> Iterator[tuple[str, datetime]]:
+        """Every file we wrote (keys in new_key's shape only) with when it was written."""
+        ...
+
+    def delete(self, key: str) -> None: ...
+
 
 def new_key(owner_id: int, ext: str) -> str:
     return f"{owner_id}/{secrets.token_hex(16)}.{ext}"
@@ -182,6 +189,17 @@ class LocalStorage:
             raise ValueError("outside storage root")
         return path.read_bytes()
 
+    def keys(self) -> Iterator[tuple[str, datetime]]:
+        for path in self.root.glob("*/*"):
+            key = path.relative_to(self.root).as_posix()
+            if KEY_RE.fullmatch(key) and path.is_file():
+                yield key, datetime.fromtimestamp(path.stat().st_mtime, timezone.utc)
+
+    def delete(self, key: str) -> None:
+        if not KEY_RE.fullmatch(key):
+            raise ValueError("not a key we wrote")
+        (self.root / key).unlink(missing_ok=True)
+
 
 def sigv4_headers(method: str, url: str, *, region: str, access_key: str, secret_key: str, payload: bytes = b"",
                   headers: dict[str, str] | None = None, now: datetime | None = None,
@@ -221,8 +239,11 @@ class S3Storage:
         self.public_base = public_base.rstrip("/")
         self.client = client or httpx.Client(timeout=30)
 
-    def _send(self, method: str, key: str, data: bytes = b"", headers: dict[str, str] | None = None) -> httpx.Response:
-        url = f"{self.endpoint}/{self.bucket}/{key}"
+    def _send(self, method: str, key: str, data: bytes = b"", headers: dict[str, str] | None = None,
+              query: dict[str, str] | None = None) -> httpx.Response:
+        url = f"{self.endpoint}/{self.bucket}" + (f"/{key}" if key else "")
+        if query:  # SigV4 signs the query sorted and encoded exactly so, which is also how it is sent
+            url += "?" + "&".join(f"{quote(k, safe='-_.~')}={quote(v, safe='-_.~')}" for k, v in sorted(query.items()))
         signed = sigv4_headers(method, url, region=self.region, access_key=self.access_key,
                                secret_key=self.secret_key, payload=data, headers=headers)
         r = self.client.request(method, url, content=data or None, headers=signed)
@@ -244,6 +265,28 @@ class S3Storage:
         if key is None:
             raise ValueError("not stored here")
         return self._send("GET", key).content
+
+    def keys(self) -> Iterator[tuple[str, datetime]]:
+        """ListObjectsV2 page by page."""
+        token = None
+        while True:
+            query = {"list-type": "2", **({"continuation-token": token} if token else {})}
+            root = ElementTree.fromstring(self._send("GET", "", query=query).content)
+            ns = {"s3": root.tag[1:].split("}")[0]} if root.tag.startswith("{") else {}
+            find = (lambda node, name: node.find(f"s3:{name}", ns)) if ns else (lambda node, name: node.find(name))
+            for item in (root.findall("s3:Contents", ns) if ns else root.findall("Contents")):
+                key, when = find(item, "Key"), find(item, "LastModified")
+                if key is not None and when is not None and KEY_RE.fullmatch(key.text or ""):
+                    yield key.text, datetime.fromisoformat((when.text or "").replace("Z", "+00:00"))
+            more, nxt = find(root, "IsTruncated"), find(root, "NextContinuationToken")
+            if more is None or more.text != "true" or nxt is None or not nxt.text:
+                return
+            token = nxt.text
+
+    def delete(self, key: str) -> None:
+        if not KEY_RE.fullmatch(key):
+            raise ValueError("not a key we wrote")
+        self._send("DELETE", key)
 
 
 def make_storage(settings) -> Storage:
