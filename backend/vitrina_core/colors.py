@@ -38,6 +38,9 @@ COLORS: dict[str, tuple[str, ...]] = {
     "түрлі түсті": ("аралас", "көп түсті", "разноцветный", "multicolor", "multicolour", "multi"),
 }
 
+# Two-tone names and the plain colours they are made of: a buyer who asks for black also sees black-and-white pairs.
+PARTS: dict[str, tuple[str, ...]] = {"қара-ақ": ("қара", "ақ")}
+
 _HARD = ("ый", "ой", "ая", "ое", "ые", "ого", "ому", "ую", "ым", "ых", "ыми")
 _SOFT = ("ий", "яя", "ее", "ие", "его", "ему", "юю", "им", "их", "ими")
 
@@ -71,6 +74,17 @@ def canonical_color(text: str) -> str:
     """The colour's Kazakh name when it is on the list in any of its words; otherwise the text, tidied."""
     tidy = " ".join(_visible(text).split())
     return WORDS.get(_fold(tidy), tidy)
+
+
+def color_list(text: str) -> list[str]:
+    """The stored names of a comma-separated colour list, once each and sorted: "черный, Blue" is көк and қара."""
+    return sorted({name for part in text.split(",") if (name := canonical_color(part))})
+
+
+def matching_colors(names: list[str]) -> list[str]:
+    """The stored colours a listing may have to show for these: each name and the two-tone names made with it."""
+    asked = set(names)
+    return sorted(asked | {two for two, parts in PARTS.items() if asked & set(parts)})
 
 
 def color_query(query: str) -> str:

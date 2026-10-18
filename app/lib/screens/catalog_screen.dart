@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 
 import '../api.dart';
+import '../colors.dart';
 import '../labels.dart';
 import '../session.dart';
 import '../theme.dart';
@@ -86,6 +87,25 @@ class _CatalogScreenState extends State<CatalogScreen> {
       _hasMore = true;
       _results = _load();
     });
+  }
+
+  /// The colours the catalog is narrowed to, said out loud, with a cross that drops them and nothing else.
+  Widget _colorsOn() {
+    final names = (_filter.colors.toList()..sort()).map(colorName).toList();
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: InputChip(
+        key: const Key('colors-on'),
+        avatar: ColorDot(_filter.colors.first),
+        label: Text(names.length <= 2 ? names.join(', ') : '${names.take(2).join(', ')} +${names.length - 2}'),
+        onPressed: _pickFilter,
+        onDeleted: () {
+          _filter = _filter.withColors(const {});
+          _search();
+        },
+        deleteButtonTooltipMessage: tr('Түсті алып тастау'),
+      ),
+    );
   }
 
   /// Size, category, sale and the filter sheet off; the words typed stay. The saved size is kept for next time.
@@ -335,6 +355,7 @@ class _CatalogScreenState extends State<CatalogScreen> {
                       ),
                     ),
                   ),
+                  if (_filter.colors.isNotEmpty) _colorsOn(),
                   Padding(
                     padding: const EdgeInsets.only(right: 8),
                     child: FilterChip(

@@ -392,6 +392,14 @@ class CatalogFilter {
   /// The stored colour names asked for; none means every colour.
   final Set<String> colors;
 
+  CatalogFilter withColors(Set<String> picked) => CatalogFilter(
+      sort: sort,
+      conditions: conditions,
+      minPriceTiyn: minPriceTiyn,
+      maxPriceTiyn: maxPriceTiyn,
+      city: city,
+      colors: picked);
+
   /// How many refinements differ from the default, for the badge on the filter button.
   int get active =>
       (sort != 'new' ? 1 : 0) +

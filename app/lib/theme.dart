@@ -176,7 +176,7 @@ ThemeData buildTheme(Brightness brightness) {
       selectedColor: scheme.primary,
       secondarySelectedColor: scheme.primary,
       checkmarkColor: scheme.onPrimary,
-      // Light text on a picked chip for every kind of chip: a FilterChip does not take secondaryLabelStyle.
+      // Light text on a picked FilterChip or InputChip too: only ChoiceChip takes secondaryLabelStyle.
       labelStyle: _w(text.labelLarge!, 550).copyWith(
           color: WidgetStateColor.resolveWith((s) =>
               s.contains(WidgetState.selected) && !s.contains(WidgetState.disabled)

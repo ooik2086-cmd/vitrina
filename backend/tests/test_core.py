@@ -5,7 +5,7 @@ from pathlib import Path
 from datetime import datetime, timedelta, timezone
 
 from vitrina_core.catalog import compute_bounds, normalize_query, Segment, MIN_SAMPLE
-from vitrina_core.colors import COLORS, WORDS, canonical_color, color_query
+from vitrina_core.colors import COLORS, PARTS, WORDS, canonical_color, color_list, color_query, matching_colors
 from vitrina_core.money import (
     CommissionRule, Entry, Ledger, LedgerError, PLATFORM_FEE, PROVIDER_CLEARING,
     buyer_refund, escrow, format_tenge, record_payment, seller_payable, settle, tenge_to_tiyn,
@@ -263,6 +263,13 @@ APP_COLORS = Path(__file__).resolve().parents[2] / "app" / "lib" / "colors.dart"
 
 
 class ColorTests(unittest.TestCase):
+    def test_a_colour_list_asks_for_its_two_tone_pairs_too(self):
+        self.assertEqual(color_list(" Blue, черный ,,\u200b, кара"), ["көк", "қара"])
+        self.assertEqual(matching_colors(["қара"]), ["қара", "қара-ақ"])
+        self.assertEqual(matching_colors(["көк"]), ["көк"])
+        for two, parts in PARTS.items():
+            self.assertTrue({two, *parts} <= set(COLORS), two)
+
     def test_a_colour_typed_in_any_word_is_stored_by_its_kazakh_name(self):
         for typed in ("Черный", " чёрный ", "BLACK", "қара", "кара", "черные", "\u200bчерный"):
             self.assertEqual(canonical_color(typed), "қара", typed)

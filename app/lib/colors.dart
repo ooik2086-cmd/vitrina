@@ -29,6 +29,11 @@ const shoeColors = <String, Color>{
   'түрлі түсті': Color(0x00000000),
 };
 
+/// Two-tone names and the plain colours they are made of (backend PARTS): asking for black shows black-and-white too.
+const colorParts = <String, List<String>>{
+  'қара-ақ': ['қара', 'ақ'],
+};
+
 /// A stored colour in the interface language: the listed colours are translated, a colour the seller typed is shown
 /// as typed.
 String colorName(String stored) => shoeColors.containsKey(stored) ? tr(stored) : stored;

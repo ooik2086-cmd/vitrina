@@ -748,7 +748,7 @@ void main() {
     await expectLater(api.startPayment(1), throwsA(isA<ApiException>().having((e) => e.code, 'code', 'demo')));
     final black = await api.search(filter: const CatalogFilter(colors: {'қара'}));
     expect(black, isNotEmpty);
-    expect(black.every((l) => l.color == 'қара'), isTrue);
+    expect(black.every((l) => l.color == 'қара' || l.color == 'қара-ақ'), isTrue); // black-and-white is black too
     expect(black.length, lessThan(all.length));
   });
 
@@ -1043,6 +1043,7 @@ void main() {
     expect(body, {'color': 'ақ,қара'});
     final saved = SavedSearch.fromJson({'id': 1, 'color': 'ақ,қара,мраморный'});
     expect(saved.colors, {'ақ', 'қара', 'мраморный'});
+    expect(saved.asBody, {'color': 'ақ,мраморный,қара'}); // sorted as the server sorts
     expect(savedSearchLabel(saved), 'ақ, қара, мраморный');
     expect(const CatalogFilter(colors: {'қара', 'көк'}).query, {'color': 'көк,қара'});
     expect(const CatalogFilter(colors: {'қара', 'көк'}).active, 1);
@@ -1050,10 +1051,12 @@ void main() {
 
   testWidgets('catalog saves the current search and opens a saved one', (tester) async {
     final calls = <String>[];
+    final asked = <Map<String, String>>[];
     final api = Api(
         base: 'http://x/api/v1',
         client: MockClient((req) async {
           calls.add('${req.method} ${req.url.path}${req.body.isEmpty ? '' : ' ${req.body}'}');
+          if (req.url.path == '/api/v1/listings') asked.add(req.url.queryParameters);
           switch (req.url.path) {
             case '/api/v1/saved-searches' when req.method == 'POST':
               return jsonResponse({'id': 4, ...jsonDecode(req.body) as Map<String, dynamic>}, 201);
@@ -1067,7 +1070,8 @@ void main() {
                     'size_cm': null,
                     'condition': null,
                     'min_price_tiyn': null,
-                    'max_price_tiyn': null
+                    'max_price_tiyn': null,
+                    'color': 'ақ,қара',
                   }
                 ]
               });
@@ -1092,11 +1096,19 @@ void main() {
     expect(find.byKey(const Key('search-saved')), findsOneWidget);
     await tester.tap(find.byKey(const Key('saved-searches')));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('«adidas»'));
+    await tester.tap(find.text('«adidas» · ақ, қара'));
     await tester.pumpAndSettle();
     expect(calls.last, startsWith('GET /api/v1/listings'));
+    expect(asked.last['color'], 'ақ,қара');
     expect(find.text('adidas'), findsOneWidget); // the query box shows the saved search
     expect(find.byKey(const Key('search-saved')), findsOneWidget);
+    // The colours show next to the filter button, and its cross drops them and nothing else.
+    expect(find.descendant(of: find.byKey(const Key('colors-on')), matching: find.text('ақ, қара')), findsOneWidget);
+    await tester.tap(find.byTooltip('Түсті алып тастау'));
+    await tester.pumpAndSettle();
+    expect((asked.last['color'], asked.last['q']), (null, 'adidas'));
+    expect(find.byKey(const Key('colors-on')), findsNothing);
+    expect(find.byKey(const Key('save-search')), findsOneWidget); // no longer the saved search
   });
 
   testWidgets('reviews show the buyer photos and open one large', (tester) async {
@@ -1732,6 +1744,28 @@ void main() {
     await tap('filter-color-қара');
     await tap('apply-filter');
     expect(result!.colors, {'көк'});
+    // A colour not on the list, from a saved search, has a chip too, so it can be dropped.
+    initial = const CatalogFilter(colors: {'мраморный'});
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    expect(chip('мраморный').selected, isTrue);
+    await tap('filter-color-мраморный');
+    await tap('apply-filter');
+    expect(result!.colors, isEmpty);
+  });
+
+  testWidgets('a picked filter chip has light text on its dark fill', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+        theme: buildTheme(Brightness.light),
+        home: Scaffold(
+            body: Column(children: [
+          FilterChip(label: const Text('on'), selected: true, onSelected: (_) {}),
+          FilterChip(label: const Text('off'), selected: false, onSelected: (_) {}),
+        ]))));
+    final scheme = Theme.of(tester.element(find.text('on'))).colorScheme;
+    Color? ink(String text) => tester.renderObject<RenderParagraph>(find.text(text)).text.style?.color;
+    expect(ink('on'), scheme.onPrimary);
+    expect(ink('off'), scheme.onSurface);
   });
 
   test('packing slip comes back as PDF bytes, or as the server\'s error', () async {

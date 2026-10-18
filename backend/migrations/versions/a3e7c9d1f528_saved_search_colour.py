@@ -18,8 +18,10 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column('saved_searches', sa.Column('color', sa.String(length=300), nullable=True))
+    with op.batch_alter_table('saved_searches', schema=None) as batch_op:
+        batch_op.add_column(sa.Column('color', sa.String(length=300), nullable=True))
 
 
 def downgrade() -> None:
-    op.drop_column('saved_searches', 'color')
+    with op.batch_alter_table('saved_searches', schema=None) as batch_op:
+        batch_op.drop_column('color')

@@ -539,12 +539,15 @@ class ColorwayTests(ApiTestCase):
         black, blue = self.publish(color="қара"), self.publish(color="көк")
         self.publish(color="қызыл")
         marble = self.publish(color="мраморный")
+        two_tone = self.publish(color="черно-белый")
         find = lambda color: sorted(i["id"] for i in self.c.get(  # noqa: E731
             "/api/v1/listings", params={"color": color}).json()["items"])
-        self.assertEqual(find("қара,Blue"), sorted([black["id"], blue["id"]]))
-        self.assertEqual(find("черные"), [black["id"]])
+        self.assertEqual(find("қара,Blue"), sorted([black["id"], blue["id"], two_tone["id"]]))
+        self.assertEqual(find("черные"), sorted([black["id"], two_tone["id"]]))  # black-and-white is black too
+        self.assertEqual(find("қара-ақ"), [two_tone["id"]])
         self.assertEqual(find(" , мраморный"), [marble["id"]])  # a typed colour, as typed
-        self.assertEqual(len(find("")), 4)  # no colour: every colour
+        self.assertEqual(len(find("")), 5)  # no colour: every colour
+        self.assertEqual(len(find(" , \u200b")), 5)  # only blank parts: every colour, as a saved search reads it
 
 
 class DidYouMeanTests(ApiTestCase):
@@ -1403,8 +1406,16 @@ class SavedSearchTests(ApiTestCase):
         self.publish(color="қызыл")
         self.assertEqual(self.get("/notifications", self.buyer).json()["items"], [])
         blue = self.publish(color="синий")
+        two_tone = self.publish(color="бело-черный")  # black is in it
         self.assertEqual([n["listing_id"] for n in self.get("/notifications", self.buyer).json()["items"]],
-                         [blue["id"]])
+                         [two_tone["id"], blue["id"]])
+
+    def test_a_colour_list_too_long_once_in_kazakh_is_refused_not_stored(self):
+        # "multi" is 5 letters, "түрлі түсті" 11: the length is checked on what would be stored.
+        typed = ",".join(["multi", "orange", "кум", "ivory", "navy", "pink"] + [f"x{i:02}" for i in range(67)])
+        self.assertLessEqual(len(typed), 300)
+        r = self.post("/saved-searches", self.buyer, {"color": typed})
+        self.assertEqual((r.status_code, r.json()["code"]), (422, "validation"))
 
     def test_list_delete_and_limit(self):
         ids = [self.post("/saved-searches", self.buyer, {"q": f"model {i}"}).json()["id"] for i in range(10)]

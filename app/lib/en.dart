@@ -975,4 +975,5 @@ const en = <String, String>{
   'түрлі түсті': 'multicolour',
   'Мысалы: мәрмәр': 'For example: marble',
   'Өзгерту': 'Change',
+  'Түсті алып тастау': 'Remove colour',
 };

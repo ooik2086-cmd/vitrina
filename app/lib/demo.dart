@@ -10,6 +10,8 @@ import 'dart:convert';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 
+import 'colors.dart';
+
 const demoMode = bool.fromEnvironment('DEMO');
 
 const demoToken = 'demo';
@@ -143,7 +145,12 @@ class DemoClient extends http.BaseClient {
       if (q['seller_id'] != null && '${(l['seller'] as Map)['id']}' != q['seller_id']) return false;
       if (q['sale'] == 'true' && l['was_price_tiyn'] == null) return false;
       if (conditions != null && !conditions.contains(l['condition'])) return false;
-      if (colors != null && colors.isNotEmpty && !colors.contains(l['color'])) return false;
+      if (colors != null &&
+          colors.isNotEmpty &&
+          !colors.contains(l['color']) &&
+          !(colorParts[l['color']] ?? const []).any(colors.contains)) {
+        return false;
+      }
       if ((minP != null && price < minP) || (maxP != null && price > maxP)) return false;
       if (cm != null &&
           !(l['sizes'] as List).any((s) =>

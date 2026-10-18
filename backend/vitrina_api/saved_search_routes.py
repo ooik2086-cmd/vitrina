@@ -2,13 +2,13 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from vitrina_core.catalog import normalize_query
-from vitrina_core.colors import canonical_color, color_query
+from vitrina_core.colors import PARTS, color_list, color_query, matching_colors
 
 from . import services
 from . import promo
@@ -39,8 +39,9 @@ def catalog_filter(stmt, *, q: str | None = None, category: str | None = None, b
         stmt = stmt.where(Listing.price_tiyn >= min_price_tiyn)
     if max_price_tiyn is not None:
         stmt = stmt.where(Listing.price_tiyn <= max_price_tiyn)
-    if color:  # one colour or a comma-separated list, in any of the words the colour list knows
-        stmt = stmt.where(Listing.color.in_(colors_of(color)))
+    # One colour or a comma-separated list, in any of the words the colour list knows; blank parts ask for nothing.
+    if color and (names := color_list(color)):
+        stmt = stmt.where(Listing.color.in_(matching_colors(names)))
     if size_cm:
         mm = cm_to_mm(size_cm)
         stmt = stmt.where(Listing.id.in_(select(ListingSize.listing_id).where(
@@ -62,17 +63,16 @@ class SavedSearchIn(BaseModel):
     size_cm: str | None = Field(default=None, max_length=8)
     color: str | None = Field(default=None, max_length=300)
 
-
-def colors_of(color: str) -> list[str]:
-    """The stored names of a comma-separated colour list: "черный,Blue" is "қара" and "көк"."""
-    return sorted({canonical_color(c) for c in color.split(",") if c.strip()})
+    # In one spelling before the length is checked: a Kazakh name can be longer than the word typed for it.
+    _color = field_validator("color", mode="before")(
+        lambda v: (",".join(color_list(v)) or None) if isinstance(v, str) else v)
 
 
 def search_values(source) -> dict:
     values = {f: getattr(source, f) for f in SEARCH_FIELDS}
     values = {k: (v.strip() or None) if isinstance(v, str) else v for k, v in values.items()}
     if values["color"]:
-        values["color"] = ",".join(colors_of(values["color"])) or None  # one spelling, so equal searches compare equal
+        values["color"] = ",".join(color_list(values["color"])) or None  # one spelling, so equal searches compare equal
     return values
 
 
@@ -103,7 +103,10 @@ def announce(db: Session, listing: Listing) -> None:
         User.is_blocked.is_(False),
         or_(SavedSearch.category.is_(None), SavedSearch.category == "", SavedSearch.category == listing.category),
         or_(SavedSearch.min_price_tiyn.is_(None), SavedSearch.min_price_tiyn <= listing.price_tiyn),
-        or_(SavedSearch.max_price_tiyn.is_(None), SavedSearch.max_price_tiyn >= listing.price_tiyn))
+        or_(SavedSearch.max_price_tiyn.is_(None), SavedSearch.max_price_tiyn >= listing.price_tiyn),
+        # A colour search names this colour or one it is made of (a looser test; the exact one is below).
+        or_(SavedSearch.color.is_(None), SavedSearch.color == "",
+            *[SavedSearch.color.contains(c, autoescape=True) for c in {listing.color, *PARTS.get(listing.color, ())}]))
     for saved in db.scalars(candidates.order_by(SavedSearch.id)).all():
         if saved.user_id in told:
             continue
