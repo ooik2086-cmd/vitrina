@@ -26,43 +26,55 @@ def load(url: str, root: Path) -> Image.Image:
     return img.convert("RGBA").resize((SIDE, SIDE))
 
 
-def grey(img: Image.Image, mask: Image.Image | None) -> Image.Image:
-    """The picture on a mid-grey ground, with only the shoe kept when a cut-out mask is given."""
+def grey(img: Image.Image) -> Image.Image:
+    """The picture on a mid-grey ground."""
     ground = Image.new("RGBA", img.size, (128, 128, 128, 255))
     ground.alpha_composite(img)
-    out = ground.convert("L")
-    return out if mask is None else Image.composite(out, Image.new("L", out.size, 128), mask)
+    return ground.convert("L")
 
 
-def gap(a: Image.Image, b: Image.Image) -> float:
-    return ImageStat.Stat(ImageChops.difference(a, b)).mean[0]
+def gap(a: Image.Image, b: Image.Image, mask: Image.Image | None) -> float:
+    """Mean grey-level difference, over the shoe alone when a cut-out mask is given, so a small shoe on a large empty
+    ground does not water the difference down."""
+    return ImageStat.Stat(ImageChops.difference(grey(a), grey(b)), mask).mean[0]
+
+
+def compare(m: dict, root: Path) -> list[str]:
+    """What is wrong with one photo: a missing file, or a copy that shows another picture."""
+    urls = [u for u in (m.get("thumb_url"), m.get("processed_url"), m.get("original_url")) if u]
+    try:
+        imgs = {u: load(u, root) for u in urls}
+    except FileNotFoundError as e:
+        return [f"missing file {e.filename}"]
+    cut = m.get("processed_url")
+    mask = imgs[cut].getchannel("A").point(lambda a: 255 if a > 128 else 0) if cut else None
+    if mask is not None and not mask.getbbox():
+        mask = None  # an empty cut-out leaves nothing to compare over
+    shown = cut or m["original_url"]
+    return [f"{u.rsplit('/', 1)[1]} is not the same picture as {shown.rsplit('/', 1)[1]}"
+            for u in urls if u != shown and gap(imgs[u], imgs[shown], mask) > LIMIT]
 
 
 def check(answers: dict, root: Path) -> list[str]:
-    problems, seen = [], set()
+    problems: list[str] = []
+    seen: dict[tuple, list[str]] = {}  # the same photo recurs in several answers
+    owned: dict[int, set[str]] = {}  # every picture each listing has
+    covers: list[tuple[str, int, str]] = []
 
     def walk(node):
         if isinstance(node, dict):
+            if node.get("listing_cover") and node.get("listing_id") is not None:
+                covers.append((node["listing_cover"], node["listing_id"], f"listing {node['listing_id']} cover"))
             if "media" in node and "id" in node and isinstance(node["media"], list):
+                for m in node["media"]:
+                    owned.setdefault(node["id"], set()).update(
+                        u for u in (m.get("thumb_url"), m.get("processed_url"), m.get("original_url")) if u)
                 for i, m in enumerate(node["media"]):
                     key = (m.get("thumb_url"), m.get("processed_url"), m.get("original_url"))
-                    if key in seen:
-                        continue
-                    seen.add(key)
+                    if key not in seen:
+                        seen[key] = compare(m, root)
                     where = f"listing {node['id']} photo {i} ({m.get('angle')})"
-                    urls = [u for u in (m.get("thumb_url"), m.get("processed_url"), m.get("original_url")) if u]
-                    try:
-                        imgs = {u: load(u, root) for u in urls}
-                    except FileNotFoundError as e:
-                        problems.append(f"{where}: missing file {e.filename}")
-                        continue
-                    cut = m.get("processed_url")
-                    mask = imgs[cut].getchannel("A").point(lambda a: 255 if a > 128 else 0) if cut else None
-                    shown = cut or m["original_url"]
-                    for u in urls:
-                        if u != shown and gap(grey(imgs[u], mask), grey(imgs[shown], mask)) > LIMIT:
-                            problems.append(f"{where}: {u.rsplit('/', 1)[1]} is not the same picture as "
-                                            f"{shown.rsplit('/', 1)[1]}")
+                    problems.extend(f"{where}: {p}" for p in seen[key])
             for v in node.values():
                 walk(v)
         elif isinstance(node, list):
@@ -70,7 +82,12 @@ def check(answers: dict, root: Path) -> list[str]:
                 walk(v)
 
     walk(answers)
-    return problems
+    for url, listing, where in covers:
+        if listing in owned and url not in owned[listing]:
+            problems.append(f"{where}: {url.rsplit('/', 1)[1]} is not one of this listing's photos")
+        elif not (root / url.split("/demo/media/", 1)[1]).is_file():
+            problems.append(f"{where}: missing file {url.rsplit('/', 1)[1]}")
+    return list(dict.fromkeys(problems))
 
 
 def main() -> None:

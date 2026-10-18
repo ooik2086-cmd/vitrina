@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import '../theme.dart';
 import '../i18n.dart';
 import 'studio.dart';
+import 'scroll_showcase.dart' show ShowcaseScene;
 
 /// Backdrop per showcase style. Styles change only what surrounds the photos, never the photos.
 BoxDecoration showcaseBackground(String style) => switch (style) {
@@ -168,8 +169,9 @@ class _SpinViewerState extends State<SpinViewer> {
 
 /// Swipeable gallery with page dots, for the angle photos and for listings without a frame sequence.
 class PhotoGallery extends StatefulWidget {
-  const PhotoGallery({super.key, required this.urls});
+  const PhotoGallery({super.key, required this.urls, this.dark = false});
   final List<String> urls;
+  final bool dark; // the photos stand on a dark scene: the page dots go light
 
   @override
   State<PhotoGallery> createState() => _PhotoGalleryState();
@@ -208,7 +210,10 @@ class _PhotoGalleryState extends State<PhotoGallery> {
               width: i == _page ? 18 : 6,
               height: 6,
               decoration: BoxDecoration(
-                  color: i == _page ? Brand.ink : Colors.black26, borderRadius: BorderRadius.circular(99)),
+                  color: i == _page
+                      ? (widget.dark ? ShowcaseScene.dark.fg : Brand.ink)
+                      : (widget.dark ? Colors.white30 : Colors.black26),
+                  borderRadius: BorderRadius.circular(99)),
             ),
         ]),
       ),

@@ -23,6 +23,17 @@ class ShowcaseScene {
       Color(0xFF9A97AB), Color(0xFFB9A8FF), Color(0x4D9684E6));
 }
 
+/// Whether controls on [ground] read better in the dark scene's light ink than in the light scene's dark ink: the
+/// pair with the higher contrast ratio wins, so a mid-tone ground never gets ink that hardly shows.
+bool darkerScene(Color ground) {
+  double ratio(Color a, Color b) {
+    final la = a.computeLuminance(), lb = b.computeLuminance();
+    return (math.max(la, lb) + 0.05) / (math.min(la, lb) + 0.05);
+  }
+
+  return ratio(ShowcaseScene.dark.fg, ground) > ratio(ShowcaseScene.light.fg, ground);
+}
+
 /// The average colour of the outermost two pixels of an RGBA image: the background a photo was taken on.
 Color edgeColour(ByteData rgba, int width, int height) {
   var r = 0, g = 0, b = 0, n = 0;
@@ -424,12 +435,17 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
     });
   }
 
-  void _remember(ImageProvider full) {
+  /// Which zoom each remembered full photo was decoded for.
+  final _bucketOf = Expando<int>();
+
+  void _remember(ImageProvider full, int bucket) {
+    _bucketOf[full] = bucket;
     if (_recentFull.isNotEmpty && _recentFull.last == full) return;
-    // The same photo decoded for another zoom: drop it, a 3200 px photo at two sizes is tens of megabytes.
+    // The same photo decoded for another zoom: drop it, a 3200 px photo at two sizes is tens of megabytes. The
+    // screen-size copy stays, so zooming back out is sharp at once.
     ImageProvider source(ImageProvider p) => p is ResizeImage ? p.imageProvider : p;
     for (final other in [..._recentFull]) {
-      if (other != full && source(other) == source(full)) {
+      if (other != full && _bucketOf[other] != 1 && source(other) == source(full)) {
         _recentFull.remove(other);
         other.evict();
       }
@@ -554,7 +570,8 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
     final turn = _plan.turn;
     if (_shown.frame >= turn || _dragFrame.floor() % turn != _shown.frame) _dragFrame = _shown.frame % turn * 1.0;
     _dragFrame = (_dragFrame - d.delta.dx / (width * 1.5) * turn) % turn;
-    widget.scroll.jumpTo(_plan.centreOf(0, _dragFrame.floor()) * _travel);
+    // A tiny negative remainder rounds up to the turn itself, which is a frame past it.
+    widget.scroll.jumpTo(_plan.centreOf(0, _dragFrame.floor() % turn) * _travel);
   }
 
   Widget _photo(MediaItem m, ShowcaseStep step, double width) {
@@ -574,7 +591,7 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
         math.min(6000, (width * dpr * bucket).round()), null, NetworkImage(step.cut ? m.url : m.originalUrl));
     // With no small copy the base is already this photo at screen size: nothing to lay over it, nothing to drop.
     final sharpen = (_settled || _zoomed) && provider != small;
-    if (sharpen) _remember(provider);
+    if (sharpen) _remember(provider, bucket);
     final full = Image(
       image: provider,
       key: ValueKey('showcase-full-${m.url}-$bucket'),
@@ -605,7 +622,7 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
     final report = widget.onStageTop;
     if (report == null || !mounted) return;
     final offset = widget.scroll.hasClients ? widget.scroll.offset : 0.0;
-    final covers = offset < _travel + widget.stageHeight - MediaQuery.paddingOf(context).top;
+    final covers = offset < _travel + widget.stageHeight - MediaQuery.viewPaddingOf(context).top;
     final now = _plan.at(_progress);
     final top = !covers ? null : (_onDark(_plan.steps[now.step]) ? Brightness.dark : Brightness.light);
     if (_topReported && top == _top) return;
@@ -618,7 +635,7 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
   bool _onDark(ShowcaseStep step) {
     if (widget.listing.backdrop != null && step.cut) return !_light;
     final edge = _photoEdge;
-    if (!step.cut && edge != null) return edge.computeLuminance() < 0.3;
+    if (!step.cut && edge != null) return darkerScene(edge);
     return widget.listing.showcaseStyle == 'premium';
   }
 

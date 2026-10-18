@@ -545,6 +545,10 @@ void main() {
     await tester.pump();
     await tester.tap(find.byKey(const Key('showcase-details')));
     await tester.pumpAndSettle();
+    // The details come up under the app bar, which still stands on the stage's last stretch: so do the icons.
+    expect(style(), SystemUiOverlayStyle.light);
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, -120));
+    await tester.pumpAndSettle();
     expect(style(), isNull); // the page's own canvas: the theme decides
   });
 
@@ -557,6 +561,30 @@ void main() {
     await tester.tap(find.byKey(const Key('showcase-step-top')));
     await tester.pumpAndSettle();
     expect(style(), SystemUiOverlayStyle.light);
+  });
+
+  test('controls on a ground take whichever ink reads better on it', () {
+    expect(darkerScene(const Color(0xFF000000)), isTrue);
+    expect(darkerScene(const Color(0xFF3A3A3A)), isTrue);
+    expect(darkerScene(const Color(0xFF808080)), isFalse); // mid grey: dark ink reads better than light
+    expect(darkerScene(const Color(0xFFFFFFFF)), isFalse);
+  });
+
+  showcaseTest('a dark scan\'s Photo tab keeps light status bar icons and page dots over its photos', (tester) async {
+    // As the demo's scan: each photo is itself cut out, so the one file is both original and cut-out.
+    final body = scan();
+    for (final m in body['media'] as List) {
+      m['processed_url'] = m['original_url'];
+    }
+    await pump(tester, body);
+    await tester.tap(find.byKey(const Key('showcase-photos')));
+    await tester.pumpAndSettle();
+    SystemUiOverlayStyle? style() => tester.widget<AppBar>(find.byType(AppBar)).systemOverlayStyle;
+    expect(style(), SystemUiOverlayStyle.light);
+    expect(tester.widget<PhotoGallery>(find.byType(PhotoGallery)).dark, isTrue);
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, -700));
+    await tester.pumpAndSettle();
+    expect(style(), isNull); // past the photos: the page's own canvas
   });
 
   test('the stage behind photos as taken is the colour around their edge', () {

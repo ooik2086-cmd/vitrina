@@ -1,6 +1,7 @@
 """Puts the frames of the approved Scroll 3D demo page (https://claude.ai/artifact/JC3hb8S7YMjPaxL6jBS1TG) into the
 recorded demo answers, so the app's showcase shows exactly what that page shows: the blue shoe (listing 3) and the
-black one (listing 1), 103 frames of one scan each at 1600 px, the six photo views at 3200 px.
+black one (listing 1), 103 frames of one scan each at 1600 px. The stops (outer, front, inner, back, top, sole,
+close-up) are frames of that same scan, the top, sole and close-up from its sharper renders.
 
     python3 app/demo/use_scan.py <folder with frames/blue and frames/black, as the page publishes them>
 
