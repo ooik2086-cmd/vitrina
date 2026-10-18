@@ -1,7 +1,9 @@
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vitrina/theme.dart';
 import 'package:vitrina/widgets/studio.dart';
@@ -116,24 +118,76 @@ void main() {
     expect(drawn, findsNothing);
   });
 
-  for (final (brightness, canvas) in [(Brightness.light, Brand.paperCanvas), (Brightness.dark, Brand.nightCanvas)]) {
-    testWidgets('every page stands on the ${brightness.name} canvas, and a page coming in covers the one under it',
-        (tester) async {
-      await tester.pumpWidget(MaterialApp(theme: buildTheme(brightness), home: const Scaffold(body: Text('first'))));
-      Finder canvasUnder(String text) => find.ancestor(
-          of: find.text(text), matching: find.byWidgetPredicate((w) => w is DecoratedBox && w.decoration == canvas));
-      expect(canvasUnder('first'), findsOneWidget);
+  for (final (brightness, canvas, icons) in [
+    (Brightness.light, Brand.paperCanvas, Brightness.dark),
+    (Brightness.dark, Brand.nightCanvas, Brightness.light),
+  ]) {
+    testWidgets(
+        'every page stands on the ${brightness.name} canvas, a page coming in covers the one under it, and the '
+        'status bar icons read on it', (tester) async {
+      final theme = buildTheme(brightness);
+      await tester
+          .pumpWidget(MaterialApp(theme: theme, builder: canvasBehind, home: const Scaffold(body: Text('first'))));
+      bool isCanvas(Widget w) => w is DecoratedBox && w.decoration == canvas;
+      Finder canvasUnder(String text) => find.ancestor(of: find.text(text), matching: find.byWidgetPredicate(isCanvas));
+      expect(canvasUnder('first'), findsNWidgets(2)); // its own, and the one behind every page
       tester.state<NavigatorState>(find.byType(Navigator)).push(MaterialPageRoute<void>(
           builder: (_) => Scaffold(appBar: AppBar(title: const Text('t')), body: const Text('second'))));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 100));
-      expect(canvasUnder('second'), findsOneWidget); // its own canvas hides the first page mid-transition
+      // Mid-transition the new page has its own canvas, inside the transition, not shared with the page below,
+      expect(canvasUnder('second'), findsNWidgets(2));
+      final own = find.ancestor(of: find.text('second'), matching: find.byWidgetPredicate(isCanvas)).first;
+      expect(find.descendant(of: own, matching: find.text('first')), findsNothing);
+      // and nothing of another colour comes between the pages.
+      expect(find.byWidgetPredicate((w) => w is ColoredBox && w.color.a > 0 && w.color != canvas.color), findsNothing);
       await tester.pumpAndSettle();
       expect(
           tester
               .widget<Material>(find.descendant(of: find.byType(AppBar), matching: find.byType(Material)).first)
               .color,
           Colors.transparent);
-    });
+      final styles = tester
+          .widgetList<AnnotatedRegion<SystemUiOverlayStyle>>(find.byType(AnnotatedRegion<SystemUiOverlayStyle>))
+          .map((r) => r.value.statusBarIconBrightness)
+          .toSet();
+      expect(styles, {icons});
+    }, variant: TargetPlatformVariant.only(TargetPlatform.android));
   }
+
+  testWidgets('every platform\'s pages get the canvas, with that platform\'s own transition timing', (tester) async {
+    final theme = buildTheme(Brightness.light);
+    for (final p in TargetPlatform.values) {
+      final b = theme.pageTransitionsTheme.builders[p];
+      expect(b, isA<OnCanvas>(), reason: '$p');
+      final inner = (b! as OnCanvas).inner;
+      expect((b.transitionDuration, b.reverseTransitionDuration, b.delegatedTransition == null),
+          (inner.transitionDuration, inner.reverseTransitionDuration, inner.delegatedTransition == null));
+    }
+    for (final p in [TargetPlatform.iOS, TargetPlatform.windows]) {
+      debugDefaultTargetPlatformOverride = p;
+      await tester.pumpWidget(MaterialApp(
+          key: ValueKey(p), theme: theme, builder: canvasBehind, home: const Scaffold(body: Text('first'))));
+      tester
+          .state<NavigatorState>(find.byType(Navigator))
+          .push(MaterialPageRoute<void>(builder: (_) => const Scaffold(body: Text('second'))));
+      await tester.pumpAndSettle();
+      expect(
+          find.ancestor(
+              of: find.text('second'),
+              matching: find.byWidgetPredicate((w) => w is DecoratedBox && w.decoration == Brand.paperCanvas)),
+          findsNWidgets(2),
+          reason: '$p');
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+
+  test('switching light and dark blends the canvas instead of jumping', () {
+    final light = buildTheme(Brightness.light).extension<AppCanvas>()!;
+    final dark = buildTheme(Brightness.dark).extension<AppCanvas>()!;
+    final half = light.lerp(dark, 0.5);
+    expect(half.decoration, isNot(light.decoration));
+    expect(half.decoration, isNot(dark.decoration));
+    expect(light.lerp(dark, 1).decoration.gradient, dark.decoration.gradient);
+  });
 }

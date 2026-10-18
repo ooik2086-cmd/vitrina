@@ -1,4 +1,6 @@
+import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 /// Visual system: quiet off-white canvas so products carry the colour, ink-black type and actions,
 /// one warm accent for prices and calls to action. Inter covers Kazakh Cyrillic and the ₸ sign.
@@ -6,9 +8,9 @@ abstract final class Brand {
   static const ink = Color(0xFF0E0E10);
   static const accent = Color(0xFFFF5A36);
 
-  /// The accent deep enough for white text on it and for accent text on a light canvas (4.6:1 with white).
-  /// [accent] stays for icons, badges' dots and other decoration.
-  static const accentStrong = Color(0xFFD93A17);
+  /// The accent deep enough for white text on it and for accent text on the light canvas (5.6:1 with white,
+  /// 4.8:1 on the paper). [accent] stays for icons, badges' dots and other decoration.
+  static const accentStrong = Color(0xFFC2330F);
   static const canvasLight = Color(0xFFF5F4F1);
   static const canvasDark = Color(0xFF0C0C0E);
   static const studio = Color(0xFFF3F2EF); // product photo backdrop
@@ -27,18 +29,48 @@ abstract final class Brand {
     gradient: RadialGradient(
       center: Alignment(0, -1.2),
       radius: 1.5,
-      colors: [Color(0xFF26231F), Color(0xFF141416), canvasDark],
+      colors: [Color(0xFF161517), Color(0xFF0F0F11), canvasDark], // never lighter than the cards on it
       stops: [0, 0.45, 1],
     ),
   );
 }
 
-/// Draws [canvas] behind every page, inside the platform's own page transition, so a page coming in covers the
+/// The backdrop every page stands on and the status bar icons that read on it. Part of the theme, so a switch
+/// between light and dark blends it like everything else. The decoration must be opaque.
+class AppCanvas extends ThemeExtension<AppCanvas> {
+  const AppCanvas(this.decoration, this.overlay);
+  final BoxDecoration decoration;
+  final SystemUiOverlayStyle overlay;
+
+  static AppCanvas of(BuildContext context) => Theme.of(context).extension<AppCanvas>()!;
+
+  @override
+  AppCanvas copyWith({BoxDecoration? decoration, SystemUiOverlayStyle? overlay}) =>
+      AppCanvas(decoration ?? this.decoration, overlay ?? this.overlay);
+
+  @override
+  AppCanvas lerp(AppCanvas? other, double t) => other == null
+      ? this
+      : AppCanvas(BoxDecoration.lerp(decoration, other.decoration, t)!, t < 0.5 ? overlay : other.overlay);
+}
+
+/// The canvas behind the navigator, for MaterialApp.builder: what shows while two pages cross in a transition,
+/// so the backdrop never dips to another colour.
+Widget canvasBehind(BuildContext context, Widget? child) =>
+    DecoratedBox(decoration: AppCanvas.of(context).decoration, child: child);
+
+/// Each platform's own transition, with no colour of its own between the pages: the canvas shows there instead.
+const _transitions = <TargetPlatform, PageTransitionsBuilder>{
+  TargetPlatform.android: PredictiveBackPageTransitionsBuilder(fallbackColor: Colors.transparent),
+  TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+  TargetPlatform.macOS: CupertinoPageTransitionsBuilder(),
+};
+
+/// Draws the canvas behind every page, inside the platform's own page transition, so a page coming in covers the
 /// one under it as before while every page shares the same backdrop. Scaffolds and app bars are see-through.
 class OnCanvas extends PageTransitionsBuilder {
-  const OnCanvas(this.inner, this.canvas);
+  const OnCanvas(this.inner);
   final PageTransitionsBuilder inner;
-  final Decoration canvas;
 
   @override
   DelegatedTransitionBuilder? get delegatedTransition => inner.delegatedTransition;
@@ -49,20 +81,30 @@ class OnCanvas extends PageTransitionsBuilder {
 
   @override
   Widget buildTransitions<T>(PageRoute<T> route, BuildContext context, Animation<double> animation,
-          Animation<double> secondaryAnimation, Widget child) =>
-      inner.buildTransitions(
-          route,
-          context,
-          animation,
-          secondaryAnimation,
-          // The page repaints on its own layer, so scrolling never redraws the canvas under it.
-          DecoratedBox(decoration: canvas, child: RepaintBoundary(child: child)));
+      Animation<double> secondaryAnimation, Widget child) {
+    final canvas = AppCanvas.of(context);
+    return inner.buildTransitions(
+      route,
+      context,
+      animation,
+      secondaryAnimation,
+      // Pages without an app bar get status bar icons that read on the canvas too; an app bar sets its own.
+      AnnotatedRegion<SystemUiOverlayStyle>(
+        value: canvas.overlay,
+        // The page repaints on its own layer, so scrolling never redraws the canvas under it.
+        child: DecoratedBox(decoration: canvas.decoration, child: RepaintBoundary(child: child)),
+      ),
+    );
+  }
 }
 
-/// [canvas] replaces the page backdrop; only for trying other backdrops side by side.
-ThemeData buildTheme(Brightness brightness, {Decoration? canvas}) {
+ThemeData buildTheme(Brightness brightness) {
   final dark = brightness == Brightness.dark;
-  final page = canvas ?? (dark ? Brand.nightCanvas : Brand.paperCanvas);
+  // An app bar works its icons out from its own colour, and a see-through one reads as black: say it outright.
+  final overlay =
+      (dark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark).copyWith(statusBarColor: Colors.transparent);
+  final canvas = AppCanvas(dark ? Brand.nightCanvas : Brand.paperCanvas, overlay);
+  final fieldEdge = dark ? const Color(0xFF6A6A72) : const Color(0xFF8A857E);
   final scheme = ColorScheme.fromSeed(
     seedColor: Brand.accent,
     brightness: brightness,
@@ -73,7 +115,7 @@ ThemeData buildTheme(Brightness brightness, {Decoration? canvas}) {
     onSecondary: Colors.white,
     surface: dark ? const Color(0xFF151518) : Colors.white,
     surfaceContainerLowest: dark ? Brand.canvasDark : Brand.canvasLight,
-    surfaceContainerHighest: dark ? const Color(0xFF232327) : const Color(0xFFECEBE7),
+    surfaceContainerHighest: dark ? const Color(0xFF232327) : const Color(0xFFE6E3DC), // apart from the paper
     outlineVariant: dark ? const Color(0xFF2A2A2F) : const Color(0xFFE4E2DD),
   );
   final base = ThemeData(useMaterial3: true, brightness: brightness, colorScheme: scheme, fontFamily: 'Inter');
@@ -86,12 +128,15 @@ ThemeData buildTheme(Brightness brightness, {Decoration? canvas}) {
   final shape = RoundedRectangleBorder(borderRadius: BorderRadius.circular(14));
   return base.copyWith(
     scaffoldBackgroundColor: Colors.transparent, // the canvas each page stands on shows through
+    extensions: [canvas],
     pageTransitionsTheme: PageTransitionsTheme(builders: {
-      for (final e in const PageTransitionsTheme().builders.entries) e.key: OnCanvas(e.value, page),
+      for (final p in TargetPlatform.values)
+        p: OnCanvas(_transitions[p] ?? const ZoomPageTransitionsBuilder(backgroundColor: Colors.transparent)),
     }),
     textTheme: text,
     appBarTheme: AppBarTheme(
       backgroundColor: Colors.transparent,
+      systemOverlayStyle: overlay,
       surfaceTintColor: Colors.transparent,
       elevation: 0,
       scrolledUnderElevation: 0,
@@ -140,10 +185,10 @@ ThemeData buildTheme(Brightness brightness, {Decoration? canvas}) {
       filled: true,
       fillColor: scheme.surface,
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-      border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: scheme.outlineVariant)),
-      enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: scheme.outlineVariant)),
+      // A field's edge stands 3:1 off both the white field and the canvas, so it reads as something to type in.
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: fieldEdge)),
+      enabledBorder:
+          OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: fieldEdge)),
       focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: scheme.primary, width: 1.5)),
     ),

@@ -1,8 +1,8 @@
 import 'dart:math' as math;
-import 'dart:typed_data';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../i18n.dart';
 
 /// Frame count that gives a smooth turn (one frame every 15°). The server accepts 8 or more.
@@ -134,6 +134,7 @@ class _SpinCaptureScreenState extends State<SpinCaptureScreen> with WidgetsBindi
         appBar: AppBar(
           backgroundColor: Colors.black,
           foregroundColor: Colors.white,
+          systemOverlayStyle: SystemUiOverlayStyle.light, // white icons over the camera
           title: Text(tr('360° түсіру')),
           actions: [
             TextButton(

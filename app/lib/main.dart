@@ -68,6 +68,7 @@ class VitrinaApp extends StatelessWidget {
             debugShowCheckedModeBanner: false,
             theme: buildTheme(Brightness.light),
             darkTheme: buildTheme(Brightness.dark),
+            builder: canvasBehind,
             home: ValueListenableBuilder<bool>(
               valueListenable: onboarded,
               builder: (context, done, _) => done ? const HomeShell() : const OnboardingScreen(),

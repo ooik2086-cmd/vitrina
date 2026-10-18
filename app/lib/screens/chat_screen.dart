@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../api.dart';
 import '../labels.dart';
@@ -484,7 +485,10 @@ class _PhotoViewer extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
-      appBar: AppBar(backgroundColor: Colors.black, foregroundColor: Colors.white),
+      appBar: AppBar(
+          backgroundColor: Colors.black,
+          foregroundColor: Colors.white,
+          systemOverlayStyle: SystemUiOverlayStyle.light), // white icons on the black viewer
       body: InteractiveViewer(maxScale: 5, child: Center(child: Image.network(url))),
     );
   }

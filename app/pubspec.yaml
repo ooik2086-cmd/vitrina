@@ -5,6 +5,7 @@ version: 0.1.0+1
 
 environment:
   sdk: ">=3.5.0 <4.0.0"
+  flutter: ">=3.35.0" # PageTransitionsBuilder.delegatedTransition and PredictiveBack fallbackColor
 
 dependencies:
   camera: ^0.12.1
