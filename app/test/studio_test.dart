@@ -2,6 +2,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:vitrina/theme.dart';
 import 'package:vitrina/widgets/studio.dart';
 
 /// 100 × 50: the left half an opaque shoe, the right half see-through, as a cut-out is.
@@ -45,4 +46,25 @@ void main() {
     await tester.pumpWidget(shadowOf(photo));
     expect(find.byType(RawImage), findsOneWidget); // from the cache, on the first frame
   });
+
+  for (final (brightness, canvas) in [(Brightness.light, Brand.studioCanvas), (Brightness.dark, Brand.nightCanvas)]) {
+    testWidgets('every page stands on the ${brightness.name} canvas, and a page coming in covers the one under it',
+        (tester) async {
+      await tester.pumpWidget(MaterialApp(theme: buildTheme(brightness), home: const Scaffold(body: Text('first'))));
+      Finder canvasUnder(String text) => find.ancestor(
+          of: find.text(text), matching: find.byWidgetPredicate((w) => w is DecoratedBox && w.decoration == canvas));
+      expect(canvasUnder('first'), findsOneWidget);
+      tester.state<NavigatorState>(find.byType(Navigator)).push(MaterialPageRoute<void>(
+          builder: (_) => Scaffold(appBar: AppBar(title: const Text('t')), body: const Text('second'))));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(canvasUnder('second'), findsOneWidget); // its own canvas hides the first page mid-transition
+      await tester.pumpAndSettle();
+      expect(
+          tester
+              .widget<Material>(find.descendant(of: find.byType(AppBar), matching: find.byType(Material)).first)
+              .color,
+          Colors.transparent);
+    });
+  }
 }

@@ -13,10 +13,54 @@ abstract final class Brand {
   static const canvasDark = Color(0xFF0C0C0E);
   static const studio = Color(0xFFF3F2EF); // product photo backdrop
   static const radius = 20.0;
+
+  /// What every page stands on in the light theme: soft light from above, fading to a warm grey at the bottom,
+  /// like a photo studio. Cards, fields and the tab bar are white on it.
+  static const studioCanvas = BoxDecoration(
+    gradient: RadialGradient(
+      center: Alignment(0, -1.2),
+      radius: 1.5,
+      colors: [Color(0xFFFFFFFF), Color(0xFFF6F4F0), Color(0xFFEEEBE5)],
+      stops: [0, 0.45, 1],
+    ),
+  );
+
+  /// The dark theme's canvas: near-black with a faint warm light at the top.
+  static const nightCanvas = BoxDecoration(
+    gradient: RadialGradient(
+      center: Alignment(0, -1.2),
+      radius: 1.5,
+      colors: [Color(0xFF26231F), Color(0xFF141416), canvasDark],
+      stops: [0, 0.45, 1],
+    ),
+  );
 }
 
-ThemeData buildTheme(Brightness brightness) {
+/// Draws [canvas] behind every page, inside the platform's own page transition, so a page coming in covers the
+/// one under it as before while every page shares the same backdrop. Scaffolds and app bars are see-through.
+class OnCanvas extends PageTransitionsBuilder {
+  const OnCanvas(this.inner, this.canvas);
+  final PageTransitionsBuilder inner;
+  final Decoration canvas;
+
+  @override
+  DelegatedTransitionBuilder? get delegatedTransition => inner.delegatedTransition;
+  @override
+  Duration get transitionDuration => inner.transitionDuration;
+  @override
+  Duration get reverseTransitionDuration => inner.reverseTransitionDuration;
+
+  @override
+  Widget buildTransitions<T>(PageRoute<T> route, BuildContext context, Animation<double> animation,
+          Animation<double> secondaryAnimation, Widget child) =>
+      inner.buildTransitions(
+          route, context, animation, secondaryAnimation, DecoratedBox(decoration: canvas, child: child));
+}
+
+/// [canvas] replaces the page backdrop; only for trying other backdrops side by side.
+ThemeData buildTheme(Brightness brightness, {Decoration? canvas}) {
   final dark = brightness == Brightness.dark;
+  final page = canvas ?? (dark ? Brand.nightCanvas : Brand.studioCanvas);
   final scheme = ColorScheme.fromSeed(
     seedColor: Brand.accent,
     brightness: brightness,
@@ -39,10 +83,13 @@ ThemeData buildTheme(Brightness brightness) {
   );
   final shape = RoundedRectangleBorder(borderRadius: BorderRadius.circular(14));
   return base.copyWith(
-    scaffoldBackgroundColor: scheme.surfaceContainerLowest,
+    scaffoldBackgroundColor: Colors.transparent, // the canvas each page stands on shows through
+    pageTransitionsTheme: PageTransitionsTheme(builders: {
+      for (final e in const PageTransitionsTheme().builders.entries) e.key: OnCanvas(e.value, page),
+    }),
     textTheme: text,
     appBarTheme: AppBarTheme(
-      backgroundColor: scheme.surfaceContainerLowest,
+      backgroundColor: Colors.transparent,
       surfaceTintColor: Colors.transparent,
       elevation: 0,
       scrolledUnderElevation: 0,
