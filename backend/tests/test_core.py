@@ -3,6 +3,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 
 from vitrina_core.catalog import compute_bounds, normalize_query, Segment, MIN_SAMPLE
+from vitrina_core.colors import COLORS, canonical_color
 from vitrina_core.money import (
     CommissionRule, Entry, Ledger, LedgerError, PLATFORM_FEE, PROVIDER_CLEARING,
     buyer_refund, escrow, format_tenge, record_payment, seller_payable, settle, tenge_to_tiyn,
@@ -257,3 +258,23 @@ class CatalogTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ColorTests(unittest.TestCase):
+    def test_a_colour_typed_in_any_language_is_stored_by_its_kazakh_name(self):
+        for typed in ("Черный", " чёрный ", "BLACK", "қара"):
+            self.assertEqual(canonical_color(typed), "қара")
+        self.assertEqual(canonical_color("Темно-синий"), "қою көк")
+        self.assertEqual(canonical_color("  бордо  с  белым "), "бордо с белым")  # not listed: kept as typed
+
+    def test_no_word_names_two_colours(self):
+        words = [w for name, others in COLORS.items() for w in (name, *others)]
+        self.assertEqual(len(words), len(set(words)))
+
+    def test_the_app_offers_the_same_colours(self):
+        import re
+        from pathlib import Path
+        dart = (Path(__file__).resolve().parents[2] / "app" / "lib" / "colors.dart").read_text(encoding="utf-8")
+        block = dart[dart.index("const shoeColors"):dart.index("};", dart.index("const shoeColors"))]
+        self.assertEqual(re.findall(r"^  '([^']+)': Color", block, re.M), list(COLORS))
+

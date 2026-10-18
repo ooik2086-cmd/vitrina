@@ -3,9 +3,10 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from vitrina_core.catalog import Condition
+from vitrina_core.colors import canonical_color
 
 from .api_common import CATEGORIES
 
@@ -55,6 +56,9 @@ class ListingIn(BaseModel):
     sizes: list[SizeIn] = Field(min_length=1, max_length=30)
     photos: list[PhotoIn] = Field(default_factory=list, max_length=60)
 
+    # "Черный" and "black" are stored as "қара": one colour of a model is one swatch.
+    _color = field_validator("color")(lambda v: canonical_color(v))
+
 
 class StockIn(BaseModel):
     id: int
@@ -81,6 +85,8 @@ class ListingPatch(BaseModel):
     photos: list[PhotoIn] | None = Field(default=None, max_length=60)  # the whole set, replacing the current one
     add_photos: list[PhotoIn] | None = Field(default=None, max_length=60)
     add_sizes: list[SizeIn] | None = Field(default=None, max_length=30)
+
+    _color = field_validator("color")(lambda v: v if v is None else canonical_color(v))
 
 
 class DeliveryIn(BaseModel):

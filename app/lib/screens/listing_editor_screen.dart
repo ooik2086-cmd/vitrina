@@ -8,6 +8,7 @@ import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/listing_contents.dart' show ShowcaseStopsHint;
 import 'spin_capture_screen.dart';
+import '../colors.dart';
 import '../i18n.dart';
 
 /// Required angles first; the server refuses to publish with fewer than four photos.
@@ -423,7 +424,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
               onChanged: (v) => setState(() => _category = v!),
             ),
             TextFormField(controller: _brand, decoration: InputDecoration(labelText: tr('Бренді (міндетті емес)'))),
-            TextFormField(controller: _color, decoration: InputDecoration(labelText: tr('Түсі')), validator: _required),
+            ColorField(controller: _color),
             DropdownButtonFormField<String>(
               initialValue: _condition,
               decoration: InputDecoration(labelText: tr('Жағдайы')),

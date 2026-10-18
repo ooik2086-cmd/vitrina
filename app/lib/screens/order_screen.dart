@@ -14,6 +14,7 @@ import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/listing_contents.dart' show photoAngles;
 import '../widgets/spin_viewer.dart';
+import '../colors.dart';
 import '../i18n.dart';
 import 'chat_screen.dart';
 import 'help_screen.dart';
@@ -429,7 +430,8 @@ class _OrderedDetails extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final name = [details['brand'], details['model_name'], details['color']]
+    final color = details['color'];
+    final name = [details['brand'], details['model_name'], if (color is String) colorName(color)]
         .whereType<String>()
         .where((v) => v.isNotEmpty)
         .join(' · ');

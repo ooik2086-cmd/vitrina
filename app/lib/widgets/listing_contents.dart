@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../api.dart';
+import '../colors.dart';
 import '../i18n.dart';
 import '../labels.dart';
 import '../screens/listing_editor_screen.dart';
@@ -83,12 +84,7 @@ class ListingNameFields extends StatelessWidget {
                 decoration: InputDecoration(labelText: tr('Моделі')))),
       ]),
       const SizedBox(height: 12),
-      TextFormField(
-        key: const Key('edit-color'),
-        controller: color,
-        decoration: InputDecoration(labelText: tr('Түсі')),
-        validator: (v) => (v ?? '').trim().length < 2 ? tr('Түсін жазыңыз') : null,
-      ),
+      ColorField(controller: color),
       if (fresh) ...[
         const SizedBox(height: 12),
         DropdownButtonFormField<String>(

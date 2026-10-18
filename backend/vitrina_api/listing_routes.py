@@ -13,6 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from vitrina_core.catalog import Authenticity, Condition, normalize_query
+from vitrina_core.colors import canonical_color, color_words
 from vitrina_core.orders import OrderStatus as S
 
 from . import services
@@ -33,8 +34,8 @@ from .saved_search_routes import announce
 router = APIRouter(prefix="/api/v1")
 
 
-def search_text(body: ListingIn) -> str:
-    return normalize_query(" ".join(filter(None, [body.title, body.brand, body.model_name, body.color, body.category])))
+def search_text(title: str, brand: str | None, model_name: str | None, color: str, category: str) -> str:
+    return normalize_query(" ".join(filter(None, [title, brand, model_name, color_words(color), category])))
 
 
 @router.post("/media", status_code=201)
@@ -173,7 +174,8 @@ def create_listing(body: ListingIn, request: Request, background: BackgroundTask
         seller_id=user.id, title=body.title, category=body.category, brand=body.brand, model_name=body.model_name,
         color=body.color, condition=body.condition.value, defects=body.defects, description=body.description,
         price_tiyn=body.price_tiyn, delivery_price_tiyn=body.delivery_price_tiyn,
-        showcase_style=body.showcase_style, search_text=search_text(body),
+        showcase_style=body.showcase_style,
+        search_text=search_text(body.title, body.brand, body.model_name, body.color, body.category),
         authenticity=Authenticity.UNVERIFIED.value,
         sizes=[ListingSize(label=s.label, insole_mm=cm_to_mm(s.insole_cm), quantity=s.quantity) for s in body.sizes],
         media=[Media(original_url=p.url, angle=p.angle, position=i) for i, p in enumerate(body.photos)],
@@ -335,8 +337,8 @@ def edit_contents(db: Session, cfg: Settings, storage: Storage, listing: Listing
         listing.condition = body.condition.value
         changed.add("text")
     if "name" in changed:
-        listing.search_text = normalize_query(" ".join(filter(None, [listing.title, listing.brand, listing.model_name,
-                                                                      listing.color, listing.category])))
+        listing.search_text = search_text(listing.title, listing.brand, listing.model_name, listing.color,
+                                          listing.category)
     have = {m.original_url for m in listing.media}
     # A retry after a lost answer sends the same photos again: those already on the listing are skipped.
     added = [p for p in body.add_photos or [] if p.url not in have]
@@ -586,6 +588,11 @@ def _same(text: str | None) -> str:
     return " ".join((text or "").replace("ё", "е").replace("Ё", "Е").split()).casefold()
 
 
+def _same_color(text: str | None) -> str:
+    """As _same, and a colour typed in Russian or English before the picker is the same as its Kazakh name."""
+    return _same(canonical_color(text or ""))
+
+
 def safe_colorways(db: Session, listing: Listing) -> list[dict]:
     """The colours are an extra beside the shoe: if working them out fails, the page still opens, without them."""
     try:
@@ -606,7 +613,7 @@ def colorways(db: Session, listing: Listing) -> list[dict]:
     model = _same(listing.model_name)
     if not model:
         return []
-    brand, own, new = _same(listing.brand), _same(listing.color), listing.condition in NEW_CONDITIONS
+    brand, own, new = _same(listing.brand), _same_color(listing.color), listing.condition in NEW_CONDITIONS
     in_stock = select(ListingSize.id).where(ListingSize.listing_id == Listing.id, ListingSize.quantity > 0).exists()
     rows = db.execute(select(Listing.id, Listing.model_name, Listing.brand, Listing.color, Listing.condition,
                              Listing.price_tiyn, in_stock).where(
@@ -614,7 +621,7 @@ def colorways(db: Session, listing: Listing) -> list[dict]:
         Listing.category == listing.category, Listing.model_name.is_not(None)))
     best: dict[str, tuple] = {}
     for id_, model_name, brand_name, color_name, condition, price, stocked in rows:
-        color = _same(color_name)
+        color = _same_color(color_name)
         if _same(model_name) != model or _same(brand_name) != brand or not color or color == own:
             continue
         rank = ((condition in NEW_CONDITIONS) != new, not stocked, price, id_)

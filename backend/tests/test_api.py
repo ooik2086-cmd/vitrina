@@ -456,6 +456,20 @@ class ColorwayTests(ApiTestCase):
                          [(sold_out["id"], False), (black["id"], True), (sand["id"], False)])
         self.assertNotIn(dear_black["id"], [c["id"] for c in got])
 
+    def test_a_colour_typed_in_russian_or_english_is_one_colour_with_its_kazakh_name(self):
+        here = self.publish(color="көк")
+        black = self.publish(color="Черный")
+        self.assertEqual(black["color"], "қара")
+        self.publish(color="black", price_tiyn=9_000_000)  # the same colour: no second swatch
+        self.assertEqual([c["color"] for c in self.colors(here["id"])], ["көк", "қара"])
+        r = self.c.patch(f"/api/v1/listings/{here['id']}", json={"color": "Red"}, headers=self.h(self.seller))
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["color"], "қызыл")
+        # A buyer searching in Russian or English still finds it.
+        for q in ("черный", "black", "қара"):
+            found = self.c.get("/api/v1/listings", params={"q": q}).json()["items"]
+            self.assertIn(black["id"], [l["id"] for l in found], q)
+
     def test_no_model_name_no_colours(self):
         a = self.publish(model_name=None)
         self.publish(model_name=None, color="қара")

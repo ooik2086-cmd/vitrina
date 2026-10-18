@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../api.dart';
+import '../colors.dart';
 import '../i18n.dart';
 import '../labels.dart';
 import '../my_size.dart';
@@ -168,7 +169,7 @@ class _Table extends StatelessWidget {
         _Row(label: tr('Жағдайы'), items: items, cell: (l) => Text(label(conditions, l.condition))),
         _Row(label: tr('Түпнұсқалығы'), items: items, cell: (l) => Text(label(authenticity, l.authenticity))),
         _Row(label: tr('Бренд'), items: items, cell: (l) => Text(l.brand ?? '—')),
-        _Row(label: tr('Түсі'), items: items, cell: (l) => Text(l.color)),
+        _Row(label: tr('Түсі'), items: items, cell: (l) => Text(colorName(l.color))),
         _Row(
           label: size == null ? tr('Бар өлшемдер') : trf('Сіздің өлшеміңіз ({0} см)', [size]),
           items: items,

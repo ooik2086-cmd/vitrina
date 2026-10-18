@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../api.dart';
+import '../colors.dart';
 import '../i18n.dart';
 import '../labels.dart';
 import '../theme.dart';
@@ -21,7 +22,7 @@ class ColorSwatches extends StatelessWidget {
 
   /// What a swatch says when touched and long-pressed: the colour, its price, and that it is sold out.
   static String describe(Colorway c) {
-    final named = '${c.color}, ${formatTenge(c.priceTiyn)}';
+    final named = '${colorName(c.color)}, ${formatTenge(c.priceTiyn)}';
     return c.inStock ? named : trf('{0}, өлшемдері таусылған', [named]);
   }
 
@@ -128,7 +129,7 @@ class ColorChoice extends StatelessWidget {
         key: const Key('color-name'),
         TextSpan(children: [
           TextSpan(text: '${tr('Түсі')}: ', style: TextStyle(color: theme.colorScheme.onSurfaceVariant)),
-          TextSpan(text: listing.color, style: weight(theme.textTheme.bodyLarge!, 650)),
+          TextSpan(text: colorName(listing.color), style: weight(theme.textTheme.bodyLarge!, 650)),
         ]),
         style: theme.textTheme.bodyLarge,
       ),

@@ -12,6 +12,7 @@ import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:vitrina/api.dart';
 import 'package:vitrina/appearance.dart';
+import 'package:vitrina/colors.dart';
 import 'package:vitrina/demo.dart';
 import 'package:vitrina/i18n.dart';
 import 'package:vitrina/theme.dart';
@@ -1194,9 +1195,10 @@ void main() {
     await tester.pump();
     expect(find.text('Толтырыңыз'), findsWidgets);
     expect(find.text('Бағаны енгізіңіз'), findsOneWidget);
+    expect(find.text('Түсін таңдаңыз'), findsOneWidget); // the colour is picked, not left out
 
     await tester.enterText(find.widgetWithText(TextFormField, 'Атауы'), 'Qadam Runner');
-    await tester.enterText(find.widgetWithText(TextFormField, 'Түсі'), 'ақ');
+    await tester.tap(find.byKey(const Key('color-ақ')));
     await tester.enterText(find.widgetWithText(TextFormField, 'Бағасы'), '34900');
     await tester.enterText(find.widgetWithText(TextFormField, 'Өлшем'), '42');
     await tester.enterText(find.widgetWithText(TextFormField, 'Ұлтарақ, см'), '27');
@@ -1211,6 +1213,46 @@ void main() {
     await tester.tap(find.text('Киілген, жақсы').last);
     await tester.pumpAndSettle();
     expect(find.widgetWithText(TextFormField, 'Ақаулары'), findsOneWidget);
+  });
+
+  testWidgets('the colour is picked from a list, or typed when it is not on it', (tester) async {
+    final color = TextEditingController();
+    final form = GlobalKey<FormState>();
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(body: SingleChildScrollView(child: Form(key: form, child: ColorField(controller: color))))));
+    expect(form.currentState!.validate(), isFalse);
+    await tester.pump();
+    expect(find.text('Түсін таңдаңыз'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('color-қою көк')));
+    await tester.pump();
+    expect(color.text, 'қою көк');
+    expect(tester.widget<ChoiceChip>(find.byKey(const Key('color-қою көк'))).selected, isTrue);
+    expect(find.byKey(const Key('color-other-text')), findsNothing);
+    expect(form.currentState!.validate(), isTrue);
+    // Not on the list: typed by hand.
+    await tester.tap(find.byKey(const Key('color-other')));
+    await tester.pump();
+    expect(color.text, isEmpty); // the listed colour does not linger in the typing field
+    await tester.enterText(find.byKey(const Key('color-other-text')), 'бордо');
+    expect(color.text, 'бордо');
+    expect(tester.widget<ChoiceChip>(find.byKey(const Key('color-қою көк'))).selected, isFalse);
+  });
+
+  testWidgets('a colour typed before the list opens as typed', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: SingleChildScrollView(child: ColorField(controller: TextEditingController(text: 'бордо'))))));
+    expect(tester.widget<ChoiceChip>(find.byKey(const Key('color-other'))).selected, isTrue);
+    expect(find.widgetWithText(TextField, 'бордо'), findsOneWidget);
+  });
+
+  test('listed colours show in the interface language, typed ones as typed', () {
+    addTearDown(() => appLanguage.value = 'kk');
+    appLanguage.value = 'ru';
+    expect(colorName('қою көк'), 'темно-синий');
+    expect(colorName('бордо'), 'бордо');
+    appLanguage.value = 'en';
+    expect(colorName('қара'), 'black');
   });
 
   testWidgets('chat shows both sides and warns only the reader about contact details', (tester) async {
@@ -2607,8 +2649,10 @@ void main() {
       for (final k in ['brand', 'model_name', 'color', 'category', 'condition']) {
         expect(sent.single.containsKey(k), isFalse, reason: k);
       }
-      // After sale the condition can only be marked worse.
-      await tester.ensureVisible(find.byKey(const Key('edit-condition')));
+      // After sale the condition can only be marked worse. (Mid-screen: the colour chips push it to where the
+      // "saved" note covers the bottom.)
+      await Scrollable.ensureVisible(tester.element(find.byKey(const Key('edit-condition'))), alignment: 0.5);
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('edit-condition')));
       await tester.pumpAndSettle();
       expect(find.text('Жаңа, қорабымен'), findsNothing);
