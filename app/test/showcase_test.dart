@@ -57,13 +57,13 @@ Map<String, dynamic> listing({bool details = true, String? backdrop = 'light', b
       'seller': {'id': 3, 'shop_name': 'Qadam Store', 'city': 'Алматы'},
     };
 
-/// One continuous scan, as on the approved demo page: the turn is frames 0-11, then the camera rises to the top
-/// (frame 12), goes under the sole (18) and in close (23). The stop photos are those frames.
+/// One continuous scan, as on the approved demo page: the turn is frames 0-7 (frame 8 is frame 0 again), then the
+/// camera rises to the top (frame 12), goes under the sole (18) and in close (23). The stop photos are those frames.
 Map<String, dynamic> scan({String? backdrop = 'dark'}) => {
       ...listing(backdrop: backdrop),
       'media': [
         for (final (angle, i) in [('outer', 0), ('top', 12), ('sole', 18), ('detail', 23)]) media(angle, 'f$i'),
-        for (var i = 0; i < 24; i++) media('frame', 'f$i'),
+        for (var i = 0; i < 24; i++) media('frame', i == 8 ? 'f0' : 'f$i'),
       ],
     };
 
@@ -133,6 +133,7 @@ void main() {
         expect(s.weight / s.media.length, closeTo(5 / 24, 1e-9));
       }
       expect({for (var i = 0; i <= 1000; i++) plan.at(i / 1000)}.length, 24); // every frame shows, in order
+      expect(plan.turn, 8); // where the first frame comes round again
     });
 
     test('stop photos that are not frames of the turn stay separate photos', () {
@@ -532,19 +533,45 @@ void main() {
     expect(halo, findsOneWidget);
   });
 
-  showcaseTest('a dark stage turns the status bar icons light, until the page scrolls past it', (tester) async {
+  showcaseTest('the status bar icons read on the stage under them, until the page scrolls past it', (tester) async {
     await pump(tester, listing(backdrop: 'dark'));
     await tester.pump();
     SystemUiOverlayStyle? style() => tester.widget<AppBar>(find.byType(AppBar)).systemOverlayStyle;
     expect(style(), SystemUiOverlayStyle.light);
     await tester.tap(find.byKey(const Key('showcase-backdrop')));
     await tester.pump();
-    expect(style(), isNull); // the theme's dark icons, on the light scene
+    expect(style(), SystemUiOverlayStyle.dark); // dark icons on the light scene, even in the app's dark theme
     await tester.tap(find.byKey(const Key('showcase-backdrop')));
     await tester.pump();
     await tester.tap(find.byKey(const Key('showcase-details')));
     await tester.pumpAndSettle();
-    expect(style(), isNull);
+    expect(style(), isNull); // the page's own canvas: the theme decides
+  });
+
+  showcaseTest('a stage step that changes between light and dark updates the status bar at once', (tester) async {
+    // The turn's photos as taken stand on the light studio; the cut-out top on the listing's dark scene.
+    await pump(tester, listing(backdrop: 'dark', cutFrames: false));
+    await tester.pump();
+    SystemUiOverlayStyle? style() => tester.widget<AppBar>(find.byType(AppBar)).systemOverlayStyle;
+    expect(style(), SystemUiOverlayStyle.dark);
+    await tester.tap(find.byKey(const Key('showcase-step-top')));
+    await tester.pumpAndSettle();
+    expect(style(), SystemUiOverlayStyle.light);
+  });
+
+  test('the stage behind photos as taken is the colour around their edge', () {
+    // 10 × 10, a light grey frame two pixels wide around a black middle.
+    final px = ByteData(10 * 10 * 4);
+    for (var y = 0; y < 10; y++) {
+      for (var x = 0; x < 10; x++) {
+        final edge = x < 2 || y < 2 || x > 7 || y > 7;
+        for (var c = 0; c < 3; c++) {
+          px.setUint8((y * 10 + x) * 4 + c, edge ? 0xE6 : 0);
+        }
+        px.setUint8((y * 10 + x) * 4 + 3, 255);
+      }
+    }
+    expect(edgeColour(px, 10, 10), const Color(0xFFE6E6E6));
   });
 
   showcaseTest('a scan is drawn edge to edge, its frames having their own margin', (tester) async {
@@ -564,16 +591,21 @@ void main() {
         isNotEmpty);
   });
 
-  showcaseTest('the stage adds no shadow of its own, as on the demo page, whatever the backdrop', (tester) async {
-    for (final body in [
-      listing(),
-      listing(backdrop: 'dark'),
-      {...listing(backdrop: null), 'showcase_style': 'premium'},
-      {...listing(backdrop: null), 'showcase_style': 'dynamic'},
+  showcaseTest('a seller\'s cut-out turns on its own shadow on a light stage; a scan brings its own', (tester) async {
+    for (final (body, shadows) in [
+      (listing(), 1),
+      (listing(backdrop: 'dark'), 0), // a shadow would not show
+      ({...listing(backdrop: null), 'showcase_style': 'premium'}, 0),
+      ({...listing(backdrop: null), 'showcase_style': 'dynamic'}, 1),
+      (scan(backdrop: 'light'), 0), // the scan's frames have their floor shadow in them
     ]) {
       await pump(tester, body);
-      expect(find.byType(ContactShadow), findsNothing);
+      expect(find.byType(ContactShadow), findsNWidgets(shadows), reason: '$body');
     }
+    await pump(tester, listing());
+    await tester.tap(find.byKey(const Key('showcase-step-sole')));
+    await tester.pumpAndSettle();
+    expect(find.byType(ContactShadow), findsNothing); // the sole stands on nothing
     expect(showcaseBackground('clean').gradient, studioGradient);
   });
 
@@ -668,6 +700,29 @@ void main() {
     await tester.pumpAndSettle();
     expect(tick('sole').color, ShowcaseScene.light.glow);
     expect(tick('close').color, ShowcaseScene.light.ink);
+  });
+
+  for (final (name, body) in [('photos', listing()), ('a scan', scan())]) {
+    showcaseTest('with $name the line reaches each stop just as its view comes up', (tester) async {
+      await pump(tester, body);
+      final line = find.byKey(const Key('showcase-line-fill'));
+      for (final kind in ['top', 'sole', 'close']) {
+        await tester.tap(find.byKey(Key('showcase-step-$kind')));
+        await tester.pumpAndSettle();
+        final stop = tester.getCenter(find.byKey(Key('showcase-step-$kind')));
+        final end = tester.getTopRight(line).dx;
+        expect(end, closeTo(stop.dx, 1), reason: kind);
+      }
+    });
+  }
+
+  showcaseTest('on a scan a sideways drag goes round within the turn, never up over the shoe', (tester) async {
+    await pump(tester, scan());
+    // Frame 0 dragged back goes round to the last frame of the turn, not on to the top view.
+    await tester.drag(find.byKey(const Key('showcase')), const Offset(30, 0));
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(base(tester), 'https://cdn/f7-s.webp');
+    expect(ShowcasePlan.of(Listing.fromJson(listing())).turn, 24); // photos: the whole turn
   });
 
   showcaseTest('on a narrow phone the stop being shown stays in view and the photos button never scrolls away',

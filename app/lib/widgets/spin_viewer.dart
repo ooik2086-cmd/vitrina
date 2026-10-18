@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -182,6 +183,8 @@ class _PhotoGalleryState extends State<PhotoGallery> {
     if (widget.urls.isEmpty) {
       return const ColoredBox(color: Brand.studio, child: Center(child: Icon(Icons.image_not_supported_outlined)));
     }
+    // Decoded at the size shown: a 3200 px photo decoded whole is 40 MB.
+    final side = (MediaQuery.sizeOf(context).width * MediaQuery.devicePixelRatioOf(context)).round();
     return Stack(children: [
       PageView(
         onPageChanged: (p) => setState(() => _page = p),
@@ -189,6 +192,7 @@ class _PhotoGalleryState extends State<PhotoGallery> {
           for (final u in widget.urls)
             Image.network(u,
                 fit: BoxFit.cover,
+                cacheWidth: math.min(side, 2000),
                 errorBuilder: (_, __, ___) => const Center(child: Icon(Icons.broken_image_outlined))),
         ],
       ),

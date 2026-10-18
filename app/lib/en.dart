@@ -843,6 +843,7 @@ const en = <String, String>{
   'Түсірілген {0} кадр сақталмайды.': 'The {0} frames taken will not be kept.',
   'Фотоны өшіру': 'Delete photo',
   'кадр {0} / {1}': 'frame {0} of {1}',
+  '{0}, кадр {1} / {2}': '{0}, frame {1} of {2}',
   'Қалу': 'Stay',
   'Шығып кету': 'Leave',
   '360° көрініс қосылды': '360° view added',

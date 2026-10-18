@@ -55,7 +55,7 @@ class _ListingScreenState extends State<ListingScreen> {
   final _showcase = GlobalKey<ScrollShowcaseState>();
   final _sizesKey = GlobalKey();
   bool _scrollLocked = false; // the showcase is zoomed in or being pinched
-  bool _darkTop = false; // a dark showcase stage is under the status bar
+  Brightness? _stageTop; // how dark the showcase stage under the status bar is, while it is there
   Offer? _offer; // the signed-in buyer's latest offer on this listing
   // One key per order attempt: a retried tap after a lost response returns the same order.
   String _orderKey = newIdempotencyKey();
@@ -222,25 +222,33 @@ class _ListingScreenState extends State<ListingScreen> {
       extendBodyBehindAppBar: true,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
-        systemOverlayStyle: _darkTop ? SystemUiOverlayStyle.light : null, // icons that read on a dark stage
-        leading: const Padding(padding: EdgeInsets.all(6), child: _RoundButton(back: true, child: BackButtonIcon())),
+        // Icons that read on the stage under them, whatever the app's theme.
+        systemOverlayStyle: switch (_stageTop) {
+          Brightness.dark => SystemUiOverlayStyle.light,
+          Brightness.light => SystemUiOverlayStyle.dark,
+          null => null,
+        },
+        leading: Padding(
+            padding: const EdgeInsets.all(6),
+            child: _RoundButton(dark: _stageTop == Brightness.dark, back: true, child: const BackButtonIcon())),
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 8),
             child: _RoundButton(
               key: const Key('share'),
+              dark: _stageTop == Brightness.dark,
               onTap: _share,
               tooltip: tr('Бөлісу'),
-              child: const Icon(Icons.ios_share_rounded, color: Brand.ink),
+              child: const Icon(Icons.ios_share_rounded),
             ),
           ),
           Padding(
             padding: const EdgeInsets.only(right: 10),
             child: _RoundButton(
+              dark: _stageTop == Brightness.dark,
               onTap: _toggleFavorite,
               tooltip: tr('Таңдаулыға'),
-              child:
-                  Icon(_favorite ? Icons.favorite : Icons.favorite_border, color: _favorite ? Brand.accent : Brand.ink),
+              child: Icon(_favorite ? Icons.favorite : Icons.favorite_border, color: _favorite ? Brand.accent : null),
             ),
           ),
         ],
@@ -363,12 +371,12 @@ class _ListingScreenState extends State<ListingScreen> {
                           if (_scroll.hasClients) _scroll.jumpTo(0);
                           setState(() {
                             _showPhotos = true;
-                            _darkTop = false;
+                            _stageTop = null;
                             _stage = null;
                           });
                         },
-                        onDarkTop: (dark) {
-                          if (mounted) setState(() => _darkTop = dark);
+                        onStageTop: (top) {
+                          if (mounted) setState(() => _stageTop = top);
                         },
                         onDetails: () => _toDetails(l))
                   else
@@ -385,7 +393,10 @@ class _ListingScreenState extends State<ListingScreen> {
                             child: Material(
                               type: MaterialType.transparency,
                               child: ColoredBox(
-                                color: Brand.studio,
+                                // A scan's photos are themselves cut out: they stand on the scene the 360° view has.
+                                color: l.backdrop != null && l.photos.every((p) => p.processedUrl == p.originalUrl)
+                                    ? (l.backdrop == 'dark' ? ShowcaseScene.dark : ShowcaseScene.light).ink
+                                    : Brand.studio,
                                 child: PhotoGallery(urls: [for (final p in l.photos) p.originalUrl]),
                               ),
                             ),
@@ -707,20 +718,23 @@ class _ListingScreenState extends State<ListingScreen> {
 }
 
 class _RoundButton extends StatelessWidget {
-  const _RoundButton({super.key, required this.child, this.onTap, this.tooltip, this.back = false});
+  const _RoundButton({super.key, required this.child, this.onTap, this.tooltip, this.back = false, this.dark = false});
   final Widget child;
   final VoidCallback? onTap;
   final String? tooltip;
   final bool back;
 
+  /// Over the demo page's dark scene: its panel colour, as the stage's own buttons.
+  final bool dark;
+
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: Colors.white.withValues(alpha: 0.92),
-      shape: const CircleBorder(),
+      color: dark ? ShowcaseScene.dark.panel : Colors.white.withValues(alpha: 0.92),
+      shape: CircleBorder(side: dark ? BorderSide(color: ShowcaseScene.dark.line) : BorderSide.none),
       child: IconButton(
         tooltip: tooltip ?? (back ? tr('Артқа') : null),
-        color: Brand.ink,
+        color: dark ? ShowcaseScene.dark.fg : Brand.ink,
         onPressed: back ? () => Navigator.maybePop(context) : onTap,
         icon: child,
       ),

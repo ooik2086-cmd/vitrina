@@ -25,7 +25,7 @@ FRAMES = 103
 # The page's photo views and its stops: the turn is frames 0-39, then the camera rises over the top (54), goes under
 # the sole (74) and comes in close (102).
 VIEWS = {"outer": 0, "front": 11, "inner": 20, "back": 30, "top": 54, "sole": 74, "detail": 102}
-SHARP = {0, 11, 20, 54, 74, 102}  # the page has 3200 px copies of these for zooming in
+SHARP = {54, 74, 102}  # the stops: the page has 3200 px copies for zooming in (the cover stays 1600 px, it is shown everywhere)
 SHOES = {3: ("blue", "көк"), 1: ("black", "қара")}
 
 
@@ -52,19 +52,20 @@ def main() -> None:
     answers = json.loads((HERE / "api.json").read_text())
     for listing_id, (shoe, color) in SHOES.items():
         media = media_of(src / shoe)
-        old = answers[f"GET /listings/{listing_id}"]["media"]
-        moved = {o["original_url"]: n["original_url"] for o, n in zip(old, media)}  # orders show the cover photo
 
+        # Only this listing and the orders for it change: other listings share some of the old photos.
         def fix(node):
             if isinstance(node, dict):
                 if node.get("id") == listing_id and "media" in node:
                     node["media"] = media
                     node["color"] = color
                     node["title"] = f"Жеңіл жүгіру кроссовкасы, {color}"
+                if node.get("listing_id") == listing_id and "listing_cover" in node:
+                    node["listing_cover"] = media[0]["processed_url"]
                 return {k: fix(v) for k, v in node.items()}
             if isinstance(node, list):
                 return [fix(v) for v in node]
-            return moved.get(node, node) if isinstance(node, str) else node
+            return node
 
         answers = fix(answers)
     (HERE / "api.json").write_text(json.dumps(answers, ensure_ascii=False))

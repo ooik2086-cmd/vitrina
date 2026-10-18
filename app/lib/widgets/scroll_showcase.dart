@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import '../api.dart';
 import '../i18n.dart';
 import 'spin_viewer.dart' show showcaseBackground;
+import 'studio.dart';
 
 /// The colours of the stage, taken from the approved Scroll 3D demo page: a light studio for dark shoes and a dark
 /// one for light shoes. [ink] is the backdrop, [halo] the soft light behind the shoe, the rest are for the controls.
@@ -20,6 +21,31 @@ class ShowcaseScene {
       Color(0xFF66637A), Color(0xFF6D5BD0), Color(0xF2FFFFFF));
   static const dark = ShowcaseScene._(Color(0xFF0E0E14), Color(0xFF17161F), Color(0xFF2A2836), Color(0xFFECEBF3),
       Color(0xFF9A97AB), Color(0xFFB9A8FF), Color(0x4D9684E6));
+}
+
+/// The average colour of the outermost two pixels of an RGBA image: the background a photo was taken on.
+Color edgeColour(ByteData rgba, int width, int height) {
+  var r = 0, g = 0, b = 0, n = 0;
+  void add(int x, int y) {
+    final i = (y * width + x) * 4;
+    r += rgba.getUint8(i);
+    g += rgba.getUint8(i + 1);
+    b += rgba.getUint8(i + 2);
+    n++;
+  }
+
+  for (var d = 0; d < 2 && d < height && d < width; d++) {
+    for (var x = 0; x < width; x++) {
+      add(x, d);
+      add(x, height - 1 - d);
+    }
+    for (var y = 2; y < height - 2; y++) {
+      add(d, y);
+      add(width - 1 - d, y);
+    }
+  }
+  if (n == 0) return const Color(0xFFFFFFFF);
+  return Color.fromARGB(255, r ~/ n, g ~/ n, b ~/ n);
 }
 
 /// A round light, fading out to nothing at its edge, filling the square the shoe is drawn in less 6% on each side.
@@ -102,6 +128,25 @@ class ShowcasePlan {
   /// Made from one continuous scan: its frames carry their own margin and floor shadow.
   final bool scan;
 
+  /// Frames in one full turn: up to where the first frame comes round again (a scan carries on past it to the
+  /// stops), or all of the turn's frames.
+  late final int turn = () {
+    final f = steps.first.media;
+    for (var k = 1; k < f.length; k++) {
+      if (f[k].url == f.first.url) return k;
+    }
+    return f.length;
+  }();
+
+  double _upTo(int step, int frame) =>
+      steps.take(step).fold(0.0, (sum, s) => sum + s.weight) + steps[step].weight * frame / steps[step].media.length;
+
+  /// Where a photo sits on the stop line: 0 at the first photo, 1 at the last, in the same measure the scroll uses.
+  double along(int step, int frame) {
+    final end = _upTo(steps.length - 1, steps.last.media.length - 1);
+    return end <= 0 ? 0 : _upTo(step, frame) / end;
+  }
+
   final List<ShowcaseStep> steps;
   final double total;
 
@@ -150,7 +195,7 @@ class ScrollShowcase extends StatefulWidget {
     this.onPhotos,
     this.onDetails,
     this.onLock,
-    this.onDarkTop,
+    this.onStageTop,
   });
 
   final Listing listing;
@@ -168,8 +213,8 @@ class ScrollShowcase extends StatefulWidget {
   /// True while the page must not scroll: during a pinch and while zoomed in.
   final ValueChanged<bool>? onLock;
 
-  /// True while a dark stage is under the status bar.
-  final ValueChanged<bool>? onDarkTop;
+  /// How dark the stage under the status bar is; null when the stage has scrolled away from it.
+  final ValueChanged<Brightness?>? onStageTop;
 
   /// How far the page scrolls while the stage stays in place: 0.6 of the stage for the whole turn, so one ordinary
   /// swipe turns the shoe once round (a full screen per turn felt slow and heavy under the finger), and 0.3 per stop.
@@ -232,6 +277,7 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
     _shown = (step: 0, frame: 0);
     _scale = 1;
     _pan = Offset.zero;
+    _photoEdge = null;
   }
 
   static String _signature(Listing l) => [l.backdrop, for (final m in l.media) '${m.url}|${m.thumbUrl}'].join(',');
@@ -250,6 +296,7 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
       _precached = false;
       _precache();
       _setLock();
+      WidgetsBinding.instance.addPostFrameCallback((_) => _reportTop()); // the page is building now
     }
   }
 
@@ -261,9 +308,12 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
 
   /// What the stage draws first for a photo: the small copy, or the photo decoded at screen size if there is none.
   /// Precaching asks for exactly this provider, so the cache is hit.
+  static const thumbSide = 400;
+
   ImageProvider _base(MediaItem m, ShowcaseStep step) {
     final thumbFits = m.thumbUrl != null && (step.cut || m.processedUrl == null);
-    if (thumbFits) return NetworkImage(m.thumbUrl!);
+    // 400 px, as the demo page's scrolling copies: a scan's hundred or so frames then fit the image cache.
+    if (thumbFits) return ResizeImage.resizeIfNeeded(thumbSide, null, NetworkImage(m.thumbUrl!));
     final width = (MediaQuery.sizeOf(context).width * MediaQuery.devicePixelRatioOf(context)).round();
     return ResizeImage.resizeIfNeeded(math.min(2000, width), null, NetworkImage(step.cut ? m.url : m.originalUrl));
   }
@@ -275,14 +325,51 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
     for (final s in _plan.steps) {
       for (final m in s.media) {
         precacheImage(_base(m, s), context, onError: (_, __) {});
+        // The shadows too, so the first turn does not make one per frame while the finger moves.
+        if (_shadowed(s)) ContactShadow.prepare(_base(m, s), createLocalImageConfiguration(context));
       }
     }
+    final first = _plan.steps.first;
+    if (!first.cut && first.media.isNotEmpty) _sampleEdge(_base(first.media.first, first));
+  }
+
+  /// The colour around the edge of the first photo as taken, for the stage behind such photos: on the studio
+  /// gradient the photo's own background showed as a box.
+  Color? _photoEdge;
+  ImageStream? _edgeStream;
+  ImageStreamListener? _edgeListener;
+
+  void _sampleEdge(ImageProvider photo) {
+    _stopSampling();
+    final stream = photo.resolve(createLocalImageConfiguration(context));
+    late final ImageStreamListener listener;
+    listener = ImageStreamListener((info, _) {
+      _stopSampling();
+      final image = info.image;
+      image.toByteData(format: ui.ImageByteFormat.rawRgba).then((data) {
+        final colour = data == null ? null : edgeColour(data, image.width, image.height);
+        info.dispose();
+        if (mounted && colour != null) {
+          setState(() => _photoEdge = colour);
+          _reportTop();
+        }
+      }, onError: (Object _) => info.dispose());
+    }, onError: (_, __) => _stopSampling());
+    _edgeStream = stream..addListener(listener);
+    _edgeListener = listener;
+  }
+
+  void _stopSampling() {
+    if (_edgeListener != null) _edgeStream?.removeListener(_edgeListener!);
+    _edgeStream = null;
+    _edgeListener = null;
   }
 
   @override
   void dispose() {
     widget.scroll.removeListener(_onScroll);
     _settle?.cancel();
+    _stopSampling();
     if (_lockedOffset != null || _zoomed) widget.onLock?.call(false);
     for (final p in _recentFull) {
       p.evict();
@@ -339,6 +426,14 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
 
   void _remember(ImageProvider full) {
     if (_recentFull.isNotEmpty && _recentFull.last == full) return;
+    // The same photo decoded for another zoom: drop it, a 3200 px photo at two sizes is tens of megabytes.
+    ImageProvider source(ImageProvider p) => p is ResizeImage ? p.imageProvider : p;
+    for (final other in [..._recentFull]) {
+      if (other != full && source(other) == source(full)) {
+        _recentFull.remove(other);
+        other.evict();
+      }
+    }
     _recentFull
       ..remove(full)
       ..add(full);
@@ -370,7 +465,9 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
   String _describe(int index) {
     final p = _plan.photos[index.clamp(0, _plan.photos.length - 1)];
     final s = _plan.steps[p.step];
-    return s.kind == 'spin' ? trf('кадр {0} / {1}', [p.frame + 1, s.media.length]) : s.label;
+    if (s.kind == 'spin') return trf('кадр {0} / {1}', [p.frame + 1, s.media.length]);
+    // A scan's stop carries frames on towards the next one: each still reads differently.
+    return s.media.length > 1 ? trf('{0}, кадр {1} / {2}', [s.label, p.frame + 1, s.media.length]) : s.label;
   }
 
   // Touches, relayed from above the list.
@@ -448,11 +545,16 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
     _setLock();
   }
 
-  /// A sideways drag also turns the shoe, as the old 360° viewer did.
+  double _dragFrame = 0;
+
+  /// A sideways drag also turns the shoe, as the old 360° viewer did, round and round within one turn (a scan's
+  /// frames after the turn rise over the shoe, which a drag should not do).
   void _drag(DragUpdateDetails d, double width) {
     if (_zoomed || _shown.step != 0 || !widget.scroll.hasClients) return;
-    final spin = _plan.steps.length > 1 ? _plan.startOf(1) * _travel : _travel;
-    widget.scroll.jumpTo((widget.scroll.offset - d.delta.dx / (width * 1.5) * spin).clamp(0.0, spin - 1));
+    final turn = _plan.turn;
+    if (_shown.frame >= turn || _dragFrame.floor() % turn != _shown.frame) _dragFrame = _shown.frame % turn * 1.0;
+    _dragFrame = (_dragFrame - d.delta.dx / (width * 1.5) * turn) % turn;
+    widget.scroll.jumpTo(_plan.centreOf(0, _dragFrame.floor()) * _travel);
   }
 
   Widget _photo(MediaItem m, ShowcaseStep step, double width) {
@@ -482,35 +584,58 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
           sync || frame != null ? child : const SizedBox.shrink(), // until then the small copy shows through
       errorBuilder: (_, __, ___) => const SizedBox.shrink(),
     );
-    final img = Stack(fit: StackFit.expand, children: [base, if (sharpen) full]);
+    // A seller's cut-out turning on the floor stands on its shadow, made from the small copy. A scan has its own.
+    final img = Stack(fit: StackFit.expand, children: [
+      if (_shadowed(step) && !_onDark(step) && !_zoomed)
+        ContactShadow(image: small, fit: BoxFit.contain, gapless: true),
+      base,
+      if (sharpen) full,
+    ]);
     // A scan's frames have their own margin; a seller's cut-out is often cropped close, so it gets one.
     return step.cut && !_plan.scan ? Padding(padding: const EdgeInsets.all(20), child: img) : img;
   }
 
-  bool? _darkTop;
+  bool _shadowed(ShowcaseStep step) => !_plan.scan && step.kind == 'spin' && step.cut;
 
-  /// Tells the page whether a dark stage is under the status bar, so its icons can turn light.
+  Brightness? _top;
+  bool _topReported = false;
+
+  /// Tells the page how dark the stage under the status bar is (null once scrolled past), so its icons can read.
   void _reportTop() {
-    final report = widget.onDarkTop;
+    final report = widget.onStageTop;
     if (report == null || !mounted) return;
     final offset = widget.scroll.hasClients ? widget.scroll.offset : 0.0;
     final covers = offset < _travel + widget.stageHeight - MediaQuery.paddingOf(context).top;
-    final dark = covers && _onDark(_plan.steps[_shown.step]);
-    if (dark == _darkTop) return;
-    _darkTop = dark;
-    report(dark);
+    final now = _plan.at(_progress);
+    final top = !covers ? null : (_onDark(_plan.steps[now.step]) ? Brightness.dark : Brightness.light);
+    if (_topReported && top == _top) return;
+    _top = top;
+    _topReported = true;
+    report(top);
   }
 
   /// The step's photos stand on a dark backdrop.
-  bool _onDark(ShowcaseStep step) =>
-      widget.listing.backdrop != null && step.cut ? !_light : widget.listing.showcaseStyle == 'premium';
+  bool _onDark(ShowcaseStep step) {
+    if (widget.listing.backdrop != null && step.cut) return !_light;
+    final edge = _photoEdge;
+    if (!step.cut && edge != null) return edge.computeLuminance() < 0.3;
+    return widget.listing.showcaseStyle == 'premium';
+  }
+
+  BoxDecoration _stage(ShowcaseStep step, bool own) {
+    if (own) return _backdrop;
+    final edge = _photoEdge;
+    if (!step.cut && edge != null) return BoxDecoration(color: edge);
+    return showcaseBackground(widget.listing.showcaseStyle);
+  }
 
   BoxDecoration get _backdrop => BoxDecoration(color: (_light ? ShowcaseScene.light : ShowcaseScene.dark).ink);
 
   /// The stops on a line that fills as the shoe goes round, as on the demo page: a stop lights up once reached.
-  Widget _stops(ShowcaseScene scene, int current, int index) {
-    const width = 200.0;
-    final filled = _plan.photos.length < 2 ? 0.0 : index / (_plan.photos.length - 1);
+  /// The line and the stops use the same measure, so the line reaches each stop as its view comes up.
+  Widget _stops(ShowcaseScene scene, ({int step, int frame}) now) {
+    const width = 240.0; // 48 dp between the closest stops, so their buttons do not overlap
+    final filled = _plan.along(now.step, now.frame);
     return SizedBox(
       width: width + 48,
       height: 48,
@@ -527,17 +652,19 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
           top: 22.5,
           height: 3,
           width: width * filled,
-          child: DecoratedBox(decoration: BoxDecoration(color: scene.glow, borderRadius: BorderRadius.circular(3))),
+          child: DecoratedBox(
+              key: const Key('showcase-line-fill'),
+              decoration: BoxDecoration(color: scene.glow, borderRadius: BorderRadius.circular(3))),
         ),
         for (var i = 0; i < _plan.steps.length; i++)
           Positioned(
-            left: width * _plan.startOf(i),
+            left: width * _plan.along(i, 0),
             top: 0,
             width: 48,
             height: 48,
             child: Semantics(
               button: true,
-              selected: i == current,
+              selected: i == now.step,
               label: _plan.steps[i].label,
               child: Tooltip(
                 message: _plan.steps[i].label,
@@ -553,8 +680,9 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
                       height: 14,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        color: i <= current ? scene.glow : scene.ink,
-                        border: Border.all(color: i <= current ? scene.glow : scene.line, width: 2),
+                        color: i <= now.step ? scene.glow : scene.ink,
+                        // The muted ink, not the line's colour, so a stop not yet reached still shows (3:1).
+                        border: Border.all(color: i <= now.step ? scene.glow : scene.muted, width: 2),
                       ),
                     ),
                   ),
@@ -585,7 +713,7 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
         RepaintBoundary(
           child: DecoratedBox(
             key: const Key('showcase'),
-            decoration: ownBackdrop ? _backdrop : showcaseBackground(widget.listing.showcaseStyle),
+            decoration: _stage(step, ownBackdrop),
             child: Column(children: [
               SizedBox(height: top),
               Expanded(
@@ -694,26 +822,27 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
               // The stops on a thin line that fills as the shoe turns (Aza's choice: nothing written beside the
               // shoe). Each stop is a 48 dp button that jumps straight to its view; its name is read out and shown on
               // long press.
-              Center(child: _stops(scene, now.step, index)),
-              // How to use it, until the shoe starts turning.
-              AnimatedOpacity(
-                opacity: index == 0 ? 1 : 0,
-                duration: _reduceMotion ? Duration.zero : const Duration(milliseconds: 300),
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                  child: Text.rich(
-                    TextSpan(children: [
-                      WidgetSpan(
-                          alignment: PlaceholderAlignment.middle,
-                          child: Icon(Icons.south_rounded, size: 16, color: scene.muted)),
-                      TextSpan(text: ' ${tr('Төмен жүргізіңіз · екі саусақпен жақындатыңыз')}'),
-                    ]),
-                    key: const Key('showcase-hint'),
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 13, color: scene.muted),
+              Center(child: _stops(scene, now)),
+              // How to use it, until the shoe starts turning; not on a short screen, where the shoe needs the room.
+              if (MediaQuery.sizeOf(context).height >= 560)
+                AnimatedOpacity(
+                  opacity: index == 0 ? 1 : 0,
+                  duration: _reduceMotion ? Duration.zero : const Duration(milliseconds: 300),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                    child: Text.rich(
+                      TextSpan(children: [
+                        WidgetSpan(
+                            alignment: PlaceholderAlignment.middle,
+                            child: Icon(Icons.south_rounded, size: 16, color: scene.muted)),
+                        TextSpan(text: ' ${tr('Төмен жүргізіңіз · екі саусақпен жақындатыңыз')}'),
+                      ]),
+                      key: const Key('showcase-hint'),
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 13, color: scene.muted),
+                    ),
                   ),
                 ),
-              ),
             ]),
           ),
         ),

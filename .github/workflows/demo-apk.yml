@@ -23,6 +23,12 @@ jobs:
         working-directory: app
     steps:
       - uses: actions/checkout@v4
+      # Every demo photo's small copy, cut-out and original must be the same picture, or the page draws two shoes
+      # on top of each other. Nothing is built or published when they are not.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install Pillow && python demo/check_media.py
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
