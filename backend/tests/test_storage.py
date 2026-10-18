@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 import httpx
 
 from vitrina_api.config import Settings
-from vitrina_api.storage import LocalStorage, S3Storage, make_storage, sigv4_headers
+from vitrina_api.storage import LocalStorage, S3Storage, make_storage, presign, sigv4_headers
 
 KEY_ID, SECRET = "AKIAIOSFODNN7EXAMPLE", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
 
@@ -19,6 +19,15 @@ class SigV4Tests(unittest.TestCase):
                          "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/us-east-1/s3/aws4_request, "
                          "SignedHeaders=host;range;x-amz-content-sha256;x-amz-date, "
                          "Signature=f0e8bdb87c964420e857bd35b5d6ed310bd44f0170aba48dd91039c6036bdb41")
+
+
+class PresignTests(unittest.TestCase):
+    def test_matches_the_aws_documentation_example(self):
+        # "Authenticating Requests: Using Query Parameters" example from the S3 SigV4 documentation.
+        url = presign("https://examplebucket.s3.amazonaws.com/test.txt", region="us-east-1", access_key=KEY_ID,
+                      secret_key=SECRET, expires=86400, now=datetime(2013, 5, 24, tzinfo=timezone.utc))
+        self.assertTrue(url.endswith("X-Amz-Signature=aeeed9bbccd4d02ee5c0109b86d86835f995330da4c265957d157751f604d404"))
+        self.assertIn("X-Amz-Expires=86400", url)
 
 
 class FakeBucket:
@@ -104,6 +113,21 @@ class S3StorageTests(unittest.TestCase):
             b"<ListBucketResult><IsTruncated>true</IsTruncated></ListBucketResult>"))))
         with self.assertRaises(RuntimeError):
             list(self.s3.keys())
+
+
+class PrivateBucketTests(unittest.TestCase):
+    def test_private_files_are_stored_as_references_and_read_through_links_that_expire(self):
+        from vitrina_api.storage import PRIVATE_BASE, private_link
+        bucket = FakeBucket()
+        s3 = S3Storage(endpoint="https://s3.example.kz", bucket="vitrina-private", region="kz-1", access_key="key",
+                       secret_key="secret", public_base=PRIVATE_BASE,
+                       client=httpx.Client(transport=httpx.MockTransport(bucket)))
+        ref = s3.put(b"receipt", owner_id=4)
+        self.assertRegex(ref, r"^private:/4/[0-9a-f]{32}\.jpg$")
+        link = private_link(s3, ref, now=datetime(2026, 10, 18, tzinfo=timezone.utc), ttl=600)
+        self.assertTrue(link.startswith(f"https://s3.example.kz/vitrina-private/{ref.removeprefix('private:/')}?"))
+        self.assertIn("X-Amz-Expires=600", link)
+        self.assertIsNone(private_link(s3, "private:/../secret"))
 
 
 class LocalListingTests(unittest.TestCase):

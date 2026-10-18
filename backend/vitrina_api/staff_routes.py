@@ -10,12 +10,13 @@ from vitrina_core.orders import Actor, OrderStatus as S
 
 from . import services
 from .config import Settings
-from .deps import get_db, get_settings, staff_user
+from .deps import get_db, get_private, get_settings, staff_user
 from .errors import ApiError
 from .models import AuditLog, AuthProof, ListingReport, Listing, Order, OrderEvent, OrderEvidence, User, utcnow
 from .schemas import EvidenceRequestIn, ReasonIn, ReportCloseIn, ResolveIn
 from .serializers import listing_out, moderation_out, order_out, order_summary, ordered_details, ordered_photos
 from .saved_search_routes import announce
+from .storage import Storage, private_link
 from .listing_routes import split_codes
 from .order_routes import dispute_evidence_until, order_evidence_list, order_for
 
@@ -264,7 +265,8 @@ def admin_audit(staff: User = Depends(staff_user), db: Session = Depends(get_db)
 
 
 @router.get("/admin/orders/{order_id}/evidence")
-def order_evidence(order_id: int, staff: User = Depends(staff_user), db: Session = Depends(get_db)):
+def order_evidence(order_id: int, staff: User = Depends(staff_user), db: Session = Depends(get_db),
+                   files: Storage = Depends(get_private)):
     """What support decides a dispute on: both sides' words, the chat with its photos, and the parcel details.
     Read-only, and every look is written to the audit log because it shows a private conversation."""
     from .models import Conversation, Message
@@ -278,12 +280,12 @@ def order_evidence(order_id: int, staff: User = Depends(staff_user), db: Session
     db.commit()
     return {"tracking_number": order.tracking_number, "dispute_reason": order.dispute_reason,
             "listing_title": order.listing_title, "listing_photos": ordered_photos(order),
-            "listing_details": ordered_details(order), "evidence": order_evidence_list(db, order),
+            "listing_details": ordered_details(order), "evidence": order_evidence_list(db, order, files),
             "evidence_until": (until.isoformat() if (until := dispute_evidence_until(db, order)) else None),
             "evidence_requests": [{"reason": r.reason, "at": services.aware(r.at).isoformat()} for r in db.scalars(
                 select(AuditLog).where(AuditLog.action == "request_evidence", AuditLog.target == f"order:{order.id}")
                 .order_by(AuditLog.id)).all()],
-            "authenticity_proofs": [p.url for p in db.scalars(select(AuthProof).where(
+            "authenticity_proofs": [private_link(files, p.url) for p in db.scalars(select(AuthProof).where(
                 AuthProof.listing_id == order.listing_id).order_by(AuthProof.id)).all()],
             "delivery_city": order.delivery_city,
             "delivered_at": services.aware(order.delivered_at).isoformat() if order.delivered_at else None,

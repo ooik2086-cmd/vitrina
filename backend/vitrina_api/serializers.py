@@ -19,6 +19,7 @@ from .errors import ApiError
 from .social import seller_rating
 from .models import PriceChange, Favorite, Listing, ListingSize, Order, User
 from .api_common import ALMATY
+from .storage import private_link
 
 
 def cm_to_mm(text: str) -> int:
@@ -200,8 +201,9 @@ def ordered_details(order: Order) -> dict | None:
     return json.loads(order.listing_details) if order.listing_details else None
 
 
-def evidence_out(order: Order, item) -> dict:
-    return {"id": item.id, "from": "buyer" if item.user_id == order.buyer_id else "seller", "url": item.url, "kind": item.kind, "note": item.note,
+def evidence_out(order: Order, item, files) -> dict:
+    return {"id": item.id, "from": "buyer" if item.user_id == order.buyer_id else "seller",
+            "url": private_link(files, item.url), "kind": item.kind, "note": item.note,
             "at": services.aware(item.created_at).isoformat()}
 
 

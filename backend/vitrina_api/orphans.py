@@ -121,37 +121,41 @@ def main(argv: list[str] | None = None) -> int:
     from .config import Settings
     from .deps import now_utc
     from .models import make_session_factory
-    from .storage import make_storage
+    from .storage import make_private_storage, make_storage
 
     parser = argparse.ArgumentParser(description="Find, and with --delete remove, stored files nothing points at.")
     parser.add_argument("--delete", action="store_true", help="delete them; without it only list them")
     parser.add_argument("--force", action="store_true", help=f"delete even when more than {MAX_SHARE:.0%} look unused")
     args = parser.parse_args(argv)
     cfg = Settings()
-    sessions, storage = make_session_factory(cfg.database_url, create_schema=False), make_storage(cfg)
+    sessions = make_session_factory(cfg.database_url, create_schema=False)
     print(f"database: {make_url(cfg.database_url).render_as_string(hide_password=True)}")
-    print(f"storage: {where(storage)}")
-    try:
-        result = sweep(sessions, storage, now=now_utc(), delete=args.delete, force=args.force)
-    except SweepRefused as e:
-        print(f"stopped, nothing deleted: {e}", file=sys.stderr)
-        return 2
-    for key in result.orphans:
-        print(key)
-    print(f"{result.stored} files older than {MIN_AGE.days} days, {result.referenced} keys in the database, "
-          f"{len(result.orphans)} unused")
-    if not args.delete:
-        print("nothing deleted; run with --delete to remove them")
-        return 0
-    with sessions() as db:
-        services.audit(db, None, "orphans.delete", where(storage)[-80:],
-                       f"deleted {len(result.deleted)}, failed {len(result.failed)}")
-        db.commit()
-    print(f"deleted {len(result.deleted)}, failed {len(result.failed)}")
-    for key in result.failed:
-        print(f"failed: {key}", file=sys.stderr)
-    return 1 if result.failed else 0
-
+    code = 0
+    for storage in (make_storage(cfg), make_private_storage(cfg)):  # photos, then receipts and dispute evidence
+        print(f"storage: {where(storage)}")
+        try:
+            result = sweep(sessions, storage, now=now_utc(), delete=args.delete, force=args.force)
+        except SweepRefused as e:
+            print(f"stopped, nothing deleted here: {e}", file=sys.stderr)
+            code = max(code, 2)
+            continue
+        for key in result.orphans:
+            print(key)
+        print(f"{result.stored} files older than {MIN_AGE.days} days, {result.referenced} keys in the database, "
+              f"{len(result.orphans)} unused")
+        if not args.delete:
+            print("nothing deleted; run with --delete to remove them")
+            continue
+        with sessions() as db:
+            services.audit(db, None, "orphans.delete", where(storage)[-80:],
+                           f"deleted {len(result.deleted)}, failed {len(result.failed)}")
+            db.commit()
+        print(f"deleted {len(result.deleted)}, failed {len(result.failed)}")
+        for key in result.failed:
+            print(f"failed: {key}", file=sys.stderr)
+        if result.failed:
+            code = max(code, 1)
+    return code
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)

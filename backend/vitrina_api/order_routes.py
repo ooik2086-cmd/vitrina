@@ -18,7 +18,7 @@ from vitrina_core.orders import Actor, OrderStatus as S
 from . import services
 from . import coupons, offers
 from .config import Settings
-from .deps import current_user, get_db, get_settings, get_storage
+from .deps import current_user, get_db, get_private, get_settings
 from .errors import ApiError
 from .models import IdempotencyRecord, Listing, ListingSize, Order, OrderEvent, OrderEvidence, Review, User
 from .api_common import DECLINABLE, IN_DELIVERY, PHONE_RE
@@ -134,14 +134,14 @@ def list_orders(role: Literal["buyer", "seller"] = "buyer", user: User = Depends
 
 @router.get("/orders/{order_id}")
 def get_order(order_id: int, user: User = Depends(current_user), db: Session = Depends(get_db),
-              cfg: Settings = Depends(get_settings)):
+              cfg: Settings = Depends(get_settings), files: Storage = Depends(get_private)):
     order = order_for(db, order_id, user)
     reviewed = db.scalar(select(Review.id).where(Review.order_id == order.id)) is not None
     events = db.scalars(select(OrderEvent).where(OrderEvent.order_id == order.id).order_by(OrderEvent.id)).all()
     act_by = services.deadline(db, order, cfg.confirm_window)
     return {**order_summary(db, order), "reviewed": reviewed, "delivery": delivery_out(order, user),
             "deadline": act_by.isoformat() if act_by else None, "listing_photos": ordered_photos(order),
-            "listing_details": ordered_details(order), "evidence": order_evidence_list(db, order),
+            "listing_details": ordered_details(order), "evidence": order_evidence_list(db, order, files),
             "evidence_until": evidence_until_out(db, order),
             "history": [{"status": e.to_status, "at": services.aware(e.at).isoformat()} for e in events]}
 
@@ -283,9 +283,9 @@ def dispute_evidence_until(db: Session, order: Order):
 MAX_EVIDENCE = 10
 
 
-def order_evidence_list(db: Session, order: Order) -> list[dict]:
+def order_evidence_list(db: Session, order: Order, files: Storage) -> list[dict]:
     rows = db.scalars(select(OrderEvidence).where(OrderEvidence.order_id == order.id).order_by(OrderEvidence.id)).all()
-    return [evidence_out(order, e) for e in rows]
+    return [evidence_out(order, e, files) for e in rows]
 
 
 EVIDENCE_TRIES_PER_HOUR = 30  # stored or refused: every try costs a 12 MB read and maybe an ffmpeg run
@@ -296,7 +296,7 @@ def add_evidence(order_id: int, request: Request, file: UploadFile = File(...),
                  note: str | None = Form(default=None, max_length=500),
                  key: str | None = Form(default=None, min_length=8, max_length=64),
                  user: User = Depends(current_user), db: Session = Depends(get_db),
-                 storage: Storage = Depends(get_storage)):
+                 files: Storage = Depends(get_private)):
     """A photo or short MP4 for an open return or dispute. Kept as sent: it cannot be edited or taken back.
     [key] is the app's id for this file: a retry after a lost answer returns the first copy instead of a second."""
 
@@ -319,7 +319,7 @@ def add_evidence(order_id: int, request: Request, file: UploadFile = File(...),
 
     order = order_for(db, order_id, user)
     if (seen := check(order)) is not None:
-        return evidence_out(order, seen)
+        return evidence_out(order, seen, files)
     if not request.app.state.evidence_limiter.allow(str(user.id), time.monotonic()):
         raise ApiError(429, "rate_limited")
     # The file is cleaned and stored with no transaction open, so a slow video holds neither a pooled connection
@@ -336,10 +336,10 @@ def add_evidence(order_id: int, request: Request, file: UploadFile = File(...),
             raise ApiError(503, "video_unavailable")
     else:
         clean, ext, kind = normalize_image(data), "jpg", "photo"
-    url = storage.put(clean, owner_id=user.id, ext=ext)
+    url = files.put(clean, owner_id=user.id, ext=ext)
     order = order_for(db, order_id, user, lock=True)
     if (seen := check(order)) is not None:  # the same file arrived twice at once and the other request won
-        return evidence_out(order, seen)
+        return evidence_out(order, seen, files)
     item = OrderEvidence(order_id=order.id, user_id=user.id, url=url, kind=kind, client_key=key,
                          note=(note or "").strip() or None)
     db.add(item)
@@ -348,4 +348,4 @@ def add_evidence(order_id: int, request: Request, file: UploadFile = File(...),
                     f"Заказ №{order.id}: другая сторона добавила доказательство.",
                     f"Order No. {order.id}: the other side added evidence.", order_id=order.id)
     db.commit()
-    return evidence_out(order, item)
+    return evidence_out(order, item, files)

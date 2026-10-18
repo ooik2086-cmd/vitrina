@@ -39,6 +39,11 @@ def get_storage(request: Request) -> Storage:
     return request.app.state.storage
 
 
+def get_private(request: Request) -> Storage:
+    """Receipts and dispute evidence: stored apart, shown only through links that expire (storage.private_link)."""
+    return request.app.state.private
+
+
 def current_user(authorization: str | None = Header(default=None), db: Session = Depends(get_db)) -> User:
     if not authorization or not authorization.startswith("Bearer "):
         raise ApiError(401, "unauthorized")

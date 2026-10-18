@@ -9,7 +9,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
 from PIL import Image
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 
 os.environ.setdefault("VITRINA_LOG_LEVEL", "WARNING")  # keep test output to what failed
 
@@ -47,6 +47,7 @@ class ApiTestCase(unittest.TestCase):
             engine.dispose()
         self.cfg = Settings(database_url=url or f"sqlite:///{os.path.join(self.tmp.name, 't.db')}", debug_otp=True, otp_resend_after=timedelta(0),
                             media_dir=os.path.join(self.tmp.name, "media"), public_media_url="http://test/media",
+                            private_media_dir=os.path.join(self.tmp.name, "private"),
                             allow_external_media=self.external_media)
         self.app = create_app(self.cfg)
         self.c = TestClient(self.app)
@@ -113,6 +114,12 @@ class ApiTestCase(unittest.TestCase):
 
     def db(self):
         return self.app.state.sessions()
+
+    def fetch(self, url):
+        """A file through the address a response gave, as the app would load it."""
+        r = self.c.get(url.removeprefix("http://test"))
+        self.assertEqual(r.status_code, 200, url)
+        return r
 
     def make_staff(self, phone="+77010000009"):
         token = self.login(phone)
@@ -785,7 +792,8 @@ class OpsTests(ApiTestCase):
                          payment_webhook_secret=b"p" * 40, delivery_webhook_secret=b"d" * 40,
                          database_url="postgresql+psycopg://u:p@db/vitrina", media_dir=self.tmp.name,
                          public_media_url="https://cdn.vitrina.kz", cors_origins=[], s3_bucket="vitrina",
-                         s3_endpoint="https://s3.example.kz", s3_access_key="k", s3_secret_key="s")
+                         s3_endpoint="https://s3.example.kz", s3_access_key="k", s3_secret_key="s",
+                         s3_private_bucket="vitrina-private")
         self.assertEqual(production_problems(ready), [])
         from dataclasses import replace
         for loose, env in ((dict(cors_origins=["*"]), "VITRINA_CORS_ORIGINS"),
@@ -1565,6 +1573,27 @@ class AuthenticityTests(ApiTestCase):
     def upload(self, lid, token):
         return self.c.post(f"/api/v1/listings/{lid}/proofs", headers=self.h(token),
                            files={"file": ("receipt.jpg", jpeg(), "image/jpeg")})
+
+    def test_a_receipt_is_stored_apart_and_shown_only_through_a_link_that_expires(self):
+        from vitrina_api.models import AuthProof
+        from vitrina_api.storage import private_link
+        lid = self.publish()["id"]
+        link = self.upload(lid, self.seller).json()["proofs"][0]["url"]
+        with self.db() as db:
+            stored = db.scalars(select(AuthProof.url)).one()
+        self.assertTrue(stored.startswith("private:/"))  # an address never reaches the database
+        key = stored.removeprefix("private:/")
+        self.assertEqual(self.fetch(link).headers["cache-control"], "private, max-age=3600")
+        self.assertEqual(self.c.get(f"/media/{key}").status_code, 404)  # not among the public photos
+        tampered = link[:-1] + ("0" if link[-1] != "0" else "1")
+        self.assertEqual(self.c.get(tampered.removeprefix("http://test")).status_code, 404)
+        old = private_link(self.app.state.private, stored, now=datetime.now(timezone.utc) - timedelta(hours=2))
+        self.assertEqual(self.c.get(old.removeprefix("http://test")).status_code, 404)  # expired
+        other = link.replace(f"/{key.split('/')[0]}/", "/999/")
+        self.assertEqual(self.c.get(other.removeprefix("http://test")).status_code, 404)
+        # A proof saved before private storage keeps its public address.
+        self.assertEqual(private_link(self.app.state.private, "http://test/media/1/" + "a" * 32 + ".jpg"),
+                         "http://test/media/1/" + "a" * 32 + ".jpg")
 
     def test_proof_is_private_and_staff_decide_what_the_listing_shows(self):
         listing = self.publish()
@@ -2386,8 +2415,7 @@ class DisputeEvidenceTests(ApiTestCase):
         r = self.add(order, self.buyer, note="  Табаны  ")
         self.assertEqual(r.status_code, 201, r.text)
         self.assertEqual((r.json()["from"], r.json()["kind"], r.json()["note"]), ("buyer", "photo", "Табаны"))
-        path = os.path.join(self.tmp.name, "media", r.json()["url"].removeprefix("http://test/media/"))
-        with Image.open(path) as img:
+        with Image.open(io.BytesIO(self.fetch(r.json()["url"]).content)) as img:
             self.assertNotIn(0x8825, img.getexif())  # no place left in the photo
         self.assertEqual(self.add(order, self.seller).status_code, 201)
         self.post(f"/orders/{order['id']}/dispute", self.seller, {"reason": "Аяқ киім киілген"})
@@ -2425,10 +2453,8 @@ class DisputeEvidenceTests(ApiTestCase):
         r = self.add(order, self.buyer, clip, "v.mp4", "video/mp4")
         self.assertEqual(r.status_code, 201, r.text)
         self.assertEqual(r.json()["kind"], "video")
-        self.assertTrue(r.json()["url"].endswith(".mp4"))
-        path = os.path.join(self.tmp.name, "media", r.json()["url"].removeprefix("http://test/media/"))
-        with open(path, "rb") as f:
-            kept = f.read()
+        self.assertIn(".mp4?", r.json()["url"])
+        kept = self.fetch(r.json()["url"]).content
         self.assertFalse(b"Almaty" in kept or b"Phone XYZ" in kept)
         broken = b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 100
         self.assertEqual(self.add(order, self.buyer, broken, "v.mp4", "video/mp4").status_code, 415)
@@ -2634,8 +2660,8 @@ class OrphanSweepTests(ApiTestCase):
         self.assertIn("deleted 1, failed 0", out.getvalue())
         with self.assertRaises(FileNotFoundError):
             self.storage.read(lost)
-        with self.db() as db:
-            self.assertEqual(db.query(AuditLog).filter_by(action="orphans.delete").count(), 1)
+        with self.db() as db:  # one record per store: the photos and the private files
+            self.assertEqual(db.query(AuditLog).filter_by(action="orphans.delete").count(), 2)
 
 
 if __name__ == "__main__":

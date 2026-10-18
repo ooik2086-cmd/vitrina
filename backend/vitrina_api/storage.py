@@ -167,16 +167,41 @@ def checked_key(key: str) -> str:
     return key
 
 
+# Private files are stored as "private:/<key>", never as an address: each response turns them into a link that
+# expires (private_link), so a link that leaks from a screenshot or a log stops working.
+PRIVATE_BASE = "private:"
+PRIVATE_LINK_TTL = 3600
+
+
+def private_link(files, ref: str | None, *, now: datetime | None = None, ttl: int = PRIVATE_LINK_TTL) -> str | None:
+    """What a response shows for a stored file: a public address as it is, a private one as a link that expires.
+    Files from before private storage existed keep their public address."""
+    if not ref or not ref.startswith(PRIVATE_BASE + "/"):
+        return ref
+    key = key_of(PRIVATE_BASE, ref)
+    return files.signed_url(key, ttl, now=now) if key else None
+
+
+def link_signature(secret: bytes, key: str, expires: int) -> str:
+    return hmac.new(secret, f"private-media:{key}:{expires}".encode(), hashlib.sha256).hexdigest()
+
+
 CONTENT_TYPES = {"jpg": "image/jpeg", "webp": "image/webp", "png": "image/png", "mp4": "video/mp4"}
 
 
 class LocalStorage:
     """Development storage on disk. Production uses S3Storage with a bucket hosted in Kazakhstan."""
 
-    def __init__(self, root: str, public_base: str):
+    def __init__(self, root: str, public_base: str, *, link_base: str = "", link_secret: bytes = b""):
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
         self.public_base = public_base.rstrip("/")
+        self.link_base, self.link_secret = link_base.rstrip("/"), link_secret
+
+    def signed_url(self, key: str, ttl: int, *, now: datetime | None = None) -> str:
+        """A link to the API's /private-media route, checked there (link_signature)."""
+        expires = int((now or datetime.now(timezone.utc)).timestamp()) + ttl
+        return f"{self.link_base}/{checked_key(key)}?exp={expires}&sig={link_signature(self.link_secret, key, expires)}"
 
     def put(self, data: bytes, *, owner_id: int, ext: str = "jpg") -> str:
         name = new_key(owner_id, ext)
@@ -237,6 +262,25 @@ def sigv4_headers(method: str, url: str, *, region: str, access_key: str, secret
                              f"Signature={signature}"}
 
 
+def presign(url: str, *, region: str, access_key: str, secret_key: str, expires: int,
+            now: datetime | None = None) -> str:
+    """A GET link signed in its query string (S3 "presigned URL"), valid for expires seconds."""
+    now = now or datetime.now(timezone.utc)
+    amz_date, day = now.strftime("%Y%m%dT%H%M%SZ"), now.strftime("%Y%m%d")
+    parts = urlsplit(url)
+    scope = f"{day}/{region}/s3/aws4_request"
+    params = {"X-Amz-Algorithm": "AWS4-HMAC-SHA256", "X-Amz-Credential": f"{access_key}/{scope}",
+              "X-Amz-Date": amz_date, "X-Amz-Expires": str(expires), "X-Amz-SignedHeaders": "host"}
+    query = "&".join(f"{quote(k, safe='-_.~')}={quote(v, safe='-_.~')}" for k, v in sorted(params.items()))
+    canonical = "\n".join(["GET", quote(parts.path or "/", safe="/-_.~"), query, f"host:{parts.netloc}\n", "host",
+                           "UNSIGNED-PAYLOAD"])
+    to_sign = "\n".join(["AWS4-HMAC-SHA256", amz_date, scope, hashlib.sha256(canonical.encode()).hexdigest()])
+    key = f"AWS4{secret_key}".encode()
+    for part in (day, region, "s3", "aws4_request"):
+        key = hmac.new(key, part.encode(), hashlib.sha256).digest()
+    return f"{url}?{query}&X-Amz-Signature={hmac.new(key, to_sign.encode(), hashlib.sha256).hexdigest()}"
+
+
 class S3Storage:
     """Photos in an S3-compatible bucket, addressed path-style ({endpoint}/{bucket}/{key}) so any provider works.
     public_base is what buyers' phones load from: the bucket's public address or a CDN in front of it."""
@@ -263,7 +307,8 @@ class S3Storage:
     def put(self, data: bytes, *, owner_id: int, ext: str = "jpg") -> str:
         key = new_key(owner_id, ext)
         self._send("PUT", key, data, {"content-type": CONTENT_TYPES.get(ext, "application/octet-stream"),
-                                      "cache-control": "public, max-age=31536000, immutable"})
+                                      "cache-control": "private, max-age=3600" if self.public_base == PRIVATE_BASE
+                                      else "public, max-age=31536000, immutable"})
         return f"{self.public_base}/{key}"
 
     def owns(self, url: str, owner_id: int | None = None) -> bool:
@@ -274,6 +319,11 @@ class S3Storage:
         if key is None:
             raise ValueError("not stored here")
         return self._send("GET", key).content
+
+    def signed_url(self, key: str, ttl: int, *, now: datetime | None = None) -> str:
+        """A presigned GET (SigV4 in the query string) that the bucket honours for ttl seconds."""
+        return presign(f"{self.endpoint}/{self.bucket}/{checked_key(key)}", region=self.region,
+                       access_key=self.access_key, secret_key=self.secret_key, expires=ttl, now=now)
 
     def keys(self) -> Iterator[tuple[str, datetime]]:
         """ListObjectsV2 page by page."""
@@ -293,6 +343,17 @@ class S3Storage:
 
     def delete(self, key: str) -> None:
         self._send("DELETE", checked_key(key))
+
+
+def make_private_storage(settings):
+    """Where private files go: the private bucket, or a folder the public /media mount does not serve."""
+    if settings.s3_private_bucket:
+        return S3Storage(endpoint=settings.s3_endpoint, bucket=settings.s3_private_bucket, region=settings.s3_region,
+                         access_key=settings.s3_access_key, secret_key=settings.s3_secret_key, public_base=PRIVATE_BASE)
+    origin = urlsplit(settings.public_media_url)
+    return LocalStorage(settings.private_media_dir, PRIVATE_BASE,
+                        link_base=f"{origin.scheme}://{origin.netloc}/api/v1/private-media",
+                        link_secret=hashlib.sha256(b"private-media|" + settings.otp_secret).digest())
 
 
 def make_storage(settings) -> Storage:

@@ -13,13 +13,13 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from . import authenticity, coupons, cutout, delivery_eta, jobs, offers, payouts, qa, slip, visual
+from . import authenticity, coupons, cutout, delivery_eta, jobs, offers, payouts, private_media, qa, slip, visual
 from .config import Settings, production_problems
 from .errors import ApiError, api_error_handler
 from .share import router as share_router
 from .social import router as social_router
 from .models import make_session_factory
-from .storage import MAX_UPLOAD_BYTES, make_storage
+from .storage import MAX_UPLOAD_BYTES, make_private_storage, make_storage
 from .api_common import log
 from .auth_routes import OTP_REQUESTS_PER_ADDRESS_PER_HOUR
 from .order_routes import EVIDENCE_TRIES_PER_HOUR
@@ -73,6 +73,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
     app.state.sessions = make_session_factory(settings.database_url, create_schema=settings.auto_create_schema)
     app.state.storage = make_storage(settings)
+    app.state.private = make_private_storage(settings)
     app.state.segmenter = cutout.load_segmenter(settings.cutout_model)
     app.state.embedder = visual.load_embedder(settings.search_model)
     app.state.image_search_limiter = SlidingWindowLimiter(IMAGE_SEARCH_PER_MINUTE, 60)
@@ -128,6 +129,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(slip.router)
     app.include_router(qa.router)
     # Without a bucket, serve uploaded photos from disk (development). With one, the bucket or its CDN serves them.
+    if not settings.s3_private_bucket:
+        app.include_router(private_media.router)
     if not settings.s3_bucket:
         app.mount("/media", StaticFiles(directory=settings.media_dir), name="media")
     # Support console: a static page that talks to the same staff-only API; the page itself holds no data.

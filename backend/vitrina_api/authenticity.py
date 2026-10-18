@@ -15,10 +15,10 @@ from sqlalchemy.orm import Session
 from vitrina_core.catalog import Authenticity
 
 from . import services
-from .deps import current_user, get_db, get_storage, staff_user
+from .deps import current_user, get_db, get_private, staff_user
 from .errors import ApiError
 from .models import AuthProof, Listing, Order, User
-from .storage import MAX_UPLOAD_BYTES, Storage, normalize_image
+from .storage import MAX_UPLOAD_BYTES, Storage, normalize_image, private_link
 
 router = APIRouter(prefix="/api/v1")
 
@@ -26,10 +26,10 @@ MAX_PROOFS = 4
 UNVERIFIED, SELLER_EVIDENCE = Authenticity.UNVERIFIED.value, Authenticity.SELLER_EVIDENCE.value
 
 
-def proofs_out(db: Session, listing: Listing) -> dict:
+def proofs_out(db: Session, listing: Listing, files: Storage) -> dict:
     rows = db.scalars(select(AuthProof).where(AuthProof.listing_id == listing.id).order_by(AuthProof.id)).all()
     return {"authenticity": listing.authenticity, "note": listing.authenticity_note,
-            "proofs": [{"id": p.id, "url": p.url} for p in rows]}
+            "proofs": [{"id": p.id, "url": private_link(files, p.url)} for p in rows]}
 
 
 def seller_listing(db: Session, listing_id: int, user: User) -> Listing:
@@ -42,16 +42,17 @@ def seller_listing(db: Session, listing_id: int, user: User) -> Listing:
 
 
 @router.get("/listings/{listing_id}/proofs")
-def list_proofs(listing_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+def list_proofs(listing_id: int, user: User = Depends(current_user), db: Session = Depends(get_db),
+                files: Storage = Depends(get_private)):
     listing = db.get(Listing, listing_id)
     if listing is None or (listing.seller_id != user.id and user.role not in ("support", "admin")):
         raise ApiError(404, "not_found")
-    return proofs_out(db, listing)
+    return proofs_out(db, listing, files)
 
 
 @router.post("/listings/{listing_id}/proofs", status_code=201)
 def add_proof(listing_id: int, file: UploadFile = File(...), user: User = Depends(current_user),
-                    db: Session = Depends(get_db), storage: Storage = Depends(get_storage)):
+                    db: Session = Depends(get_db), files: Storage = Depends(get_private)):
     listing = seller_listing(db, listing_id, user)
     count = len(db.scalars(select(AuthProof.id).where(AuthProof.listing_id == listing.id)).all())
     if count >= MAX_PROOFS:
@@ -59,15 +60,16 @@ def add_proof(listing_id: int, file: UploadFile = File(...), user: User = Depend
     data = file.file.read(MAX_UPLOAD_BYTES + 1)
     if len(data) > MAX_UPLOAD_BYTES:
         raise ApiError(413, "file_too_large")
-    db.add(AuthProof(listing_id=listing.id, url=storage.put(normalize_image(data), owner_id=user.id)))
+    db.add(AuthProof(listing_id=listing.id, url=files.put(normalize_image(data), owner_id=user.id)))
     if listing.authenticity == UNVERIFIED:
         listing.authenticity, listing.authenticity_note = SELLER_EVIDENCE, None  # staff will take a look
     db.commit()
-    return proofs_out(db, listing)
+    return proofs_out(db, listing, files)
 
 
 @router.delete("/listings/{listing_id}/proofs/{proof_id}")
-def delete_proof(listing_id: int, proof_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+def delete_proof(listing_id: int, proof_id: int, user: User = Depends(current_user), db: Session = Depends(get_db),
+                 files: Storage = Depends(get_private)):
     listing = seller_listing(db, listing_id, user)
     proof = db.get(AuthProof, proof_id)
     if proof is None or proof.listing_id != listing.id:
@@ -82,11 +84,12 @@ def delete_proof(listing_id: int, proof_id: int, user: User = Depends(current_us
     if left is None and listing.authenticity == SELLER_EVIDENCE:
         listing.authenticity = UNVERIFIED  # nothing left to back the claim
     db.commit()
-    return proofs_out(db, listing)
+    return proofs_out(db, listing, files)
 
 
 @router.get("/admin/authenticity")
-def admin_authenticity(staff: User = Depends(staff_user), db: Session = Depends(get_db)):
+def admin_authenticity(staff: User = Depends(staff_user), db: Session = Depends(get_db),
+                       files: Storage = Depends(get_private)):
     """Listings with proof waiting for staff, oldest first."""
     rows = db.scalars(select(Listing).where(Listing.authenticity == SELLER_EVIDENCE,
                                             Listing.status.in_(("published", "paused", "sold", "moderation")))
@@ -97,7 +100,7 @@ def admin_authenticity(staff: User = Depends(staff_user), db: Session = Depends(
         cover = next((m.processed_url or m.original_url for m in listing.media if m.angle != "frame"), None)
         items.append({"id": listing.id, "title": listing.title, "brand": listing.brand,
                       "model_name": listing.model_name, "price_tiyn": listing.price_tiyn, "cover": cover,
-                      "shop_name": seller.shop_name, **proofs_out(db, listing)})
+                      "shop_name": seller.shop_name, **proofs_out(db, listing, files)})
     return {"items": items}
 
 
@@ -120,7 +123,7 @@ DECISION_TEXT = {
 
 @router.post("/admin/listings/{listing_id}/authenticity")
 def set_authenticity(listing_id: int, body: AuthenticityIn, staff: User = Depends(staff_user),
-                     db: Session = Depends(get_db)):
+                     db: Session = Depends(get_db), files: Storage = Depends(get_private)):
     listing = db.get(Listing, listing_id)
     if listing is None:
         raise ApiError(404, "not_found")
@@ -136,4 +139,4 @@ def set_authenticity(listing_id: int, body: AuthenticityIn, staff: User = Depend
                     ru.format(t=listing.title, n=note or ""), en.format(t=listing.title, n=note or ""),
                     listing_id=listing.id)
     db.commit()
-    return proofs_out(db, listing)
+    return proofs_out(db, listing, files)

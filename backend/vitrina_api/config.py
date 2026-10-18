@@ -43,6 +43,11 @@ class Settings:
     s3_region: str = field(default_factory=lambda: os.environ.get("VITRINA_S3_REGION", "us-east-1"))
     s3_access_key: str = field(default_factory=lambda: os.environ.get("VITRINA_S3_ACCESS_KEY", ""))
     s3_secret_key: str = field(default_factory=lambda: os.environ.get("VITRINA_S3_SECRET_KEY", ""))
+    # Files only the people involved may see (authenticity proofs: receipts, boxes; dispute evidence): a second,
+    # non-public bucket, read through links that expire. Without a bucket they sit in private_media_dir and the API
+    # serves them at /api/v1/private-media with a signed link.
+    s3_private_bucket: str = field(default_factory=lambda: os.environ.get("VITRINA_S3_PRIVATE_BUCKET", ""))
+    private_media_dir: str = field(default_factory=lambda: os.environ.get("VITRINA_PRIVATE_MEDIA_DIR", "./media-private-dev"))
     # Listings may only reference photos uploaded through /media, so sellers cannot embed tracking pixels or hotlinks.
     allow_external_media: bool = field(default_factory=lambda: os.environ.get("VITRINA_ALLOW_EXTERNAL_MEDIA", "0") == "1")
     # Browser origins allowed to call the API (the Flutter web build during development). Empty = none.
@@ -77,4 +82,7 @@ def production_problems(s: Settings) -> list[str]:
         problems.append("VITRINA_S3_BUCKET must be set: photos on the API server's disk are lost with the server")
     elif not (s.s3_endpoint.startswith("https://") and s.s3_access_key and s.s3_secret_key):
         problems.append("VITRINA_S3_ENDPOINT (https), VITRINA_S3_ACCESS_KEY and VITRINA_S3_SECRET_KEY must be set")
+    if not s.s3_private_bucket or s.s3_private_bucket == s.s3_bucket:
+        problems.append("VITRINA_S3_PRIVATE_BUCKET must name a second bucket without public read: receipts and "
+                        "dispute evidence must not be reachable by address")
     return problems
