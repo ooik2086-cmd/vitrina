@@ -35,7 +35,7 @@ class ListingScreen extends StatefulWidget {
   /// The photo the catalog card showed: it flies in and stays while the listing loads.
   final String? cover;
 
-  /// The cover is a cut-out: it keeps the card's studio backdrop and shadow on the way.
+  /// The cover is a cut-out: its shadow flies with it.
   final bool coverIsCutout;
 
   @override
@@ -256,16 +256,12 @@ class _ListingScreenState extends State<ListingScreen> {
             return Stack(children: [
               Hero(
                 tag: 'listing-${widget.listingId}',
-                child: DecoratedBox(
-                  decoration: widget.coverIsCutout ? studioBackdrop() : const BoxDecoration(),
-                  child: Stack(fit: StackFit.expand, children: [
-                    if (widget.coverIsCutout) ContactShadow(image: coverImage(cover), fit: BoxFit.contain),
-                    Image(
-                        image: coverImage(cover),
-                        fit: BoxFit.contain,
-                        errorBuilder: (_, __, ___) => const SizedBox.shrink()),
-                  ]),
-                ),
+                // Only the shoe: the page may open on a dark stage or the photos as taken, so no backdrop flashes.
+                child: CoverPhoto(
+                    image: coverImage(cover),
+                    cutout: widget.coverIsCutout,
+                    fit: BoxFit.contain,
+                    errorBuilder: (_, __, ___) => const SizedBox.shrink()),
               ),
               const Center(child: CircularProgressIndicator()),
             ]);

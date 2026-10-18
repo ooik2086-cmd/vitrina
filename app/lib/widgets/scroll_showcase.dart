@@ -216,6 +216,8 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
     for (final s in _plan.steps) {
       for (final m in s.media) {
         precacheImage(_base(m, s), context, onError: (_, __) {});
+        // The shadows too, so the first turn does not make one per frame while the finger moves.
+        if (s.kind == 'spin' && s.cut) ContactShadow.prepare(_base(m, s), createLocalImageConfiguration(context));
       }
     }
   }
@@ -422,11 +424,14 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
           sync || frame != null ? child : const SizedBox.shrink(), // until then the small copy shows through
       errorBuilder: (_, __, ___) => const SizedBox.shrink(),
     );
-    // A cut-out stands on the floor: its shadow, made from the small copy, which stays the same while it sharpens.
-    final shadow = step.cut && !_onDark(step);
-    final img = Stack(
-        fit: StackFit.expand,
-        children: [if (shadow) ContactShadow(image: small, fit: BoxFit.contain), base, if (sharpen) full]);
+    // A cut-out turning on the floor stands on its shadow, made from the small copy, which stays while it sharpens.
+    // Not on the top, sole and close-up shots, which do not stand on anything, and not zoomed in.
+    final shadow = step.kind == 'spin' && step.cut && !_onDark(step) && !_zoomed;
+    final img = Stack(fit: StackFit.expand, children: [
+      if (shadow) ContactShadow(image: small, fit: BoxFit.contain, gapless: true),
+      base,
+      if (sharpen) full
+    ]);
     return step.cut ? Padding(padding: const EdgeInsets.all(20), child: img) : img;
   }
 

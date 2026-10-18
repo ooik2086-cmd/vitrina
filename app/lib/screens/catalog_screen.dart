@@ -8,6 +8,7 @@ import '../labels.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import '../widgets/studio.dart';
 import '../widgets/filter_sheet.dart';
 import '../widgets/size_guide.dart';
 import 'image_search_screen.dart';
@@ -576,7 +577,7 @@ class _RecentRow extends StatelessWidget {
                     width: 104,
                     height: 92,
                     clipBehavior: Clip.antiAlias,
-                    decoration: BoxDecoration(color: Brand.studio, borderRadius: BorderRadius.circular(16)),
+                    decoration: studioBackdrop(radius: BorderRadius.circular(16)),
                     child: r.coverUrl == null
                         ? const Icon(Icons.image_outlined)
                         : Image.network(r.coverUrl!,

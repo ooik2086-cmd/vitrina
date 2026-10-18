@@ -174,25 +174,24 @@ class ListingTile extends StatelessWidget {
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         AspectRatio(
           aspectRatio: 1,
-          child: Hero(
-            tag: 'listing-${listing.id}',
-            child: Container(
-              clipBehavior: Clip.antiAlias,
-              decoration: studioBackdrop(radius: BorderRadius.circular(Brand.radius)),
-              child: Stack(fit: StackFit.expand, children: [
-                if (cover == null)
-                  const Icon(Icons.image_outlined, color: Colors.black26)
-                else ...[
-                  if (listing.coverIsCutout) ContactShadow(image: coverImage(cover), fit: BoxFit.cover),
-                  Image(
-                      image: coverImage(cover),
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => const Icon(Icons.broken_image_outlined, color: Colors.black26)),
-                ],
-                if (listing.frames.isNotEmpty) const Positioned(left: 10, top: 10, child: Badge360()),
-                if (listing.wasPriceTiyn != null) Positioned(right: 10, top: 10, child: SaleBadge(listing: listing)),
-              ]),
-            ),
+          // The card stays put; only the shoe flies into the listing page and back.
+          child: Container(
+            clipBehavior: Clip.antiAlias,
+            decoration: studioBackdrop(radius: BorderRadius.circular(Brand.radius)),
+            child: Stack(fit: StackFit.expand, children: [
+              Hero(
+                tag: 'listing-${listing.id}',
+                child: cover == null
+                    ? const Icon(Icons.image_outlined, color: Colors.black26)
+                    : CoverPhoto(
+                        image: coverImage(cover),
+                        cutout: listing.coverIsCutout,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => const Icon(Icons.broken_image_outlined, color: Colors.black26)),
+              ),
+              if (listing.frames.isNotEmpty) const Positioned(left: 10, top: 10, child: Badge360()),
+              if (listing.wasPriceTiyn != null) Positioned(right: 10, top: 10, child: SaleBadge(listing: listing)),
+            ]),
           ),
         ),
         const SizedBox(height: 10),

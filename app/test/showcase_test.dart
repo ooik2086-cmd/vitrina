@@ -12,6 +12,7 @@ import 'package:vitrina/screens/listing_screen.dart';
 import 'package:vitrina/session.dart';
 import 'package:vitrina/widgets/common.dart';
 import 'package:vitrina/widgets/scroll_showcase.dart';
+import 'package:vitrina/widgets/spin_viewer.dart';
 import 'package:vitrina/widgets/studio.dart';
 
 http.Response jsonResponse(Object body, [int status = 200]) =>
@@ -226,8 +227,16 @@ void main() {
     await tester.tap(find.byType(Hero));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
-    // Mid-flight: the cover is drawn in flight, on the way to the waiting listing page.
+    // Mid-flight: the cover is drawn in flight, on the way to the waiting listing page, with its shadow and no
+    // backdrop of its own, so nothing flashes if the page opens on a dark stage.
     expect(find.byWidgetPredicate((w) => w is Image && w.fit == BoxFit.contain), findsOneWidget);
+    expect(find.byWidgetPredicate((w) => w is ContactShadow && w.fit == BoxFit.contain), findsOneWidget);
+    expect(
+        find.byWidgetPredicate((w) =>
+            w is DecoratedBox &&
+            w.decoration is BoxDecoration &&
+            (w.decoration as BoxDecoration).gradient == studioGradient),
+        findsOneWidget); // only the card left behind
     expect(find.byType(CircularProgressIndicator), findsOneWidget);
     loaded.complete(jsonResponse(listing()));
     await tester.pumpAndSettle();
@@ -328,8 +337,16 @@ void main() {
     await tester.tap(find.byType(Hero));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
-    // Mid-flight: the cover is drawn in flight, on the way to the waiting listing page.
+    // Mid-flight: the cover is drawn in flight, on the way to the waiting listing page, with its shadow and no
+    // backdrop of its own, so nothing flashes if the page opens on a dark stage.
     expect(find.byWidgetPredicate((w) => w is Image && w.fit == BoxFit.contain), findsOneWidget);
+    expect(find.byWidgetPredicate((w) => w is ContactShadow && w.fit == BoxFit.contain), findsOneWidget);
+    expect(
+        find.byWidgetPredicate((w) =>
+            w is DecoratedBox &&
+            w.decoration is BoxDecoration &&
+            (w.decoration as BoxDecoration).gradient == studioGradient),
+        findsOneWidget); // only the card left behind
     expect(find.byType(CircularProgressIndicator), findsOneWidget);
     loaded.complete(jsonResponse(listing()));
     await tester.pumpAndSettle();
@@ -492,6 +509,31 @@ void main() {
     expect(find.byType(ContactShadow), findsNothing);
   });
 
+  showcaseTest('a seller\'s dark premium stage has no shadow; the light ones do', (tester) async {
+    await pump(tester, {...listing(backdrop: null), 'showcase_style': 'premium'});
+    expect(find.byType(ContactShadow), findsNothing);
+    await pump(tester, {...listing(backdrop: null), 'showcase_style': 'dynamic'});
+    expect(find.byType(ContactShadow), findsOneWidget);
+    expect(showcaseBackground('clean').gradient, studioGradient);
+  });
+
+  showcaseTest('the sole and close-up shots stand on nothing, and a zoomed shoe drops its shadow', (tester) async {
+    await pump(tester, listing());
+    expect(find.byType(ContactShadow), findsOneWidget);
+    await tester.tap(find.byKey(const Key('showcase-step-sole')));
+    await tester.pumpAndSettle();
+    expect(find.byType(ContactShadow), findsNothing);
+    await tester.tap(find.byKey(const Key('showcase-step-spin')));
+    await tester.pumpAndSettle();
+    expect(find.byType(ContactShadow), findsOneWidget);
+    final at = tester.getCenter(find.byKey(const Key('showcase')));
+    await tester.tapAt(at);
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tapAt(at);
+    await tester.pumpAndSettle();
+    expect(find.byType(ContactShadow), findsNothing);
+  });
+
   showcaseTest('photos as taken have their own floor and get no shadow', (tester) async {
     await pump(tester, listing(cutFrames: false));
     expect(find.byType(ContactShadow), findsNothing);
@@ -502,12 +544,13 @@ void main() {
     Future<void> show(Map<String, dynamic> json) => tester.pumpWidget(MaterialApp(
         home: Scaffold(body: SizedBox(width: 220, height: 400, child: ListingTile(listing: Listing.fromJson(json))))));
     await show(listing());
-    final card =
-        tester.widget<Container>(find.descendant(of: find.byType(Hero), matching: find.byType(Container)).first);
-    expect((card.decoration as BoxDecoration).gradient, studioGradient);
+    final card = tester.widget<Container>(find.ancestor(of: find.byType(Hero), matching: find.byType(Container)).first);
+    expect((card.decoration as BoxDecoration).gradient, studioGradient); // the card stays; only the shoe flies
     final shadow = tester.widget<ContactShadow>(find.byType(ContactShadow));
     final photo = tester.widget<Image>(find.descendant(of: find.byType(Hero), matching: find.byType(Image)));
     expect(shadow.image, photo.image); // one decoded copy for both
+    final layers = tester.widget<Stack>(find.descendant(of: find.byType(CoverPhoto), matching: find.byType(Stack)));
+    expect([for (final w in layers.children) w.runtimeType], [ContactShadow, Image]); // under the photo
     await show({
       ...listing(),
       'media': [media('front', 'front', cut: false)]

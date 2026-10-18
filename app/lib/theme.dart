@@ -14,15 +14,12 @@ abstract final class Brand {
   static const studio = Color(0xFFF3F2EF); // product photo backdrop
   static const radius = 20.0;
 
-  /// What every page stands on in the light theme: soft light from above, fading to a warm grey at the bottom,
-  /// like a photo studio. Cards, fields and the tab bar are white on it.
-  static const studioCanvas = BoxDecoration(
-    gradient: RadialGradient(
-      center: Alignment(0, -1.2),
-      radius: 1.5,
-      colors: [Color(0xFFFFFFFF), Color(0xFFF6F4F0), Color(0xFFEEEBE5)],
-      stops: [0, 0.45, 1],
-    ),
+  /// What every page stands on in the light theme: warm milk-white paper with a fine grain, too faint to read as a
+  /// pattern, so the page feels like a printed catalogue rather than a screen. Cards, fields and the tab bar are
+  /// white on it.
+  static const paperCanvas = BoxDecoration(
+    color: Color(0xFFF2EFE9),
+    image: DecorationImage(image: AssetImage('assets/textures/grain.png'), repeat: ImageRepeat.repeat, scale: 3),
   );
 
   /// The dark theme's canvas: near-black with a faint warm light at the top.
@@ -54,13 +51,18 @@ class OnCanvas extends PageTransitionsBuilder {
   Widget buildTransitions<T>(PageRoute<T> route, BuildContext context, Animation<double> animation,
           Animation<double> secondaryAnimation, Widget child) =>
       inner.buildTransitions(
-          route, context, animation, secondaryAnimation, DecoratedBox(decoration: canvas, child: child));
+          route,
+          context,
+          animation,
+          secondaryAnimation,
+          // The page repaints on its own layer, so scrolling never redraws the canvas under it.
+          DecoratedBox(decoration: canvas, child: RepaintBoundary(child: child)));
 }
 
 /// [canvas] replaces the page backdrop; only for trying other backdrops side by side.
 ThemeData buildTheme(Brightness brightness, {Decoration? canvas}) {
   final dark = brightness == Brightness.dark;
-  final page = canvas ?? (dark ? Brand.nightCanvas : Brand.studioCanvas);
+  final page = canvas ?? (dark ? Brand.nightCanvas : Brand.paperCanvas);
   final scheme = ColorScheme.fromSeed(
     seedColor: Brand.accent,
     brightness: brightness,

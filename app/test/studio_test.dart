@@ -1,3 +1,4 @@
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -27,27 +28,95 @@ void main() {
     });
   });
 
-  testWidgets('a shadow is drawn once its photo is decoded, and the next card with that photo has it at once',
-      (tester) async {
+  Future<MemoryImage> photoOf(WidgetTester tester) async {
     final png =
         await tester.runAsync(() async => (await (await halfShoe()).toByteData(format: ui.ImageByteFormat.png))!);
-    final photo = MemoryImage(png!.buffer.asUint8List());
-    Widget shadowOf(ImageProvider image) => Directionality(
-        textDirection: TextDirection.ltr,
-        child: SizedBox(width: 200, height: 200, child: ContactShadow(image: image, fit: BoxFit.contain)));
+    return MemoryImage(png!.buffer.asUint8List());
+  }
+
+  Widget shadowOf(ImageProvider image, {bool gapless = false, double height = 200}) => Directionality(
+      textDirection: TextDirection.ltr,
+      child: Align(
+          alignment: Alignment.topLeft,
+          child: SizedBox(
+              width: 200, height: height, child: ContactShadow(image: image, fit: BoxFit.contain, gapless: gapless))));
+  final drawn = find.descendant(of: find.byType(ContactShadow), matching: find.byType(CustomPaint));
+  // Decoding and drawing need real time, which widget tests only give inside runAsync, and the photo is handed
+  // out on a frame. The app makes the same shadow on its own when a card first shows the photo.
+  Future<void> prepare(WidgetTester tester, ImageProvider photo) async {
+    ContactShadow.prepare(photo, ImageConfiguration.empty);
+    for (var i = 0; i < 200 && !ContactShadow.isMade(photo); i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 5)));
+      await tester.pump(); // the decoded photo is handed out on a frame
+    }
+  }
+
+  testWidgets('a card makes its photo\'s shadow itself once the photo is decoded', (tester) async {
+    final photo = await photoOf(tester);
     await tester.pumpWidget(shadowOf(photo));
-    expect(find.byType(RawImage), findsNothing); // nothing to show until the photo is there
-    for (var i = 0; i < 10 && find.byType(RawImage).evaluate().isEmpty; i++) {
-      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+    expect(drawn, findsNothing); // nothing to show until the photo is there
+    for (var i = 0; i < 200 && drawn.evaluate().isEmpty; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 5)));
       await tester.pump();
     }
-    expect(tester.widget<RawImage>(find.byType(RawImage)).image!.width, ContactShadow.width);
-    await tester.pumpWidget(const SizedBox.shrink()); // the first card is gone
-    await tester.pumpWidget(shadowOf(photo));
-    expect(find.byType(RawImage), findsOneWidget); // from the cache, on the first frame
+    expect(drawn, findsOneWidget);
   });
 
-  for (final (brightness, canvas) in [(Brightness.light, Brand.studioCanvas), (Brightness.dark, Brand.nightCanvas)]) {
+  testWidgets('a card shows the shadow of a photo already made, from the first frame', (tester) async {
+    final photo = await photoOf(tester);
+    await prepare(tester, photo);
+    await tester.pumpWidget(shadowOf(photo));
+    expect(drawn, findsOneWidget);
+  });
+
+  testWidgets('the shadow sits just under the photo as drawn, however tall the box', (tester) async {
+    final photo = await photoOf(tester);
+    await prepare(tester, photo);
+    await tester.pumpWidget(shadowOf(photo, height: 600));
+    // The 2:1 photo is drawn 200 × 100 in the middle of the 600 high box: rows 250 to 350, and the shadow 3 lower.
+    expect(
+        tester.renderObject(drawn),
+        paints
+          ..something((method, args) {
+            if (method != #drawImageRect) return false;
+            expect(args[2], const Rect.fromLTWH(0, 253, 200, 100));
+            return true;
+          }));
+  });
+
+  testWidgets('a card given another photo drops the old shadow, and has none when the new photo fails', (tester) async {
+    final photo = await photoOf(tester);
+    await prepare(tester, photo);
+    await tester.pumpWidget(shadowOf(photo));
+    expect(drawn, findsOneWidget);
+    await tester.pumpWidget(shadowOf(const NetworkImage('https://cdn/broken.webp')));
+    expect(drawn, findsNothing); // not the previous shoe's outline under a different shoe
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+    await tester.pump();
+    expect(drawn, findsNothing);
+  });
+
+  testWidgets('frames of one turning shoe keep the last shadow until the next is made', (tester) async {
+    final photo = await photoOf(tester);
+    await prepare(tester, photo);
+    await tester.pumpWidget(shadowOf(photo, gapless: true));
+    await tester.pumpWidget(shadowOf(MemoryImage(Uint8List.fromList([...photo.bytes, 0])), gapless: true));
+    expect(drawn, findsOneWidget);
+  });
+
+  testWidgets('an extreme photo gets no shadow rather than a stretched one', (tester) async {
+    final strip = await tester.runAsync(() async {
+      final recorder = ui.PictureRecorder();
+      Canvas(recorder).drawRect(const Rect.fromLTWH(0, 0, 900, 10), Paint());
+      final img = await recorder.endRecording().toImage(900, 10);
+      return MemoryImage((await img.toByteData(format: ui.ImageByteFormat.png))!.buffer.asUint8List());
+    });
+    await prepare(tester, strip!);
+    await tester.pumpWidget(shadowOf(strip));
+    expect(drawn, findsNothing);
+  });
+
+  for (final (brightness, canvas) in [(Brightness.light, Brand.paperCanvas), (Brightness.dark, Brand.nightCanvas)]) {
     testWidgets('every page stands on the ${brightness.name} canvas, and a page coming in covers the one under it',
         (tester) async {
       await tester.pumpWidget(MaterialApp(theme: buildTheme(brightness), home: const Scaffold(body: Text('first'))));

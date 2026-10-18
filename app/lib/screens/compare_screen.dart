@@ -6,6 +6,7 @@ import '../labels.dart';
 import '../my_size.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import '../widgets/studio.dart';
 import 'listing_screen.dart';
 
 /// Up to this many listings side by side; a fourth column no longer fits a phone.
@@ -105,7 +106,7 @@ class _Pick extends StatelessWidget {
         width: 76,
         clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
-          color: Brand.studio,
+          gradient: studioGradient,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(color: picked ? Theme.of(context).colorScheme.primary : Colors.transparent, width: 2),
         ),
@@ -228,10 +229,12 @@ class _Head extends StatelessWidget {
           aspectRatio: 1,
           child: Container(
             clipBehavior: Clip.antiAlias,
-            decoration: BoxDecoration(color: Brand.studio, borderRadius: BorderRadius.circular(14)),
+            decoration: studioBackdrop(radius: BorderRadius.circular(14)),
             child: cover == null
                 ? const Icon(Icons.image_outlined, color: Colors.black26)
-                : Image.network(cover,
+                : CoverPhoto(
+                    image: coverImage(cover),
+                    cutout: listing.coverIsCutout,
                     fit: BoxFit.cover,
                     errorBuilder: (_, __, ___) => const Icon(Icons.broken_image_outlined, color: Colors.black26)),
           ),
