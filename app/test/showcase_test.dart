@@ -57,6 +57,16 @@ Map<String, dynamic> listing({bool details = true, String? backdrop = 'light', b
       'seller': {'id': 3, 'shop_name': 'Qadam Store', 'city': 'Алматы'},
     };
 
+/// One continuous scan, as on the approved demo page: the turn is frames 0-11, then the camera rises to the top
+/// (frame 12), goes under the sole (18) and in close (23). The stop photos are those frames.
+Map<String, dynamic> scan({String? backdrop = 'dark'}) => {
+      ...listing(backdrop: backdrop),
+      'media': [
+        for (final (angle, i) in [('outer', 0), ('top', 12), ('sole', 18), ('detail', 23)]) media(angle, 'f$i'),
+        for (var i = 0; i < 24; i++) media('frame', 'f$i'),
+      ],
+    };
+
 /// The test binding answers every image request with HTTP 400. A photo that fails after the stage has already moved
 /// on to the next frame has nobody left to show its error, so Flutter logs it; that is expected here, not a fault.
 void showcaseTest(String description, WidgetTesterCallback body) => testWidgets(description, (tester) async {
@@ -107,6 +117,26 @@ void main() {
       for (final p in plan.photos) {
         expect(plan.at(plan.centreOf(p.step, p.frame)), p);
       }
+    });
+
+    test('a scan carries on from the turn to each view: every stop starts at its own frame, evenly paced', () {
+      final plan = ShowcasePlan.of(Listing.fromJson(scan()));
+      expect(plan.scan, isTrue);
+      expect([for (final s in plan.steps) (s.kind, s.media.length)],
+          [('spin', 12), ('top', 6), ('sole', 5), ('close', 1)]);
+      for (final (step, frame) in [(1, 12), (2, 18), (3, 23)]) {
+        expect(plan.steps[step].media.first.url, 'https://cdn/f$frame.webp');
+      }
+      // Each frame takes the same share of the scroll, and the whole is as long as a turn with three photo stops.
+      expect(plan.total, closeTo(5, 1e-9));
+      for (final s in plan.steps) {
+        expect(s.weight / s.media.length, closeTo(5 / 24, 1e-9));
+      }
+      expect({for (var i = 0; i <= 1000; i++) plan.at(i / 1000)}.length, 24); // every frame shows, in order
+    });
+
+    test('stop photos that are not frames of the turn stay separate photos', () {
+      expect(ShowcasePlan.of(Listing.fromJson(listing())).scan, isFalse);
     });
 
     test('a turn where some frames have no cut-out shows all of them as taken', () {
@@ -491,47 +521,60 @@ void main() {
   showcaseTest('the backdrop follows the shoe and can be switched by hand', (tester) async {
     await pump(tester, listing(backdrop: 'dark'));
     BoxDecoration deco() => tester.widget<DecoratedBox>(find.byKey(const Key('showcase'))).decoration as BoxDecoration;
-    expect(deco().gradient, isNotNull); // a light shoe on the dark backdrop
-    expect(deco().gradient, isNot(studioGradient));
+    // The demo page's colours: a light shoe on its dark scene, in a soft light that does not zoom with the shoe.
+    expect(deco().color, ShowcaseScene.dark.ink);
+    final halo = find.byWidgetPredicate((w) => w is CustomPaint && w.painter.runtimeType.toString() == '_Halo');
+    expect(halo, findsOneWidget);
+    expect(find.ancestor(of: halo, matching: find.byKey(const Key('showcase-zoom'))), findsNothing);
     await tester.tap(find.byKey(const Key('showcase-backdrop')));
     await tester.pump();
-    expect(deco().gradient, studioGradient);
+    expect(deco().color, ShowcaseScene.light.ink);
+    expect(halo, findsOneWidget);
   });
 
-  showcaseTest('a cut-out stands on the studio floor with its shadow; on the dark backdrop there is none',
-      (tester) async {
+  showcaseTest('a dark stage turns the status bar icons light, until the page scrolls past it', (tester) async {
+    await pump(tester, listing(backdrop: 'dark'));
+    await tester.pump();
+    SystemUiOverlayStyle? style() => tester.widget<AppBar>(find.byType(AppBar)).systemOverlayStyle;
+    expect(style(), SystemUiOverlayStyle.light);
+    await tester.tap(find.byKey(const Key('showcase-backdrop')));
+    await tester.pump();
+    expect(style(), isNull); // the theme's dark icons, on the light scene
+    await tester.tap(find.byKey(const Key('showcase-backdrop')));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('showcase-details')));
+    await tester.pumpAndSettle();
+    expect(style(), isNull);
+  });
+
+  showcaseTest('a scan is drawn edge to edge, its frames having their own margin', (tester) async {
+    await pump(tester, scan());
+    expect(
+        find
+            .ancestor(of: find.byKey(const ValueKey('showcase-base')), matching: find.byType(Padding))
+            .evaluate()
+            .where((e) => (e.widget as Padding).padding == const EdgeInsets.all(20)),
+        isEmpty);
     await pump(tester, listing());
-    final shadow = tester.widget<ContactShadow>(find.byType(ContactShadow));
-    expect(urlOf(shadow.image), base(tester)); // made from the copy already on screen, not a second download
-    expect(shadow.fit, BoxFit.contain);
-    await tester.tap(find.byKey(const Key('showcase-backdrop')));
-    await tester.pump();
-    expect(find.byType(ContactShadow), findsNothing);
+    expect(
+        find
+            .ancestor(of: find.byKey(const ValueKey('showcase-base')), matching: find.byType(Padding))
+            .evaluate()
+            .where((e) => (e.widget as Padding).padding == const EdgeInsets.all(20)),
+        isNotEmpty);
   });
 
-  showcaseTest('a seller\'s dark premium stage has no shadow; the light ones do', (tester) async {
-    await pump(tester, {...listing(backdrop: null), 'showcase_style': 'premium'});
-    expect(find.byType(ContactShadow), findsNothing);
-    await pump(tester, {...listing(backdrop: null), 'showcase_style': 'dynamic'});
-    expect(find.byType(ContactShadow), findsOneWidget);
+  showcaseTest('the stage adds no shadow of its own, as on the demo page, whatever the backdrop', (tester) async {
+    for (final body in [
+      listing(),
+      listing(backdrop: 'dark'),
+      {...listing(backdrop: null), 'showcase_style': 'premium'},
+      {...listing(backdrop: null), 'showcase_style': 'dynamic'},
+    ]) {
+      await pump(tester, body);
+      expect(find.byType(ContactShadow), findsNothing);
+    }
     expect(showcaseBackground('clean').gradient, studioGradient);
-  });
-
-  showcaseTest('the sole and close-up shots stand on nothing, and a zoomed shoe drops its shadow', (tester) async {
-    await pump(tester, listing());
-    expect(find.byType(ContactShadow), findsOneWidget);
-    await tester.tap(find.byKey(const Key('showcase-step-sole')));
-    await tester.pumpAndSettle();
-    expect(find.byType(ContactShadow), findsNothing);
-    await tester.tap(find.byKey(const Key('showcase-step-spin')));
-    await tester.pumpAndSettle();
-    expect(find.byType(ContactShadow), findsOneWidget);
-    final at = tester.getCenter(find.byKey(const Key('showcase')));
-    await tester.tapAt(at);
-    await tester.pump(const Duration(milliseconds: 50));
-    await tester.tapAt(at);
-    await tester.pumpAndSettle();
-    expect(find.byType(ContactShadow), findsNothing);
   });
 
   showcaseTest('photos as taken have their own floor and get no shadow', (tester) async {
@@ -607,13 +650,24 @@ void main() {
     expect(find.text('Nike Air Force 1').hitTestable(), findsOneWidget);
   });
 
-  showcaseTest('the stops are dots with no text beside the shoe, named for screen readers', (tester) async {
+  showcaseTest('the stops sit on a line with no text beside the shoe, named for screen readers', (tester) async {
     await pump(tester, listing());
     final dots = find.byKey(const Key('showcase-step-sole'));
     expect(find.descendant(of: dots, matching: find.byType(Text)), findsNothing);
     expect(find.text('Табаны'), findsNothing);
     expect(tester.getSemantics(dots), isSemantics(label: 'Табаны', isButton: true, hasTapAction: true));
-    expect(tester.getSize(dots), const Size(40, 48));
+    expect(tester.getSize(dots), const Size(48, 48));
+    // Reached stops light up as the line fills.
+    BoxDecoration tick(String kind) => tester
+        .widget<AnimatedContainer>(
+            find.descendant(of: find.byKey(Key('showcase-step-$kind')), matching: find.byType(AnimatedContainer)))
+        .decoration! as BoxDecoration;
+    expect(tick('spin').color, ShowcaseScene.light.glow);
+    expect(tick('sole').color, ShowcaseScene.light.ink);
+    await tester.tap(dots);
+    await tester.pumpAndSettle();
+    expect(tick('sole').color, ShowcaseScene.light.glow);
+    expect(tick('close').color, ShowcaseScene.light.ink);
   });
 
   showcaseTest('on a narrow phone the stop being shown stays in view and the photos button never scrolls away',

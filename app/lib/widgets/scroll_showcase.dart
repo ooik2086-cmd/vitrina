@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
@@ -7,9 +8,35 @@ import 'package:flutter/services.dart';
 
 import '../api.dart';
 import '../i18n.dart';
-import '../theme.dart';
 import 'spin_viewer.dart' show showcaseBackground;
-import 'studio.dart';
+
+/// The colours of the stage, taken from the approved Scroll 3D demo page: a light studio for dark shoes and a dark
+/// one for light shoes. [ink] is the backdrop, [halo] the soft light behind the shoe, the rest are for the controls.
+class ShowcaseScene {
+  const ShowcaseScene._(this.ink, this.panel, this.line, this.fg, this.muted, this.glow, this.halo);
+  final Color ink, panel, line, fg, muted, glow, halo;
+
+  static const light = ShowcaseScene._(Color(0xFFE8E6EE), Color(0xFFF7F6FA), Color(0xFFD3D0DE), Color(0xFF17161D),
+      Color(0xFF66637A), Color(0xFF6D5BD0), Color(0xF2FFFFFF));
+  static const dark = ShowcaseScene._(Color(0xFF0E0E14), Color(0xFF17161F), Color(0xFF2A2836), Color(0xFFECEBF3),
+      Color(0xFF9A97AB), Color(0xFFB9A8FF), Color(0x4D9684E6));
+}
+
+/// A round light, fading out to nothing at its edge, filling the square the shoe is drawn in less 6% on each side.
+class _Halo extends CustomPainter {
+  _Halo(this.color);
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final r = size.shortestSide * 0.44;
+    final c = size.center(Offset.zero);
+    canvas.drawCircle(c, r, Paint()..shader = ui.Gradient.radial(c, r, [color, color.withValues(alpha: 0)]));
+  }
+
+  @override
+  bool shouldRepaint(_Halo old) => old.color != color;
+}
 
 /// One stop of the showcase: the turn made of 360° frames, then the top, the sole and a close-up.
 class ShowcaseStep {
@@ -34,21 +61,46 @@ class ShowcaseStep {
 
 /// Which photo shows at a given scroll position. Only real photos are shown: nothing is generated or blended.
 class ShowcasePlan {
-  ShowcasePlan(this.steps) : total = steps.fold(0.0, (sum, s) => sum + s.weight);
+  ShowcasePlan(this.steps, {this.scan = false}) : total = steps.fold(0.0, (sum, s) => sum + s.weight);
 
   /// The frames in order, then the top and sole photos and the close-up (stitching, logo), each only when the
   /// seller took it.
+  ///
+  /// A scan is one continuous camera move: the turn, then on up over the top, under the sole and in close. Its stop
+  /// photos are frames of that move, so each stop starts at its own frame and carries the frames that move on
+  /// towards the next one, and every frame takes the same share of the scroll.
   factory ShowcasePlan.of(Listing l) {
     final frames = l.frames;
     MediaItem? first(String angle) => l.media.where((m) => m.angle == angle).firstOrNull;
+    final stops = [
+      for (final (kind, angle) in const [('top', 'top'), ('sole', 'sole'), ('close', 'detail')])
+        if (first(angle) case final m?) (kind: kind, photo: m),
+    ];
+    final at = [for (final s in stops) frames.indexWhere((f) => f.url == s.photo.url)];
+    var scan = stops.isNotEmpty && at.first > 0;
+    for (var i = 1; i < at.length && scan; i++) {
+      scan = at[i] > at[i - 1];
+    }
+    if (scan) {
+      // The same total as photo stops (2 for the turn, 1 per stop), spread evenly over the frames.
+      final perFrame = (2 + stops.length) / frames.length;
+      ShowcaseStep part(String kind, int from, int to) =>
+          ShowcaseStep(kind, frames.sublist(from, to), (to - from) * perFrame);
+      return ShowcasePlan([
+        part('spin', 0, at.first),
+        for (var i = 0; i < stops.length; i++)
+          part(stops[i].kind, at[i], i + 1 < at.length ? at[i + 1] : frames.length),
+      ], scan: true);
+    }
     // Twice as much scrolling for the whole turn as for each stop: see ScrollShowcase.travelFor.
     return ShowcasePlan([
       ShowcaseStep('spin', frames, 2),
-      if (first('top') case final m?) ShowcaseStep('top', [m], 1),
-      if (first('sole') case final m?) ShowcaseStep('sole', [m], 1),
-      if (first('detail') case final m?) ShowcaseStep('close', [m], 1),
+      for (final s in stops) ShowcaseStep(s.kind, [s.photo], 1),
     ]);
   }
+
+  /// Made from one continuous scan: its frames carry their own margin and floor shadow.
+  final bool scan;
 
   final List<ShowcaseStep> steps;
   final double total;
@@ -98,6 +150,7 @@ class ScrollShowcase extends StatefulWidget {
     this.onPhotos,
     this.onDetails,
     this.onLock,
+    this.onDarkTop,
   });
 
   final Listing listing;
@@ -114,6 +167,9 @@ class ScrollShowcase extends StatefulWidget {
 
   /// True while the page must not scroll: during a pinch and while zoomed in.
   final ValueChanged<bool>? onLock;
+
+  /// True while a dark stage is under the status bar.
+  final ValueChanged<bool>? onDarkTop;
 
   /// How far the page scrolls while the stage stays in place: 0.6 of the stage for the whole turn, so one ordinary
   /// swipe turns the shoe once round (a full screen per turn felt slow and heavy under the finger), and 0.3 per stop.
@@ -164,7 +220,10 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
     super.initState();
     _setUp();
     widget.scroll.addListener(_onScroll);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _hint());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _hint();
+      _reportTop();
+    });
   }
 
   void _setUp() {
@@ -216,8 +275,6 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
     for (final s in _plan.steps) {
       for (final m in s.media) {
         precacheImage(_base(m, s), context, onError: (_, __) {});
-        // The shadows too, so the first turn does not make one per frame while the finger moves.
-        if (s.kind == 'spin' && s.cut) ContactShadow.prepare(_base(m, s), createLocalImageConfiguration(context));
       }
     }
   }
@@ -251,6 +308,7 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
       return;
     }
     final now = _plan.at(_progress);
+    _reportTop();
     if (now != _shown) {
       if (now.step != _shown.step) {
         if (_jumpingTo == null || _jumpingTo == now.step) {
@@ -424,51 +482,89 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
           sync || frame != null ? child : const SizedBox.shrink(), // until then the small copy shows through
       errorBuilder: (_, __, ___) => const SizedBox.shrink(),
     );
-    // A cut-out turning on the floor stands on its shadow, made from the small copy, which stays while it sharpens.
-    // Not on the top, sole and close-up shots, which do not stand on anything, and not zoomed in.
-    final shadow = step.kind == 'spin' && step.cut && !_onDark(step) && !_zoomed;
-    final img = Stack(fit: StackFit.expand, children: [
-      if (shadow) ContactShadow(image: small, fit: BoxFit.contain, gapless: true),
-      base,
-      if (sharpen) full
-    ]);
-    return step.cut ? Padding(padding: const EdgeInsets.all(20), child: img) : img;
+    final img = Stack(fit: StackFit.expand, children: [base, if (sharpen) full]);
+    // A scan's frames have their own margin; a seller's cut-out is often cropped close, so it gets one.
+    return step.cut && !_plan.scan ? Padding(padding: const EdgeInsets.all(20), child: img) : img;
   }
 
-  /// The step's photos stand on a dark backdrop, where a shadow would not show.
+  bool? _darkTop;
+
+  /// Tells the page whether a dark stage is under the status bar, so its icons can turn light.
+  void _reportTop() {
+    final report = widget.onDarkTop;
+    if (report == null || !mounted) return;
+    final offset = widget.scroll.hasClients ? widget.scroll.offset : 0.0;
+    final covers = offset < _travel + widget.stageHeight - MediaQuery.paddingOf(context).top;
+    final dark = covers && _onDark(_plan.steps[_shown.step]);
+    if (dark == _darkTop) return;
+    _darkTop = dark;
+    report(dark);
+  }
+
+  /// The step's photos stand on a dark backdrop.
   bool _onDark(ShowcaseStep step) =>
       widget.listing.backdrop != null && step.cut ? !_light : widget.listing.showcaseStyle == 'premium';
 
-  BoxDecoration get _backdrop {
-    if (widget.listing.backdrop == null) return showcaseBackground(widget.listing.showcaseStyle);
-    return _light
-        ? studioBackdrop()
-        : const BoxDecoration(gradient: RadialGradient(colors: [Color(0xFF3A3A40), Color(0xFF111114)], radius: 0.9));
-  }
+  BoxDecoration get _backdrop => BoxDecoration(color: (_light ? ShowcaseScene.light : ShowcaseScene.dark).ink);
 
-  Widget _chip({required Key key, required VoidCallback? onTap, required Widget child, Color? fill, Color? border}) =>
-      // 36 dp to look at, 48 dp to touch; the Material carries the fill so the press ripple shows on it.
-      ConstrainedBox(
-        constraints: const BoxConstraints(minHeight: 48, minWidth: 48),
-        child: Center(
-          widthFactor: 1,
-          child: Material(
-            color: fill ?? Colors.transparent,
-            shape: StadiumBorder(side: border == null ? BorderSide.none : BorderSide(color: border)),
-            clipBehavior: Clip.antiAlias,
-            child: InkWell(
-              key: key,
-              onTap: onTap,
-              child: Container(
-                constraints: const BoxConstraints(minHeight: 36, minWidth: 44),
-                alignment: Alignment.center,
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: child,
+  /// The stops on a line that fills as the shoe goes round, as on the demo page: a stop lights up once reached.
+  Widget _stops(ShowcaseScene scene, int current, int index) {
+    const width = 200.0;
+    final filled = _plan.photos.length < 2 ? 0.0 : index / (_plan.photos.length - 1);
+    return SizedBox(
+      width: width + 48,
+      height: 48,
+      child: Stack(clipBehavior: Clip.none, children: [
+        Positioned(
+          left: 24,
+          right: 24,
+          top: 22.5,
+          height: 3,
+          child: DecoratedBox(decoration: BoxDecoration(color: scene.line, borderRadius: BorderRadius.circular(3))),
+        ),
+        Positioned(
+          left: 24,
+          top: 22.5,
+          height: 3,
+          width: width * filled,
+          child: DecoratedBox(decoration: BoxDecoration(color: scene.glow, borderRadius: BorderRadius.circular(3))),
+        ),
+        for (var i = 0; i < _plan.steps.length; i++)
+          Positioned(
+            left: width * _plan.startOf(i),
+            top: 0,
+            width: 48,
+            height: 48,
+            child: Semantics(
+              button: true,
+              selected: i == current,
+              label: _plan.steps[i].label,
+              child: Tooltip(
+                message: _plan.steps[i].label,
+                excludeFromSemantics: true,
+                child: InkWell(
+                  key: Key('showcase-step-${_plan.steps[i].kind}'),
+                  customBorder: const CircleBorder(),
+                  onTap: () => _goTo(i),
+                  child: Center(
+                    child: AnimatedContainer(
+                      duration: _reduceMotion ? Duration.zero : const Duration(milliseconds: 180),
+                      width: 14,
+                      height: 14,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: i <= current ? scene.glow : scene.ink,
+                        border: Border.all(color: i <= current ? scene.glow : scene.line, width: 2),
+                      ),
+                    ),
+                  ),
+                ),
               ),
             ),
           ),
-        ),
-      );
+      ]),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -480,7 +576,7 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
     final media = step.media[now.frame];
     final ownBackdrop = widget.listing.backdrop != null && step.cut;
     final onDark = _onDark(step);
-    final chipText = onDark ? Colors.white : Brand.ink;
+    final scene = onDark ? ShowcaseScene.dark : ShowcaseScene.light;
     final index = _photoIndex;
     final top = MediaQuery.paddingOf(context).top + kToolbarHeight; // the shoe stays clear of the app bar
     return SizedBox(
@@ -512,26 +608,30 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
                           onDoubleTapDown: (d) => _tapAt = d.localPosition,
                           onDoubleTap: () => _doubleTap(box.biggest),
                           onHorizontalDragUpdate: (d) => _drag(d, box.maxWidth),
-                          child: ClipRect(
-                            child: Transform(
-                              key: const Key('showcase-zoom'),
-                              alignment: Alignment.center,
-                              transform: Matrix4.identity()
-                                ..translateByDouble(_pan.dx, _pan.dy, 0, 1)
-                                ..scaleByDouble(_scale, _scale, 1, 1),
-                              filterQuality: _zoomed ? FilterQuality.high : null,
-                              // The catalog card's photo flies into place here, as it does on the Photo tab. Not
-                              // while zoomed (it would fly from the magnified photo) or with reduced motion.
-                              child: HeroMode(
-                                enabled: !_zoomed && !_reduceMotion,
-                                child: Hero(
-                                  tag: 'listing-${widget.listing.id}',
-                                  // Going back, the shoe as it is turned now shrinks into the card.
-                                  flightShuttleBuilder: (_, __, direction, from, to) =>
-                                      (direction == HeroFlightDirection.pop ? from : to).widget,
-                                  child: Material(
-                                    type: MaterialType.transparency,
-                                    child: SizedBox.expand(child: _photo(media, step, box.maxWidth)),
+                          // The soft light behind the shoe stays put while the shoe zooms, as on the approved demo page.
+                          child: CustomPaint(
+                            painter: ownBackdrop ? _Halo(scene.halo) : null,
+                            child: ClipRect(
+                              child: Transform(
+                                key: const Key('showcase-zoom'),
+                                alignment: Alignment.center,
+                                transform: Matrix4.identity()
+                                  ..translateByDouble(_pan.dx, _pan.dy, 0, 1)
+                                  ..scaleByDouble(_scale, _scale, 1, 1),
+                                filterQuality: _zoomed ? FilterQuality.high : null,
+                                // The catalog card's photo flies into place here, as it does on the Photo tab. Not
+                                // while zoomed (it would fly from the magnified photo) or with reduced motion.
+                                child: HeroMode(
+                                  enabled: !_zoomed && !_reduceMotion,
+                                  child: Hero(
+                                    tag: 'listing-${widget.listing.id}',
+                                    // Going back, the shoe as it is turned now shrinks into the card.
+                                    flightShuttleBuilder: (_, __, direction, from, to) =>
+                                        (direction == HeroFlightDirection.pop ? from : to).widget,
+                                    child: Material(
+                                      type: MaterialType.transparency,
+                                      child: SizedBox.expand(child: _photo(media, step, box.maxWidth)),
+                                    ),
                                   ),
                                 ),
                               ),
@@ -543,105 +643,76 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
                   ),
                 ),
               ),
-              // Zoom reset and backdrop switch, on the right above the stops.
+              // Zoom reset, backdrop switch, the photos as taken and the details, on the right above the stops.
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 8),
                 child: Row(mainAxisAlignment: MainAxisAlignment.end, children: [
                   if (_zoomed)
                     _RoundChip(
                       key: const Key('showcase-reset-zoom'),
+                      scene: scene,
                       tooltip: tr('Бастапқы өлшем'),
                       onTap: _resetZoom,
-                      child: const Text('1×', style: TextStyle(fontWeight: FontWeight.w700, color: Brand.ink)),
+                      child: Text('1×', style: TextStyle(fontWeight: FontWeight.w700, color: scene.fg)),
                     ),
                   if (ownBackdrop)
                     _RoundChip(
                       key: const Key('showcase-backdrop'),
+                      scene: scene,
                       tooltip: _light ? tr('Қараңғы фон') : tr('Ашық фон'),
                       toggled: !_light,
-                      onTap: () => setState(() => _light = !_light),
-                      child: const Icon(Icons.contrast, size: 20, color: Brand.ink),
+                      onTap: () {
+                        setState(() => _light = !_light);
+                        _reportTop();
+                      },
+                      child: Icon(Icons.contrast, size: 20, color: scene.fg),
+                    ),
+                  if (widget.onPhotos != null)
+                    _RoundChip(
+                      key: const Key('showcase-photos'),
+                      scene: scene,
+                      tooltip: tr('Фото'),
+                      onTap: () {
+                        _resetZoom();
+                        widget.onPhotos!();
+                      },
+                      child: Icon(Icons.photo_library_outlined, size: 18, color: scene.fg),
+                    ),
+                  if (widget.onDetails != null)
+                    _RoundChip(
+                      key: const Key('showcase-details'),
+                      scene: scene,
+                      tooltip: tr('Толығырақ'),
+                      onTap: () {
+                        _resetZoom();
+                        widget.onDetails!();
+                      },
+                      child: Icon(Icons.keyboard_double_arrow_down_rounded, size: 20, color: scene.fg),
                     ),
                 ]),
               ),
-              // The stops as dots (Aza's choice: nothing written beside the shoe). Each is a 48 dp button that jumps
-              // straight to its view; its name is read out and shown on long press.
-              Padding(
-                padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
-                child: Row(children: [
-                  Expanded(
-                    child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                      for (var i = 0; i < _plan.steps.length; i++)
-                        Semantics(
-                          button: true,
-                          selected: i == now.step,
-                          label: _plan.steps[i].label,
-                          child: Tooltip(
-                            message: _plan.steps[i].label,
-                            excludeFromSemantics: true,
-                            child: InkWell(
-                              key: Key('showcase-step-${_plan.steps[i].kind}'),
-                              customBorder: const CircleBorder(),
-                              onTap: () => _goTo(i),
-                              child: SizedBox(
-                                width: 40,
-                                height: 48,
-                                child: Center(
-                                  child: AnimatedContainer(
-                                    duration: _reduceMotion ? Duration.zero : const Duration(milliseconds: 180),
-                                    width: i == now.step ? 22 : 9,
-                                    height: 9,
-                                    decoration: BoxDecoration(
-                                      color: i == now.step
-                                          ? (onDark ? Colors.white : Brand.ink)
-                                          : (onDark ? Colors.white38 : Brand.ink.withValues(alpha: 0.25)),
-                                      borderRadius: BorderRadius.circular(99),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
+              // The stops on a thin line that fills as the shoe turns (Aza's choice: nothing written beside the
+              // shoe). Each stop is a 48 dp button that jumps straight to its view; its name is read out and shown on
+              // long press.
+              Center(child: _stops(scene, now.step, index)),
+              // How to use it, until the shoe starts turning.
+              AnimatedOpacity(
+                opacity: index == 0 ? 1 : 0,
+                duration: _reduceMotion ? Duration.zero : const Duration(milliseconds: 300),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                  child: Text.rich(
+                    TextSpan(children: [
+                      WidgetSpan(
+                          alignment: PlaceholderAlignment.middle,
+                          child: Icon(Icons.south_rounded, size: 16, color: scene.muted)),
+                      TextSpan(text: ' ${tr('Төмен жүргізіңіз · екі саусақпен жақындатыңыз')}'),
                     ]),
+                    key: const Key('showcase-hint'),
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 13, color: scene.muted),
                   ),
-                  if (widget.onPhotos != null)
-                    Semantics(
-                      button: true,
-                      label: tr('Фото'),
-                      child: Tooltip(
-                        message: tr('Фото'),
-                        excludeFromSemantics: true,
-                        child: _chip(
-                          key: const Key('showcase-photos'),
-                          onTap: () {
-                            _resetZoom();
-                            widget.onPhotos!();
-                          },
-                          border: onDark ? Colors.white54 : Colors.black26,
-                          child: Icon(Icons.photo_library_outlined, size: 18, color: chipText),
-                        ),
-                      ),
-                    ),
-                  if (widget.onDetails != null)
-                    Semantics(
-                      button: true,
-                      label: tr('Толығырақ'),
-                      child: Tooltip(
-                        message: tr('Толығырақ'),
-                        excludeFromSemantics: true,
-                        child: _chip(
-                          key: const Key('showcase-details'),
-                          onTap: () {
-                            _resetZoom();
-                            widget.onDetails!();
-                          },
-                          border: onDark ? Colors.white54 : Colors.black26,
-                          child: Icon(Icons.keyboard_double_arrow_down_rounded, size: 20, color: chipText),
-                        ),
-                      ),
-                    ),
-                ]),
+                ),
               ),
             ]),
           ),
@@ -677,8 +748,10 @@ class _PinStage extends FlowDelegate {
 }
 
 class _RoundChip extends StatelessWidget {
-  const _RoundChip({super.key, required this.child, required this.onTap, required this.tooltip, this.toggled});
+  const _RoundChip(
+      {super.key, required this.child, required this.onTap, required this.tooltip, required this.scene, this.toggled});
   final Widget child;
+  final ShowcaseScene scene;
   final VoidCallback onTap;
   final String tooltip;
   final bool? toggled;
@@ -692,8 +765,8 @@ class _RoundChip extends StatelessWidget {
           child: Tooltip(
             message: tooltip,
             child: Material(
-              color: Colors.white.withValues(alpha: 0.92),
-              shape: const CircleBorder(),
+              color: scene.panel,
+              shape: CircleBorder(side: BorderSide(color: scene.line)),
               child: InkWell(
                 customBorder: const CircleBorder(),
                 onTap: onTap,

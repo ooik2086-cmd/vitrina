@@ -1,6 +1,7 @@
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../api.dart';
@@ -54,6 +55,7 @@ class _ListingScreenState extends State<ListingScreen> {
   final _showcase = GlobalKey<ScrollShowcaseState>();
   final _sizesKey = GlobalKey();
   bool _scrollLocked = false; // the showcase is zoomed in or being pinched
+  bool _darkTop = false; // a dark showcase stage is under the status bar
   Offer? _offer; // the signed-in buyer's latest offer on this listing
   // One key per order attempt: a retried tap after a lost response returns the same order.
   String _orderKey = newIdempotencyKey();
@@ -220,6 +222,7 @@ class _ListingScreenState extends State<ListingScreen> {
       extendBodyBehindAppBar: true,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
+        systemOverlayStyle: _darkTop ? SystemUiOverlayStyle.light : null, // icons that read on a dark stage
         leading: const Padding(padding: EdgeInsets.all(6), child: _RoundButton(back: true, child: BackButtonIcon())),
         actions: [
           Padding(
@@ -360,8 +363,12 @@ class _ListingScreenState extends State<ListingScreen> {
                           if (_scroll.hasClients) _scroll.jumpTo(0);
                           setState(() {
                             _showPhotos = true;
+                            _darkTop = false;
                             _stage = null;
                           });
+                        },
+                        onDarkTop: (dark) {
+                          if (mounted) setState(() => _darkTop = dark);
                         },
                         onDetails: () => _toDetails(l))
                   else
