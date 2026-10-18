@@ -2,75 +2,85 @@ import 'package:flutter/material.dart';
 
 import '../api.dart';
 import '../i18n.dart';
-import '../screens/listing_screen.dart';
+import '../labels.dart';
 import '../theme.dart';
 import 'studio.dart';
 
-/// The same model's colours in this shop as small round photos, this one ringed. Tapping another opens that
-/// colour's listing in place of this one, so back still leads where the buyer came from.
+/// The same model's colours in this shop as small round photos, this one ringed, always in the same order whichever
+/// colour is open. A sold-out colour is struck through, and still opens: the buyer can look and ask to be told.
 class ColorSwatches extends StatelessWidget {
-  const ColorSwatches({super.key, required this.listing, this.onDark = false});
-  final Listing listing;
+  const ColorSwatches({super.key, required this.colors, required this.ring, required this.edge, required this.onPick});
+  final List<Colorway> colors;
 
-  /// Drawn on a dark stage: the ring is white.
-  final bool onDark;
+  /// The ring around the colour shown, and the thin edge of the others: from the stage or the page they sit on.
+  final Color ring;
+  final Color edge;
+  final ValueChanged<Colorway> onPick;
 
   static const size = 44.0;
 
-  static void open(BuildContext context, Colorway c) {
-    final thumb = c.thumbUrl;
-    Navigator.of(context).pushReplacement(MaterialPageRoute(
-        builder: (_) => ListingScreen(listingId: c.id, cover: thumb, coverIsCutout: c.cutout && thumb != null)));
+  /// What a swatch says when touched and long-pressed: the colour, its price, and that it is sold out.
+  static String describe(Colorway c) {
+    final named = '${c.color}, ${formatTenge(c.priceTiyn)}';
+    return c.inStock ? named : trf('{0}, өлшемдері таусылған', [named]);
   }
 
   @override
   Widget build(BuildContext context) {
-    final ring = onDark ? Colors.white : Theme.of(context).colorScheme.primary;
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(mainAxisSize: MainAxisSize.min, children: [
-        for (final c in listing.colors)
-          Semantics(
-            button: !c.current,
-            selected: c.current,
-            label: c.inStock ? c.color : trf('{0}, өлшемдері таусылған', [c.color]),
-            excludeSemantics: true,
-            child: Tooltip(
-              message: c.color,
-              excludeFromSemantics: true,
-              child: InkWell(
-                key: Key('color-${c.id}'),
-                customBorder: const CircleBorder(),
-                onTap: c.current ? null : () => open(context, c),
-                // 48 dp to touch, the photo inside a ring when it is this one.
-                child: SizedBox(
-                  width: 52,
-                  height: 52,
-                  child: Center(
-                    child: Container(
-                      width: size,
-                      height: size,
-                      padding: const EdgeInsets.all(2),
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        border: Border.all(color: c.current ? ring : Colors.transparent, width: 2),
-                      ),
-                      child: Opacity(
-                        opacity: c.inStock ? 1 : 0.45, // still there to look at, but nothing to order
+    final side = (size * MediaQuery.devicePixelRatioOf(context)).round();
+    return Semantics(
+      container: true,
+      explicitChildNodes: true,
+      label: tr('Басқа түстер'),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          for (final c in colors)
+            Semantics(
+              button: !c.current,
+              selected: c.current,
+              label: describe(c),
+              onTap: c.current ? null : () => onPick(c),
+              excludeSemantics: true,
+              child: Tooltip(
+                message: describe(c),
+                excludeFromSemantics: true,
+                child: InkWell(
+                  key: Key('color-${c.id}'),
+                  customBorder: const CircleBorder(),
+                  onTap: c.current ? null : () => onPick(c),
+                  // 48 dp to touch, as the round buttons beside them; the photo inside a ring when it is this one.
+                  child: SizedBox(
+                    width: 48,
+                    height: 48,
+                    child: Center(
+                      child: Container(
+                        key: Key('color-ring-${c.id}'),
+                        width: size,
+                        height: size,
+                        padding: const EdgeInsets.all(3),
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(color: c.current ? ring : edge, width: c.current ? 2 : 1),
+                        ),
                         child: ClipOval(
-                          child: DecoratedBox(
-                            decoration: const BoxDecoration(gradient: studioGradient),
-                            child: c.thumbUrl == null
-                                ? const SizedBox.expand()
-                                : Image(
-                                    image: ResizeImage.resizeIfNeeded(
-                                        (size * MediaQuery.devicePixelRatioOf(context)).round(),
-                                        null,
-                                        NetworkImage(c.thumbUrl!)),
-                                    fit: c.cutout ? BoxFit.contain : BoxFit.cover,
-                                    errorBuilder: (_, __, ___) => const SizedBox.expand(),
-                                  ),
-                          ),
+                          child: Stack(fit: StackFit.expand, children: [
+                            DecoratedBox(
+                              decoration: const BoxDecoration(gradient: studioGradient),
+                              child: c.thumbUrl == null
+                                  ? null
+                                  : Opacity(
+                                      opacity: c.inStock ? 1 : 0.5,
+                                      child: Image(
+                                        image: ResizeImage(NetworkImage(c.thumbUrl!),
+                                            width: side, height: side, policy: ResizeImagePolicy.fit),
+                                        fit: c.cutout ? BoxFit.contain : BoxFit.cover,
+                                        errorBuilder: (_, __, ___) => const SizedBox.expand(),
+                                      ),
+                                    ),
+                            ),
+                            if (!c.inStock) CustomPaint(key: Key('color-sold-out-${c.id}'), painter: _Strike(ring)),
+                          ]),
                         ),
                       ),
                     ),
@@ -78,16 +88,37 @@ class ColorSwatches extends StatelessWidget {
                 ),
               ),
             ),
-          ),
-      ]),
+        ]),
+      ),
     );
   }
 }
 
+/// One line across a sold-out colour, as a crossed-out item on a shop shelf label.
+class _Strike extends CustomPainter {
+  const _Strike(this.colour);
+  final Color colour;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.drawLine(
+        Offset(size.width * 0.15, size.height * 0.85),
+        Offset(size.width * 0.85, size.height * 0.15),
+        Paint()
+          ..color = colour
+          ..strokeWidth = 2
+          ..strokeCap = StrokeCap.round);
+  }
+
+  @override
+  bool shouldRepaint(_Strike old) => old.colour != colour;
+}
+
 /// Under the title: the shoe's colour in words, and the other colours to switch to when the shop has them.
 class ColorChoice extends StatelessWidget {
-  const ColorChoice({super.key, required this.listing});
+  const ColorChoice({super.key, required this.listing, required this.onPick});
   final Listing listing;
+  final ValueChanged<Colorway> onPick;
 
   @override
   Widget build(BuildContext context) {
@@ -105,8 +136,13 @@ class ColorChoice extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.only(top: 2),
           child: Transform.translate(
-            offset: const Offset(-4, 0), // the first ring lines up with the text, not its touch margin
-            child: ColorSwatches(listing: listing),
+            offset: const Offset(-2, 0), // the first ring lines up with the text, not its touch margin
+            child: ColorSwatches(
+              colors: listing.colors,
+              ring: theme.colorScheme.primary,
+              edge: theme.colorScheme.outlineVariant,
+              onPick: onPick,
+            ),
           ),
         ),
     ]);

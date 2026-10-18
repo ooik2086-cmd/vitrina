@@ -574,40 +574,59 @@ def get_listing(listing_id: int, user: User | None = Depends(optional_user), db:
     alerts = [] if user is None else list(db.scalars(select(StockAlert.size_id).where(
         StockAlert.user_id == user.id, StockAlert.listing_id == listing.id)).all())
     return {**listing_out(db, listing, owner=owner), "size_fit": size_fit(db, listing), "stock_alerts": alerts,
-            "popularity": popularity(db, listing), "colors": colorways(db, listing)}
+            "popularity": popularity(db, listing), "colors": safe_colorways(db, listing)}
 
 
 MAX_COLORWAYS = 12
+NEW_CONDITIONS = {Condition.NEW_WITH_BOX.value, Condition.NEW_NO_BOX.value, Condition.UNWORN_STORED.value}
 
 
 def _same(text: str | None) -> str:
-    return " ".join((text or "").split()).casefold()
+    """Case, spacing and ё/е do not make another model or colour."""
+    return " ".join((text or "").replace("ё", "е").replace("Ё", "Е").split()).casefold()
+
+
+def safe_colorways(db: Session, listing: Listing) -> list[dict]:
+    """The colours are an extra beside the shoe: if working them out fails, the page still opens, without them."""
+    try:
+        return colorways(db, listing)
+    except Exception:  # noqa: BLE001 - logged; the listing itself must still load
+        log.exception("colorways failed for listing %s", listing.id)
+        return []
 
 
 def colorways(db: Session, listing: Listing) -> list[dict]:
     """The same model from the same shop in other colours, so a buyer can switch colour beside the shoe. One entry
-    per colour, this listing first: for another colour the cheapest published listing with a size in stock, or the
-    cheapest if none has. Empty without a model name or without another colour.
+    per colour: for another colour the published pair of the same category closest in condition (new beside new,
+    worn beside worn), then with a size in stock, then the cheapest. In colour-name order, this listing among them,
+    so the swatches keep their places whichever colour is open. Empty without a model name or another colour.
 
-    Brand and model are compared ignoring case and spacing here, not in SQL: SQLite's lower() leaves Cyrillic alone."""
+    Brand and model are compared ignoring case and spacing here, not in SQL: SQLite's lower() leaves Cyrillic alone.
+    Only the columns needed to choose are read, not every pair's photos and sizes."""
     model = _same(listing.model_name)
     if not model:
         return []
-    brand, own = _same(listing.brand), _same(listing.color)
-    best: dict[str, tuple[tuple, Listing]] = {}
-    for other in db.scalars(select(Listing).where(
-            Listing.seller_id == listing.seller_id, Listing.status == "published", Listing.id != listing.id,
-            Listing.model_name.is_not(None))):
-        color = _same(other.color)
-        if _same(other.model_name) != model or _same(other.brand) != brand or not color or color == own:
+    brand, own, new = _same(listing.brand), _same(listing.color), listing.condition in NEW_CONDITIONS
+    in_stock = select(ListingSize.id).where(ListingSize.listing_id == Listing.id, ListingSize.quantity > 0).exists()
+    rows = db.execute(select(Listing.id, Listing.model_name, Listing.brand, Listing.color, Listing.condition,
+                             Listing.price_tiyn, in_stock).where(
+        Listing.seller_id == listing.seller_id, Listing.status == "published", Listing.id != listing.id,
+        Listing.category == listing.category, Listing.model_name.is_not(None)))
+    best: dict[str, tuple] = {}
+    for id_, model_name, brand_name, color_name, condition, price, stocked in rows:
+        color = _same(color_name)
+        if _same(model_name) != model or _same(brand_name) != brand or not color or color == own:
             continue
-        rank = (not any(s.quantity > 0 for s in other.sizes), other.price_tiyn, other.id)
+        rank = ((condition in NEW_CONDITIONS) != new, not stocked, price, id_)
         if color not in best or rank < best[color][0]:
-            best[color] = (rank, other)
+            best[color] = (rank, color, id_)
     if not best:
         return []
-    others = sorted((pick for _, pick in best.values()), key=lambda l: _same(l.color))[:MAX_COLORWAYS - 1]
-    return [colorway_out(c, current=c.id == listing.id) for c in [listing, *others]]
+    # Past the cap, the colours most worth showing stay: the closest condition and in stock first.
+    kept = sorted(best.values())[:MAX_COLORWAYS - 1]
+    picked = {l.id: l for l in db.scalars(select(Listing).where(Listing.id.in_([id_ for _, _, id_ in kept])))}
+    shown = sorted([(own, listing), *((color, picked[id_]) for _, color, id_ in kept)], key=lambda p: p[0])
+    return [colorway_out(c, current=c.id == listing.id) for _, c in shown]
 
 
 def colorway_out(listing: Listing, *, current: bool) -> dict:

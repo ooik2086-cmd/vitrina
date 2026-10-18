@@ -649,20 +649,72 @@ void main() {
         'cutout': true,
       };
 
+  final colours = [colorway(9, 'ақ', inStock: false), colorway(8, 'көк'), colorway(7, 'қара', current: true)];
+
+  /// The listing opened from another page, so leaving it shows where the buyer came from.
+  Future<void> pumpOpened(WidgetTester tester, Map<String, dynamic> body) async {
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async => jsonResponse(req.url.path.endsWith('/similar') ? {'items': []} : body)));
+    tester.view.physicalSize = const Size(400, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(SessionScope(
+        session: Session(api),
+        child: MaterialApp(
+            home: Builder(
+                builder: (context) => TextButton(
+                    onPressed: () => Navigator.of(context)
+                        .push(MaterialPageRoute(builder: (_) => const ListingScreen(listingId: 7))),
+                    child: const Text('catalog'))))));
+    await tester.tap(find.text('catalog'));
+    await tester.pumpAndSettle();
+  }
+
   showcaseTest('the other colours sit beside the turning shoe, and one tap opens that colour in place', (tester) async {
-    await pump(tester, {
-      ...listing(),
-      'colors': [colorway(7, 'қара', current: true), colorway(8, 'көк'), colorway(9, 'ақ', inStock: false)],
-    });
+    await pumpOpened(tester, {...listing(), 'colors': colours});
     final stage = find.byKey(const Key('showcase'));
     expect(find.descendant(of: stage, matching: find.byType(ColorSwatches)), findsOneWidget);
     expect(find.descendant(of: stage, matching: find.text('қара')), findsNothing); // no words beside the shoe
-    expect(tester.getSemantics(find.byKey(const Key('color-9'))).label, 'ақ, өлшемдері таусылған');
-    expect(tester.getSemantics(find.byKey(const Key('color-7'))).flagsCollection.isSelected, ui.Tristate.isTrue);
+    final soldOut = tester.getSemantics(find.byKey(const Key('color-9')));
+    expect(soldOut.label, allOf(startsWith('ақ, '), contains('45'), endsWith('өлшемдері таусылған')));
+    expect(find.byKey(const Key('color-sold-out-9')), findsOneWidget); // struck through, not only faded
+    expect(find.byKey(const Key('color-sold-out-8')), findsNothing);
+    final current = tester.getSemantics(find.byKey(const Key('color-7')));
+    expect(current.flagsCollection.isSelected, ui.Tristate.isTrue);
+    // A screen reader can open a colour too, not only a finger.
+    expect(tester.getSemantics(find.byKey(const Key('color-8'))).getSemanticsData().hasAction(SemanticsAction.tap),
+        isTrue);
+    // The ring is the stage's ink, whatever the phone's theme.
+    BoxDecoration ring(int id) =>
+        tester.widget<Container>(find.byKey(Key('color-ring-$id'))).decoration as BoxDecoration;
+    expect((ring(7).border as Border).top.color, ShowcaseScene.light.fg);
+    expect((ring(8).border as Border).top.color, ShowcaseScene.light.line);
     await tester.tap(find.descendant(of: stage, matching: find.byKey(const Key('color-8'))));
     await tester.pumpAndSettle();
-    expect(tester.widget<ListingScreen>(find.byType(ListingScreen)).listingId, 8);
-    expect(find.byType(ListingScreen), findsOneWidget); // in place of the black one, so back leads out
+    final opened = tester.widget<ListingScreen>(find.byType(ListingScreen));
+    expect((opened.listingId, opened.atDetails), (8, false));
+    // In place of the black one: back leads to where the buyer came from.
+    tester.state<NavigatorState>(find.byType(Navigator)).pop();
+    await tester.pumpAndSettle();
+    expect(find.byType(ListingScreen), findsNothing);
+    expect(find.text('catalog'), findsOneWidget);
+  });
+
+  showcaseTest('a colour picked under the title opens at the title, with the size the buyer picked', (tester) async {
+    await pumpOpened(tester, {...listing(), 'colors': colours});
+    await tester.tap(find.byKey(const Key('showcase-details')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('42').first);
+    await tester.pump();
+    final under = find.byType(ColorChoice);
+    expect(find.descendant(of: under, matching: find.byType(ColorSwatches)), findsOneWidget);
+    await tester.tap(find.descendant(of: under, matching: find.byKey(const Key('color-8'))));
+    await tester.pumpAndSettle();
+    final opened = tester.widget<ListingScreen>(find.byType(ListingScreen));
+    expect((opened.listingId, opened.sizeLabel, opened.atDetails), (8, '42', true));
+    expect(page(tester).pixels, greaterThan(800)); // past the showcase, not back at its first frame
+    expect(find.byKey(const Key('color-name')).hitTestable(), findsOneWidget);
   });
 
   showcaseTest('the colour is named under the title, with no swatches when there is only one', (tester) async {

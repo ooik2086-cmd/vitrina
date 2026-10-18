@@ -124,46 +124,9 @@ class DemoClient extends http.BaseClient {
           (_answers['GET /listings/${(l as Map)['id']}'] as Map<String, dynamic>?) ?? l as Map<String, dynamic>,
       ];
 
-  /// The server's colour choice (listing_routes.colorways), worked out from the recorded listings.
-  List<Map<String, dynamic>> _colors(Map<String, dynamic> l) {
-    String same(Object? t) => '${t ?? ''}'.trim().split(RegExp(r'\s+')).join(' ').toLowerCase();
-    final model = same(l['model_name']);
-    if (model.isEmpty) return const [];
-    final best = <String, Map<String, dynamic>>{};
-    bool inStock(Map o) => (o['sizes'] as List).any((s) => (s as Map)['available'] == true);
-    for (final o in _all) {
-      final color = same(o['color']);
-      if (o['id'] == l['id'] ||
-          same(o['model_name']) != model ||
-          same(o['brand']) != same(l['brand']) ||
-          (o['seller'] as Map)['id'] != (l['seller'] as Map)['id'] ||
-          color.isEmpty ||
-          color == same(l['color'])) {
-        continue;
-      }
-      final was = best[color];
-      int rank(Map o) => (inStock(o) ? 0 : 1 << 40) + (o['price_tiyn'] as int);
-      if (was == null || rank(o) < rank(was)) best[color] = o;
-    }
-    if (best.isEmpty) return const [];
-    Map<String, dynamic> out(Map<String, dynamic> o) {
-      final media = (o['media'] as List).cast<Map>();
-      final photos = media.where((m) => m['angle'] != 'frame').toList();
-      final cover = (photos.isNotEmpty ? photos : media).firstOrNull;
-      return {
-        'id': o['id'],
-        'color': o['color'],
-        'price_tiyn': o['price_tiyn'],
-        'current': o['id'] == l['id'],
-        'in_stock': inStock(o),
-        'thumb_url': cover == null ? null : cover['thumb_url'] ?? cover['processed_url'] ?? cover['original_url'],
-        'cutout': cover?['processed_url'] != null,
-      };
-    }
-
-    final others = best.values.toList()..sort((a, b) => same(a['color']).compareTo(same(b['color'])));
-    return [out(l), for (final o in others.take(11)) out(o)];
-  }
+  /// The server's colour choice (listing_routes.colorways), worked out from the recorded listings: per other colour
+  /// the pair of the same category closest in condition, then in stock, then cheapest; all in colour-name order.
+  List<Map<String, dynamic>> _colors(Map<String, dynamic> l) => colorwaysOf(l, _all);
 
   /// The server's catalog filters, applied to the recorded listings.
   List<Map<String, dynamic>> _catalog(Map<String, String> q) {
@@ -234,4 +197,67 @@ class DemoClient extends http.BaseClient {
     (thread['items'] as List).add(message);
     return (201, message);
   }
+}
+
+const _newConditions = {'new_with_box', 'new_no_box', 'unworn_stored'};
+
+/// The same choice as the server's colorways() (backend ColorwayTests), over recorded listings; checked on the demo
+/// data in widget_test.dart.
+List<Map<String, dynamic>> colorwaysOf(Map<String, dynamic> l, Iterable<Map<String, dynamic>> all) {
+  String same(Object? t) =>
+      '${t ?? ''}'.replaceAll('ё', 'е').replaceAll('Ё', 'Е').trim().split(RegExp(r'\s+')).join(' ').toLowerCase();
+  final model = same(l['model_name']);
+  if (model.isEmpty) return const [];
+  bool inStock(Map o) => (o['sizes'] as List).any((s) => (s as Map)['available'] == true);
+  final isNew = _newConditions.contains(l['condition']);
+  // As the server's rank: condition group, then in stock, then price, then id.
+  List<num> rank(Map o) => [
+        _newConditions.contains(o['condition']) == isNew ? 0 : 1,
+        inStock(o) ? 0 : 1,
+        o['price_tiyn'] as int,
+        o['id'] as int,
+      ];
+  int byRank(Map a, Map b) {
+    final ra = rank(a), rb = rank(b);
+    for (var i = 0; i < ra.length; i++) {
+      if (ra[i] != rb[i]) return ra[i].compareTo(rb[i]);
+    }
+    return 0;
+  }
+
+  final best = <String, Map<String, dynamic>>{};
+  for (final o in all) {
+    final color = same(o['color']);
+    if (o['id'] == l['id'] ||
+        o['status'] != 'published' ||
+        o['category'] != l['category'] ||
+        same(o['model_name']) != model ||
+        same(o['brand']) != same(l['brand']) ||
+        (o['seller'] as Map)['id'] != (l['seller'] as Map)['id'] ||
+        color.isEmpty ||
+        color == same(l['color'])) {
+      continue;
+    }
+    final was = best[color];
+    if (was == null || byRank(o, was) < 0) best[color] = o;
+  }
+  if (best.isEmpty) return const [];
+  final kept = best.values.toList()..sort(byRank);
+  Map<String, dynamic> out(Map<String, dynamic> o) {
+    final media = (o['media'] as List).cast<Map>();
+    final photos = media.where((m) => m['angle'] != 'frame').toList();
+    final cover = (photos.isNotEmpty ? photos : media).firstOrNull;
+    return {
+      'id': o['id'],
+      'color': o['color'],
+      'price_tiyn': o['price_tiyn'],
+      'current': o['id'] == l['id'],
+      'in_stock': inStock(o),
+      'thumb_url': cover == null ? null : cover['thumb_url'] ?? cover['processed_url'] ?? cover['original_url'],
+      'cutout': cover?['processed_url'] != null,
+    };
+  }
+
+  final shown = [l, ...kept.take(11)]..sort((a, b) => same(a['color']).compareTo(same(b['color'])));
+  return [for (final o in shown) out(o)];
 }

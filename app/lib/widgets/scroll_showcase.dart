@@ -208,10 +208,14 @@ class ScrollShowcase extends StatefulWidget {
     this.onDetails,
     this.onLock,
     this.onStageTop,
+    this.onColor,
   });
 
   final Listing listing;
   final ScrollController scroll;
+
+  /// Opens another colour of the model; its swatches sit beside the shoe when there is more than one colour.
+  final ValueChanged<Colorway>? onColor;
 
   /// The visible height of the list: the stage fills it while the shoe turns.
   final double stageHeight;
@@ -795,10 +799,14 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
                 padding: const EdgeInsets.symmetric(horizontal: 8),
                 child: Row(children: [
                   Expanded(
-                    child: widget.listing.colors.length > 1
+                    child: widget.onColor != null && widget.listing.colors.length > 1
                         ? Align(
                             alignment: Alignment.centerLeft,
-                            child: ColorSwatches(listing: widget.listing, onDark: onDark),
+                            child: ColorSwatches(
+                                colors: widget.listing.colors,
+                                ring: scene.fg,
+                                edge: scene.line,
+                                onPick: widget.onColor!),
                           )
                         : const SizedBox.shrink(),
                   ),

@@ -747,6 +747,16 @@ void main() {
     await expectLater(api.startPayment(1), throwsA(isA<ApiException>().having((e) => e.code, 'code', 'demo')));
   });
 
+  test('the demo offers each colour as the server would: closest condition, the same order on every colour', () async {
+    final api = Api(base: 'http://demo/api/v1', client: await DemoClient.load())..token = demoToken;
+    final blue = await api.listing(3); // Runner 01, new without box
+    // Black: the new boxed pair (1), not the cheaper worn one (2); the rejected pair (5) and another shop's (6) never.
+    expect([for (final c in blue.colors) (c.id, c.current)], [(3, true), (1, false), (4, false)]);
+    final black = await api.listing(1);
+    expect([for (final c in black.colors) c.color], [for (final c in blue.colors) c.color]); // swatches keep places
+    expect(black.colors.singleWhere((c) => c.current).id, 1);
+  });
+
   test('order summary lists the price with its promo and says it is not a fiscal receipt', () {
     final o = OrderInfo.fromJson({
       'id': 1006,

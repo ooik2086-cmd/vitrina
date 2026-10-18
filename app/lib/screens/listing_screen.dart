@@ -31,8 +31,20 @@ import '../recent.dart';
 const _minSpinFrames = 8;
 
 class ListingScreen extends StatefulWidget {
-  const ListingScreen({super.key, required this.listingId, this.cover, this.coverIsCutout = false});
+  const ListingScreen(
+      {super.key,
+      required this.listingId,
+      this.cover,
+      this.coverIsCutout = false,
+      this.sizeLabel,
+      this.atDetails = false});
   final int listingId;
+
+  /// The size the buyer had picked on another colour of this model: picked here too when it is in stock.
+  final String? sizeLabel;
+
+  /// Opens past the showcase, at the title, as when another colour was picked there.
+  final bool atDetails;
 
   /// The photo the catalog card showed: it flies in and stays while the listing loads.
   final String? cover;
@@ -314,6 +326,25 @@ class _ListingScreenState extends State<ListingScreen> {
           MediaQuery.paddingOf(context).top -
           kToolbarHeight;
 
+  /// Another colour of this model, in place of this one: back still leads where the buyer came from. The size they
+  /// picked comes along, and from the details they land at the details again.
+  void _openColor(Listing l, Colorway c, {required bool atDetails}) {
+    final thumb = c.thumbUrl;
+    final size = l.sizes.where((s) => s.id == _sizeId).firstOrNull?.label;
+    Navigator.of(context).pushReplacement(PageRouteBuilder(
+      transitionDuration: const Duration(milliseconds: 200),
+      reverseTransitionDuration: const Duration(milliseconds: 200),
+      pageBuilder: (_, __, ___) => ListingScreen(
+          listingId: c.id,
+          cover: thumb,
+          coverIsCutout: c.cutout && thumb != null,
+          sizeLabel: size,
+          atDetails: atDetails),
+      // The same shoe in another colour: a quick fade, not a new page sliding in.
+      transitionsBuilder: (_, animation, __, child) => FadeTransition(opacity: animation, child: child),
+    ));
+  }
+
   void _toDetails(Listing l) {
     final at = _detailsAt(l);
     if (!_scroll.hasClients || at == null) return;
@@ -354,7 +385,15 @@ class _ListingScreenState extends State<ListingScreen> {
     final fit = bestFit(l.sizes, mySize.value);
     if (!_fitChecked) {
       _fitChecked = true; // pick the buyer's saved size once; after that their taps decide
-      _sizeId ??= fit?.id;
+      final kept = l.sizes.where((s) => s.available && s.label == widget.sizeLabel).firstOrNull;
+      _sizeId ??= kept?.id ?? fit?.id;
+      if (widget.atDetails) {
+        // The showcase sets its height while building: go past it once the page is laid out.
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          final at = mounted ? _detailsAt(l) : null;
+          if (at != null && _scroll.hasClients) _scroll.jumpTo(min(_scroll.position.maxScrollExtent, at));
+        });
+      }
     }
     final selected = l.sizes.where((s) => s.id == _sizeId).firstOrNull;
     final me = SessionScope.of(context).me;
@@ -400,6 +439,7 @@ class _ListingScreenState extends State<ListingScreen> {
                           onStageTop: (top) {
                             if (mounted) setState(() => _stageTop = top);
                           },
+                          onColor: (c) => _openColor(l, c, atDetails: false),
                           onDetails: () => _toDetails(l))
                     else
                       // Square on a phone; on a tablet or the web the photo stops growing so the details stay in view.
@@ -450,7 +490,7 @@ class _ListingScreenState extends State<ListingScreen> {
                       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                         Text(l.title, style: theme.textTheme.headlineSmall),
                         const SizedBox(height: 6),
-                        ColorChoice(listing: l),
+                        ColorChoice(listing: l, onPick: (c) => _openColor(l, c, atDetails: true)),
                         const SizedBox(height: 6),
                         PriceLine(listing: l, style: weight(theme.textTheme.headlineSmall!, 800)),
                         if (l.wasPriceTiyn != null)
@@ -525,7 +565,6 @@ class _ListingScreenState extends State<ListingScreen> {
                                   name: tr('Түпнұсқалығы'),
                                   value: label(authenticity, l.authenticity)),
                               const Divider(),
-                              _Fact(icon: Icons.palette_outlined, name: tr('Түсі'), value: l.color),
                             ]),
                           ),
                         ),

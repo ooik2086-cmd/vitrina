@@ -5,6 +5,7 @@ import os
 import tempfile
 import time
 import unittest
+from unittest import mock
 from datetime import date, datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
@@ -444,18 +445,64 @@ class ColorwayTests(ApiTestCase):
         self.post(f"/listings/{paused['id']}/pause", self.seller)
 
         got = self.colors(sand["id"])
+        # By colour name (көк, қара, құм), this one among them: the swatches keep their places.
         self.assertEqual([(c["id"], c["current"]) for c in got],
-                         [(sand["id"], True), (sold_out["id"], False), (black["id"], False)])  # own first, then by name
-        self.assertFalse(got[1]["in_stock"])
-        self.assertTrue(got[0]["thumb_url"])
-        # From the black one, its own colour is itself, not the dearer black pair.
-        self.assertEqual([c["id"] for c in self.colors(black["id"])], [black["id"], sold_out["id"], sand["id"]])
+                         [(sold_out["id"], False), (black["id"], False), (sand["id"], True)])
+        self.assertFalse(got[0]["in_stock"])
+        self.assertEqual(got[1]["price_tiyn"], 4_000_000)
+        self.assertTrue(got[2]["thumb_url"])
+        # From the black one, its own colour is itself, not the dearer black pair; the order stays.
+        self.assertEqual([(c["id"], c["current"]) for c in self.colors(black["id"])],
+                         [(sold_out["id"], False), (black["id"], True), (sand["id"], False)])
         self.assertNotIn(dear_black["id"], [c["id"] for c in got])
 
     def test_no_model_name_no_colours(self):
         a = self.publish(model_name=None)
         self.publish(model_name=None, color="қара")
         self.assertEqual(self.colors(a["id"]), [])
+        b = self.publish(model_name="  ")
+        self.publish(model_name="  ", color="көк")
+        self.assertEqual(self.colors(b["id"]), [])  # a blank name is no model either
+
+    def test_a_colour_opens_the_pair_closest_in_condition_then_in_stock_then_cheapest(self):
+        new = self.publish(condition="new_with_box", price_tiyn=6_000_000)
+        worn = self.publish(condition="used_excellent", price_tiyn=2_000_000)
+        cheap_worn_black = self.publish(color="қара", condition="used_excellent", price_tiyn=1_000_000)
+        new_black = self.publish(color="қара", condition="new_no_box", price_tiyn=5_000_000)
+        cheap_new_black = self.publish(color="қара", condition="unworn_stored", price_tiyn=4_000_000)
+        with self.db() as db:
+            db.query(ListingSize).filter_by(listing_id=cheap_new_black["id"]).update({"quantity": 0})
+            db.commit()
+        self.publish(color="көк", category="kids")  # a kids' pair of the same name is another shoe
+
+        def black(listing):
+            return [c["id"] for c in self.colors(listing["id"]) if not c["current"]]
+
+        self.assertEqual(black(new), [new_black["id"]])  # new beside new, and in stock before cheaper
+        self.assertEqual(black(worn), [cheap_worn_black["id"]])  # worn beside worn
+
+    def test_past_the_cap_colours_in_stock_stay(self):
+        here = self.publish(color="ақ")
+        names = [f"түс {i:02d}" for i in range(13)]
+        made = {name: self.publish(color=name)["id"] for name in names}
+        with self.db() as db:
+            db.query(ListingSize).filter(ListingSize.listing_id.in_([made[n] for n in names[:2]])).update(
+                {"quantity": 0})
+            db.commit()
+        got = self.colors(here["id"])
+        self.assertEqual(len(got), 12)
+        shown = {c["id"] for c in got}
+        self.assertTrue(all(made[n] not in shown for n in names[:2]))  # the sold-out ones give way
+        self.assertTrue(all(c["in_stock"] for c in got))
+
+    def test_the_page_opens_without_colours_when_they_fail(self):
+        listing = self.publish()
+        self.publish(color="қара")
+        with mock.patch("vitrina_api.listing_routes.colorways", side_effect=RuntimeError("boom")), \
+                self.assertLogs("vitrina", level="ERROR"):
+            r = self.c.get(f"/api/v1/listings/{listing['id']}")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["colors"], [])
 
 
 class DidYouMeanTests(ApiTestCase):
