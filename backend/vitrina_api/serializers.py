@@ -82,9 +82,11 @@ def listing_out(db: Session, listing: Listing, *, owner: bool = False) -> dict:
         # Three separate facts, never merged into one "quality" label.
         "segment": segment_for(db, listing), "condition": listing.condition, "authenticity": listing.authenticity,
         "defects": listing.defects, "description": listing.description, "showcase_style": listing.showcase_style,
+        "backdrop": listing.backdrop,
         "sizes": [{"id": s.id, "label": s.label, "insole_cm": mm_to_cm(s.insole_mm), "available": s.quantity > 0,
                    **({"quantity": s.quantity} if owner else {})} for s in listing.sizes],
-        "media": [{"original_url": m.original_url, "processed_url": m.processed_url, "angle": m.angle}
+        "media": [{"original_url": m.original_url, "processed_url": m.processed_url, "thumb_url": m.thumb_url,
+                   "angle": m.angle}
                   for m in listing.media],
         "photos_version": photos_version(listing),
         "seller": {"id": seller.id, "shop_name": seller.shop_name, "city": seller.city,  # never the phone

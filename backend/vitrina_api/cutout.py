@@ -122,6 +122,38 @@ def process_photo(data: bytes, segment: Segmenter, *, min_share: float = 0.03,
     return encode_cutout(cut_out(img, mask))
 
 
+THUMB_SIDE_PX = 480
+DARK_SHOE = 0.34  # mean luminance of the shoe's own pixels below which it gets a light backdrop
+
+
+def make_thumb(data: bytes) -> bytes:
+    """A small WebP of a photo or cut-out for scrolling; transparency is kept, colours are only resampled."""
+    img = Image.open(io.BytesIO(data))
+    img.load()
+    img = img.convert("RGBA") if img.mode in ("RGBA", "LA", "P") else img.convert("RGB")
+    img.thumbnail((THUMB_SIDE_PX, THUMB_SIDE_PX), Image.Resampling.LANCZOS)
+    out = io.BytesIO()
+    img.save(out, "WEBP", quality=82, method=4)
+    return out.getvalue()
+
+
+def backdrop_for(cutout_bytes: bytes) -> str | None:
+    """light or dark, from how bright the shoe itself is (transparent pixels are ignored); None without alpha."""
+    img = Image.open(io.BytesIO(cutout_bytes))
+    img.load()
+    if img.mode != "RGBA":
+        return None
+    img.thumbnail((256, 256))
+    lum = img.convert("RGB").convert("L")
+    alpha = img.getchannel("A").point(lambda v: 255 if v >= 128 else 0)
+    hist = lum.histogram(mask=alpha)
+    count = sum(hist)
+    if count == 0:
+        return None
+    mean = sum(i * n for i, n in enumerate(hist)) / count / 255
+    return "light" if mean < DARK_SHOE else "dark"
+
+
 def process_listing_media(media: list, read: Callable[[str], bytes], write: Callable[[bytes], str],
                           segment: Segmenter) -> int:
     """Fill processed_url for each photo that has none. Returns how many were cut out."""
@@ -136,5 +168,6 @@ def process_listing_media(media: list, read: Callable[[str], bytes], write: Call
             continue
         if result is not None:
             m.processed_url = write(result)
+            m.thumb_url = None  # the small copy follows the new cut-out
             done += 1
     return done

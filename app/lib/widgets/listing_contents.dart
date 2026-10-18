@@ -152,7 +152,8 @@ class _ListingContentsCardState extends State<ListingContentsCard> {
     final urls = <String>[];
     for (var i = 0; i < files.length; i += 4) {
       urls.addAll(await Future.wait([
-        for (final f in files.skip(i).take(4)) f.readAsBytes().then((b) => api.uploadPhoto(b, f.name)),
+        for (final f in files.skip(i).take(4))
+          f.readAsBytes().then((b) => api.uploadPhoto(b, f.name, detail: detailAngles.contains(angle))),
       ]));
     }
     return [
@@ -182,6 +183,10 @@ class _ListingContentsCardState extends State<ListingContentsCard> {
       ),
     );
     if (angle == null || !mounted) return;
+    await _addPhotoAt(angle);
+  }
+
+  Future<void> _addPhotoAt(String angle) async {
     final source = await showModalBottomSheet<ImageSource>(
       context: context,
       builder: (context) => SafeArea(
@@ -202,7 +207,8 @@ class _ListingContentsCardState extends State<ListingContentsCard> {
       ),
     );
     if (source == null) return;
-    final file = await _picker.pickImage(source: source, maxWidth: 2000, maxHeight: 2000, imageQuality: 90);
+    final side = detailAngles.contains(angle) ? 3000.0 : 2000.0;
+    final file = await _picker.pickImage(source: source, maxWidth: side, maxHeight: side, imageQuality: 90);
     if (file == null) return;
     await _run((api) async => api.editListing(_l.id, addPhotos: await _upload(api, [file], angle)), tr('Фото қосылды'));
   }
@@ -354,9 +360,50 @@ class _ListingContentsCardState extends State<ListingContentsCard> {
             label: Text(tr('360° өшіру')),
           ),
         ]),
+        ShowcaseStopsHint(have: {for (final m in _l.media) m.angle}, onPick: _addPhotoAt, enabled: !_busy),
       ],
       if (_busy) const Padding(padding: EdgeInsets.only(top: 8), child: LinearProgressIndicator()),
     ]);
+  }
+}
+
+/// After the 360° turn the showcase scrolls on to the top, the sole and a close-up. This asks the seller for the
+/// ones still missing, one tap each; a stop without its photo is simply skipped on the listing page.
+class ShowcaseStopsHint extends StatelessWidget {
+  const ShowcaseStopsHint({super.key, required this.have, required this.onPick, this.enabled = true});
+
+  /// Angles the listing already has a photo for.
+  final Set<String> have;
+  final ValueChanged<String> onPick;
+  final bool enabled;
+
+  static const stops = {'top': 'Үстінен', 'sole': 'Табаны', 'label': 'Жақыннан (тігіс, логотип, жапсырма)'};
+
+  @override
+  Widget build(BuildContext context) {
+    final missing = [
+      for (final a in stops.keys)
+        if (!have.contains(a)) a
+    ];
+    if (missing.isEmpty) return const SizedBox.shrink();
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(tr('360° айналымнан кейін сатып алушы үстін, табанын және жақын көріністі көреді. Бір-бір фото қосыңыз:'),
+            style: theme.textTheme.bodySmall),
+        const SizedBox(height: 6),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          for (final a in missing)
+            ActionChip(
+              key: Key('stop-$a'),
+              avatar: const Icon(Icons.add_a_photo_outlined, size: 18),
+              label: Text(tr(stops[a]!)),
+              onPressed: enabled ? () => onPick(a) : null,
+            ),
+        ]),
+      ]),
+    );
   }
 }
 

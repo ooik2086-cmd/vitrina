@@ -23,7 +23,7 @@ from .errors import ApiError
 from .social import size_fit
 from .models import (PriceChange, StockAlert, ListingDailyViews, ListingEmbedding, ListingReport, Favorite, Listing,
                      ListingSize, Media, Order, User)
-from .storage import MAX_UPLOAD_BYTES, Storage, normalize_image
+from .storage import DETAIL_SIDE_PX, MAX_SIDE_PX, MAX_UPLOAD_BYTES, Storage, normalize_image
 from .api_common import ALMATY, DEFECT_REQUIRED, MAX_LISTING_MEDIA, MAX_LISTING_SIZES, MIN_SPIN_FRAMES, log
 from .schemas import ListingIn, ListingPatch, PhotoIn, ReportIn
 from .serializers import cm_to_mm, listing_out, mark_price_change, photo_snapshot, was_price
@@ -38,14 +38,15 @@ def search_text(body: ListingIn) -> str:
 
 
 @router.post("/media", status_code=201)
-def upload_photo(file: UploadFile = File(...), user: User = Depends(current_user),
+def upload_photo(file: UploadFile = File(...), detail: bool = False, user: User = Depends(current_user),
                        storage: Storage = Depends(get_storage)):
+    """[detail] keeps a top, sole or label close-up larger, so its stitching is still sharp when zoomed in."""
     if not user.is_seller:
         raise ApiError(403, "seller_required")
     data = file.file.read(MAX_UPLOAD_BYTES + 1)
     if len(data) > MAX_UPLOAD_BYTES:
         raise ApiError(413, "file_too_large")
-    return {"url": storage.put(normalize_image(data), owner_id=user.id)}
+    return {"url": storage.put(normalize_image(data, DETAIL_SIDE_PX if detail else MAX_SIDE_PX), owner_id=user.id)}
 
 
 # Labels and defect close-ups stay as taken: their surroundings are part of what they prove.
@@ -121,9 +122,38 @@ def render_listing_promo(state, listing_id: int, lang: str) -> bool:
 PROMO_ANGLES = ("outer", "front", "inner", "back", "top")
 
 
+def thumb_listing(state, listing_id: int) -> int:
+    """Background job: the small copies the showcase shows while scrolling, and the backdrop that suits the shoe."""
+    storage = state.storage
+    done = 0
+    with state.sessions() as db:
+        listing = db.get(Listing, listing_id)
+        if listing is None:
+            return 0
+        for m in listing.media:
+            source = m.processed_url or m.original_url
+            if m.thumb_url or not storage.owns(source):
+                continue
+            try:
+                m.thumb_url = storage.put(cutout.make_thumb(storage.read(source)), owner_id=listing.seller_id,
+                                          ext="webp")
+                done += 1
+            except Exception:
+                log.exception("thumbnail failed for %s", source)
+        shown = sorted(listing.media, key=lambda m: (m.angle != "frame", m.angle != "front", m.position))
+        first = next((m for m in shown if m.processed_url and storage.owns(m.processed_url)), None)
+        try:
+            listing.backdrop = cutout.backdrop_for(storage.read(first.processed_url)) if first else None
+        except Exception:
+            log.exception("backdrop failed for listing %s", listing_id)
+        db.commit()
+        return done
+
+
 def prepare_listing_media(state, listing_id: int) -> None:
-    # Cut-outs first, so the search vector is computed on the shoe without its backdrop.
+    # Cut-outs first, so the search vector and the small copies are made from the shoe without its backdrop.
     cutout_listing(state, listing_id)
+    thumb_listing(state, listing_id)
     embed_listing(state, listing_id)
 
 

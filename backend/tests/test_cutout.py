@@ -6,7 +6,13 @@ import unittest
 from PIL import Image, ImageDraw
 
 from tests.test_api import LISTING, MediaTests, jpeg
-from vitrina_api.cutout import cut_out, fill_holes, process_photo
+from vitrina_api.cutout import backdrop_for, cut_out, fill_holes, make_thumb, process_photo
+
+
+def solid(colour, size=(800, 600)) -> bytes:
+    out = io.BytesIO()
+    Image.new("RGB", size, colour).save(out, "JPEG")
+    return out.getvalue()
 
 
 def ring_mask(size=(400, 400)):
@@ -50,6 +56,10 @@ class CutoutApiTests(MediaTests):
         super().setUp()
         self.app.state.segmenter = center_segmenter
 
+    def mine(self, listing_id):
+        items = self.c.get("/api/v1/me/listings", headers=self.h(self.seller)).json()["items"]
+        return next(i for i in items if i["id"] == listing_id)
+
     def test_new_listing_gets_cutouts_except_labels_and_defects(self):
         urls = [self.upload(self.seller, jpeg()).json()["url"] for _ in range(6)]
         angles = ("front", "outer", "inner", "back", "label", "defect")
@@ -74,6 +84,57 @@ class CutoutApiTests(MediaTests):
         self.post("/listings", self.seller, {**LISTING, "photos": photos})
         mine = self.c.get("/api/v1/me/listings", headers=self.h(self.seller)).json()["items"][0]
         self.assertTrue(all(m["processed_url"] is None for m in mine["media"]))
+
+    def test_every_photo_gets_a_small_copy_that_keeps_the_cut_out(self):
+        urls = [self.upload(self.seller, jpeg()).json()["url"] for _ in range(5)]
+        photos = [{"url": u, "angle": a} for u, a in zip(urls, ("front", "outer", "inner", "back", "label"))]
+        self.post("/listings", self.seller, {**LISTING, "photos": photos})
+        mine = self.c.get("/api/v1/me/listings", headers=self.h(self.seller)).json()["items"][0]
+        for m in mine["media"]:
+            img = Image.open(io.BytesIO(self.c.get(m["thumb_url"].replace("http://test", "")).content))
+            self.assertEqual(img.format, "WEBP")
+            self.assertLessEqual(max(img.size), 480)
+            self.assertEqual(img.mode, "RGB" if m["angle"] == "label" else "RGBA", m["angle"])
+
+    def test_a_dark_shoe_gets_a_light_backdrop_and_a_light_shoe_a_dark_one(self):
+        for colour, want in (((25, 25, 30), "light"), ((235, 235, 225), "dark")):
+            url = self.upload(self.seller, solid(colour)).json()["url"]
+            photos = [{"url": url, "angle": a} for a in ("front", "outer", "inner", "back")]
+            r = self.post("/listings", self.seller, {**LISTING, "photos": photos})
+            self.assertEqual(self.mine(r.json()["id"])["backdrop"], want)
+
+    def test_without_a_model_there_are_small_copies_but_no_backdrop(self):
+        self.app.state.segmenter = None
+        url = self.upload(self.seller, jpeg()).json()["url"]
+        photos = [{"url": url, "angle": a} for a in ("front", "outer", "inner", "back")]
+        r = self.post("/listings", self.seller, {**LISTING, "photos": photos})
+        got = self.mine(r.json()["id"])
+        self.assertIsNone(got["backdrop"])
+        self.assertTrue(all(m["thumb_url"] for m in got["media"]))
+
+    def test_close_ups_keep_more_pixels_than_showcase_photos(self):
+        big = solid((120, 90, 60), (3600, 2400))
+        for detail, side in ((False, 2000), (True, 3000)):
+            r = self.c.post(f"/api/v1/media?detail={'true' if detail else 'false'}", headers=self.h(self.seller),
+                            files={"file": ("p.jpg", big, "image/jpeg")})
+            img = Image.open(io.BytesIO(self.c.get(r.json()["url"].replace("http://test", "")).content))
+            self.assertEqual(max(img.size), side)
+
+
+class ShowcaseUnitTests(unittest.TestCase):
+    def test_backdrop_ignores_the_transparent_surroundings(self):
+        img = Image.new("RGBA", (300, 300), (255, 255, 255, 0))  # bright but see-through
+        ImageDraw.Draw(img).rectangle((100, 100, 200, 200), fill=(10, 10, 10, 255))
+        out = io.BytesIO()
+        img.save(out, "WEBP", lossless=True)
+        self.assertEqual(backdrop_for(out.getvalue()), "light")
+        self.assertIsNone(backdrop_for(jpeg()))  # no cut-out, no backdrop
+
+    def test_a_small_copy_keeps_its_colours(self):
+        thumb = Image.open(io.BytesIO(make_thumb(solid((200, 30, 30), (1600, 1200)))))
+        self.assertEqual(thumb.size, (480, 360))
+        r, g, b = thumb.convert("RGB").getpixel((240, 180))
+        self.assertTrue(abs(r - 200) < 8 and abs(g - 30) < 8 and abs(b - 30) < 8, (r, g, b))
 
 
 @unittest.skipUnless(os.environ.get("VITRINA_CUTOUT_MODEL"), "set VITRINA_CUTOUT_MODEL to test the real model")

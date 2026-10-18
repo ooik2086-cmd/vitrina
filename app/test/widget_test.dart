@@ -2646,6 +2646,32 @@ void main() {
       expect(find.byKey(const Key('add-spin')), findsNothing);
       expect(find.text('360° көрініс: 8 кадр'), findsOneWidget);
     });
+
+    testWidgets('with a 360° view the seller is asked for the missing top, sole and close-up, one tap each',
+        (tester) async {
+      final frames = [
+        for (var i = 0; i < 8; i++) {'original_url': 'https://cdn/f$i.jpg', 'processed_url': null, 'angle': 'frame'}
+      ];
+      await show(
+          tester,
+          listingJson(media: [
+            ...photos,
+            {'original_url': 'https://cdn/s.jpg', 'processed_url': null, 'angle': 'sole'},
+            ...frames
+          ]));
+      expect(find.byKey(const Key('stop-top')), findsOneWidget);
+      expect(find.byKey(const Key('stop-sole')), findsNothing); // already there
+      expect(find.byKey(const Key('stop-label')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('stop-top')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('source-camera')), findsOneWidget); // straight to the camera, no angle question
+      expect(find.byKey(const Key('angle-top')), findsNothing);
+    });
+
+    testWidgets('without a 360° view there is nothing to ask for', (tester) async {
+      await show(tester, listingJson(media: photos));
+      expect(find.byKey(const Key('stop-top')), findsNothing);
+    });
   });
 
   testWidgets('a new code can be asked for only after the countdown', (tester) async {

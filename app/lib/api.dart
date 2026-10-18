@@ -394,9 +394,13 @@ class MediaItem {
   MediaItem.fromJson(Map<String, dynamic> j)
       : originalUrl = j['original_url'] as String,
         processedUrl = j['processed_url'] as String?,
+        thumbUrl = j['thumb_url'] as String?,
         angle = j['angle'] as String;
   final String originalUrl;
   final String? processedUrl;
+
+  /// A 480 px copy of [url] for showing while the showcase scrolls; null until the server has made it.
+  final String? thumbUrl;
   final String angle;
 
   /// The processed image only changes the background; the original stays available.
@@ -420,6 +424,7 @@ class Listing {
         defects = j['defects'] as String?,
         description = j['description'] as String?,
         showcaseStyle = j['showcase_style'] as String,
+        backdrop = j['backdrop'] as String?,
         sizes = [for (final s in j['sizes'] as List) ShoeSize.fromJson(s as Map<String, dynamic>)],
         media = [for (final m in j['media'] as List) MediaItem.fromJson(m as Map<String, dynamic>)],
         shopName = (j['seller'] as Map)['shop_name'] as String?,
@@ -464,6 +469,9 @@ class Listing {
   final String authenticity;
   final String? defects;
   final String? description;
+
+  /// light or dark: what the cut-out shoe stands out on, chosen by the server from the shoe's own brightness.
+  final String? backdrop;
   final String showcaseStyle;
   final List<ShoeSize> sizes;
   final List<MediaItem> media;
@@ -972,8 +980,9 @@ class Api {
 
   // selling
   /// Uploads one photo; the server strips metadata and returns the URL to reference in a listing.
-  Future<String> uploadPhoto(List<int> bytes, String filename) async {
-    final req = http.MultipartRequest('POST', Uri.parse('$base/media'))
+  /// [detail] is for top, sole and label close-ups: the server keeps them larger (3000 px) for zooming in.
+  Future<String> uploadPhoto(List<int> bytes, String filename, {bool detail = false}) async {
+    final req = http.MultipartRequest('POST', Uri.parse('$base/media${detail ? '?detail=true' : ''}'))
       ..headers.addAll({'Accept': 'application/json', if (token != null) 'Authorization': 'Bearer $token'})
       ..files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
     final data = await _upload(req);

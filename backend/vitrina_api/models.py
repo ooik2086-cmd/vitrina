@@ -79,6 +79,8 @@ class Listing(Base):
     price_tiyn: Mapped[int] = mapped_column(BigInteger)
     delivery_price_tiyn: Mapped[int] = mapped_column(BigInteger, default=0)
     showcase_style: Mapped[str] = mapped_column(String(20), default="clean")
+    # light | dark: the backdrop the cut-out shoe stands out on (a dark shoe gets a light one); None without a cut-out
+    backdrop: Mapped[str | None] = mapped_column(String(10))
     search_text: Mapped[str] = mapped_column(Text, default="")
     views: Mapped[int] = mapped_column(Integer, default=0, server_default="0")  # product page opens by others
     promo_state: Mapped[str | None] = mapped_column(String(12))  # rendering | ready | failed; None = never made
@@ -118,6 +120,8 @@ class Media(Base):
     listing_id: Mapped[int] = mapped_column(ForeignKey("listings.id"), index=True)
     original_url: Mapped[str] = mapped_column(String(500))
     processed_url: Mapped[str | None] = mapped_column(String(500))
+    # A small copy (480 px) of processed_url or original_url, shown while the showcase is being scrolled.
+    thumb_url: Mapped[str | None] = mapped_column(String(500))
     angle: Mapped[str] = mapped_column(String(20))  # front|outer|inner|back|top|sole|label|defect|frame
     position: Mapped[int] = mapped_column(Integer, default=0)
     phash: Mapped[str | None] = mapped_column(String(16), index=True)  # difference hash, for reused photos

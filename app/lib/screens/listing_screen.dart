@@ -12,6 +12,7 @@ import '../widgets/delivery_eta.dart';
 import '../widgets/delivery_sheet.dart';
 import '../widgets/questions.dart';
 import '../widgets/size_guide.dart';
+import '../widgets/scroll_showcase.dart';
 import '../widgets/spin_viewer.dart';
 import 'chat_screen.dart';
 import 'help_screen.dart';
@@ -42,6 +43,7 @@ class _ListingScreenState extends State<ListingScreen> {
   bool _favorite = false;
   bool _ordering = false;
   bool _showPhotos = false;
+  final _scroll = ScrollController(); // drives the scroll-turned showcase at the top
   Offer? _offer; // the signed-in buyer's latest offer on this listing
   // One key per order attempt: a retried tap after a lost response returns the same order.
   String _orderKey = newIdempotencyKey();
@@ -53,6 +55,12 @@ class _ListingScreenState extends State<ListingScreen> {
     _loadListing();
     _similar ??= SessionScope.of(context).api.similar(widget.listingId).catchError((_) => <Listing>[]);
     _loadOffer();
+  }
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
   }
 
   void _loadListing() {
@@ -256,32 +264,40 @@ class _ListingScreenState extends State<ListingScreen> {
     final itemPrice = deal == null ? l.priceTiyn : (deal.priceTiyn < l.priceTiyn ? deal.priceTiyn : l.priceTiyn);
     return Column(children: [
       Expanded(
-        child: ListView(padding: EdgeInsets.zero, children: [
-          // Square on a phone; on a tablet or the web the photo stops growing so the details stay in view.
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxHeight: 560),
-            child: AspectRatio(
-              aspectRatio: 1,
-              child: Hero(
-                tag: 'listing-${l.id}',
-                // The 360° view uses cut-out frames over the seller's showcase style; the photo tab always shows
-                // the photos exactly as taken, so buyers can check the unedited originals.
-                child: DecoratedBox(
-                  decoration: showcaseBackground(l.showcaseStyle),
-                  child: Material(
-                    type: MaterialType.transparency,
-                    child: hasSpin && !_showPhotos
-                        ? SpinViewer(frameUrls: [for (final f in frames) f.url])
-                        : ColoredBox(
-                            color: Brand.studio,
-                            child: PhotoGallery(urls: [for (final p in l.photos) p.originalUrl]),
-                          ),
+        child: ListView(controller: _scroll, padding: EdgeInsets.zero, children: [
+          if (hasSpin && !_showPhotos)
+            LayoutBuilder(
+                builder: (context, box) => ScrollShowcase(
+                    listing: l,
+                    scroll: _scroll,
+                    viewerHeight: box.maxWidth < 560 ? box.maxWidth : 560,
+                    onPhotos: () {
+                      if (_scroll.hasClients) _scroll.jumpTo(0);
+                      setState(() => _showPhotos = true);
+                    }))
+          else
+            // Square on a phone; on a tablet or the web the photo stops growing so the details stay in view.
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 560),
+              child: AspectRatio(
+                aspectRatio: 1,
+                child: Hero(
+                  tag: 'listing-${l.id}',
+                  // The photo tab always shows the photos exactly as taken, so buyers can check the unedited originals.
+                  child: DecoratedBox(
+                    decoration: showcaseBackground(l.showcaseStyle),
+                    child: Material(
+                      type: MaterialType.transparency,
+                      child: ColoredBox(
+                        color: Brand.studio,
+                        child: PhotoGallery(urls: [for (final p in l.photos) p.originalUrl]),
+                      ),
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
-          if (hasSpin)
+          if (hasSpin && _showPhotos) // in the 360° view the switch sits on the viewer itself
             Padding(
               padding: contentPadding(context, const EdgeInsets.fromLTRB(20, 14, 20, 0)),
               child: SegmentedButton<bool>(
@@ -291,7 +307,10 @@ class _ListingScreenState extends State<ListingScreen> {
                   ButtonSegment(value: true, icon: Icon(Icons.photo_library_outlined), label: Text(tr('Фото'))),
                 ],
                 selected: {_showPhotos},
-                onSelectionChanged: (v) => setState(() => _showPhotos = v.first),
+                onSelectionChanged: (v) {
+                  if (_scroll.hasClients) _scroll.jumpTo(0); // the showcase's stretch of page comes or goes
+                  setState(() => _showPhotos = v.first);
+                },
               ),
             ),
           Padding(

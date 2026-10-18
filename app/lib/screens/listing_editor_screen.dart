@@ -6,12 +6,16 @@ import '../labels.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import '../widgets/listing_contents.dart' show ShowcaseStopsHint;
 import 'spin_capture_screen.dart';
 import '../i18n.dart';
 
 /// Required angles first; the server refuses to publish with fewer than four photos.
 const requiredAngles = {'front': 'Алдынан', 'outer': 'Сырт бүйірі', 'inner': 'Ішкі бүйірі', 'back': 'Өкшесі'};
 const optionalAngles = {'sole': 'Табаны', 'top': 'Үстінен', 'label': 'Жапсырма, өлшем'};
+
+/// Close-ups the showcase zooms into; they are uploaded larger so stitching and print stay sharp.
+const detailAngles = {'top', 'sole', 'label'};
 const _defectRequired = {'used_good', 'defective'};
 
 class _SizeRow {
@@ -145,9 +149,9 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
     if (leave == true && mounted) Navigator.pop(context);
   }
 
-  _Upload _startUpload(XFile file) {
+  _Upload _startUpload(XFile file, {bool detail = false}) {
     late final _Upload u;
-    u = _Upload(file.readAsBytes().then((b) => _api.uploadPhoto(b, file.name)).then((url) {
+    u = _Upload(file.readAsBytes().then((b) => _api.uploadPhoto(b, file.name, detail: detail)).then((url) {
       if (mounted) setState(() => u.url = url);
       return url;
     }, onError: (Object e) {
@@ -158,7 +162,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
     return u;
   }
 
-  Future<XFile?> _pick() async {
+  Future<XFile?> _pick({double side = 2000}) async {
     final source = await showModalBottomSheet<ImageSource>(
       context: context,
       builder: (context) => SafeArea(
@@ -175,13 +179,14 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
       ),
     );
     if (source == null) return null;
-    return _picker.pickImage(source: source, maxWidth: 2000, maxHeight: 2000, imageQuality: 90);
+    return _picker.pickImage(source: source, maxWidth: side, maxHeight: side, imageQuality: 90);
   }
 
   Future<void> _pickAngle(String angle) async {
-    final file = await _pick();
+    final detail = detailAngles.contains(angle);
+    final file = await _pick(side: detail ? 3000 : 2000);
     if (file == null) return;
-    final upload = _startUpload(file);
+    final upload = _startUpload(file, detail: detail);
     setState(() => _photos[angle] = upload);
     if (!_suggestAsked && (angle == 'outer' || angle == 'front')) {
       _suggestAsked = true;
@@ -372,6 +377,11 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
                         [spinTargetFrames]),
                     style: theme.textTheme.bodySmall,
                   ),
+                  if (_frames.isNotEmpty)
+                    ShowcaseStopsHint(have: {
+                      for (final e in _photos.entries)
+                        if (e.value.error == null) e.key
+                    }, onPick: _pickAngle),
                   if (_frames.any((f) => f.error != null))
                     Text(tr('Кейбір кадрлар жүктелмеді. Қайта түсіріңіз.'),
                         style: TextStyle(color: theme.colorScheme.error)),

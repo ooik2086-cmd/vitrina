@@ -937,4 +937,12 @@ const en = <String, String>{
       'Evidence can be added until {0}. Then support decides.',
   'Ақау байқасаңыз, қазір түсіріп қойыңыз: қайтару сұрағанда сатушы бірден көреді.':
       'Spotted a defect? Photograph it now: the seller sees it as soon as you ask for a return.',
+  '360° көрініс: {0}. Бұру үшін бетті жоғары-төмен жылжытыңыз.':
+      '360° view: {0}. Scroll the page up and down to turn it.',
+  'Ашық фон': 'Light backdrop',
+  'Бастапқы өлшем': 'Original size',
+  'Жақын': 'Close-up',
+  'Қараңғы фон': 'Dark backdrop',
+  '360° айналымнан кейін сатып алушы үстін, табанын және жақын көріністі көреді. Бір-бір фото қосыңыз:': 'After the 360° turn buyers see the top, the sole and a close-up. Add one photo of each:',
+  'Жақыннан (тігіс, логотип, жапсырма)': 'Close-up (stitching, logo, label)',
 };

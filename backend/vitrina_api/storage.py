@@ -27,6 +27,7 @@ log = logging.getLogger("vitrina.storage")
 
 MAX_UPLOAD_BYTES = 12 * 1024 * 1024
 MAX_SIDE_PX = 2000
+DETAIL_SIDE_PX = 3000  # top, sole and label close-ups: stitching and print stay sharp at 3x zoom
 MIN_SIDE_PX = 400
 ALLOWED_FORMATS = {"JPEG", "PNG", "WEBP"}
 # Decompression-bomb guard: refuse anything that would decode beyond ~50 MP.
@@ -92,7 +93,7 @@ def clean_video(data: bytes) -> bytes:
         _video_slots.release()
 
 
-def normalize_image(data: bytes) -> bytes:
+def normalize_image(data: bytes, max_side: int = MAX_SIDE_PX) -> bytes:
     """Return a clean JPEG: orientation applied, metadata dropped, long side capped.
 
     Only geometry and encoding change; colours and content are left as photographed.
@@ -112,7 +113,7 @@ def normalize_image(data: bytes) -> bytes:
         base = Image.new("RGB", img.size, (255, 255, 255))
         base.paste(img, mask=img.convert("RGBA").getchannel("A"))
         img = base
-    img.thumbnail((MAX_SIDE_PX, MAX_SIDE_PX), Image.Resampling.LANCZOS)
+    img.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)
     out = io.BytesIO()
     img.save(out, "JPEG", quality=88, optimize=True, progressive=True)
     return out.getvalue()
