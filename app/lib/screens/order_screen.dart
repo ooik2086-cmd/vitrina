@@ -1,3 +1,4 @@
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -49,7 +50,7 @@ List<_Action> _actionsFor(OrderInfo o, {required bool isBuyer}) {
       needs: 'reason',
       destructive: true,
       explain: tr('Тапсырысты қолдау қызметі қарайды. Шешім шыққанша ақша ешкімге өтпейді.'),
-      done: tr('Дау ашылды. Төменде фото не видео дәлел қосыңыз: қолдау қызметі соны қарап шешеді.'));
+      done: tr('Дау ашылды. «Дәлелдер» бөлімінде фото не видео қосыңыз: қолдау қызметі соны қарап шешеді.'));
   if (isBuyer) {
     return switch (o.status) {
       'CREATED' => [_Action(tr('Төлеу'), 'pay'), cancel],
@@ -79,7 +80,7 @@ List<_Action> _actionsFor(OrderInfo o, {required bool isBuyer}) {
           _Action(tr('Қайтару'), 'return',
               needs: 'reason',
               explain: tr('Сатушы қайтаруды мақұлдаса, ақша сізге қайтарылады. Келіспесе, қолдау қызметі шешеді.'),
-              done: tr('Қайтару сұрауы сатушыға жіберілді. Төменде ақаудың фотосын қосыңыз.')),
+              done: tr('Қайтару сұрауы сатушыға жіберілді. «Дәлелдер» бөлімінде ақаудың фотосын қосыңыз.')),
           dispute,
         ],
       'RETURN_REQUESTED' => [dispute],
@@ -107,7 +108,7 @@ List<_Action> _actionsFor(OrderInfo o, {required bool isBuyer}) {
             destructive: true,
             hint: tr('Неге келіспейсіз? Қолдау қызметі осыны оқиды.'),
             explain: tr('Қайтаруды қолдау қызметі шешеді. Шешім шыққанша ақша ешкімге өтпейді.'),
-            done: tr('Қолдау қызметіне жіберілді. Төменде өз дәлеліңізді қосыңыз.')),
+            done: tr('Қолдау қызметіне жіберілді. «Дәлелдер» бөлімінде өз дәлеліңізді қосыңыз.')),
       ],
     _ => const [],
   };
@@ -318,15 +319,6 @@ class _OrderScreenState extends State<OrderScreen> {
                   _OrderedDetails(details: o.listingDetails!),
                   const SizedBox(height: 16),
                 ],
-                if (o.evidence.isNotEmpty || _evidenceOpen.contains(o.status)) ...[
-                  _EvidenceCard(
-                    order: o,
-                    canAdd: _evidenceOpen.contains(o.status) && (me?.id == o.buyerId || me?.id == o.sellerId),
-                    meId: me?.id,
-                    onAdded: _refresh,
-                  ),
-                  const SizedBox(height: 16),
-                ],
                 _Timeline(order: o),
                 const SizedBox(height: 16),
                 const _ProtectionNote(),
@@ -360,6 +352,16 @@ class _OrderScreenState extends State<OrderScreen> {
                       label: Text(tr('Жіберу парағын жүктеу')),
                     ),
                   ),
+                // Next to the buttons that open a return or dispute, so it is where the next step is.
+                if (o.evidence.isNotEmpty || _evidenceOpen.contains(o.status)) ...[
+                  _EvidenceCard(
+                    order: o,
+                    canAdd: _evidenceOpen.contains(o.status) && (me?.id == o.buyerId || me?.id == o.sellerId),
+                    meId: me?.id,
+                    onAdded: _refresh,
+                  ),
+                  const SizedBox(height: 16),
+                ],
                 for (final a in _actionsFor(o, isBuyer: me?.id == o.buyerId))
                   if (a.endpoint != 'pay') // the banner on top carries it
                     Padding(
@@ -378,6 +380,7 @@ class _OrderScreenState extends State<OrderScreen> {
 const _evidenceOpen = {'RETURN_REQUESTED', 'DISPUTED'};
 const _maxEvidence = 10;
 const _maxUploadBytes = 12 * 1024 * 1024;
+const _videoSeconds = 15; // about what a phone records at 1080p within 12 MB
 
 /// What the listing said when the order was placed: the condition and defects the buyer agreed to.
 class _OrderedDetails extends StatelessWidget {
@@ -399,9 +402,15 @@ class _OrderedDetails extends StatelessWidget {
         padding: const EdgeInsets.all(14),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(tr('Тапсырыс берген кездегі сипаттама'), style: theme.textTheme.titleSmall),
+          if (details['backfilled'] == true) ...[
+            const SizedBox(height: 2),
+            Text(
+                tr('Бұл тапсырыс сипаттама сақтала бастағанға дейін берілген. Мұнда тауар бетінің кейінгі нұсқасы тұр.'),
+                style: theme.textTheme.bodySmall),
+          ],
           const SizedBox(height: 8),
           if (name.isNotEmpty) Text(name),
-          Text(trf('Күйі: {0}', [label(conditions, details['condition'] as String?)])),
+          Text(trf('Жағдайы: {0}', [label(conditions, details['condition'] as String?)])),
           if (defects.isNotEmpty) Text(trf('Ақаулар: {0}', [defects])),
           if (description.isNotEmpty) ...[
             const SizedBox(height: 4),
@@ -433,58 +442,102 @@ class _EvidenceCardState extends State<_EvidenceCard> {
   int? _side(String from) => from == 'buyer' ? widget.order.buyerId : widget.order.sellerId;
 
   Future<XFile?> _pick() async {
+    final isBuyer = widget.meId == widget.order.buyerId;
     final choice = await showModalBottomSheet<String>(
       context: context,
+      isScrollControlled: true,
       builder: (context) => SafeArea(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          ListTile(
-            title: Text(tr('Дәлел қосу')),
-            subtitle: Text(tr('Аяқкиімді, қорапты және жапсырманы анық түсіріңіз. Жіберген соң өшіруге болмайды.')),
-          ),
-          ListTile(
-            key: const Key('evidence-camera'),
-            leading: const Icon(Icons.photo_camera_outlined),
-            title: Text(tr('Камера')),
-            onTap: () => Navigator.pop(context, 'camera'),
-          ),
-          ListTile(
-            key: const Key('evidence-gallery'),
-            leading: const Icon(Icons.photo_library_outlined),
-            title: Text(tr('Галерея')),
-            onTap: () => Navigator.pop(context, 'gallery'),
-          ),
-          ListTile(
-            key: const Key('evidence-video'),
-            leading: const Icon(Icons.videocam_outlined),
-            title: Text(tr('Видео (1 минутқа дейін)')),
-            onTap: () => Navigator.pop(context, 'video'),
-          ),
-        ]),
+        child: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            ListTile(
+              title: Text(tr('Дәлел қосу')),
+              subtitle: Text(isBuyer
+                  ? tr('Келген аяқкиімді, қорапты және жапсырманы анық түсіріңіз. Жіберген соң өшіруге болмайды.')
+                  : tr('Жіберген аяқкиімнің, қораптың не трек-чектің фотосын қосыңыз. Жіберген соң өшіруге болмайды.')),
+            ),
+            ListTile(
+              key: const Key('evidence-camera'),
+              leading: const Icon(Icons.photo_camera_outlined),
+              title: Text(tr('Фото түсіру')),
+              onTap: () => Navigator.pop(context, 'camera'),
+            ),
+            ListTile(
+              key: const Key('evidence-gallery'),
+              leading: const Icon(Icons.photo_library_outlined),
+              title: Text(tr('Галереядан фото')),
+              onTap: () => Navigator.pop(context, 'gallery'),
+            ),
+            ListTile(
+              key: const Key('evidence-record'),
+              leading: const Icon(Icons.videocam_outlined),
+              title: Text(tr('Видео түсіру')),
+              subtitle: Text(trf('{0} секундқа дейін', [_videoSeconds])),
+              onTap: () => Navigator.pop(context, 'record'),
+            ),
+            ListTile(
+              key: const Key('evidence-video'),
+              leading: const Icon(Icons.video_library_outlined),
+              title: Text(tr('Галереядан видео')),
+              subtitle: Text(tr('MP4 не MOV, 12 МБ-қа дейін (шамамен 10 секунд)')),
+              onTap: () => Navigator.pop(context, 'video'),
+            ),
+          ]),
+        ),
       ),
     );
     final picker = ImagePicker();
     return switch (choice) {
       'camera' => picker.pickImage(source: ImageSource.camera, maxWidth: 1600, imageQuality: 90),
       'gallery' => picker.pickImage(source: ImageSource.gallery, maxWidth: 1600, imageQuality: 90),
-      'video' => picker.pickVideo(source: ImageSource.gallery, maxDuration: const Duration(minutes: 1)),
+      // maxDuration only stops a recording; a gallery clip is checked by size below.
+      'record' => picker.pickVideo(source: ImageSource.camera, maxDuration: const Duration(seconds: _videoSeconds)),
+      'video' => picker.pickVideo(source: ImageSource.gallery),
       _ => Future.value(null),
     };
   }
 
-  /// Null when cancelled, '' when sent without a note. The controller is left to the collector: disposing it here
-  /// would break the dialog's closing animation.
-  Future<String?> _note() {
+  /// Shows what is about to go out and that it is final. Null when cancelled, '' when sent without a note. The
+  /// controller is left to the collector: disposing it here would break the dialog's closing animation.
+  Future<String?> _confirm(Uint8List bytes, bool video) {
     final ctrl = TextEditingController();
     return showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(tr('Түсініктеме')),
-        content: TextField(
-          key: const Key('evidence-note'),
-          controller: ctrl,
-          maxLength: 500,
-          maxLines: 3,
-          decoration: InputDecoration(hintText: tr('Мысалы: оң аяқтың табаны жарылған')),
+        title: Text(tr('Дәлелді жіберу керек пе?')),
+        content: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            ClipRRect(
+              key: const Key('evidence-preview'),
+              borderRadius: BorderRadius.circular(12),
+              child: ColoredBox(
+                color: Brand.studio,
+                child: SizedBox(
+                  height: 120,
+                  width: double.infinity,
+                  child: video
+                      ? const Icon(Icons.videocam_outlined, size: 40, color: Colors.black87)
+                      : Image.memory(bytes,
+                          fit: BoxFit.contain,
+                          cacheHeight: 360,
+                          errorBuilder: (_, __, ___) => const Icon(Icons.image_outlined, color: Colors.black54)),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              key: const Key('evidence-note'),
+              controller: ctrl,
+              maxLength: 500,
+              maxLines: 3,
+              decoration: InputDecoration(
+                  labelText: tr('Түсініктеме (міндетті емес)'),
+                  hintText: widget.meId == widget.order.buyerId
+                      ? tr('Мысалы: оң аяқтың табаны жарылған')
+                      : tr('Мысалы: жіберер алдындағы түрі')),
+            ),
+            Text(tr('Жіберген соң өзгертуге не өшіруге болмайды. Екі тарап та, қолдау қызметі де көреді.'),
+                style: Theme.of(context).textTheme.bodySmall),
+          ]),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: Text(tr('Бас тарту'))),
@@ -498,26 +551,58 @@ class _EvidenceCardState extends State<_EvidenceCard> {
   }
 
   Future<void> _add() async {
-    final file = await _pick();
-    if (file == null || !mounted) return;
-    final bytes = await file.readAsBytes();
-    if (!mounted) return;
-    if (bytes.length > _maxUploadBytes) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(tr('Файл тым үлкен: 12 МБ-қа дейін. Қысқарақ видео түсіріңіз.'))));
+    final XFile? file;
+    final Uint8List bytes;
+    try {
+      file = await _pick();
+      if (file == null || !mounted) return;
+      // Measured before reading: a long gallery clip can be hundreds of MB, and is refused without loading it.
+      if (await file.length() > _maxUploadBytes) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text(tr('Файл тым үлкен: 12 МБ-қа дейін. Қысқарақ видео түсіріңіз не фото жіберіңіз.'))));
+        }
+        return;
+      }
+      bytes = await file.readAsBytes();
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(tr('Файлды ашу мүмкін болмады. Басқасын таңдаңыз.'))));
+      }
       return;
     }
-    final note = await _note();
+    if (!mounted) return;
+    final video = file.name.toLowerCase().endsWith('.mp4') ||
+        file.name.toLowerCase().endsWith('.mov') ||
+        (file.mimeType ?? '').startsWith('video/');
+    final note = await _confirm(bytes, video);
     if (note == null || !mounted) return; // cancelled
+    final key = List.generate(16, (_) => Random.secure().nextInt(16).toRadixString(16)).join();
+    await _send(bytes, file.name, note, key);
+  }
+
+  /// One try; after a dropped connection the same [key] is offered again, so a copy that did arrive is not doubled.
+  Future<void> _send(Uint8List bytes, String name, String note, String key) async {
     setState(() => _uploading = true);
     try {
-      await SessionScope.of(context).api.addEvidence(widget.order.id, bytes, file.name, note: note);
+      await SessionScope.of(context).api.addEvidence(widget.order.id, bytes, name, note: note, key: key);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr('Дәлел қосылды'))));
       }
       await widget.onAdded();
-    } catch (e) {
-      if (mounted) showError(context, e);
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      if (e.status == 0) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(tr('Дәлел жіберілмеді: байланыс үзілді.')),
+          duration: const Duration(seconds: 10),
+          action: SnackBarAction(label: tr('Қайталау'), onPressed: () => _send(bytes, name, note, key)),
+        ));
+      } else {
+        showError(context, e);
+        if (e.status == 409) await widget.onAdded(); // the case closed or the limit filled: show it as it is now
+      }
     } finally {
       if (mounted) setState(() => _uploading = false);
     }
@@ -536,7 +621,14 @@ class _EvidenceCardState extends State<_EvidenceCard> {
             key: Key('evidence-${e.id}'),
             borderRadius: BorderRadius.circular(12),
             onTap: video
-                ? () => launchUrl(Uri.parse(e.url), mode: LaunchMode.externalApplication)
+                ? () async {
+                    final opened = await launchUrl(Uri.parse(e.url), mode: LaunchMode.externalApplication)
+                        .catchError((_) => false);
+                    if (!opened && mounted) {
+                      ScaffoldMessenger.of(context)
+                          .showSnackBar(SnackBar(content: Text(tr('Видеоны ашатын бағдарлама табылмады.'))));
+                    }
+                  }
                 : () => _OrderedPhotos.open(context, e.url),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(12),
@@ -559,7 +651,9 @@ class _EvidenceCardState extends State<_EvidenceCard> {
         const SizedBox(width: 12),
         Expanded(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('$who · ${formatDay(e.at)}', style: Theme.of(context).textTheme.labelMedium),
+            Text(
+                '$who · ${formatDay(e.at)} ${e.at.hour.toString().padLeft(2, '0')}:${e.at.minute.toString().padLeft(2, '0')}',
+                style: Theme.of(context).textTheme.labelMedium),
             if (e.note != null) Text(e.note!),
           ]),
         ),

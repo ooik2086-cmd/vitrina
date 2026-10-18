@@ -882,7 +882,8 @@ class Api {
     }
   }
 
-  Future<dynamic> _upload(http.MultipartRequest req) async => _decode(await _fetch(req, limit: uploadTimeout));
+  Future<dynamic> _upload(http.MultipartRequest req, {Duration limit = uploadTimeout}) async =>
+      _decode(await _fetch(req, limit: limit));
 
   /// A file the server streams back (CSV, PDF): its bytes, or the server's error.
   Future<List<int>> _bytes(String path, {Map<String, String>? query}) async {
@@ -1241,13 +1242,16 @@ class Api {
     return (await _upload(req) as Map)['url'] as String;
   }
 
-  /// A photo or MP4 for an open return or dispute. It cannot be taken back once sent.
-  Future<Evidence> addEvidence(int orderId, List<int> bytes, String filename, {String? note}) async {
+  /// A photo or MP4 for an open return or dispute. It cannot be taken back once sent. [key] names this file: sending
+  /// it again with the same key after a timeout returns the copy that already arrived instead of adding a second.
+  Future<Evidence> addEvidence(int orderId, List<int> bytes, String filename, {String? note, String? key}) async {
     final req = http.MultipartRequest('POST', Uri.parse('$base/orders/$orderId/evidence'))
       ..headers.addAll({'Accept': 'application/json', if (token != null) 'Authorization': 'Bearer $token'})
       ..files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
     if (note != null && note.isNotEmpty) req.fields['note'] = note;
-    return Evidence.fromJson(await _upload(req) as Map<String, dynamic>);
+    if (key != null) req.fields['key'] = key;
+    // 12 MB on a weak rural uplink takes longer than a photo; the key makes a late retry harmless.
+    return Evidence.fromJson(await _upload(req, limit: const Duration(minutes: 3)) as Map<String, dynamic>);
   }
 
   /// Answered questions for everyone; the asker's own and, for the seller, all of them. [unanswered] is the

@@ -113,8 +113,10 @@ class SignInPrompt extends StatelessWidget {
 Future<XFile?> pickPhoto(BuildContext context, {String? title, String? subtitle}) async {
   final source = await showModalBottomSheet<ImageSource>(
     context: context,
+    isScrollControlled: true,
     builder: (context) => SafeArea(
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
+      child: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
         if (title != null) ListTile(title: Text(title), subtitle: subtitle == null ? null : Text(subtitle)),
         ListTile(
           leading: const Icon(Icons.photo_camera_outlined),
@@ -126,7 +128,7 @@ Future<XFile?> pickPhoto(BuildContext context, {String? title, String? subtitle}
           title: Text(tr('Галерея')),
           onTap: () => Navigator.pop(context, ImageSource.gallery),
         ),
-      ]),
+      ])),
     ),
   );
   if (source == null) return null;

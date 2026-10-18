@@ -5,7 +5,12 @@ import hashlib
 import hmac
 import io
 import re
+import resource
 import secrets
+import shutil
+import subprocess
+import tempfile
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Protocol
@@ -23,6 +28,63 @@ MIN_SIDE_PX = 400
 ALLOWED_FORMATS = {"JPEG", "PNG", "WEBP"}
 # Decompression-bomb guard: refuse anything that would decode beyond ~50 MP.
 Image.MAX_IMAGE_PIXELS = 50_000_000
+
+# ISO base media files all start with an ftyp box; the brand says whether it is a video or a HEIC/AVIF still.
+VIDEO_BRANDS = {b"isom", b"iso2", b"iso4", b"iso5", b"iso6", b"mp41", b"mp42", b"avc1", b"qt  ", b"M4V ", b"3gp4",
+                b"3gp5", b"3gp6", b"3g2a", b"dash", b"MSNV"}
+VIDEO_COPY_CAP = MAX_UPLOAD_BYTES + (1 << 20)  # a clean copy is about the input's size; leave room for the index
+VIDEO_SECONDS = 20  # a 12 MB stream copy takes well under a second; anything slower is not a normal phone clip
+_video_slots = threading.BoundedSemaphore(2)  # ffmpeg runs per API process at once
+
+
+def is_video(data: bytes) -> bool:
+    return data[4:8] == b"ftyp" and data[8:12] in VIDEO_BRANDS
+
+
+class VideoUnavailable(Exception):
+    """ffmpeg is missing, busy or too slow: a server problem, not the file's fault."""
+
+
+def _limit_ffmpeg() -> None:
+    # In the child, before exec: no file over the upload cap, a few seconds of CPU, bounded memory.
+    resource.setrlimit(resource.RLIMIT_FSIZE, (VIDEO_COPY_CAP, VIDEO_COPY_CAP))
+    resource.setrlimit(resource.RLIMIT_CPU, (VIDEO_SECONDS, VIDEO_SECONDS))
+    resource.setrlimit(resource.RLIMIT_AS, (1 << 30, 1 << 30))
+
+
+def clean_video(data: bytes) -> bytes:
+    """The same MP4 with its metadata (phone model, place, time) dropped; the picture is copied, not re-encoded.
+
+    Raises ApiError 415 for a file ffmpeg cannot read as an MP4/MOV, or whose copy would grow past the upload cap
+    (a crafted sample table can repeat the same bytes many times), and VideoUnavailable when the server cannot run it.
+    """
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None:
+        raise VideoUnavailable("ffmpeg not found")
+    if not _video_slots.acquire(blocking=False):
+        raise VideoUnavailable("busy")
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            src, out = Path(tmp) / "in.mp4", Path(tmp) / "out.mp4"
+            src.write_bytes(data)
+            try:
+                run = subprocess.run(
+                    [ffmpeg, "-nostdin", "-loglevel", "error", "-y", "-protocol_whitelist", "file", "-f", "mov",
+                     "-i", str(src), "-map", "0:v:0", "-map", "0:a:0?", "-map_metadata", "-1", "-map_metadata:s",
+                     "-1", "-map_chapters", "-1", "-c", "copy", "-fs", str(VIDEO_COPY_CAP), "-fflags", "+bitexact",
+                     "-movflags", "+faststart", str(out)],
+                    capture_output=True, timeout=VIDEO_SECONDS, preexec_fn=_limit_ffmpeg)
+            except subprocess.TimeoutExpired as exc:
+                raise VideoUnavailable("timeout") from exc
+            except OSError as exc:
+                raise VideoUnavailable(str(exc)) from exc
+            size = out.stat().st_size if out.exists() else 0
+            # -fs stops at the cap, so a copy that reached it was cut short: refuse it rather than store half.
+            if run.returncode != 0 or size == 0 or size >= VIDEO_COPY_CAP or size > 2 * len(data):
+                raise ApiError(415, "unsupported_video", "the video could not be read")
+            return out.read_bytes()
+    finally:
+        _video_slots.release()
 
 
 def normalize_image(data: bytes) -> bytes:

@@ -2,15 +2,13 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
-import shutil
-import subprocess
-import tempfile
-from pathlib import Path
+import time
 from typing import Literal
 
-from fastapi import APIRouter, Depends, File, Form, Header, UploadFile
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, File, Form, Header, Request, UploadFile
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -26,10 +24,11 @@ from .api_common import DECLINABLE, IN_DELIVERY, PHONE_RE
 from .schemas import DeliveryIn, OrderIn, ReasonIn, ShipIn
 from .serializers import (away_until, delivery_out, details_snapshot, evidence_out, listing_cover, order_out,
                           order_summary, ordered_details, ordered_photos, photo_snapshot, photos_version)
-from .storage import MAX_UPLOAD_BYTES, Storage, normalize_image
+from .storage import MAX_UPLOAD_BYTES, Storage, VideoUnavailable, clean_video, is_video, normalize_image
 
 
 router = APIRouter(prefix="/api/v1")
+log = logging.getLogger("vitrina.orders")
 
 
 def order_for(db: Session, order_id: int, user: User, *, role: str | None = None, lock: bool = False) -> Order:
@@ -268,58 +267,60 @@ def order_evidence_list(db: Session, order: Order) -> list[dict]:
     return [evidence_out(order, e) for e in rows]
 
 
-def clean_video(data: bytes) -> bytes:
-    """The same MP4 with its metadata (phone model, place, time) dropped; the picture is copied, not re-encoded.
-    Raises ValueError for anything ffmpeg cannot read as an MP4."""
-    ffmpeg = shutil.which("ffmpeg")
-    if ffmpeg is None:
-        raise RuntimeError("ffmpeg not found")
-    with tempfile.TemporaryDirectory() as tmp:
-        src, out = Path(tmp) / "in.mp4", Path(tmp) / "out.mp4"
-        src.write_bytes(data)
-        run = subprocess.run([ffmpeg, "-loglevel", "error", "-y", "-protocol_whitelist", "file", "-f", "mp4", "-i", str(src), "-map", "0:v:0",
-                              "-map", "0:a:0?", "-map_metadata", "-1", "-map_chapters", "-1", "-c", "copy",
-                              "-fflags", "+bitexact", "-movflags", "+faststart", str(out)],
-                             capture_output=True, timeout=60)
-        if run.returncode != 0 or not out.exists() or out.stat().st_size == 0:
-            raise ValueError("not a readable mp4")
-        return out.read_bytes()
+EVIDENCE_TRIES_PER_HOUR = 30  # stored or refused: every try costs a 12 MB read and maybe an ffmpeg run
 
 
 @router.post("/orders/{order_id}/evidence", status_code=201)
-def add_evidence(order_id: int, file: UploadFile = File(...), note: str | None = Form(default=None, max_length=500),
+def add_evidence(order_id: int, request: Request, file: UploadFile = File(...),
+                 note: str | None = Form(default=None, max_length=500),
+                 key: str | None = Form(default=None, min_length=8, max_length=64),
                  user: User = Depends(current_user), db: Session = Depends(get_db),
                  storage: Storage = Depends(get_storage)):
-    """A photo or short MP4 for an open return or dispute. Kept as sent: it cannot be edited or taken back."""
+    """A photo or short MP4 for an open return or dispute. Kept as sent: it cannot be edited or taken back.
+    [key] is the app's id for this file: a retry after a lost answer returns the first copy instead of a second."""
 
-    def check(order: Order) -> None:
+    def check(order: Order) -> OrderEvidence | None:
         if user.id not in (order.buyer_id, order.seller_id):
             raise ApiError(404, "not_found")
+        if key is not None:
+            seen = db.scalar(select(OrderEvidence).where(OrderEvidence.order_id == order.id,
+                                                         OrderEvidence.user_id == user.id,
+                                                         OrderEvidence.client_key == key))
+            if seen is not None:
+                return seen
         if order.status not in EVIDENCE_OPEN:
             raise ApiError(409, "invalid_status")
-        count = len(db.scalars(select(OrderEvidence.id).where(OrderEvidence.order_id == order.id,
-                                                              OrderEvidence.user_id == user.id)).all())
+        count = db.scalar(select(func.count(OrderEvidence.id)).where(OrderEvidence.order_id == order.id,
+                                                                     OrderEvidence.user_id == user.id))
         if count >= MAX_EVIDENCE:
             raise ApiError(409, "too_much_evidence")
+        return None
 
-    check(order_for(db, order_id, user))
+    order = order_for(db, order_id, user)
+    if (seen := check(order)) is not None:
+        return evidence_out(order, seen)
+    if not request.app.state.evidence_limiter.allow(str(user.id), time.monotonic()):
+        raise ApiError(429, "rate_limited")
+    # The file is cleaned and stored with no transaction open, so a slow video holds neither a pooled connection
+    # nor the order row. A copy whose order closed meanwhile stays unreferenced, as every upload may.
+    db.rollback()
     data = file.file.read(MAX_UPLOAD_BYTES + 1)
     if len(data) > MAX_UPLOAD_BYTES:
         raise ApiError(413, "file_too_large")
-    # The file is cleaned before the order is locked, so a slow video does not hold up the order's other steps.
-    if data[4:8] == b"ftyp":
+    if is_video(data):
         try:
             clean, ext, kind = clean_video(data), "mp4", "video"
-        except RuntimeError:
-            raise ApiError(422, "video_unavailable")
-        except (ValueError, subprocess.TimeoutExpired):
-            raise ApiError(415, "unsupported_media", "the video could not be read")
+        except VideoUnavailable as exc:
+            log.warning("evidence video for order %s not cleaned: %s", order_id, exc)
+            raise ApiError(503, "video_unavailable")
     else:
         clean, ext, kind = normalize_image(data), "jpg", "photo"
-    order = order_for(db, order_id, user, lock=True)
-    check(order)  # the order may have been resolved, or this side's limit reached, while the file was cleaned
     url = storage.put(clean, owner_id=user.id, ext=ext)
-    item = OrderEvidence(order_id=order.id, user_id=user.id, url=url, kind=kind, note=(note or "").strip() or None)
+    order = order_for(db, order_id, user, lock=True)
+    if (seen := check(order)) is not None:  # the same file arrived twice at once and the other request won
+        return evidence_out(order, seen)
+    item = OrderEvidence(order_id=order.id, user_id=user.id, url=url, kind=kind, client_key=key,
+                         note=(note or "").strip() or None)
     db.add(item)
     other = order.seller_id if user.id == order.buyer_id else order.buyer_id
     services.notify(db, other, "evidence", f"Тапсырыс №{order.id}: екінші тарап дәлел қосты.",

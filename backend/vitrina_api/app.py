@@ -22,6 +22,7 @@ from .models import make_session_factory
 from .storage import MAX_UPLOAD_BYTES, make_storage
 from .api_common import log
 from .auth_routes import OTP_REQUESTS_PER_ADDRESS_PER_HOUR
+from .order_routes import EVIDENCE_TRIES_PER_HOUR
 from .search_routes import IMAGE_SEARCH_PER_MINUTE, SlidingWindowLimiter
 from .webhook_routes import hooks
 from . import (auth_routes, listing_routes, order_routes, saved_search_routes, search_routes, seller_routes,
@@ -76,6 +77,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.embedder = visual.load_embedder(settings.search_model)
     app.state.image_search_limiter = SlidingWindowLimiter(IMAGE_SEARCH_PER_MINUTE, 60)
     app.state.otp_limiter = SlidingWindowLimiter(OTP_REQUESTS_PER_ADDRESS_PER_HOUR, 3600)
+    app.state.evidence_limiter = SlidingWindowLimiter(EVIDENCE_TRIES_PER_HOUR, 3600)
     app.add_exception_handler(ApiError, api_error_handler)
 
     async def validation_handler(request: Request, exc: RequestValidationError):

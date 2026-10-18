@@ -888,13 +888,8 @@ const en = <String, String>{
   'Жаңа фото қосып, қосымша фотоны өшіруге болады. Негізгі төрт жақ пен ақау фотолары қалады. Тапсырыс бергендер өздері көрген фотоны тапсырыс ішінен көреді.':
       'You can add new photos and delete extra ones. The four main sides and defect close-ups stay. Buyers see the photos they ordered from in their order.',
   'Фото ашылмады. Байланысты тексеріп, қайта көріңіз.': 'The photo did not open. Check the connection and try again.',
-  'Аяқкиімді, қорапты және жапсырманы анық түсіріңіз. Жіберген соң өшіруге болмайды.':
-      'Take clear shots of the shoes, the box and the label. Once sent, it cannot be deleted.',
   'Ақаулар: {0}': 'Defects: {0}',
-  'Видео (1 минутқа дейін)': 'Video (up to 1 minute)',
   'Видеоны ашу': 'Open the video',
-  'Дау ашылды. Төменде фото не видео дәлел қосыңыз: қолдау қызметі соны қарап шешеді.':
-      'Dispute opened. Add photos or a video below: support decides on them.',
   'Дәлел қосу': 'Add evidence',
   'Дәлел қосу ({0} қалды)': 'Add evidence ({0} left)',
   'Дәлел қосылды': 'Evidence added',
@@ -906,12 +901,36 @@ const en = <String, String>{
   'Сатып алушы': 'Buyer',
   'Сіз': 'You',
   'Тапсырыс берген кездегі сипаттама': 'Description when ordered',
-  'Түсініктеме': 'Comment',
-  'Файл тым үлкен: 12 МБ-қа дейін. Қысқарақ видео түсіріңіз.':
-      'The file is too large: 12 MB at most. Record a shorter video.',
   'Фотоны ашу': 'Open the photo',
-  'Қайтару сұрауы сатушыға жіберілді. Төменде ақаудың фотосын қосыңыз.':
-      'Return request sent to the seller. Add a photo of the defect below.',
-  'Қолдау қызметіне жіберілді. Төменде өз дәлеліңізді қосыңыз.': 'Sent to support. Add your evidence below.',
   'Әзірге дәлел жоқ.': 'No evidence yet.',
+  'MP4 не MOV, 12 МБ-қа дейін (шамамен 10 секунд)': 'MP4 or MOV, up to 12 MB (about 10 seconds)',
+  '{0} секундқа дейін': 'up to {0} seconds',
+  'Бұл тапсырыс сипаттама сақтала бастағанға дейін берілген. Мұнда тауар бетінің кейінгі нұсқасы тұр.':
+      'This order was placed before descriptions were kept. This shows a later version of the listing.',
+  'Видео түсіру': 'Record a video',
+  'Видеоны ашатын бағдарлама табылмады.': 'No app found to play the video.',
+  'Галереядан видео': 'Video from the gallery',
+  'Галереядан фото': 'Photo from the gallery',
+  'Дау ашылды. «Дәлелдер» бөлімінде фото не видео қосыңыз: қолдау қызметі соны қарап шешеді.':
+      'Dispute opened. Add photos or a video in the Evidence section: support decides on them.',
+  'Дәлел жіберілмеді: байланыс үзілді.': 'The evidence was not sent: the connection dropped.',
+  'Дәлелді жіберу керек пе?': 'Send this evidence?',
+  'Жағдайы: {0}': 'Condition: {0}',
+  'Жіберген аяқкиімнің, қораптың не трек-чектің фотосын қосыңыз. Жіберген соң өшіруге болмайды.':
+      'Add photos of the shoes you sent, the box or the tracking receipt. Once sent, it cannot be deleted.',
+  'Жіберген соң өзгертуге не өшіруге болмайды. Екі тарап та, қолдау қызметі де көреді.':
+      'Once sent, it cannot be changed or deleted. Both sides and support can see it.',
+  'Келген аяқкиімді, қорапты және жапсырманы анық түсіріңіз. Жіберген соң өшіруге болмайды.':
+      'Take clear shots of the shoes that arrived, the box and the label. Once sent, it cannot be deleted.',
+  'Мысалы: жіберер алдындағы түрі': 'For example: how it looked before shipping',
+  'Түсініктеме (міндетті емес)': 'Comment (optional)',
+  'Файл тым үлкен: 12 МБ-қа дейін. Қысқарақ видео түсіріңіз не фото жіберіңіз.':
+      'The file is too large: 12 MB at most. Record a shorter video or send a photo.',
+  'Файлды ашу мүмкін болмады. Басқасын таңдаңыз.': 'The file could not be opened. Choose another one.',
+  'Фото түсіру': 'Take a photo',
+  'Қайталау': 'Retry',
+  'Қайтару сұрауы сатушыға жіберілді. «Дәлелдер» бөлімінде ақаудың фотосын қосыңыз.':
+      'Return request sent to the seller. Add a photo of the defect in the Evidence section.',
+  'Қолдау қызметіне жіберілді. «Дәлелдер» бөлімінде өз дәлеліңізді қосыңыз.':
+      'Sent to support. Add your evidence in the Evidence section.',
 };

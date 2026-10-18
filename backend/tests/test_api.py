@@ -2308,14 +2308,62 @@ def mp4(tag="Almaty 43.25 76.95") -> bytes:
             return f.read()
 
 
+def amplified(clip: bytes) -> bytes:
+    """The clip with a sample table that points every frame at the whole media data, as an attacker would write it:
+    a plain stream copy would repeat those bytes once per frame."""
+    import struct
+    d = bytearray(clip)
+
+    def find(start, end, path):
+        i = start
+        while i < end:
+            size, tag = struct.unpack(">I4s", d[i:i + 8])
+            if tag == path[0]:
+                return [i] + (find(i + 8, i + size, path[1:]) if len(path) > 1 else [])
+            i += size
+        raise KeyError(path)
+
+    mdat = find(0, len(d), [b"mdat"])[0]
+    per = struct.unpack(">I", d[mdat:mdat + 4])[0] - 8
+    chain = find(0, len(d), [b"moov", b"trak", b"mdia", b"minf", b"stbl"])
+    stbl = chain[-1]
+    stsz = find(stbl + 8, stbl + struct.unpack(">I", d[stbl:stbl + 4])[0], [b"stsz"])[0]
+    n = struct.unpack(">I", d[stsz + 16:stsz + 20])[0]
+    for k in range(n):
+        struct.pack_into(">I", d, stsz + 20 + 4 * k, per)
+
+    def replace(tag, new):
+        nonlocal d
+        stbl = chain[-1]
+        i = find(stbl + 8, stbl + struct.unpack(">I", d[stbl:stbl + 4])[0], [tag])[0]
+        delta = len(new) - struct.unpack(">I", d[i:i + 4])[0]
+        d = d[:i] + new + d[i + struct.unpack(">I", d[i:i + 4])[0]:]
+        for box in chain:
+            struct.pack_into(">I", d, box, struct.unpack(">I", d[box:box + 4])[0] + delta)
+
+    replace(b"stsc", struct.pack(">I4sIIIII", 28, b"stsc", 0, 1, 1, 1, 1))
+    replace(b"stco", struct.pack(">I4sII", 16 + 4 * n, b"stco", 0, n) + struct.pack(f">{n}I", *([mdat + 8] * n)))
+    return bytes(d)
+
+
 class DisputeEvidenceTests(ApiTestCase):
     def get(self, path, token):
         return self.c.get(f"/api/v1{path}", headers=self.h(token))
 
-    def add(self, order, token, data=None, name="p.jpg", ctype="image/jpeg", note=None):
+    def add(self, order, token, data=None, name="p.jpg", ctype="image/jpeg", note=None, key=None):
+        form = {k: v for k, v in {"note": note, "key": key}.items() if v is not None}
         return self.c.post(f"/api/v1/orders/{order['id']}/evidence", headers=self.h(token),
-                           files={"file": (name, data or jpeg(gps=True), ctype)},
-                           data={"note": note} if note is not None else None)
+                           files={"file": (name, data or jpeg(gps=True), ctype)}, data=form or None)
+
+    def evidence_count(self):
+        from vitrina_api.models import OrderEvidence
+        with self.db() as db:
+            return db.query(OrderEvidence).count()
+
+    def disputed(self):
+        _, order = self.delivered()
+        self.post(f"/orders/{order['id']}/dispute", self.buyer, {"reason": "Басқа модель келді"})
+        return order
 
     def test_the_order_keeps_what_the_listing_said(self):
         listing, order = self.ordered()
@@ -2378,6 +2426,69 @@ class DisputeEvidenceTests(ApiTestCase):
         self.assertFalse(b"Almaty" in kept or b"Phone XYZ" in kept)
         broken = b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 100
         self.assertEqual(self.add(order, self.buyer, broken, "v.mp4", "video/mp4").status_code, 415)
+
+    @unittest.skipUnless(promo.available(), "ffmpeg not installed")
+    def test_a_video_that_would_balloon_when_copied_is_refused(self):
+        order = self.disputed()
+        r = self.add(order, self.buyer, amplified(mp4()), "v.mp4", "video/mp4")
+        self.assertEqual((r.status_code, r.json()["code"]), (415, "unsupported_video"))
+        self.assertEqual(self.evidence_count(), 0)
+
+    def test_a_heic_still_is_treated_as_a_photo_not_a_video(self):
+        order = self.disputed()
+        heic = b"\x00\x00\x00\x18ftypheic" + b"\x00" * 200
+        r = self.add(order, self.buyer, heic, "p.heic", "image/heic")
+        self.assertEqual((r.status_code, r.json()["code"]), (415, "unsupported_media"))
+
+    def test_without_ffmpeg_a_video_is_turned_away_as_a_server_problem(self):
+        from unittest import mock
+        order = self.disputed()
+        with mock.patch("vitrina_api.storage.shutil.which", return_value=None):
+            r = self.add(order, self.buyer, b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 100, "v.mp4", "video/mp4")
+        self.assertEqual((r.status_code, r.json()["code"]), (503, "video_unavailable"))
+
+    def test_a_retry_with_the_same_key_adds_no_second_copy(self):
+        order = self.disputed()
+        first = self.add(order, self.buyer, key="k-0123456789")
+        again = self.add(order, self.buyer, key="k-0123456789")
+        self.assertEqual((first.status_code, again.status_code), (201, 201))
+        self.assertEqual(first.json()["id"], again.json()["id"])
+        self.assertEqual(self.evidence_count(), 1)
+        self.assertEqual(self.add(order, self.seller, key="k-0123456789").json()["id"] != first.json()["id"], True)
+
+    def test_tries_are_limited_even_when_refused(self):
+        from vitrina_api.search_routes import SlidingWindowLimiter
+        order = self.disputed()
+        self.app.state.evidence_limiter = SlidingWindowLimiter(2, 3600)
+        for _ in range(2):
+            self.assertEqual(self.add(order, self.buyer, b"hello", "x.txt", "text/plain").status_code, 415)
+        self.assertEqual(self.add(order, self.buyer).json()["code"], "rate_limited")
+
+    def test_an_order_closed_while_the_file_was_cleaned_keeps_no_evidence(self):
+        from unittest import mock
+        from vitrina_api import storage as storage_module
+        order = self.disputed()
+        staff = self.make_staff()
+        real = storage_module.normalize_image
+
+        def resolve_meanwhile(data):
+            self.post(f"/admin/orders/{order['id']}/resolve", staff, {"refund_tiyn": 0, "reason": "Шешілді"})
+            return real(data)
+
+        with mock.patch("vitrina_api.order_routes.normalize_image", side_effect=resolve_meanwhile):
+            r = self.add(order, self.buyer)
+        self.assertEqual((r.status_code, r.json()["code"]), (409, "invalid_status"))
+        self.assertEqual(self.evidence_count(), 0)
+
+    def test_an_order_from_a_description_the_buyer_did_not_see_is_refused(self):
+        listing = self.publish()
+        r = self.c.patch(f"/api/v1/listings/{listing['id']}", headers=self.h(self.seller),
+                         json={"description": "Жаңа сипаттама"})
+        self.assertEqual(r.status_code, 200, r.text)
+        body = {"listing_id": listing["id"], "size_id": listing["sizes"][0]["id"],
+                "photos_version": listing["photos_version"]}
+        r = self.post("/orders", self.buyer, body, **{"Idempotency-Key": "dv1"})
+        self.assertEqual((r.status_code, r.json()["code"]), (409, "photos_changed"))
 
     def test_support_gives_a_reason_for_a_decision(self):
         _, order = self.delivered()

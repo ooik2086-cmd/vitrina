@@ -171,10 +171,12 @@ def listing_cover(listing: Listing) -> str | None:
 
 
 def photos_version(listing: Listing) -> str:
-    """Names the photo set a buyer is looking at. An order placed from an older set is refused, so the copy kept
-    with the order is the set the buyer actually saw, not one swapped in while they were deciding."""
+    """Names the photo set and the text (condition, defects, description) a buyer is looking at. An order placed
+    from an older version is refused, so the copy kept with the order is what the buyer actually saw, not an edit
+    made while they were deciding."""
     shown = sorted(listing.media, key=lambda m: m.position)
-    return hashlib.sha256("\n".join(f"{m.original_url} {m.angle}" for m in shown).encode()).hexdigest()[:16]
+    lines = [f"{m.original_url} {m.angle}" for m in shown] + [details_snapshot(listing)]
+    return hashlib.sha256("\n".join(lines).encode()).hexdigest()[:16]
 
 
 def photo_snapshot(listing: Listing) -> str:
@@ -190,13 +192,13 @@ def details_snapshot(listing: Listing) -> str:
 
 
 def ordered_details(order: Order) -> dict | None:
-    """What the listing said when ordered: its condition and defects as the buyer read them."""
+    """What the listing said when ordered: its condition and defects as the buyer read them. backfilled=True marks
+    orders placed before these copies were kept, filled from the listing as it read on the day of the upgrade."""
     return json.loads(order.listing_details) if order.listing_details else None
 
 
 def evidence_out(order: Order, item) -> dict:
-    side = "buyer" if item.user_id == order.buyer_id else "seller" if item.user_id == order.seller_id else "support"
-    return {"id": item.id, "from": side, "url": item.url, "kind": item.kind, "note": item.note,
+    return {"id": item.id, "from": "buyer" if item.user_id == order.buyer_id else "seller", "url": item.url, "kind": item.kind, "note": item.note,
             "at": services.aware(item.created_at).isoformat()}
 
 

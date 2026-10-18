@@ -31,11 +31,14 @@ def upgrade() -> None:
         sa.Column('url', sa.String(length=500), nullable=False),
         sa.Column('kind', sa.String(length=10), nullable=False),
         sa.Column('note', sa.String(length=500), nullable=True),
+        sa.Column('client_key', sa.String(length=64), nullable=True),
         sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+        sa.UniqueConstraint('order_id', 'user_id', 'client_key', name='uq_order_evidence_key'),
     )
     op.create_index('ix_order_evidence_order_id', 'order_evidence', ['order_id'])
-    # Existing orders: the listing as it reads today is the closest record there is. Until now brand, model and
-    # category were fixed after sale and the condition could only get worse.
+    # Existing orders: the listing as it reads today is the closest record there is, but the seller may have
+    # rewritten the description and defects or marked the condition worse since. Such copies say "backfilled", so
+    # the app and support show them as today's listing, not as what the buyer read.
     bind = op.get_bind()
     listings = sa.table('listings', sa.column('id'), *[sa.column(c) for c in DETAILS])
     orders = sa.table('orders', sa.column('listing_id'), sa.column('listing_details'))
@@ -43,7 +46,7 @@ def upgrade() -> None:
         row = bind.execute(sa.select(listings).where(listings.c.id == listing_id)).first()
         if row is None:
             continue
-        details = json.dumps({c: getattr(row, c) for c in DETAILS}, ensure_ascii=False)
+        details = json.dumps({**{c: getattr(row, c) for c in DETAILS}, 'backfilled': True}, ensure_ascii=False)
         bind.execute(orders.update().where(orders.c.listing_id == listing_id, orders.c.listing_details.is_(None))
                      .values(listing_details=details))
 

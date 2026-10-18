@@ -339,7 +339,9 @@ class OrderEvidence(Base):
     url: Mapped[str] = mapped_column(String(500))
     kind: Mapped[str] = mapped_column(String(10))  # photo | video
     note: Mapped[str | None] = mapped_column(String(500))
+    client_key: Mapped[str | None] = mapped_column(String(64))  # the app's id for the file, so a retry adds no copy
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    __table_args__ = (UniqueConstraint("order_id", "user_id", "client_key", name="uq_order_evidence_key"),)
 
 
 class Review(Base):
