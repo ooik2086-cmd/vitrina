@@ -54,6 +54,8 @@ let tab = 'overview';
 let queues = {};
 const $ = (h) => { const t = document.createElement('template'); t.innerHTML = h.trim(); return t.content; };
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+// Only web addresses become links or images: a javascript: or data: URL from a seller never runs in the console.
+const webUrl = (u) => /^https?:\/\//i.test(String(u ?? '')) ? u : '#';
 const tenge = (t) => Math.floor(t / 100).toLocaleString('ru-RU').replace(/,/g, ' ') + ' ₸';
 const when = (iso) => new Date(iso).toLocaleString('ru-RU', { dateStyle:'short', timeStyle:'short' });
 
@@ -124,8 +126,8 @@ function orderCard(o, withResolve) {
       box.replaceChildren($(`<div>
         <div class="muted">Трек-нөмір: ${esc(ev.tracking_number || '—')} · Қала: ${esc(ev.delivery_city || '—')}${ev.delivered_at ? ' · Жеткізілді: ' + when(ev.delivered_at) : ''}</div>
         ${ev.statements.length ? `<b>Тараптардың сөзі</b><ol class="hist">${ev.statements.map(x => `<li>${when(x.at)} · ${esc(actor(x.actor))}: «${esc(x.reason)}»</li>`).join('')}</ol>` : ''}
-        ${ev.listing_photos ? `<b>Тапсырыс кезіндегі фото</b><div>${ev.listing_photos.filter(p => p.angle !== 'frame').map(p => `<a href="${esc(p.url)}" target="_blank" rel="noopener"><img src="${esc(p.url)}" alt="${esc(p.angle)}" style="width:64px;height:64px;object-fit:cover;background:#f3f2ef"></a>`).join(' ')}${ev.listing_photos.some(p => p.angle === 'frame') ? ` <span class="muted">+ 360°: ${ev.listing_photos.filter(p => p.angle === 'frame').length} кадр</span>` : ''}</div>` : ''}
-        <b>Чат</b>${ev.messages.length ? `<ol class="hist">${ev.messages.map(m => `<li>${when(m.at)} · ${who[m.from]}: ${esc(m.body)}${m.photo_url ? ` <a href="${esc(m.photo_url)}" target="_blank" rel="noopener"><img src="${esc(m.photo_url)}" alt="Чаттағы фото" style="width:64px;height:64px"></a>` : ''}</li>`).join('')}</ol>` : '<div class="muted">Хат жоқ.</div>'}
+        ${ev.listing_photos ? `<b>Тапсырыс кезіндегі фото</b><div>${ev.listing_photos.filter(p => p.angle !== 'frame').map(p => `<a href="${esc(webUrl(p.original_url || p.url))}" target="_blank" rel="noopener" title="Түпнұсқа фото"><img src="${esc(webUrl(p.url))}" alt="${esc(p.angle)}" style="width:64px;height:64px;object-fit:cover;background:#f3f2ef"></a>`).join(' ')}${ev.listing_photos.some(p => p.angle === 'frame') ? ` <span class="muted">+ 360°: ${ev.listing_photos.filter(p => p.angle === 'frame').length} кадр</span>` : ''}</div>` : ''}
+        <b>Чат</b>${ev.messages.length ? `<ol class="hist">${ev.messages.map(m => `<li>${when(m.at)} · ${who[m.from]}: ${esc(m.body)}${m.photo_url ? ` <a href="${esc(webUrl(m.photo_url))}" target="_blank" rel="noopener"><img src="${esc(webUrl(m.photo_url))}" alt="Чаттағы фото" style="width:64px;height:64px"></a>` : ''}</li>`).join('')}</ol>` : '<div class="muted">Хат жоқ.</div>'}
         <b>Ақша қозғалысы</b><table>${led.transactions.map(t => t.entries.map(x => `<tr><td>${esc(t.kind)}</td><td>${esc(x.account)}</td><td>${x.debit ? '−' + tenge(x.debit) : ''}</td><td>${x.credit ? '+' + tenge(x.credit) : ''}</td></tr>`).join('')).join('') || '<tr><td class="muted">Әзірге жоқ</td></tr>'}</table>
       </div>`));
     } catch (x) { box.textContent = x.message; e.target.disabled = false; }

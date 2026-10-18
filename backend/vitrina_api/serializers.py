@@ -1,6 +1,7 @@
 """How models are shown to clients: listings, orders and profiles as JSON."""
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
@@ -85,6 +86,7 @@ def listing_out(db: Session, listing: Listing, *, owner: bool = False) -> dict:
                    **({"quantity": s.quantity} if owner else {})} for s in listing.sizes],
         "media": [{"original_url": m.original_url, "processed_url": m.processed_url, "angle": m.angle}
                   for m in listing.media],
+        "photos_version": photos_version(listing),
         "seller": {"id": seller.id, "shop_name": seller.shop_name, "city": seller.city,  # never the phone
                    "away_until": away_out(seller),
                    **per_request(db, "seller_rating", seller.id, lambda: seller_rating(db, seller.id))},
@@ -166,6 +168,13 @@ def delivery_out(order: Order, viewer: User) -> dict | None:
 
 def listing_cover(listing: Listing) -> str | None:
     return next((m.processed_url or m.original_url for m in listing.media if m.angle != "frame"), None)
+
+
+def photos_version(listing: Listing) -> str:
+    """Names the photo set a buyer is looking at. An order placed from an older set is refused, so the copy kept
+    with the order is the set the buyer actually saw, not one swapped in while they were deciding."""
+    shown = sorted(listing.media, key=lambda m: m.position)
+    return hashlib.sha256("\n".join(f"{m.original_url} {m.angle}" for m in shown).encode()).hexdigest()[:16]
 
 
 def photo_snapshot(listing: Listing) -> str:

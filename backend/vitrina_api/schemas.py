@@ -95,6 +95,8 @@ class OrderIn(BaseModel):
     listing_id: int
     size_id: int
     offer_id: int | None = None  # an accepted price offer for this listing and size
+    # The listing's photos_version as the buyer saw it; older apps leave it out and get today's photos.
+    photos_version: str | None = Field(default=None, max_length=32)
     promo_code: str | None = Field(default=None, max_length=20)  # the seller's code; not with an offer
     delivery: DeliveryIn
 

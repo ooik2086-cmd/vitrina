@@ -21,7 +21,7 @@ from .models import IdempotencyRecord, Listing, ListingSize, Order, OrderEvent, 
 from .api_common import DECLINABLE, IN_DELIVERY, PHONE_RE
 from .schemas import DeliveryIn, OrderIn, ReasonIn, ShipIn
 from .serializers import (away_until, delivery_out, listing_cover, order_out, order_summary, ordered_photos,
-                          photo_snapshot)
+                          photo_snapshot, photos_version)
 
 
 router = APIRouter(prefix="/api/v1")
@@ -69,6 +69,8 @@ def create_order(body: OrderIn, user: User = Depends(current_user), db: Session 
         raise ApiError(404, "not_found")
     if listing.seller_id == user.id:
         raise ApiError(409, "own_listing")
+    if body.photos_version is not None and body.photos_version != photos_version(listing):
+        raise ApiError(409, "photos_changed")  # the buyer looks again at the new photos before paying
     if away_until(db.get(User, listing.seller_id)):
         raise ApiError(409, "seller_away")
     services.ensure_not_blocked(db, user.id, listing.seller_id)

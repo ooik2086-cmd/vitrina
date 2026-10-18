@@ -153,7 +153,10 @@ class _ListingScreenState extends State<ListingScreen> {
     try {
       final session = SessionScope.of(context);
       final order = await session.api.createOrder(listing.id, _sizeId!, _orderKey,
-          delivery: checkout.delivery, offerId: offer?.id, promoCode: checkout.promoCode);
+          delivery: checkout.delivery,
+          offerId: offer?.id,
+          promoCode: checkout.promoCode,
+          photosVersion: listing.photosVersion);
       session.api.me().then(session.update, onError: (_) {}); // the address is remembered for next time
       if (offer != null) _offer = null;
       _orderKey = newIdempotencyKey();
@@ -162,6 +165,8 @@ class _ListingScreenState extends State<ListingScreen> {
       await Navigator.of(context).push(MaterialPageRoute(builder: (_) => OrderScreen(orderId: order.id)));
     } catch (e) {
       if (mounted) showError(context, e);
+      // The seller changed the photos meanwhile: show the new ones, nothing was ordered.
+      if (e is ApiException && e.code == 'photos_changed' && mounted) setState(_loadListing);
     } finally {
       if (mounted) setState(() => _ordering = false);
     }

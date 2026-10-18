@@ -9,6 +9,7 @@ import '../session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/listing_contents.dart' show photoAngles;
+import '../widgets/spin_viewer.dart';
 import '../i18n.dart';
 import 'chat_screen.dart';
 import 'help_screen.dart';
@@ -389,7 +390,19 @@ class _OrderedPhotos extends StatelessWidget {
           backgroundColor: Brand.studio,
           insetPadding: const EdgeInsets.all(16),
           child: Stack(children: [
-            InteractiveViewer(child: Image.network(url, fit: BoxFit.contain)),
+            InteractiveViewer(
+              child: Image.network(url,
+                  fit: BoxFit.contain,
+                  semanticLabel: tr('Тапсырыс берген кездегі фото'),
+                  loadingBuilder: (_, child, progress) => progress == null
+                      ? child
+                      : const SizedBox(height: 240, child: Center(child: CircularProgressIndicator())),
+                  errorBuilder: (_, __, ___) => SizedBox(
+                      height: 240,
+                      child: Center(
+                          child: Text(tr('Фото ашылмады. Байланысты тексеріп, қайта көріңіз.'),
+                              textAlign: TextAlign.center, style: const TextStyle(color: Colors.black87))))),
+            ),
             Positioned(
               top: 4,
               right: 4,
@@ -444,8 +457,29 @@ class _OrderedPhotos extends StatelessWidget {
             ]),
           ),
           if (frames > 0) ...[
-            const SizedBox(height: 8),
-            Text(trf('360° көрініс: {0} кадр', [frames]), style: theme.textTheme.bodySmall),
+            const SizedBox(height: 4),
+            TextButton.icon(
+              key: const Key('ordered-spin'),
+              onPressed: () => showDialog<void>(
+                context: context,
+                builder: (context) => Dialog(
+                  backgroundColor: Brand.studio,
+                  insetPadding: const EdgeInsets.all(16),
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    AspectRatio(
+                      aspectRatio: 1,
+                      child: SpinViewer(frameUrls: [
+                        for (final p in photos)
+                          if (p.angle == 'frame') p.url
+                      ]),
+                    ),
+                    TextButton(onPressed: () => Navigator.pop(context), child: Text(tr('Жабу'))),
+                  ]),
+                ),
+              ),
+              icon: const Icon(Icons.threesixty),
+              label: Text(trf('360° көрініс: {0} кадр', [frames])),
+            ),
           ],
         ]),
       ),

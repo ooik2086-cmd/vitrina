@@ -26,7 +26,7 @@ from .models import (PriceChange, StockAlert, ListingDailyViews, ListingEmbeddin
 from .storage import MAX_UPLOAD_BYTES, Storage, normalize_image
 from .api_common import ALMATY, DEFECT_REQUIRED, MAX_LISTING_MEDIA, MAX_LISTING_SIZES, MIN_SPIN_FRAMES, log
 from .schemas import ListingIn, ListingPatch, PhotoIn, ReportIn
-from .serializers import cm_to_mm, listing_out, mark_price_change, was_price
+from .serializers import cm_to_mm, listing_out, mark_price_change, photo_snapshot, was_price
 from .saved_search_routes import announce
 
 
@@ -317,11 +317,14 @@ def edit_contents(db: Session, cfg: Settings, storage: Storage, listing: Listing
         if 0 < frames < MIN_SPIN_FRAMES:
             raise ApiError(422, "too_few_frames")
         if [(m.original_url, m.angle) for m in listing.media] != [(p.url, p.angle) for p in body.photos]:
-            # A listing that was on sale stays complete: orders keep their own copy of the photos they were placed on.
-            if not fresh and sum(p.angle != "frame" for p in body.photos) < cfg.min_listing_photos:
-                raise ApiError(422, "missing_required_photos")
+            if not fresh:
+                check_replacement(db, cfg, listing, body.photos)
+                # Orders placed before copies were kept get one now, from the photos they were placed on.
+                db.execute(update(Order).where(Order.listing_id == listing.id, Order.listing_photos.is_(None))
+                           .values(listing_photos=photo_snapshot(listing)))
             replace_photos(listing, body.photos)
             changed.add("photos")
+            listing.promo_state, listing.promo_url = None, None  # the promo video showed the old photos
     if added:
         added_frames = sum(p.angle == "frame" for p in added)
         if added_frames:
@@ -347,6 +350,28 @@ def edit_contents(db: Session, cfg: Settings, storage: Storage, listing: Listing
                                              quantity=size.quantity))
         db.flush()
     return changed
+
+
+REQUIRED_ANGLES = ("front", "outer", "inner", "back")
+
+
+def count_stills(angles: list[str]) -> int:
+    return sum(a != "frame" for a in angles)
+
+
+def check_replacement(db: Session, cfg: Settings, listing: Listing, photos: list[PhotoIn]) -> None:
+    """A listing that was on sale may change its photos but stays as complete as it was: the main sides it showed
+    are still shown, defect close-ups are not fewer, and the count publishing asks for is kept (a listing that
+    already had fewer keeps at least what it had). Orders keep their own copy of what they were placed on."""
+    if db.scalar(select(ListingReport.id).where(ListingReport.listing_id == listing.id,
+                                                ListingReport.status == "open").limit(1)):
+        raise ApiError(409, "under_review")  # staff judge the photos that were reported, not their replacement
+    had = [m.angle for m in listing.media]
+    new = [p.angle for p in photos]
+    if (any(a in had and a not in new for a in REQUIRED_ANGLES) or new.count("defect") < had.count("defect")):
+        raise ApiError(422, "photo_set_incomplete")
+    if count_stills(new) < min(cfg.min_listing_photos, count_stills(had)):
+        raise ApiError(422, "missing_required_photos")
 
 
 def replace_photos(listing: Listing, photos: list[PhotoIn]) -> None:

@@ -2244,7 +2244,7 @@ class ListingEditTests(ApiTestCase):
         lid = listing["id"]
         new = [{"url": f"https://cdn.example/new{i}.jpg", "angle": a}
                for i, a in enumerate(["front", "outer", "inner", "back"])]
-        self.assertEqual(self.patch(lid, {"photos": new[:3]}).json()["code"], "missing_required_photos")
+        self.assertEqual(self.patch(lid, {"photos": new[:3]}).json()["code"], "photo_set_incomplete")
         got = self.patch(lid, {"photos": new})
         self.assertEqual(got.status_code, 200, got.text)
         self.assertEqual([m["original_url"] for m in got.json()["media"]], [p["url"] for p in new])
@@ -2254,6 +2254,40 @@ class ListingEditTests(ApiTestCase):
         staff = self.make_staff()
         evidence = self.c.get(f"/api/v1/admin/orders/{order['id']}/evidence", headers=self.h(staff)).json()
         self.assertEqual(len(evidence["listing_photos"]), len(PHOTOS))
+
+    def test_an_order_from_photos_the_buyer_did_not_see_is_refused(self):
+        listing = self.publish()
+        body = {"listing_id": listing["id"], "size_id": listing["sizes"][0]["id"], "photos_version": "0" * 16}
+        r = self.post("/orders", self.buyer, body, **{"Idempotency-Key": "pv1"})
+        self.assertEqual((r.status_code, r.json()["code"]), (409, "photos_changed"))
+        body["photos_version"] = listing["photos_version"]
+        self.assertEqual(self.post("/orders", self.buyer, body, **{"Idempotency-Key": "pv2"}).status_code, 201)
+
+    def test_a_replacement_keeps_the_main_sides_and_the_defect_close_ups(self):
+        with_defect = PHOTOS + [{"url": "https://cdn.example/d1.jpg", "angle": "defect"}]
+        lid = self.publish(condition="used_good", defects="Ұлтанында сызат", photos=with_defect)["id"]
+        no_back = [p for p in with_defect if p["angle"] != "back"] + [{"url": "https://cdn.example/t.jpg", "angle": "top"}]
+        self.assertEqual(self.patch(lid, {"photos": no_back}).json()["code"], "photo_set_incomplete")
+        self.assertEqual(self.patch(lid, {"photos": PHOTOS}).json()["code"], "photo_set_incomplete")
+        better = PHOTOS + [{"url": "https://cdn.example/d2.jpg", "angle": "defect"}]
+        self.assertEqual(self.patch(lid, {"photos": better}).status_code, 200)
+
+    def test_reported_photos_stay_until_staff_have_looked(self):
+        lid = self.publish()["id"]
+        self.post(f"/listings/{lid}/report", self.buyer, {"reason": "wrong_photos", "text": "Басқа аяқ киім"})
+        new = [{**p, "url": p["url"].replace("/p", "/q")} for p in PHOTOS]
+        self.assertEqual(self.patch(lid, {"photos": new}).json()["code"], "under_review")
+
+    def test_orders_from_before_copies_were_kept_get_one_before_the_photos_change(self):
+        from vitrina_api.models import Order
+        listing, order = self.ordered()
+        with self.db() as db:
+            db.get(Order, order["id"]).listing_photos = None
+            db.commit()
+        new = [{**p, "url": p["url"].replace("/p", "/q")} for p in PHOTOS]
+        self.assertEqual(self.patch(listing["id"], {"photos": new}).status_code, 200)
+        seen = self.c.get(f"/api/v1/orders/{order['id']}", headers=self.h(self.buyer)).json()["listing_photos"]
+        self.assertEqual([p["original_url"] for p in seen], [p["url"] for p in PHOTOS])
 
     def test_others_files_cannot_be_added(self):
         lid = self.publish()["id"]

@@ -22,10 +22,11 @@ String errorText(Object? error) => error is ApiException ? error.message : tr('Ð
 /// Widest a screen's text column grows on a tablet or the web; phones are narrower than this anyway.
 const maxContentWidth = 640.0;
 
-/// [base] padding widened at the sides so the content stays [maxContentWidth] wide and centred.
+/// [base] padding widened at the sides so the column, padding included, stays [maxContentWidth] wide and centred,
+/// the same box [ContentWidth] draws, so capped lists, rows and chip strips line up on a wide screen.
 /// For lists, so the whole screen still scrolls and only the column narrows.
 EdgeInsets contentPadding(BuildContext context, EdgeInsets base) {
-  final extra = (MediaQuery.sizeOf(context).width - base.horizontal - maxContentWidth) / 2;
+  final extra = (MediaQuery.sizeOf(context).width - maxContentWidth) / 2;
   return extra <= 0 ? base : base.copyWith(left: base.left + extra, right: base.right + extra);
 }
 

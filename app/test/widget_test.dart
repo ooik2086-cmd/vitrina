@@ -719,6 +719,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Shoe 1'), findsOneWidget);
     expect(find.text('Shoe 2'), findsNothing);
+    await tester.ensureVisible(find.byKey(const Key('orders-buyer-done'))); // the chip strip scrolls sideways
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('orders-buyer-done')));
     await tester.pumpAndSettle();
     expect(find.text('Shoe 3'), findsOneWidget);
@@ -2245,9 +2247,12 @@ void main() {
     await tester.scrollUntilVisible(find.byKey(const Key('ordered-photos')), 200,
         scrollable: find.byType(Scrollable).first);
     expect(find.text('Тапсырыс берген кездегі фото'), findsOneWidget);
-    expect(
-        find.descendant(of: find.byKey(const Key('ordered-photos')), matching: find.byType(InkWell)), findsNWidgets(2));
+    expect(find.descendant(of: find.byKey(const Key('ordered-photos')), matching: find.byType(ClipRRect)),
+        findsNWidgets(2));
     expect(find.text('360° көрініс: 8 кадр'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('ordered-spin')));
+    await tester.pump();
+    expect(find.byType(SpinViewer), findsOneWidget);
   });
 
   testWidgets('confirming receipt asks first and says where the money goes', (tester) async {
@@ -2620,7 +2625,10 @@ void main() {
         ...listingJson(media: [...five, ...frames]),
         'ever_on_sale': true
       });
-      expect(find.byKey(const Key('remove-photo-0')), findsOneWidget);
+      expect(find.byKey(const Key('remove-photo-0')), findsNothing); // the front stays: buyers judge by it
+      tester.view.physicalSize = const Size(800, 2400);
+      await tester.pump();
+      expect(find.byKey(const Key('remove-photo-4')), findsOneWidget); // an extra one may go
       await tester.tap(find.byKey(const Key('remove-spin')));
       await tester.pumpAndSettle();
       expect(find.text('360° көріністі өшіру керек пе?'), findsOneWidget);

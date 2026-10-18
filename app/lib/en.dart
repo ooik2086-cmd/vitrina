@@ -884,11 +884,12 @@ const en = <String, String>{
   'Сатып алушылар таңдаған бренд, модель және санат өзгермейді. Күйін тек нашарлатып белгілеуге болады.':
       'The brand, model and category buyers chose stay fixed. The condition can only be marked worse.',
   'Тапсырыс берген кездегі фото': 'Photos when ordered',
-  'Фотоны ауыстыруға болады. Бұрын тапсырыс бергендер өздері көрген фотоны тапсырыс ішінен көреді.':
-      'You can replace photos. Buyers who already ordered see the photos they ordered from in their order.',
   '{0} мин': '{0} min',
   '{0} сек': '{0} s',
   'Жаңа код жіберілді. Бұрынғы код та жарамды.': 'A new code was sent. The earlier one still works too.',
   'Жаңа код: {0} кейін': 'New code in {0}',
   'Код {0} нөміріне жіберілді': 'Code sent to {0}',
+  'Жаңа фото қосып, қосымша фотоны өшіруге болады. Негізгі төрт жақ пен ақау фотолары қалады. Тапсырыс бергендер өздері көрген фотоны тапсырыс ішінен көреді.':
+      'You can add new photos and delete extra ones. The four main sides and defect close-ups stay. Buyers see the photos they ordered from in their order.',
+  'Фото ашылмады. Байланысты тексеріп, қайта көріңіз.': 'The photo did not open. Check the connection and try again.',
 };

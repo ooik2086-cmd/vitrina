@@ -438,13 +438,17 @@ class Listing {
         soldRecently = ((j['popularity'] as Map?)?['sold_30d'] as int?) ?? 0,
         savedBy = ((j['popularity'] as Map?)?['favorites'] as int?) ?? 0,
         modelName = j['model_name'] as String?,
-        everOnSale = (j['ever_on_sale'] as bool?) ?? false;
+        everOnSale = (j['ever_on_sale'] as bool?) ?? false,
+        photosVersion = j['photos_version'] as String?;
 
   final int id;
   final String status;
 
   /// Owner view only: once on sale the shoe itself (brand, model, category, photos) is fixed for good.
   final bool everOnSale;
+
+  /// Names the photo set shown; sent with an order so it is placed on the photos the buyer actually saw.
+  final String? photosVersion;
   final String title;
   final String category;
   final String? brand;
@@ -1105,13 +1109,14 @@ class Api {
   // orders
   /// [idempotencyKey] must stay the same when the same tap is retried, so a lost response never creates two orders.
   Future<OrderInfo> createOrder(int listingId, int sizeId, String idempotencyKey,
-          {required Delivery delivery, int? offerId, String? promoCode}) async =>
+          {required Delivery delivery, int? offerId, String? promoCode, String? photosVersion}) async =>
       OrderInfo.fromJson(await _send('POST', '/orders', body: {
         'listing_id': listingId,
         'size_id': sizeId,
         'delivery': delivery.toJson(),
         if (offerId != null) 'offer_id': offerId,
         if (promoCode != null) 'promo_code': promoCode,
+        if (photosVersion != null) 'photos_version': photosVersion,
       }, headers: {
         'Idempotency-Key': idempotencyKey
       }) as Map<String, dynamic>);

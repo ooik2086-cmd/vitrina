@@ -12,6 +12,7 @@ import 'common.dart';
 
 /// The server's own minimum (Settings.min_listing_photos) for a listing that is or was on sale.
 const _minPhotosOnSale = 4;
+const _requiredAngles = {'front', 'outer', 'inner', 'back'};
 
 const photoAngles = {...requiredAngles, ...optionalAngles, 'defect': 'Ақау, жақыннан'};
 
@@ -250,14 +251,22 @@ class _ListingContentsCardState extends State<ListingContentsCard> {
         if (_l.media[i].angle != 'frame') i
     ];
     final frames = _l.media.where((m) => m.angle == 'frame').length;
-    // A listing on sale keeps at least the photos publishing needs; orders keep their own copy of what was shown.
-    final removable = photos.length > (_l.everOnSale ? _minPhotosOnSale : 1);
+    // The server's rule for a listing that was on sale: the main sides and defect close-ups stay, and so does the
+    // count publishing asks for. Orders keep their own copy of what they were placed on.
+    bool removable(int i) {
+      if (!_l.everOnSale) return photos.length > 1;
+      final angle = _l.media[i].angle;
+      if (angle == 'defect' || photos.length <= _minPhotosOnSale) return false;
+      return !_requiredAngles.contains(angle) || photos.where((j) => _l.media[j].angle == angle).length > 1;
+    }
+
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Text(tr('Фото, 360° және өлшемдер'), style: theme.textTheme.titleMedium),
       const SizedBox(height: 4),
       Text(
         _l.everOnSale
-            ? tr('Фотоны ауыстыруға болады. Бұрын тапсырыс бергендер өздері көрген фотоны тапсырыс ішінен көреді.')
+            ? tr(
+                'Жаңа фото қосып, қосымша фотоны өшіруге болады. Негізгі төрт жақ пен ақау фотолары қалады. Тапсырыс бергендер өздері көрген фотоны тапсырыс ішінен көреді.')
             : tr('Қосқан әр фото мен өлшем бірден сақталады.'),
         style: theme.textTheme.bodySmall,
       ),
@@ -291,7 +300,7 @@ class _ListingContentsCardState extends State<ListingContentsCard> {
                       ),
                     ),
                   ),
-                  if (removable)
+                  if (removable(i))
                     Positioned(
                       top: 0,
                       right: 0,
