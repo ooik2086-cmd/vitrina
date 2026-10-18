@@ -788,8 +788,6 @@ const en = <String, String>{
   'Ақша сізге толық қайтарылады, тапсырыс жабылады.': 'You get a full refund and the order is closed.',
   'Белгіленді. Аяқкиімді тексеріп көріңіз.': 'Noted. Now check the shoes.',
   'Бәрі дұрыс па?': 'Is everything all right?',
-  'Дау ашылды. Қолдау қызметі екі жақты да тыңдап, шешім шығарады.':
-      'Dispute opened. Support will hear both sides and decide.',
   'Енді төлеңіз': 'Now pay',
   'Жіберілді деп белгіленді.': 'Marked as shipped.',
   'Неге келіспейсіз? Қолдау қызметі осыны оқиды.': 'Why do you disagree? Support will read this.',
@@ -824,12 +822,10 @@ const en = <String, String>{
   'Фотоны алып тастау': 'Remove photo',
   'Қабылданды. Енді аяқкиімді жіберіңіз.': 'Accepted. Now ship the shoes.',
   'Қайтару мақұлданды.': 'Return approved.',
-  'Қайтару сұрауы сатушыға жіберілді.': 'Return request sent to the seller.',
   'Қайтаруды мақұлдау керек пе?': 'Approve the return?',
   'Қайтаруды қолдау қызметі шешеді. Шешім шыққанша ақша ешкімге өтпейді.':
       'Support decides the return. Until it does, the money goes to no one.',
   'Қайтаруға келіспеу': 'Contest the return',
-  'Қолдау қызметіне жіберілді.': 'Sent to support.',
   '8–35 см аралығында болуы керек': 'Must be between 8 and 35 cm',
   'Атауы кемінде 3 таңбадан тұрсын': 'The title needs at least 3 characters',
   'Жоба ретінде сақталды': 'Saved as a draft',
@@ -892,4 +888,30 @@ const en = <String, String>{
   'Жаңа фото қосып, қосымша фотоны өшіруге болады. Негізгі төрт жақ пен ақау фотолары қалады. Тапсырыс бергендер өздері көрген фотоны тапсырыс ішінен көреді.':
       'You can add new photos and delete extra ones. The four main sides and defect close-ups stay. Buyers see the photos they ordered from in their order.',
   'Фото ашылмады. Байланысты тексеріп, қайта көріңіз.': 'The photo did not open. Check the connection and try again.',
+  'Аяқкиімді, қорапты және жапсырманы анық түсіріңіз. Жіберген соң өшіруге болмайды.':
+      'Take clear shots of the shoes, the box and the label. Once sent, it cannot be deleted.',
+  'Ақаулар: {0}': 'Defects: {0}',
+  'Видео (1 минутқа дейін)': 'Video (up to 1 minute)',
+  'Видеоны ашу': 'Open the video',
+  'Дау ашылды. Төменде фото не видео дәлел қосыңыз: қолдау қызметі соны қарап шешеді.':
+      'Dispute opened. Add photos or a video below: support decides on them.',
+  'Дәлел қосу': 'Add evidence',
+  'Дәлел қосу ({0} қалды)': 'Add evidence ({0} left)',
+  'Дәлел қосылды': 'Evidence added',
+  'Дәлелдер': 'Evidence',
+  'Дәлелдер саны шегіне жетті.': 'You have reached the evidence limit.',
+  'Екі тарап та, қолдау қызметі де көреді. Жіберілген дәлелді өзгертуге не өшіруге болмайды.':
+      'Both sides and support can see these. Sent evidence cannot be changed or deleted.',
+  'Мысалы: оң аяқтың табаны жарылған': 'For example: the right sole is cracked',
+  'Сатып алушы': 'Buyer',
+  'Сіз': 'You',
+  'Тапсырыс берген кездегі сипаттама': 'Description when ordered',
+  'Түсініктеме': 'Comment',
+  'Файл тым үлкен: 12 МБ-қа дейін. Қысқарақ видео түсіріңіз.':
+      'The file is too large: 12 MB at most. Record a shorter video.',
+  'Фотоны ашу': 'Open the photo',
+  'Қайтару сұрауы сатушыға жіберілді. Төменде ақаудың фотосын қосыңыз.':
+      'Return request sent to the seller. Add a photo of the defect below.',
+  'Қолдау қызметіне жіберілді. Төменде өз дәлеліңізді қосыңыз.': 'Sent to support. Add your evidence below.',
+  'Әзірге дәлел жоқ.': 'No evidence yet.',
 };

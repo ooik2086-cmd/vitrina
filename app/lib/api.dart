@@ -640,6 +640,8 @@ class OrderInfo {
           for (final p in (j['listing_photos'] as List?) ?? const [])
             (url: (p as Map)['url'] as String, angle: p['angle'] as String),
         ],
+        listingDetails = (j['listing_details'] as Map?)?.cast<String, dynamic>(),
+        evidence = [for (final e in (j['evidence'] as List?) ?? const []) Evidence.fromJson(e as Map<String, dynamic>)],
         history = [
           for (final h in (j['history'] as List?) ?? const [])
             (status: (h as Map)['status'] as String, at: DateTime.parse(h['at'] as String).toLocal()),
@@ -670,9 +672,31 @@ class OrderInfo {
   /// Empty in lists and for orders placed before these copies were kept.
   final List<({String url, String angle})> orderedPhotos;
 
+  /// What the listing said when ordered: title, brand, model_name, color, category, condition, defects, description.
+  final Map<String, dynamic>? listingDetails;
+
+  /// Photos and videos the buyer and the seller added to a return or dispute, oldest first.
+  final List<Evidence> evidence;
+
   /// When the order cancels itself (unpaid) or refunds itself (seller silent), if nobody acts first.
   final DateTime? deadline;
   final List<({String status, DateTime at})> history;
+}
+
+class Evidence {
+  Evidence.fromJson(Map<String, dynamic> j)
+      : id = j['id'] as int,
+        from = j['from'] as String,
+        url = j['url'] as String,
+        kind = j['kind'] as String,
+        note = j['note'] as String?,
+        at = DateTime.parse(j['at'] as String).toLocal();
+  final int id;
+  final String from; // buyer | seller
+  final String url;
+  final String kind; // photo | video
+  final String? note;
+  final DateTime at;
 }
 
 class Me {
@@ -1215,6 +1239,15 @@ class Api {
       ..headers.addAll({'Accept': 'application/json', if (token != null) 'Authorization': 'Bearer $token'})
       ..files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
     return (await _upload(req) as Map)['url'] as String;
+  }
+
+  /// A photo or MP4 for an open return or dispute. It cannot be taken back once sent.
+  Future<Evidence> addEvidence(int orderId, List<int> bytes, String filename, {String? note}) async {
+    final req = http.MultipartRequest('POST', Uri.parse('$base/orders/$orderId/evidence'))
+      ..headers.addAll({'Accept': 'application/json', if (token != null) 'Authorization': 'Bearer $token'})
+      ..files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
+    if (note != null && note.isNotEmpty) req.fields['note'] = note;
+    return Evidence.fromJson(await _upload(req) as Map<String, dynamic>);
   }
 
   /// Answered questions for everyone; the asker's own and, for the seller, all of them. [unanswered] is the

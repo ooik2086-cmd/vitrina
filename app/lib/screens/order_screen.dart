@@ -1,7 +1,9 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../api.dart';
 import '../labels.dart';
@@ -47,7 +49,7 @@ List<_Action> _actionsFor(OrderInfo o, {required bool isBuyer}) {
       needs: 'reason',
       destructive: true,
       explain: tr('Тапсырысты қолдау қызметі қарайды. Шешім шыққанша ақша ешкімге өтпейді.'),
-      done: tr('Дау ашылды. Қолдау қызметі екі жақты да тыңдап, шешім шығарады.'));
+      done: tr('Дау ашылды. Төменде фото не видео дәлел қосыңыз: қолдау қызметі соны қарап шешеді.'));
   if (isBuyer) {
     return switch (o.status) {
       'CREATED' => [_Action(tr('Төлеу'), 'pay'), cancel],
@@ -77,7 +79,7 @@ List<_Action> _actionsFor(OrderInfo o, {required bool isBuyer}) {
           _Action(tr('Қайтару'), 'return',
               needs: 'reason',
               explain: tr('Сатушы қайтаруды мақұлдаса, ақша сізге қайтарылады. Келіспесе, қолдау қызметі шешеді.'),
-              done: tr('Қайтару сұрауы сатушыға жіберілді.')),
+              done: tr('Қайтару сұрауы сатушыға жіберілді. Төменде ақаудың фотосын қосыңыз.')),
           dispute,
         ],
       'RETURN_REQUESTED' => [dispute],
@@ -105,7 +107,7 @@ List<_Action> _actionsFor(OrderInfo o, {required bool isBuyer}) {
             destructive: true,
             hint: tr('Неге келіспейсіз? Қолдау қызметі осыны оқиды.'),
             explain: tr('Қайтаруды қолдау қызметі шешеді. Шешім шыққанша ақша ешкімге өтпейді.'),
-            done: tr('Қолдау қызметіне жіберілді.')),
+            done: tr('Қолдау қызметіне жіберілді. Төменде өз дәлеліңізді қосыңыз.')),
       ],
     _ => const [],
   };
@@ -312,6 +314,19 @@ class _OrderScreenState extends State<OrderScreen> {
                   _OrderedPhotos(photos: o.orderedPhotos),
                   const SizedBox(height: 16),
                 ],
+                if (o.listingDetails != null) ...[
+                  _OrderedDetails(details: o.listingDetails!),
+                  const SizedBox(height: 16),
+                ],
+                if (o.evidence.isNotEmpty || _evidenceOpen.contains(o.status)) ...[
+                  _EvidenceCard(
+                    order: o,
+                    canAdd: _evidenceOpen.contains(o.status) && (me?.id == o.buyerId || me?.id == o.sellerId),
+                    meId: me?.id,
+                    onAdded: _refresh,
+                  ),
+                  const SizedBox(height: 16),
+                ],
                 _Timeline(order: o),
                 const SizedBox(height: 16),
                 const _ProtectionNote(),
@@ -359,6 +374,236 @@ class _OrderScreenState extends State<OrderScreen> {
   }
 }
 
+/// While a return or dispute is open, both sides may add photos or a video; support decides on them.
+const _evidenceOpen = {'RETURN_REQUESTED', 'DISPUTED'};
+const _maxEvidence = 10;
+const _maxUploadBytes = 12 * 1024 * 1024;
+
+/// What the listing said when the order was placed: the condition and defects the buyer agreed to.
+class _OrderedDetails extends StatelessWidget {
+  const _OrderedDetails({required this.details});
+  final Map<String, dynamic> details;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final name = [details['brand'], details['model_name'], details['color']]
+        .whereType<String>()
+        .where((v) => v.isNotEmpty)
+        .join(' · ');
+    final defects = (details['defects'] as String?)?.trim() ?? '';
+    final description = (details['description'] as String?)?.trim() ?? '';
+    return Card(
+      key: const Key('ordered-details'),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(tr('Тапсырыс берген кездегі сипаттама'), style: theme.textTheme.titleSmall),
+          const SizedBox(height: 8),
+          if (name.isNotEmpty) Text(name),
+          Text(trf('Күйі: {0}', [label(conditions, details['condition'] as String?)])),
+          if (defects.isNotEmpty) Text(trf('Ақаулар: {0}', [defects])),
+          if (description.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(description, style: theme.textTheme.bodySmall),
+          ],
+        ]),
+      ),
+    );
+  }
+}
+
+/// Photos and videos each side added to the return or dispute. Nothing here can be edited or removed.
+class _EvidenceCard extends StatefulWidget {
+  const _EvidenceCard({required this.order, required this.canAdd, required this.meId, required this.onAdded});
+  final OrderInfo order;
+  final bool canAdd;
+  final int? meId;
+  final Future<void> Function() onAdded;
+
+  @override
+  State<_EvidenceCard> createState() => _EvidenceCardState();
+}
+
+class _EvidenceCardState extends State<_EvidenceCard> {
+  bool _uploading = false;
+
+  int get _mine => widget.order.evidence.where((e) => _side(e.from) == widget.meId).length;
+
+  int? _side(String from) => from == 'buyer' ? widget.order.buyerId : widget.order.sellerId;
+
+  Future<XFile?> _pick() async {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          ListTile(
+            title: Text(tr('Дәлел қосу')),
+            subtitle: Text(tr('Аяқкиімді, қорапты және жапсырманы анық түсіріңіз. Жіберген соң өшіруге болмайды.')),
+          ),
+          ListTile(
+            key: const Key('evidence-camera'),
+            leading: const Icon(Icons.photo_camera_outlined),
+            title: Text(tr('Камера')),
+            onTap: () => Navigator.pop(context, 'camera'),
+          ),
+          ListTile(
+            key: const Key('evidence-gallery'),
+            leading: const Icon(Icons.photo_library_outlined),
+            title: Text(tr('Галерея')),
+            onTap: () => Navigator.pop(context, 'gallery'),
+          ),
+          ListTile(
+            key: const Key('evidence-video'),
+            leading: const Icon(Icons.videocam_outlined),
+            title: Text(tr('Видео (1 минутқа дейін)')),
+            onTap: () => Navigator.pop(context, 'video'),
+          ),
+        ]),
+      ),
+    );
+    final picker = ImagePicker();
+    return switch (choice) {
+      'camera' => picker.pickImage(source: ImageSource.camera, maxWidth: 1600, imageQuality: 90),
+      'gallery' => picker.pickImage(source: ImageSource.gallery, maxWidth: 1600, imageQuality: 90),
+      'video' => picker.pickVideo(source: ImageSource.gallery, maxDuration: const Duration(minutes: 1)),
+      _ => Future.value(null),
+    };
+  }
+
+  /// Null when cancelled, '' when sent without a note. The controller is left to the collector: disposing it here
+  /// would break the dialog's closing animation.
+  Future<String?> _note() {
+    final ctrl = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(tr('Түсініктеме')),
+        content: TextField(
+          key: const Key('evidence-note'),
+          controller: ctrl,
+          maxLength: 500,
+          maxLines: 3,
+          decoration: InputDecoration(hintText: tr('Мысалы: оң аяқтың табаны жарылған')),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: Text(tr('Бас тарту'))),
+          FilledButton(
+              key: const Key('evidence-send'),
+              onPressed: () => Navigator.pop(context, ctrl.text.trim()),
+              child: Text(tr('Жіберу'))),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _add() async {
+    final file = await _pick();
+    if (file == null || !mounted) return;
+    final bytes = await file.readAsBytes();
+    if (!mounted) return;
+    if (bytes.length > _maxUploadBytes) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(tr('Файл тым үлкен: 12 МБ-қа дейін. Қысқарақ видео түсіріңіз.'))));
+      return;
+    }
+    final note = await _note();
+    if (note == null || !mounted) return; // cancelled
+    setState(() => _uploading = true);
+    try {
+      await SessionScope.of(context).api.addEvidence(widget.order.id, bytes, file.name, note: note);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr('Дәлел қосылды'))));
+      }
+      await widget.onAdded();
+    } catch (e) {
+      if (mounted) showError(context, e);
+    } finally {
+      if (mounted) setState(() => _uploading = false);
+    }
+  }
+
+  Widget _tile(Evidence e) {
+    final video = e.kind == 'video';
+    final who = _side(e.from) == widget.meId ? tr('Сіз') : (e.from == 'buyer' ? tr('Сатып алушы') : tr('Сатушы'));
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Semantics(
+          button: true,
+          label: video ? tr('Видеоны ашу') : tr('Фотоны ашу'),
+          child: InkWell(
+            key: Key('evidence-${e.id}'),
+            borderRadius: BorderRadius.circular(12),
+            onTap: video
+                ? () => launchUrl(Uri.parse(e.url), mode: LaunchMode.externalApplication)
+                : () => _OrderedPhotos.open(context, e.url),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: ColoredBox(
+                color: Brand.studio,
+                child: SizedBox(
+                  width: 72,
+                  height: 72,
+                  child: video
+                      ? const Icon(Icons.play_circle_outline, size: 36, color: Colors.black87)
+                      : Image.network(e.url,
+                          cacheWidth: 216,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => const Icon(Icons.image_outlined, color: Colors.black54)),
+                ),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('$who · ${formatDay(e.at)}', style: Theme.of(context).textTheme.labelMedium),
+            if (e.note != null) Text(e.note!),
+          ]),
+        ),
+      ]),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final left = _maxEvidence - _mine;
+    return Card(
+      key: const Key('evidence'),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(tr('Дәлелдер'), style: theme.textTheme.titleSmall),
+          const SizedBox(height: 2),
+          Text(tr('Екі тарап та, қолдау қызметі де көреді. Жіберілген дәлелді өзгертуге не өшіруге болмайды.'),
+              style: theme.textTheme.bodySmall),
+          const SizedBox(height: 10),
+          if (widget.order.evidence.isEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(tr('Әзірге дәлел жоқ.'), style: theme.textTheme.bodyMedium),
+            ),
+          for (final e in widget.order.evidence) _tile(e),
+          if (widget.canAdd)
+            left > 0
+                ? OutlinedButton.icon(
+                    key: const Key('add-evidence'),
+                    onPressed: _uploading ? null : _add,
+                    icon: _uploading
+                        ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Icon(Icons.add_a_photo_outlined),
+                    label: Text(trf('Дәлел қосу ({0} қалды)', [left])),
+                  )
+                : Text(tr('Дәлелдер саны шегіне жетті.'), style: theme.textTheme.bodySmall),
+        ]),
+      ),
+    );
+  }
+}
+
 /// Plain text of the order for a messenger or a note. Not a fiscal receipt: that comes from the payment partner.
 String orderSummaryText(OrderInfo o) {
   final lines = [
@@ -384,7 +629,7 @@ class _OrderedPhotos extends StatelessWidget {
   const _OrderedPhotos({required this.photos});
   final List<({String url, String angle})> photos;
 
-  void _open(BuildContext context, String url) => showDialog<void>(
+  static void open(BuildContext context, String url) => showDialog<void>(
         context: context,
         builder: (context) => Dialog(
           backgroundColor: Brand.studio,
@@ -437,7 +682,7 @@ class _OrderedPhotos extends StatelessWidget {
                   padding: const EdgeInsets.only(right: 8),
                   child: InkWell(
                     borderRadius: BorderRadius.circular(12),
-                    onTap: () => _open(context, p.url),
+                    onTap: () => open(context, p.url),
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(12),
                       child: ColoredBox(
