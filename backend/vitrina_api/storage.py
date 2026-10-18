@@ -102,6 +102,9 @@ def normalize_image(data: bytes, max_side: int = MAX_SIDE_PX) -> bytes:
         img = Image.open(io.BytesIO(data))
         if img.format not in ALLOWED_FORMATS:
             raise ApiError(415, "unsupported_media", f"format {img.format}")
+        # Pillow only warns between the limit and twice it; refuse before decoding anything that large.
+        if img.width * img.height > Image.MAX_IMAGE_PIXELS:
+            raise ApiError(415, "unsupported_media", f"{img.width}x{img.height} is too many pixels")
         img = ImageOps.exif_transpose(img)
         img.load()
     except (UnidentifiedImageError, Image.DecompressionBombError, OSError) as exc:

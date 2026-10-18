@@ -40,7 +40,7 @@ def search_text(body: ListingIn) -> str:
 @router.post("/media", status_code=201)
 def upload_photo(file: UploadFile = File(...), detail: bool = False, user: User = Depends(current_user),
                        storage: Storage = Depends(get_storage)):
-    """[detail] keeps a top, sole or label close-up larger, so its stitching is still sharp when zoomed in."""
+    """[detail] keeps a top, sole or close-up photo larger, so its stitching is still sharp when zoomed in."""
     if not user.is_seller:
         raise ApiError(403, "seller_required")
     data = file.file.read(MAX_UPLOAD_BYTES + 1)
@@ -50,7 +50,7 @@ def upload_photo(file: UploadFile = File(...), detail: bool = False, user: User 
 
 
 # Labels and defect close-ups stay as taken: their surroundings are part of what they prove.
-CUTOUT_ANGLES = {"front", "outer", "inner", "back", "top", "sole", "frame"}
+CUTOUT_ANGLES = {"front", "outer", "inner", "back", "top", "sole", "detail", "frame"}
 
 
 def cutout_listing(state, listing_id: int) -> int:

@@ -122,7 +122,7 @@ class Media(Base):
     processed_url: Mapped[str | None] = mapped_column(String(500))
     # A small copy (480 px) of processed_url or original_url, shown while the showcase is being scrolled.
     thumb_url: Mapped[str | None] = mapped_column(String(500))
-    angle: Mapped[str] = mapped_column(String(20))  # front|outer|inner|back|top|sole|label|defect|frame
+    angle: Mapped[str] = mapped_column(String(20))  # front|outer|inner|back|top|sole|detail|label|defect|frame
     position: Mapped[int] = mapped_column(Integer, default=0)
     phash: Mapped[str | None] = mapped_column(String(16), index=True)  # difference hash, for reused photos
 

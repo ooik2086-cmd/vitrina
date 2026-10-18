@@ -12,10 +12,15 @@ import '../i18n.dart';
 
 /// Required angles first; the server refuses to publish with fewer than four photos.
 const requiredAngles = {'front': 'Алдынан', 'outer': 'Сырт бүйірі', 'inner': 'Ішкі бүйірі', 'back': 'Өкшесі'};
-const optionalAngles = {'sole': 'Табаны', 'top': 'Үстінен', 'label': 'Жапсырма, өлшем'};
+const optionalAngles = {
+  'sole': 'Табаны',
+  'top': 'Үстінен',
+  'detail': 'Жақыннан (тігіс, логотип)',
+  'label': 'Жапсырма, өлшем',
+};
 
 /// Close-ups the showcase zooms into; they are uploaded larger so stitching and print stay sharp.
-const detailAngles = {'top', 'sole', 'label'};
+const detailAngles = {'top', 'sole', 'detail', 'label'};
 const _defectRequired = {'used_good', 'defective'};
 
 class _SizeRow {

@@ -36,10 +36,10 @@ ListingQuality listingQuality(Listing l) {
     tips.add(QualityTip(25, tr('360° витрина қосыңыз: сатып алушы аяқкиімді жан-жағынан айналдырып көреді.')));
   }
   final angles = {for (final m in l.photos) m.angle};
-  final extra = ['sole', 'top', 'label'].where((a) => !angles.contains(a)).length;
+  final extra = ['sole', 'top', 'detail', 'label'].where((a) => !angles.contains(a)).length;
   if (extra > 0) {
     tips.add(
-        QualityTip(5 * extra, tr('Табанын, үстінен және өлшем жапсырмасын түсіріңіз: тозуы мен өлшемі көрінеді.')));
+        QualityTip((15 * extra / 4).round(), tr('Табанын, үстінен, жақыннан (тігіс, логотип) және өлшем жапсырмасын түсіріңіз: тозуы, сапасы мен өлшемі көрінеді.')));
   }
   if ((l.description ?? '').trim().length < 80) {
     tips.add(QualityTip(15, tr('Сипаттамаға 2–3 сөйлем жазыңыз: материалы, қалай отырады, неге сатылады.')));

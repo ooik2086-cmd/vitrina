@@ -37,7 +37,7 @@ class SizeIn(BaseModel):
 
 class PhotoIn(BaseModel):
     url: str = Field(min_length=8, max_length=500)
-    angle: Literal["front", "outer", "inner", "back", "top", "sole", "label", "defect", "frame"]
+    angle: Literal["front", "outer", "inner", "back", "top", "sole", "detail", "label", "defect", "frame"]
 
 
 class ListingIn(BaseModel):

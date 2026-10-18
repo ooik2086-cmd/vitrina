@@ -121,6 +121,78 @@ class CutoutApiTests(MediaTests):
             self.assertEqual(max(img.size), side)
 
 
+    def four(self, colour):
+        url = self.upload(self.seller, solid(colour)).json()["url"]
+        return [{"url": url, "angle": a} for a in ("front", "outer", "inner", "back")]
+
+    def test_the_backdrop_follows_the_turning_frames_before_the_front(self):
+        frame = self.upload(self.seller, solid((235, 235, 225))).json()["url"]
+        frames = [{"url": frame, "angle": "frame"}] * 8
+        r = self.post("/listings", self.seller, {**LISTING, "photos": self.four((25, 25, 30)) + frames})
+        self.assertEqual(self.mine(r.json()["id"])["backdrop"], "dark")  # the light frames decide
+
+    def test_new_photos_bring_a_new_backdrop(self):
+        r = self.post("/listings", self.seller, {**LISTING, "photos": self.four((25, 25, 30))})
+        lid = r.json()["id"]
+        self.assertEqual(self.mine(lid)["backdrop"], "light")
+        r = self.c.patch(f"/api/v1/listings/{lid}", headers=self.h(self.seller),
+                         json={"photos": self.four((235, 235, 225))})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(self.mine(lid)["backdrop"], "dark")
+
+    def test_a_close_up_photo_is_cut_out_like_the_top_and_sole(self):
+        url = self.upload(self.seller, jpeg()).json()["url"]
+        photos = self.four((120, 90, 60)) + [{"url": url, "angle": "detail"}]
+        r = self.post("/listings", self.seller, {**LISTING, "photos": photos})
+        self.assertEqual(r.status_code, 201, r.text)
+        detail = next(m for m in self.mine(r.json()["id"])["media"] if m["angle"] == "detail")
+        self.assertTrue(detail["processed_url"].endswith(".webp"))
+
+    def test_a_cut_out_made_later_replaces_the_small_copy(self):
+        from vitrina_api.listing_routes import cutout_listing, thumb_listing
+        self.app.state.segmenter = None
+        r = self.post("/listings", self.seller, {**LISTING, "photos": self.four((120, 90, 60))})
+        lid = r.json()["id"]
+        before = {m["angle"]: m["thumb_url"] for m in self.mine(lid)["media"]}
+        self.app.state.segmenter = center_segmenter  # the model arrives, as the backfill script would see it
+        cutout_listing(self.app.state, lid)
+        thumb_listing(self.app.state, lid)
+        for m in self.mine(lid)["media"]:
+            self.assertNotEqual(m["thumb_url"], before[m["angle"]])
+            img = Image.open(io.BytesIO(self.c.get(m["thumb_url"].replace("http://test", "")).content))
+            self.assertEqual(img.mode, "RGBA")
+        self.assertIsNotNone(self.mine(lid)["backdrop"])
+
+    def test_the_backfill_uses_the_storage_the_api_uses(self):
+        from scripts import cutout_backfill
+        used = []
+        real = (cutout_backfill.Settings, cutout_backfill.make_storage)
+
+        def storage(cfg):
+            used.append(cfg)
+            return self.app.state.storage
+        cutout_backfill.Settings, cutout_backfill.make_storage = (lambda: self.cfg), storage
+        try:
+            self.app.state.segmenter = None
+            r = self.post("/listings", self.seller, {**LISTING, "photos": self.four((120, 90, 60))})
+            from vitrina_api.models import Media
+            with self.app.state.sessions() as db:  # a listing from before the small copies existed
+                for m in db.query(Media).all():
+                    m.thumb_url = None
+                db.commit()
+            cutout_backfill.main()
+        finally:
+            cutout_backfill.Settings, cutout_backfill.make_storage = real
+        self.assertEqual(used, [self.cfg])
+        self.assertTrue(all(m["thumb_url"] for m in self.mine(r.json()["id"])["media"]))
+
+    def test_images_with_too_many_pixels_are_refused_before_decoding(self):
+        out = io.BytesIO()
+        Image.new("1", (8000, 7000)).save(out, "PNG")  # 56 MP, a few KB on the wire
+        r = self.upload(self.seller, out.getvalue(), "p.png", "image/png")
+        self.assertEqual((r.status_code, r.json()["code"]), (415, "unsupported_media"))
+
+
 class ShowcaseUnitTests(unittest.TestCase):
     def test_backdrop_ignores_the_transparent_surroundings(self):
         img = Image.new("RGBA", (300, 300), (255, 255, 255, 0))  # bright but see-through

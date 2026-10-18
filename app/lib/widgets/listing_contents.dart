@@ -377,7 +377,7 @@ class ShowcaseStopsHint extends StatelessWidget {
   final ValueChanged<String> onPick;
   final bool enabled;
 
-  static const stops = {'top': 'Үстінен', 'sole': 'Табаны', 'label': 'Жақыннан (тігіс, логотип, жапсырма)'};
+  static const stops = {'top': 'Үстінен', 'sole': 'Табаны', 'detail': 'Жақыннан (тігіс, логотип)'};
 
   @override
   Widget build(BuildContext context) {

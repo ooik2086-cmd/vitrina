@@ -816,7 +816,7 @@ void main() {
     final full = listingQuality(Listing.fromJson({
       ...listingJson(media: [
         for (var i = 0; i < 12; i++) m('frame'),
-        for (final a in ['front', 'outer', 'inner', 'back', 'sole', 'top', 'label']) m(a),
+        for (final a in ['front', 'outer', 'inner', 'back', 'sole', 'top', 'detail', 'label']) m(a),
       ]),
       'description':
           'Түпнұсқа, бір маусым киілді. Материалы былғары, өлшемі дәл келеді. Кішірейіп қалғандықтан сатамын.',
@@ -2661,7 +2661,7 @@ void main() {
           ]));
       expect(find.byKey(const Key('stop-top')), findsOneWidget);
       expect(find.byKey(const Key('stop-sole')), findsNothing); // already there
-      expect(find.byKey(const Key('stop-label')), findsOneWidget);
+      expect(find.byKey(const Key('stop-detail')), findsOneWidget);
       await tester.tap(find.byKey(const Key('stop-top')));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('source-camera')), findsOneWidget); // straight to the camera, no angle question

@@ -44,6 +44,9 @@ class _ListingScreenState extends State<ListingScreen> {
   bool _ordering = false;
   bool _showPhotos = false;
   final _scroll = ScrollController(); // drives the scroll-turned showcase at the top
+  final _showcase = GlobalKey<ScrollShowcaseState>();
+  final _sizesKey = GlobalKey();
+  bool _scrollLocked = false; // the showcase is zoomed in or being pinched
   Offer? _offer; // the signed-in buyer's latest offer on this listing
   // One key per order attempt: a retried tap after a lost response returns the same order.
   String _orderKey = newIdempotencyKey();
@@ -245,6 +248,50 @@ class _ListingScreenState extends State<ListingScreen> {
     );
   }
 
+  void _relay(PointerEvent e) => _showcase.currentState?.handlePointer(e);
+
+  /// Past the turning shoe to the title and details.
+  /// Height of the showcase's stage, from the last build that showed it; null without one.
+  double? _stage;
+
+  /// Scroll offset where the details begin below the showcase, just under the app bar.
+  double? _detailsAt(Listing l) => _stage == null
+      ? null
+      : ScrollShowcase.travelFor(_stage!, ShowcasePlan.of(l).steps.length) +
+          _stage! -
+          MediaQuery.paddingOf(context).top -
+          kToolbarHeight;
+
+  void _toDetails(Listing l) {
+    final at = _detailsAt(l);
+    if (!_scroll.hasClients || at == null) return;
+    final to = min(_scroll.position.maxScrollExtent, at);
+    if (MediaQuery.of(context).disableAnimations) {
+      _scroll.jumpTo(to);
+    } else {
+      _scroll.animateTo(to, duration: const Duration(milliseconds: 500), curve: Curves.easeInOut);
+    }
+  }
+
+  void _toSizes(Listing l) {
+    void show() {
+      final sizes = _sizesKey.currentContext;
+      if (sizes == null || !mounted) return;
+      Scrollable.ensureVisible(sizes,
+          alignment: 0.3,
+          duration: MediaQuery.of(context).disableAnimations ? Duration.zero : const Duration(milliseconds: 500));
+    }
+
+    // Behind a long showcase the sizes are not built yet: go past it first, then bring them into view.
+    final at = _detailsAt(l);
+    if (_sizesKey.currentContext == null && at != null && _scroll.hasClients) {
+      _scroll.jumpTo(min(_scroll.position.maxScrollExtent, at));
+      WidgetsBinding.instance.addPostFrameCallback((_) => show());
+    } else {
+      show();
+    }
+  }
+
   Widget _body(BuildContext context, Listing l) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
@@ -264,292 +311,320 @@ class _ListingScreenState extends State<ListingScreen> {
     final itemPrice = deal == null ? l.priceTiyn : (deal.priceTiyn < l.priceTiyn ? deal.priceTiyn : l.priceTiyn);
     return Column(children: [
       Expanded(
-        child: ListView(controller: _scroll, padding: EdgeInsets.zero, children: [
-          if (hasSpin && !_showPhotos)
-            LayoutBuilder(
-                builder: (context, box) => ScrollShowcase(
-                    listing: l,
-                    scroll: _scroll,
-                    viewerHeight: box.maxWidth < 560 ? box.maxWidth : 560,
-                    onPhotos: () {
-                      if (_scroll.hasClients) _scroll.jumpTo(0);
-                      setState(() => _showPhotos = true);
-                    }))
-          else
-            // Square on a phone; on a tablet or the web the photo stops growing so the details stay in view.
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 560),
-              child: AspectRatio(
-                aspectRatio: 1,
-                child: Hero(
-                  tag: 'listing-${l.id}',
-                  // The photo tab always shows the photos exactly as taken, so buyers can check the unedited originals.
-                  child: DecoratedBox(
-                    decoration: showcaseBackground(l.showcaseStyle),
-                    child: Material(
-                      type: MaterialType.transparency,
-                      child: ColoredBox(
-                        color: Brand.studio,
-                        child: PhotoGallery(urls: [for (final p in l.photos) p.originalUrl]),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          if (hasSpin && _showPhotos) // in the 360° view the switch sits on the viewer itself
-            Padding(
-              padding: contentPadding(context, const EdgeInsets.fromLTRB(20, 14, 20, 0)),
-              child: SegmentedButton<bool>(
-                showSelectedIcon: false,
-                segments: [
-                  ButtonSegment(value: false, icon: Icon(Icons.threesixty), label: Text('360°')),
-                  ButtonSegment(value: true, icon: Icon(Icons.photo_library_outlined), label: Text(tr('Фото'))),
-                ],
-                selected: {_showPhotos},
-                onSelectionChanged: (v) {
-                  if (_scroll.hasClients) _scroll.jumpTo(0); // the showcase's stretch of page comes or goes
-                  setState(() => _showPhotos = v.first);
-                },
-              ),
-            ),
-          Padding(
-            padding: contentPadding(context, const EdgeInsets.fromLTRB(20, 20, 20, 24)),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(l.title, style: theme.textTheme.headlineSmall),
-              const SizedBox(height: 6),
-              PriceLine(listing: l, style: weight(theme.textTheme.headlineSmall!, 800)),
-              if (l.wasPriceTiyn != null)
-                Padding(
-                  key: const Key('sale-honest'),
-                  padding: const EdgeInsets.only(top: 2),
-                  child: Text(tr('Сызылған баға: соңғы 30 күндегі ең төмен баға.'),
-                      style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
-                ),
-              const SizedBox(height: 4),
-              Text(
-                l.deliveryPriceTiyn == 0 ? tr('Жеткізу тегін') : trf('Жеткізу {0}', [formatTenge(l.deliveryPriceTiyn)]),
-                style: theme.textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
-              ),
-              DeliveryEta(listingId: l.id),
-              if (l.soldRecently > 0 || l.savedBy > 0)
-                Padding(
-                  key: const Key('popularity'),
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Row(children: [
-                    Icon(Icons.local_fire_department_outlined, size: 18, color: Brand.accent),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        [
-                          if (l.soldRecently > 0) trf('30 күнде {0} жұп сатып алынды', [l.soldRecently]),
-                          if (l.savedBy > 0) trf('{0} адам таңдаулыға қосты', [l.savedBy]),
-                        ].join(' · '),
-                        style: theme.textTheme.bodyMedium,
-                      ),
-                    ),
-                  ]),
-                ),
-              if (away != null) ...[
-                const SizedBox(height: 12),
-                Container(
-                  key: const Key('seller-away'),
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                      color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(Brand.radius)),
-                  child: Row(children: [
-                    const Icon(Icons.beach_access_outlined),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(trf(
-                          'Сатушы {0} дейін демалыста. Тапсырысты ол оралғанда беруге болады, ал қазір таңдаулыға қосып не сатушыға жаза аласыз.',
-                          [formatDay(away)])),
-                    ),
-                  ]),
-                ),
-              ],
-              const SizedBox(height: 20),
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                  child: Column(children: [
-                    _Fact(
-                        icon: Icons.sell_outlined,
-                        name: tr('Баға деңгейі'),
-                        value: l.segment == null ? tr('Деректер әлі аз') : label(segments, l.segment)),
-                    const Divider(),
-                    _Fact(
-                        icon: Icons.auto_awesome_outlined, name: tr('Жағдайы'), value: label(conditions, l.condition)),
-                    const Divider(),
-                    _Fact(
-                        icon: Icons.verified_outlined,
-                        name: tr('Түпнұсқалығы'),
-                        value: label(authenticity, l.authenticity)),
-                    const Divider(),
-                    _Fact(icon: Icons.palette_outlined, name: tr('Түсі'), value: l.color),
-                  ]),
-                ),
-              ),
-              if ((l.defects ?? '').isNotEmpty) ...[
-                const SizedBox(height: 12),
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration:
-                      BoxDecoration(color: scheme.errorContainer, borderRadius: BorderRadius.circular(Brand.radius)),
-                  child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Icon(Icons.report_outlined, color: scheme.onErrorContainer),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(trf('Ақаулары: {0}', [l.defects]), style: TextStyle(color: scheme.onErrorContainer)),
-                    ),
-                  ]),
-                ),
-              ],
-              const SizedBox(height: 24),
-              Row(children: [
-                Expanded(child: Text(tr('Өлшем'), style: theme.textTheme.titleMedium)),
-                TextButton.icon(
-                  key: const Key('size-guide'),
-                  onPressed: () async {
-                    if (await showSizeGuide(context) != null && mounted) setState(() {});
-                  },
-                  icon: const Icon(Icons.straighten, size: 18),
-                  label: Text(tr('Өлшем кестесі')),
-                ),
-              ]),
-              const SizedBox(height: 12),
-              Wrap(spacing: 8, runSpacing: 8, children: [
-                for (final s in l.sizes)
-                  _SizeTile(
-                    size: s,
-                    selected: _sizeId == s.id,
-                    alerted: (_alerts ?? l.stockAlerts).contains(s.id),
-                    onTap: () => setState(() => _sizeId = s.id),
-                    onSoldOutTap: me?.id == l.sellerId ? null : () => _toggleStockAlert(l, s),
-                  ),
-              ]),
-              if (me?.id != l.sellerId && l.sizes.any((s) => !s.available)) ...[
-                const SizedBox(height: 8),
-                Text(tr('Қалмаған өлшемді басыңыз: қайта шыққанда хабарлаймыз.'),
-                    style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
-              ],
-              if (l.sizeFit != null) ...[const SizedBox(height: 12), SizeFitNote(fit: l.sizeFit!)],
-              if (mySize.value != null) ...[
-                const SizedBox(height: 10),
-                Row(children: [
-                  Icon(fit == null ? Icons.info_outline : Icons.check_circle_outline,
-                      size: 18, color: fit == null ? scheme.onSurfaceVariant : Brand.accent),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      fit == null
-                          ? trf('Сіздің өлшеміңізге ({0} см) сай өлшем жоқ', [mySize.value])
-                          : trf('Сіздің өлшеміңізге ({0} см) сай: {1}', [mySize.value, fit.label]),
-                      style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
-                    ),
-                  ),
-                ]),
-              ],
-              if (_offer != null && _offer!.status != 'ordered' && _offer!.status != 'withdrawn') ...[
-                const SizedBox(height: 16),
-                OfferStatusCard(offer: _offer!, onChanged: (o) => setState(() => _offer = o)),
-              ],
-              if (canOffer) ...[
-                const SizedBox(height: 16),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    key: const Key('make-offer'),
-                    onPressed: selected == null ? null : () => _makeOffer(l, selected),
-                    icon: const Icon(Icons.local_offer_outlined),
-                    label: Text(selected == null ? tr('Баға ұсыну үшін өлшемді таңдаңыз') : tr('Баға ұсыну')),
-                  ),
-                ),
-              ],
-              if ((l.description ?? '').isNotEmpty) ...[
-                const SizedBox(height: 24),
-                Text(tr('Сипаттама'), style: theme.textTheme.titleMedium),
-                const SizedBox(height: 8),
-                Text(l.description!, style: theme.textTheme.bodyLarge),
-              ],
-              QuestionsSection(listingId: l.id, sellerId: l.sellerId),
-              const SizedBox(height: 24),
-              Card(
-                child: Column(children: [
-                  ListTile(
-                    contentPadding: const EdgeInsets.fromLTRB(16, 6, 12, 0),
-                    leading: CircleAvatar(
-                      backgroundColor: scheme.primary,
-                      foregroundColor: scheme.onPrimary,
-                      child: Text((l.shopName ?? tr('С')).characters.first.toUpperCase()),
-                    ),
-                    title: Text(l.shopName ?? tr('Сатушы'), style: theme.textTheme.titleSmall),
-                    subtitle: Row(children: [
-                      if (l.sellerRating != null) ...[
-                        Stars(value: l.sellerRating!, size: 14),
-                        const SizedBox(width: 6),
-                        Text('${l.sellerRating!.toStringAsFixed(1)} · '),
-                      ],
-                      Flexible(
-                        child: Text(
-                          [
-                            if (l.sellerCity != null) l.sellerCity!,
-                            trf('{0} пікір', [l.sellerReviews])
-                          ].join(' · '),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ]),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () =>
-                        Navigator.of(context).push(MaterialPageRoute(builder: (_) => ShopScreen(sellerId: l.sellerId))),
-                  ),
-                  if (SessionScope.of(context).me?.id != l.sellerId)
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
-                      child: SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
-                          onPressed: () => _chat(l),
-                          icon: const Icon(Icons.chat_bubble_outline_rounded),
-                          label: Text(tr('Сатушыға жазу')),
-                        ),
-                      ),
-                    )
+        child: LayoutBuilder(
+          builder: (context, viewport) => Listener(
+            // Above the list, so a second finger reaches the showcase even while the first one is scrolling.
+            onPointerDown: _relay,
+            onPointerMove: _relay,
+            onPointerUp: _relay,
+            onPointerCancel: _relay,
+            child: ListView(
+                controller: _scroll,
+                padding: EdgeInsets.zero,
+                physics: _scrollLocked ? const NeverScrollableScrollPhysics() : null,
+                children: [
+                  if (hasSpin && !_showPhotos)
+                    ScrollShowcase(
+                        key: _showcase,
+                        listing: l,
+                        scroll: _scroll,
+                        stageHeight: _stage = viewport.maxHeight,
+                        onLock: (locked) {
+                          if (mounted && locked != _scrollLocked) setState(() => _scrollLocked = locked);
+                        },
+                        onPhotos: () {
+                          if (_scroll.hasClients) _scroll.jumpTo(0);
+                          setState(() {
+                            _showPhotos = true;
+                            _stage = null;
+                          });
+                        },
+                        onDetails: () => _toDetails(l))
                   else
-                    const SizedBox(height: 8),
-                ]),
-              ),
-              if (SessionScope.of(context).me?.id != l.sellerId)
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: TextButton.icon(
-                    onPressed: () => _report(l),
-                    icon: const Icon(Icons.flag_outlined, size: 18),
-                    label: Text(tr('Тауар туралы шағымдану')),
-                    style: TextButton.styleFrom(foregroundColor: scheme.onSurfaceVariant),
-                  ),
-                ),
-              const SizedBox(height: 12),
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                    color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(Brand.radius)),
-                child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  const Icon(Icons.shield_outlined),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      tr(protectionText),
-                      style: theme.textTheme.bodySmall,
+                    // Square on a phone; on a tablet or the web the photo stops growing so the details stay in view.
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxHeight: 560),
+                      child: AspectRatio(
+                        aspectRatio: 1,
+                        child: Hero(
+                          tag: 'listing-${l.id}',
+                          // The photo tab always shows the photos exactly as taken, so buyers can check the unedited originals.
+                          child: DecoratedBox(
+                            decoration: showcaseBackground(l.showcaseStyle),
+                            child: Material(
+                              type: MaterialType.transparency,
+                              child: ColoredBox(
+                                color: Brand.studio,
+                                child: PhotoGallery(urls: [for (final p in l.photos) p.originalUrl]),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
                     ),
+                  if (hasSpin && _showPhotos) // in the 360° view the switch sits on the viewer itself
+                    Padding(
+                      padding: contentPadding(context, const EdgeInsets.fromLTRB(20, 14, 20, 0)),
+                      child: SegmentedButton<bool>(
+                        showSelectedIcon: false,
+                        segments: [
+                          ButtonSegment(value: false, icon: Icon(Icons.threesixty), label: Text('360°')),
+                          ButtonSegment(value: true, icon: Icon(Icons.photo_library_outlined), label: Text(tr('Фото'))),
+                        ],
+                        selected: {_showPhotos},
+                        onSelectionChanged: (v) {
+                          if (_scroll.hasClients) _scroll.jumpTo(0); // the showcase's stretch of page comes or goes
+                          setState(() {
+                            _showPhotos = v.first;
+                            _stage = null; // set again by the showcase when it is built
+                          });
+                        },
+                      ),
+                    ),
+                  Padding(
+                    padding: contentPadding(context, const EdgeInsets.fromLTRB(20, 20, 20, 24)),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(l.title, style: theme.textTheme.headlineSmall),
+                      const SizedBox(height: 6),
+                      PriceLine(listing: l, style: weight(theme.textTheme.headlineSmall!, 800)),
+                      if (l.wasPriceTiyn != null)
+                        Padding(
+                          key: const Key('sale-honest'),
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Text(tr('Сызылған баға: соңғы 30 күндегі ең төмен баға.'),
+                              style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
+                        ),
+                      const SizedBox(height: 4),
+                      Text(
+                        l.deliveryPriceTiyn == 0
+                            ? tr('Жеткізу тегін')
+                            : trf('Жеткізу {0}', [formatTenge(l.deliveryPriceTiyn)]),
+                        style: theme.textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
+                      ),
+                      DeliveryEta(listingId: l.id),
+                      if (l.soldRecently > 0 || l.savedBy > 0)
+                        Padding(
+                          key: const Key('popularity'),
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Row(children: [
+                            Icon(Icons.local_fire_department_outlined, size: 18, color: Brand.accent),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                [
+                                  if (l.soldRecently > 0) trf('30 күнде {0} жұп сатып алынды', [l.soldRecently]),
+                                  if (l.savedBy > 0) trf('{0} адам таңдаулыға қосты', [l.savedBy]),
+                                ].join(' · '),
+                                style: theme.textTheme.bodyMedium,
+                              ),
+                            ),
+                          ]),
+                        ),
+                      if (away != null) ...[
+                        const SizedBox(height: 12),
+                        Container(
+                          key: const Key('seller-away'),
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                              color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(Brand.radius)),
+                          child: Row(children: [
+                            const Icon(Icons.beach_access_outlined),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(trf(
+                                  'Сатушы {0} дейін демалыста. Тапсырысты ол оралғанда беруге болады, ал қазір таңдаулыға қосып не сатушыға жаза аласыз.',
+                                  [formatDay(away)])),
+                            ),
+                          ]),
+                        ),
+                      ],
+                      const SizedBox(height: 20),
+                      Card(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                          child: Column(children: [
+                            _Fact(
+                                icon: Icons.sell_outlined,
+                                name: tr('Баға деңгейі'),
+                                value: l.segment == null ? tr('Деректер әлі аз') : label(segments, l.segment)),
+                            const Divider(),
+                            _Fact(
+                                icon: Icons.auto_awesome_outlined,
+                                name: tr('Жағдайы'),
+                                value: label(conditions, l.condition)),
+                            const Divider(),
+                            _Fact(
+                                icon: Icons.verified_outlined,
+                                name: tr('Түпнұсқалығы'),
+                                value: label(authenticity, l.authenticity)),
+                            const Divider(),
+                            _Fact(icon: Icons.palette_outlined, name: tr('Түсі'), value: l.color),
+                          ]),
+                        ),
+                      ),
+                      if ((l.defects ?? '').isNotEmpty) ...[
+                        const SizedBox(height: 12),
+                        Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                              color: scheme.errorContainer, borderRadius: BorderRadius.circular(Brand.radius)),
+                          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                            Icon(Icons.report_outlined, color: scheme.onErrorContainer),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(trf('Ақаулары: {0}', [l.defects]),
+                                  style: TextStyle(color: scheme.onErrorContainer)),
+                            ),
+                          ]),
+                        ),
+                      ],
+                      const SizedBox(height: 24),
+                      Row(key: _sizesKey, children: [
+                        Expanded(child: Text(tr('Өлшем'), style: theme.textTheme.titleMedium)),
+                        TextButton.icon(
+                          key: const Key('size-guide'),
+                          onPressed: () async {
+                            if (await showSizeGuide(context) != null && mounted) setState(() {});
+                          },
+                          icon: const Icon(Icons.straighten, size: 18),
+                          label: Text(tr('Өлшем кестесі')),
+                        ),
+                      ]),
+                      const SizedBox(height: 12),
+                      Wrap(spacing: 8, runSpacing: 8, children: [
+                        for (final s in l.sizes)
+                          _SizeTile(
+                            size: s,
+                            selected: _sizeId == s.id,
+                            alerted: (_alerts ?? l.stockAlerts).contains(s.id),
+                            onTap: () => setState(() => _sizeId = s.id),
+                            onSoldOutTap: me?.id == l.sellerId ? null : () => _toggleStockAlert(l, s),
+                          ),
+                      ]),
+                      if (me?.id != l.sellerId && l.sizes.any((s) => !s.available)) ...[
+                        const SizedBox(height: 8),
+                        Text(tr('Қалмаған өлшемді басыңыз: қайта шыққанда хабарлаймыз.'),
+                            style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
+                      ],
+                      if (l.sizeFit != null) ...[const SizedBox(height: 12), SizeFitNote(fit: l.sizeFit!)],
+                      if (mySize.value != null) ...[
+                        const SizedBox(height: 10),
+                        Row(children: [
+                          Icon(fit == null ? Icons.info_outline : Icons.check_circle_outline,
+                              size: 18, color: fit == null ? scheme.onSurfaceVariant : Brand.accent),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              fit == null
+                                  ? trf('Сіздің өлшеміңізге ({0} см) сай өлшем жоқ', [mySize.value])
+                                  : trf('Сіздің өлшеміңізге ({0} см) сай: {1}', [mySize.value, fit.label]),
+                              style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+                            ),
+                          ),
+                        ]),
+                      ],
+                      if (_offer != null && _offer!.status != 'ordered' && _offer!.status != 'withdrawn') ...[
+                        const SizedBox(height: 16),
+                        OfferStatusCard(offer: _offer!, onChanged: (o) => setState(() => _offer = o)),
+                      ],
+                      if (canOffer) ...[
+                        const SizedBox(height: 16),
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            key: const Key('make-offer'),
+                            onPressed: selected == null ? null : () => _makeOffer(l, selected),
+                            icon: const Icon(Icons.local_offer_outlined),
+                            label: Text(selected == null ? tr('Баға ұсыну үшін өлшемді таңдаңыз') : tr('Баға ұсыну')),
+                          ),
+                        ),
+                      ],
+                      if ((l.description ?? '').isNotEmpty) ...[
+                        const SizedBox(height: 24),
+                        Text(tr('Сипаттама'), style: theme.textTheme.titleMedium),
+                        const SizedBox(height: 8),
+                        Text(l.description!, style: theme.textTheme.bodyLarge),
+                      ],
+                      QuestionsSection(listingId: l.id, sellerId: l.sellerId),
+                      const SizedBox(height: 24),
+                      Card(
+                        child: Column(children: [
+                          ListTile(
+                            contentPadding: const EdgeInsets.fromLTRB(16, 6, 12, 0),
+                            leading: CircleAvatar(
+                              backgroundColor: scheme.primary,
+                              foregroundColor: scheme.onPrimary,
+                              child: Text((l.shopName ?? tr('С')).characters.first.toUpperCase()),
+                            ),
+                            title: Text(l.shopName ?? tr('Сатушы'), style: theme.textTheme.titleSmall),
+                            subtitle: Row(children: [
+                              if (l.sellerRating != null) ...[
+                                Stars(value: l.sellerRating!, size: 14),
+                                const SizedBox(width: 6),
+                                Text('${l.sellerRating!.toStringAsFixed(1)} · '),
+                              ],
+                              Flexible(
+                                child: Text(
+                                  [
+                                    if (l.sellerCity != null) l.sellerCity!,
+                                    trf('{0} пікір', [l.sellerReviews])
+                                  ].join(' · '),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ]),
+                            trailing: const Icon(Icons.chevron_right),
+                            onTap: () => Navigator.of(context)
+                                .push(MaterialPageRoute(builder: (_) => ShopScreen(sellerId: l.sellerId))),
+                          ),
+                          if (SessionScope.of(context).me?.id != l.sellerId)
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+                              child: SizedBox(
+                                width: double.infinity,
+                                child: OutlinedButton.icon(
+                                  onPressed: () => _chat(l),
+                                  icon: const Icon(Icons.chat_bubble_outline_rounded),
+                                  label: Text(tr('Сатушыға жазу')),
+                                ),
+                              ),
+                            )
+                          else
+                            const SizedBox(height: 8),
+                        ]),
+                      ),
+                      if (SessionScope.of(context).me?.id != l.sellerId)
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: TextButton.icon(
+                            onPressed: () => _report(l),
+                            icon: const Icon(Icons.flag_outlined, size: 18),
+                            label: Text(tr('Тауар туралы шағымдану')),
+                            style: TextButton.styleFrom(foregroundColor: scheme.onSurfaceVariant),
+                          ),
+                        ),
+                      const SizedBox(height: 12),
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                            color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(Brand.radius)),
+                        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          const Icon(Icons.shield_outlined),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              tr(protectionText),
+                              style: theme.textTheme.bodySmall,
+                            ),
+                          ),
+                        ]),
+                      ),
+                      _SimilarRow(items: _similar),
+                    ]),
                   ),
                 ]),
-              ),
-              _SimilarRow(items: _similar),
-            ]),
           ),
-        ]),
+        ),
       ),
       Material(
         color: scheme.surface,
@@ -569,8 +644,13 @@ class _ListingScreenState extends State<ListingScreen> {
                 child: FilledButton(
                   key: const Key('buy'),
                   style: FilledButton.styleFrom(backgroundColor: Brand.accentStrong, foregroundColor: Colors.white),
-                  onPressed: l.status == 'published' && !own && selected != null && !_ordering && away == null
-                      ? () => _order(l)
+                  onPressed: l.status == 'published' && !own && !_ordering && away == null
+                      ? selected != null
+                          ? () => _order(l)
+                          // No size yet: take the buyer to the sizes, past the showcase, instead of a dead button.
+                          : l.sizes.any((s) => s.available)
+                              ? () => _toSizes(l)
+                              : null
                       : null,
                   child: Text(own
                       ? tr('Бұл сіздің тауарыңыз')

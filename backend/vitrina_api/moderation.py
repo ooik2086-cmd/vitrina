@@ -32,7 +32,7 @@ CATEGORY_PRICE_RATIO = 0.4
 MODEL_MIN_SAMPLE = 5
 # Two photos whose 64-bit difference hashes are this close are the same picture, even re-saved or resized.
 PHASH_DISTANCE = 6
-CHECKED_ANGLES = ("front", "outer", "inner", "back", "top", "sole", "label", "defect")
+CHECKED_ANGLES = ("front", "outer", "inner", "back", "top", "sole", "detail", "label", "defect")
 # Of a 360° set every fourth frame is compared: enough to catch a copied rotation without hashing dozens of frames.
 FRAME_SAMPLE = 4
 

@@ -20,14 +20,14 @@ from vitrina_api import cutout, visual  # noqa: E402
 from vitrina_api.listing_routes import cutout_listing, embed_listing, thumb_listing  # noqa: E402
 from vitrina_api.config import Settings  # noqa: E402
 from vitrina_api.models import Listing, ListingEmbedding, Media, make_session_factory  # noqa: E402
-from vitrina_api.storage import LocalStorage  # noqa: E402
+from vitrina_api.storage import make_storage  # noqa: E402
 
 
 def main() -> None:
     cfg = Settings()
     segmenter, embedder = cutout.load_segmenter(cfg.cutout_model), visual.load_embedder(cfg.search_model)
     state = SimpleNamespace(segmenter=segmenter, embedder=embedder,
-                            storage=LocalStorage(cfg.media_dir, cfg.public_media_url),
+                            storage=make_storage(cfg),
                             sessions=make_session_factory(cfg.database_url, create_schema=False))
     with state.sessions() as db:
         uncut = select(Media.listing_id).where(Media.processed_url.is_(None) | Media.thumb_url.is_(None))
