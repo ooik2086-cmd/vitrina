@@ -8,6 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from vitrina_core.catalog import normalize_query
+from vitrina_core.colors import color_query
 
 from . import services
 from . import promo
@@ -25,7 +26,8 @@ def catalog_filter(stmt, *, q: str | None = None, category: str | None = None, b
                    max_price_tiyn: int | None = None, size_cm: str | None = None):
     """The catalog's filters, shared by search and by saved-search alerts so both agree on what matches."""
     if q:
-        for token in normalize_query(q).split():
+        # Colour words become the stored Kazakh name first: "черные" and "black" find "қара".
+        for token in normalize_query(color_query(q)).split():
             stmt = stmt.where(Listing.search_text.contains(token))
     if category:
         stmt = stmt.where(Listing.category == category)

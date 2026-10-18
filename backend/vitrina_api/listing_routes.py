@@ -13,7 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from vitrina_core.catalog import Authenticity, Condition, normalize_query
-from vitrina_core.colors import canonical_color, color_words
+from vitrina_core.colors import canonical_color
 from vitrina_core.orders import OrderStatus as S
 
 from . import services
@@ -35,7 +35,7 @@ router = APIRouter(prefix="/api/v1")
 
 
 def search_text(title: str, brand: str | None, model_name: str | None, color: str, category: str) -> str:
-    return normalize_query(" ".join(filter(None, [title, brand, model_name, color_words(color), category])))
+    return normalize_query(" ".join(filter(None, [title, brand, model_name, color, category])))
 
 
 @router.post("/media", status_code=201)

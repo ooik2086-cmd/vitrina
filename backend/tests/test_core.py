@@ -1,9 +1,11 @@
 import json
+import re
 import unittest
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 
 from vitrina_core.catalog import compute_bounds, normalize_query, Segment, MIN_SAMPLE
-from vitrina_core.colors import COLORS, canonical_color
+from vitrina_core.colors import COLORS, WORDS, canonical_color, color_query
 from vitrina_core.money import (
     CommissionRule, Entry, Ledger, LedgerError, PLATFORM_FEE, PROVIDER_CLEARING,
     buyer_refund, escrow, format_tenge, record_payment, seller_payable, settle, tenge_to_tiyn,
@@ -256,25 +258,35 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(normalize_query("қысқы етік"), "qysqy etik")
 
 
-if __name__ == "__main__":
-    unittest.main()
+
+APP_COLORS = Path(__file__).resolve().parents[2] / "app" / "lib" / "colors.dart"
 
 
 class ColorTests(unittest.TestCase):
-    def test_a_colour_typed_in_any_language_is_stored_by_its_kazakh_name(self):
-        for typed in ("Черный", " чёрный ", "BLACK", "қара"):
-            self.assertEqual(canonical_color(typed), "қара")
+    def test_a_colour_typed_in_any_word_is_stored_by_its_kazakh_name(self):
+        for typed in ("Черный", " чёрный ", "BLACK", "қара", "кара", "черные", "\u200bчерный"):
+            self.assertEqual(canonical_color(typed), "қара", typed)
         self.assertEqual(canonical_color("Темно-синий"), "қою көк")
-        self.assertEqual(canonical_color("  бордо  с  белым "), "бордо с белым")  # not listed: kept as typed
+        self.assertEqual(canonical_color("бело-черный"), "қара-ақ")
+        self.assertEqual(canonical_color("құм"), "құм түсті")  # the earlier name still maps
+        self.assertEqual(canonical_color("  мраморный  с  белым "), "мраморный с белым")  # not listed: as typed
+        self.assertEqual(canonical_color("\u200b\u200e"), "")  # invisible characters are no colour
+
+    def test_a_query_names_colours_as_they_are_stored(self):
+        self.assertEqual(color_query("Черные кроссовки Nike"), "қара кроссовки nike")
+        self.assertEqual(color_query("белая обувь black/white"), "ақ обувь қара-ақ")
+        self.assertEqual(color_query("low top golden"), "low top golden")  # only whole words
 
     def test_no_word_names_two_colours(self):
         words = [w for name, others in COLORS.items() for w in (name, *others)]
         self.assertEqual(len(words), len(set(words)))
+        self.assertEqual(len(WORDS), len({w for w in WORDS}))
 
+    @unittest.skipUnless(APP_COLORS.exists(), "the app is not next to the backend here")
     def test_the_app_offers_the_same_colours(self):
-        import re
-        from pathlib import Path
-        dart = (Path(__file__).resolve().parents[2] / "app" / "lib" / "colors.dart").read_text(encoding="utf-8")
+        dart = APP_COLORS.read_text(encoding="utf-8")
         block = dart[dart.index("const shoeColors"):dart.index("};", dart.index("const shoeColors"))]
         self.assertEqual(re.findall(r"^  '([^']+)': Color", block, re.M), list(COLORS))
 
+if __name__ == "__main__":
+    unittest.main()

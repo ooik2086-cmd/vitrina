@@ -1226,31 +1226,52 @@ void main() {
     await tester.tap(find.byKey(const Key('color-қою көк')));
     await tester.pump();
     expect(color.text, 'қою көк');
-    expect(tester.widget<ChoiceChip>(find.byKey(const Key('color-қою көк'))).selected, isTrue);
-    expect(find.byKey(const Key('color-other-text')), findsNothing);
+    expect(find.text('Түсін таңдаңыз'), findsNothing); // the message goes once a colour is picked
+    // Picked: only the pick shows, so the list does not push the form away.
+    expect(find.byKey(const Key('color-қара')), findsNothing);
+    expect(find.descendant(of: find.byKey(const Key('color-picked')), matching: find.text('қою көк')), findsOneWidget);
     expect(form.currentState!.validate(), isTrue);
-    // Not on the list: typed by hand.
+    // Not on the list: typed by hand, and kept while the seller looks at a listed colour.
+    await tester.tap(find.byKey(const Key('color-change')));
+    await tester.pump();
+    await tester.ensureVisible(find.byKey(const Key('color-other')));
     await tester.tap(find.byKey(const Key('color-other')));
     await tester.pump();
     expect(color.text, isEmpty); // the listed colour does not linger in the typing field
-    await tester.enterText(find.byKey(const Key('color-other-text')), 'бордо');
-    expect(color.text, 'бордо');
-    expect(tester.widget<ChoiceChip>(find.byKey(const Key('color-қою көк'))).selected, isFalse);
+    await tester.enterText(find.byKey(const Key('color-other-text')), 'м');
+    expect(form.currentState!.validate(), isFalse);
+    await tester.pump();
+    expect(find.text('Түсін жазыңыз'), findsNWidgets(2)); // the label, and the message under the field it is about
+    await tester.enterText(find.byKey(const Key('color-other-text')), 'мәрмәр');
+    expect(color.text, 'мәрмәр');
+    await tester.tap(find.byKey(const Key('color-ақ')));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('color-change')));
+    await tester.pump();
+    await tester.ensureVisible(find.byKey(const Key('color-other')));
+    await tester.tap(find.byKey(const Key('color-other')));
+    await tester.pump();
+    expect(color.text, 'мәрмәр');
   });
 
-  testWidgets('a colour typed before the list opens as typed', (tester) async {
+  testWidgets('a colour typed before the list opens as typed, ready to change', (tester) async {
     await tester.pumpWidget(MaterialApp(
         home: Scaffold(
-            body: SingleChildScrollView(child: ColorField(controller: TextEditingController(text: 'бордо'))))));
+            body: SingleChildScrollView(child: ColorField(controller: TextEditingController(text: 'бордо с ақ'))))));
+    expect(
+        find.descendant(of: find.byKey(const Key('color-picked')), matching: find.text('бордо с ақ')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('color-change')));
+    await tester.pump();
     expect(tester.widget<ChoiceChip>(find.byKey(const Key('color-other'))).selected, isTrue);
-    expect(find.widgetWithText(TextField, 'бордо'), findsOneWidget);
+    expect(find.widgetWithText(TextField, 'бордо с ақ'), findsOneWidget);
   });
 
   test('listed colours show in the interface language, typed ones as typed', () {
     addTearDown(() => appLanguage.value = 'kk');
     appLanguage.value = 'ru';
     expect(colorName('қою көк'), 'темно-синий');
-    expect(colorName('бордо'), 'бордо');
+    expect(colorName('қара-ақ'), 'черно-белый');
+    expect(colorName('мраморный'), 'мраморный');
     appLanguage.value = 'en';
     expect(colorName('қара'), 'black');
   });

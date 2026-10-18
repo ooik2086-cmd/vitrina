@@ -57,7 +57,7 @@ class ListingIn(BaseModel):
     photos: list[PhotoIn] = Field(default_factory=list, max_length=60)
 
     # "Черный" and "black" are stored as "қара": one colour of a model is one swatch.
-    _color = field_validator("color")(lambda v: canonical_color(v))
+    _color = field_validator("color", mode="before")(lambda v: canonical_color(v) if isinstance(v, str) else v)
 
 
 class StockIn(BaseModel):
@@ -86,7 +86,7 @@ class ListingPatch(BaseModel):
     add_photos: list[PhotoIn] | None = Field(default=None, max_length=60)
     add_sizes: list[SizeIn] | None = Field(default=None, max_length=30)
 
-    _color = field_validator("color")(lambda v: v if v is None else canonical_color(v))
+    _color = field_validator("color", mode="before")(lambda v: canonical_color(v) if isinstance(v, str) else v)
 
 
 class DeliveryIn(BaseModel):

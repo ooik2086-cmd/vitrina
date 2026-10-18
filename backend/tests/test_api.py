@@ -465,10 +465,27 @@ class ColorwayTests(ApiTestCase):
         r = self.c.patch(f"/api/v1/listings/{here['id']}", json={"color": "Red"}, headers=self.h(self.seller))
         self.assertEqual(r.status_code, 200, r.text)
         self.assertEqual(r.json()["color"], "қызыл")
+        found = self.c.get("/api/v1/listings", params={"q": "красные"}).json()["items"]
+        self.assertIn(here["id"], [l["id"] for l in found])  # searched again by its new colour
         # A buyer searching in Russian or English still finds it.
-        for q in ("черный", "black", "қара"):
+        for q in ("черный", "черные найк", "black", "қара", "кара"):
             found = self.c.get("/api/v1/listings", params={"q": q}).json()["items"]
             self.assertIn(black["id"], [l["id"] for l in found], q)
+
+    def test_a_colour_stored_before_the_list_still_groups_with_its_kazakh_name(self):
+        here = self.publish(color="көк")
+        old = self.publish(color="қара")
+        with self.db() as db:
+            db.query(Listing).filter_by(id=old["id"]).update({"color": "Черный"})  # as typed before the picker
+            db.commit()
+        self.assertIn(old["id"], [c["id"] for c in self.colors(here["id"])])
+        self.publish(color="black")
+        self.assertEqual(len(self.colors(here["id"])), 2)  # still one black swatch
+
+    def test_a_blank_or_invisible_colour_is_refused(self):
+        for color in ("   ", " а ", "\u200b\u200b"):
+            r = self.post("/listings", self.seller, {**LISTING, "color": color})
+            self.assertEqual(r.status_code, 422, color)
 
     def test_no_model_name_no_colours(self):
         a = self.publish(model_name=None)

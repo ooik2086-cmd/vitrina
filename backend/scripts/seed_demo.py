@@ -21,7 +21,7 @@ SIZES = [("39", "25"), ("40", "25,5"), ("41", "26,5"), ("42", "27"), ("43", "27,
 # Listings per frame folder. Facts stay separate: condition, defects and price are the seller's claims.
 LISTINGS = {
     "street": [
-        {"title": "Жеңіл жүгіру кроссовкасы, қара", "color": "қара, маржан жолақ", "condition": "new_with_box",
+        {"title": "Жеңіл жүгіру кроссовкасы, қара", "color": "қара", "condition": "new_with_box",
          "price_tiyn": 3_290_000, "delivery_price_tiyn": 150_000, "showcase_style": "premium",
          "description": "Тор матадан жеңіл кроссовка, көбік табан. Қорабы мен жапсырмасы бар."},
         {"title": "Жеңіл кроссовка, қара, киілген", "color": "қара", "condition": "used_good",
