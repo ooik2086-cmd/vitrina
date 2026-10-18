@@ -5,7 +5,7 @@ import io
 from datetime import timedelta
 from typing import Literal
 
-from fastapi import BackgroundTasks, Depends, File, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Request, UploadFile
 from PIL import Image
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select, update
@@ -24,17 +24,20 @@ from .social import size_fit
 from .models import (PriceChange, StockAlert, ListingDailyViews, ListingEmbedding, ListingReport, Favorite, Listing,
                      ListingSize, Media, Order, User)
 from .storage import MAX_UPLOAD_BYTES, Storage, normalize_image
-from .api_common import ALMATY, DEFECT_REQUIRED, MAX_LISTING_MEDIA, MAX_LISTING_SIZES, MIN_SPIN_FRAMES, api, log
+from .api_common import ALMATY, DEFECT_REQUIRED, MAX_LISTING_MEDIA, MAX_LISTING_SIZES, MIN_SPIN_FRAMES, log
 from .schemas import ListingIn, ListingPatch, PhotoIn, ReportIn
 from .serializers import cm_to_mm, listing_out, mark_price_change, was_price
 from .saved_search_routes import announce
+
+
+router = APIRouter(prefix="/api/v1")
 
 
 def search_text(body: ListingIn) -> str:
     return normalize_query(" ".join(filter(None, [body.title, body.brand, body.model_name, body.color, body.category])))
 
 
-@api.post("/media", status_code=201)
+@router.post("/media", status_code=201)
 def upload_photo(file: UploadFile = File(...), user: User = Depends(current_user),
                        storage: Storage = Depends(get_storage)):
     if not user.is_seller:
@@ -124,7 +127,7 @@ def prepare_listing_media(state, listing_id: int) -> None:
     embed_listing(state, listing_id)
 
 
-@api.post("/listings", status_code=201)
+@router.post("/listings", status_code=201)
 def create_listing(body: ListingIn, request: Request, background: BackgroundTasks,
                    user: User = Depends(current_user), db: Session = Depends(get_db),
                    cfg: Settings = Depends(get_settings), storage: Storage = Depends(get_storage)):
@@ -159,7 +162,7 @@ def own_listing(db: Session, listing_id: int, user: User) -> Listing:
     return listing
 
 
-@api.post("/listings/{listing_id}/publish")
+@router.post("/listings/{listing_id}/publish")
 def publish_listing(listing_id: int, user: User = Depends(current_user), db: Session = Depends(get_db),
                     cfg: Settings = Depends(get_settings), storage: Storage = Depends(get_storage)):
     listing = own_listing(db, listing_id, user)
@@ -196,7 +199,7 @@ def route_after_checks(db: Session, storage: Storage, listing: Listing) -> None:
         services.tell_back_in_stock(db, listing)
 
 
-@api.patch("/listings/{listing_id}")
+@router.patch("/listings/{listing_id}")
 def edit_listing(listing_id: int, body: ListingPatch, request: Request, background: BackgroundTasks,
                  user: User = Depends(current_user), db: Session = Depends(get_db),
                  cfg: Settings = Depends(get_settings), storage: Storage = Depends(get_storage)):
@@ -361,7 +364,7 @@ class PromoIn(BaseModel):
     lang: Literal["kk", "ru", "en"] = "kk"
 
 
-@api.post("/listings/{listing_id}/promo", status_code=202)
+@router.post("/listings/{listing_id}/promo", status_code=202)
 def make_promo(listing_id: int, body: PromoIn, request: Request, background: BackgroundTasks,
                user: User = Depends(current_user), db: Session = Depends(get_db)):
     listing = own_listing(db, listing_id, user)
@@ -404,7 +407,7 @@ def set_price(db: Session, listing: Listing, new: int) -> None:
     listing.price_tiyn = new
 
 
-@api.post("/me/shop-sale")
+@router.post("/me/shop-sale")
 def start_shop_sale(body: ShopSaleIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     """The same cut on every listing on sale, rounded to whole tenge. Each shows its old price crossed out."""
     if not user.is_seller:
@@ -421,7 +424,7 @@ def start_shop_sale(body: ShopSaleIn, user: User = Depends(current_user), db: Se
     return {"changed": changed}
 
 
-@api.delete("/me/shop-sale")
+@router.delete("/me/shop-sale")
 def end_shop_sale(user: User = Depends(current_user), db: Session = Depends(get_db)):
     """Puts back the price each listing had before the sale; listings from before that was stored fall back to the
     crossed-out price."""
@@ -436,7 +439,7 @@ def end_shop_sale(user: User = Depends(current_user), db: Session = Depends(get_
     return {"changed": changed}
 
 
-@api.post("/listings/{listing_id}/pause")
+@router.post("/listings/{listing_id}/pause")
 def pause_listing(listing_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
     listing = own_listing(db, listing_id, user)
     if listing.status != "published":
@@ -446,7 +449,7 @@ def pause_listing(listing_id: int, user: User = Depends(current_user), db: Sessi
     return listing_out(db, listing, owner=True)
 
 
-@api.post("/listings/{listing_id}/report", status_code=201)
+@router.post("/listings/{listing_id}/report", status_code=201)
 def report_listing(listing_id: int, body: ReportIn, user: User = Depends(current_user),
                    db: Session = Depends(get_db)):
     """Reports only queue a listing for a moderator; they never hide it by themselves, so competitors
@@ -476,7 +479,7 @@ def waiting_size(db: Session, listing_id: int, size_id: int) -> ListingSize:
     return size
 
 
-@api.put("/listings/{listing_id}/sizes/{size_id}/alert")
+@router.put("/listings/{listing_id}/sizes/{size_id}/alert")
 def alert_when_back(listing_id: int, size_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
     """Ask to be told when a sold-out size can be ordered again."""
     size = waiting_size(db, listing_id, size_id)
@@ -491,7 +494,7 @@ def alert_when_back(listing_id: int, size_id: int, user: User = Depends(current_
     return {"size_id": size.id, "alert": True}
 
 
-@api.delete("/listings/{listing_id}/sizes/{size_id}/alert")
+@router.delete("/listings/{listing_id}/sizes/{size_id}/alert")
 def cancel_stock_alert(listing_id: int, size_id: int, user: User = Depends(current_user),
                        db: Session = Depends(get_db)):
     for a in db.scalars(select(StockAlert).where(StockAlert.user_id == user.id, StockAlert.size_id == size_id,
@@ -501,7 +504,7 @@ def cancel_stock_alert(listing_id: int, size_id: int, user: User = Depends(curre
     return {"size_id": size_id, "alert": False}
 
 
-@api.get("/listings/{listing_id}")
+@router.get("/listings/{listing_id}")
 def get_listing(listing_id: int, user: User | None = Depends(optional_user), db: Session = Depends(get_db)):
     listing = db.get(Listing, listing_id)
     visible = listing is not None and (listing.status in ("published", "sold") or (user and listing.seller_id == user.id))

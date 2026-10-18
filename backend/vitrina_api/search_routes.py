@@ -6,7 +6,7 @@ import threading
 import time
 from typing import Literal
 
-from fastapi import Depends, File, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -18,9 +18,11 @@ from .deps import current_user, get_db, get_storage, now_utc
 from .errors import ApiError
 from .models import ListingEmbedding, Listing, ListingSize, User
 from .storage import MAX_UPLOAD_BYTES, Storage, normalize_image
-from .api_common import api
 from .serializers import cm_to_mm, listing_out
 from .saved_search_routes import catalog_filter
+
+
+router = APIRouter(prefix="/api/v1")
 
 
 def sellers_in(db: Session, city: str) -> list[int]:
@@ -32,7 +34,7 @@ def sellers_in(db: Session, city: str) -> list[int]:
     return [uid for uid, c in rows if delivery_eta.known_city(c) == want]
 
 
-@api.get("/listings")
+@router.get("/listings")
 def search_listings(q: str | None = None, category: str | None = None, brand: str | None = None,
                     condition: str | None = None, min_price_tiyn: int | None = None,
                     max_price_tiyn: int | None = None, size_cm: str | None = None,
@@ -124,7 +126,7 @@ class SlidingWindowLimiter:
 IMAGE_SEARCH_PER_MINUTE = 20
 
 
-@api.post("/search/image")
+@router.post("/search/image")
 def search_by_image(request: Request, file: UploadFile = File(...), category: str | None = None,
                           size_cm: str | None = None, limit: int = 20, db: Session = Depends(get_db)):
     """Listings that look like the uploaded photo, most similar first. The photo is not stored."""
@@ -161,7 +163,7 @@ class SuggestIn(BaseModel):
     photo_url: str = Field(max_length=500)
 
 
-@api.post("/listings/suggest")
+@router.post("/listings/suggest")
 def suggest_details(body: SuggestIn, request: Request, user: User = Depends(current_user),
                     db: Session = Depends(get_db), storage: Storage = Depends(get_storage)):
     """Brand, model and category to offer the seller, read off look-alike listings already on VITRINA.
@@ -211,7 +213,7 @@ def suggest_details(body: SuggestIn, request: Request, user: User = Depends(curr
     }
 
 
-@api.get("/listings/{listing_id}/similar")
+@router.get("/listings/{listing_id}/similar")
 def similar_listings(listing_id: int, limit: int = 10, db: Session = Depends(get_db)):
     """Look-alike listings, ranked with the stored photo vectors.
     Empty when the listing has no vector yet (no model, or its photos are still being prepared)."""
@@ -244,7 +246,7 @@ def starts_a_word(key: str, typed: str) -> bool:
     return key.startswith(typed) or f" {typed}" in key
 
 
-@api.get("/search/suggest")
+@router.get("/search/suggest")
 def search_suggest(q: str = Query(default="", max_length=60), db: Session = Depends(get_db)):
     """Brands and models on sale now that start with what the buyer typed, the most offered first."""
     raw = " ".join(q.lower().split())

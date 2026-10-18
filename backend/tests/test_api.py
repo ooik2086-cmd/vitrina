@@ -150,6 +150,44 @@ class AuthTests(ApiTestCase):
         self.assertTrue(0 < int(again.json()["detail"]) <= 60)
         self.assertEqual(self.c.post("/api/v1/auth/otp", json={"phone": "+77010000007"}).status_code, 200)
 
+    def test_the_first_code_still_works_after_send_again_and_a_used_code_does_not_hold_the_next(self):
+        phone = "+77010000008"
+        first = self.c.post("/api/v1/auth/otp", json={"phone": phone}).json()["dev_code"]
+        self.c.post("/api/v1/auth/otp", json={"phone": phone})
+        r = self.c.post("/api/v1/auth/verify", json={"phone": phone, "code": first})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.app.state.settings.otp_resend_after = timedelta(seconds=60)
+        self.assertEqual(self.c.post("/api/v1/auth/otp", json={"phone": phone}).status_code, 200)  # signed in: no wait
+
+    def test_the_hourly_cap_says_how_long_to_wait(self):
+        for _ in range(self.cfg.otp_per_phone_per_hour):
+            self.c.post("/api/v1/auth/otp", json={"phone": "+77010000009"})
+        r = self.c.post("/api/v1/auth/otp", json={"phone": "+77010000009"}).json()
+        self.assertEqual(r["code"], "rate_limited")
+        self.assertTrue(3000 < int(r["detail"]) <= 3600, r)
+
+    def test_a_burst_of_parallel_requests_sends_one_code(self):
+        import threading
+        self.app.state.settings.otp_resend_after = timedelta(seconds=60)
+        barrier, codes = threading.Barrier(12), []
+
+        def ask():
+            barrier.wait()
+            codes.append(self.c.post("/api/v1/auth/otp", json={"phone": "+77010000010"}).status_code)
+        threads = [threading.Thread(target=ask) for _ in range(12)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        self.assertEqual(codes.count(200), 1, codes)
+
+    def test_refused_requests_do_not_use_up_the_address(self):
+        self.app.state.settings.otp_resend_after = timedelta(seconds=60)
+        self.c.post("/api/v1/auth/otp", json={"phone": "+77010000011"})
+        for _ in range(30):
+            self.c.post("/api/v1/auth/otp", json={"phone": "+77010000011"})
+        self.assertEqual(self.c.post("/api/v1/auth/otp", json={"phone": "+77010000012"}).status_code, 200)
+
     def test_requests_without_token_rejected(self):
         self.assertEqual(self.c.get("/api/v1/me").status_code, 401)
         self.assertEqual(self.c.get("/api/v1/me", headers={"Authorization": "Bearer nope"}).status_code, 401)

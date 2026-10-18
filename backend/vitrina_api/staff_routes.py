@@ -1,7 +1,7 @@
 """The staff console: moderation, disputes, reports, evidence and the audit log."""
 from __future__ import annotations
 
-from fastapi import Depends
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -13,7 +13,6 @@ from .config import Settings
 from .deps import get_db, get_settings, staff_user
 from .errors import ApiError
 from .models import AuditLog, ListingReport, Listing, Order, OrderEvent, User
-from .api_common import api
 from .schemas import ReasonIn, ReportCloseIn, ResolveIn
 from .serializers import listing_out, moderation_out, order_out, order_summary, ordered_photos
 from .saved_search_routes import announce
@@ -21,7 +20,10 @@ from .listing_routes import split_codes
 from .order_routes import order_for
 
 
-@api.post("/admin/orders/{order_id}/resolve")
+router = APIRouter(prefix="/api/v1")
+
+
+@router.post("/admin/orders/{order_id}/resolve")
 def resolve_dispute(order_id: int, body: ResolveIn, staff: User = Depends(staff_user),
                     db: Session = Depends(get_db), cfg: Settings = Depends(get_settings)):
     order = order_for(db, order_id, staff, lock=True)
@@ -41,7 +43,7 @@ def resolve_dispute(order_id: int, body: ResolveIn, staff: User = Depends(staff_
     return order_out(order)
 
 
-@api.post("/admin/orders/{order_id}/delivered")
+@router.post("/admin/orders/{order_id}/delivered")
 def mark_delivered(order_id: int, body: ReasonIn, staff: User = Depends(staff_user), db: Session = Depends(get_db)):
     """Support confirms a delivery the courier never reported (a call, a photo of the handover)."""
     order = order_for(db, order_id, staff, lock=True)
@@ -53,7 +55,7 @@ def mark_delivered(order_id: int, body: ReasonIn, staff: User = Depends(staff_us
     return order_out(order)
 
 
-@api.post("/admin/listings/{listing_id}/unhide")
+@router.post("/admin/listings/{listing_id}/unhide")
 def unhide_listing(listing_id: int, body: ReasonIn, staff: User = Depends(staff_user), db: Session = Depends(get_db)):
     """Undo a hide: the listing goes back to the seller as a draft, and publishing runs moderation again."""
     listing = db.get(Listing, listing_id)
@@ -69,7 +71,7 @@ def unhide_listing(listing_id: int, body: ReasonIn, staff: User = Depends(staff_
     return {"id": listing.id, "status": listing.status}
 
 
-@api.post("/admin/listings/{listing_id}/hide")
+@router.post("/admin/listings/{listing_id}/hide")
 def hide_listing(listing_id: int, body: ReasonIn, staff: User = Depends(staff_user), db: Session = Depends(get_db)):
     listing = db.get(Listing, listing_id)
     if listing is None:
@@ -82,7 +84,7 @@ def hide_listing(listing_id: int, body: ReasonIn, staff: User = Depends(staff_us
     return {"id": listing.id, "status": listing.status}
 
 
-@api.get("/admin/overview")
+@router.get("/admin/overview")
 def admin_overview(staff: User = Depends(staff_user), db: Session = Depends(get_db)):
     orders = dict(db.execute(select(Order.status, func.count(Order.id)).group_by(Order.status)).all())
     listings = dict(db.execute(select(Listing.status, func.count(Listing.id)).group_by(Listing.status)).all())
@@ -104,7 +106,7 @@ def admin_overview(staff: User = Depends(staff_user), db: Session = Depends(get_
                 select(func.count(User.id)).where(User.is_seller.is_(True)))}
 
 
-@api.get("/admin/orders")
+@router.get("/admin/orders")
 def admin_orders(status: str | None = None, staff: User = Depends(staff_user), db: Session = Depends(get_db)):
     stmt = select(Order).order_by(Order.id.desc()).limit(200)
     if status:
@@ -118,7 +120,7 @@ def admin_orders(status: str | None = None, staff: User = Depends(staff_user), d
     return {"items": items}
 
 
-@api.get("/admin/listings")
+@router.get("/admin/listings")
 def admin_listings(status: str | None = None, staff: User = Depends(staff_user), db: Session = Depends(get_db)):
     stmt = select(Listing).order_by(Listing.id.desc()).limit(200)
     if status:
@@ -126,7 +128,7 @@ def admin_listings(status: str | None = None, staff: User = Depends(staff_user),
     return {"items": [listing_out(db, r) for r in db.scalars(stmt).all()]}
 
 
-@api.get("/admin/moderation")
+@router.get("/admin/moderation")
 def admin_moderation(staff: User = Depends(staff_user), db: Session = Depends(get_db)):
     """Listings the publish checks flagged, oldest first so nobody waits longest."""
     rows = db.scalars(select(Listing).where(Listing.status == "moderation").order_by(Listing.id)).all()
@@ -146,7 +148,7 @@ def queued_listing(db: Session, listing_id: int) -> Listing:
     return listing
 
 
-@api.post("/admin/moderation/{listing_id}/approve")
+@router.post("/admin/moderation/{listing_id}/approve")
 def approve_listing(listing_id: int, staff: User = Depends(staff_user), db: Session = Depends(get_db)):
     listing = queued_listing(db, listing_id)
     listing.status = "published"
@@ -163,7 +165,7 @@ def approve_listing(listing_id: int, staff: User = Depends(staff_user), db: Sess
     return {"id": listing.id, "status": listing.status}
 
 
-@api.post("/admin/moderation/{listing_id}/reject")
+@router.post("/admin/moderation/{listing_id}/reject")
 def reject_listing(listing_id: int, body: ModerationRejectIn, staff: User = Depends(staff_user),
                    db: Session = Depends(get_db)):
     listing = queued_listing(db, listing_id)
@@ -177,7 +179,7 @@ def reject_listing(listing_id: int, body: ModerationRejectIn, staff: User = Depe
     return {"id": listing.id, "status": listing.status}
 
 
-@api.get("/admin/reports")
+@router.get("/admin/reports")
 def admin_reports(staff: User = Depends(staff_user), db: Session = Depends(get_db)):
     """Open reports grouped by listing, most-reported first."""
     rows = db.scalars(select(ListingReport).where(ListingReport.status == "open").order_by(ListingReport.id)).all()
@@ -192,7 +194,7 @@ def admin_reports(staff: User = Depends(staff_user), db: Session = Depends(get_d
     return {"items": items}
 
 
-@api.post("/admin/reports/{listing_id}/close")
+@router.post("/admin/reports/{listing_id}/close")
 def close_reports(listing_id: int, body: ReportCloseIn, staff: User = Depends(staff_user),
                   db: Session = Depends(get_db)):
     listing = db.get(Listing, listing_id)
@@ -222,14 +224,14 @@ def close_reports(listing_id: int, body: ReportCloseIn, staff: User = Depends(st
     return {"listing_id": listing.id, "status": listing.status, "closed": len(reports)}
 
 
-@api.get("/admin/audit")
+@router.get("/admin/audit")
 def admin_audit(staff: User = Depends(staff_user), db: Session = Depends(get_db)):
     rows = db.scalars(select(AuditLog).order_by(AuditLog.id.desc()).limit(100)).all()
     return {"items": [{"actor_user_id": r.actor_user_id, "action": r.action, "target": r.target, "reason": r.reason,
                        "at": services.aware(r.at).isoformat()} for r in rows]}
 
 
-@api.get("/admin/orders/{order_id}/evidence")
+@router.get("/admin/orders/{order_id}/evidence")
 def order_evidence(order_id: int, staff: User = Depends(staff_user), db: Session = Depends(get_db)):
     """What support decides a dispute on: both sides' words, the chat with its photos, and the parcel details.
     Read-only, and every look is written to the audit log because it shows a private conversation."""
@@ -252,7 +254,7 @@ def order_evidence(order_id: int, staff: User = Depends(staff_user), db: Session
                           "photo_url": m.photo_url, "at": services.aware(m.created_at).isoformat()} for m in messages]}
 
 
-@api.get("/admin/orders/{order_id}/ledger")
+@router.get("/admin/orders/{order_id}/ledger")
 def order_ledger(order_id: int, staff: User = Depends(staff_user), db: Session = Depends(get_db)):
     from .models import LedgerTx
     txs = db.scalars(select(LedgerTx).where(LedgerTx.order_id == order_id).order_by(LedgerTx.id)).all()

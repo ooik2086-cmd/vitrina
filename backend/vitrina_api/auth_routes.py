@@ -5,12 +5,13 @@ import hashlib
 import hmac
 import math
 import secrets
+import threading
 import time
 from datetime import date, timedelta
 
-from fastapi import Depends, Header, Request
+from fastapi import APIRouter, Depends, Header, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy import delete, func, or_, select, text as sql_text, update
 from sqlalchemy.orm import Session
 
 from vitrina_core.orders import OrderStatus as S
@@ -23,9 +24,12 @@ from .errors import ApiError
 from .social import CONTACT_RE
 from .models import (Block, Follow, Notification, Offer, SavedSearch, StockAlert, AuthToken, Favorite, Listing, Order,
                      OtpCode, User)
-from .api_common import ALMATY, PHONE_RE, api
+from .api_common import ALMATY, PHONE_RE
 from .schemas import OtpRequest, OtpVerify, ProfilePatch, SellerOn
 from .serializers import me_out
+
+
+router = APIRouter(prefix="/api/v1")
 
 
 OTP_REQUESTS_PER_ADDRESS_PER_HOUR = 20
@@ -33,46 +37,74 @@ OTP_FAILURES_PER_DAY = 15
 STAFF_TOKEN_TTL = timedelta(hours=12)
 
 
-@api.post("/auth/otp")
+# One phone's checks and its new code are one step: parallel requests must not all pass "no code in the last minute".
+# The striped locks cover one process (and SQLite); PostgreSQL also takes a lock that every API process shares.
+_PHONE_LOCKS = [threading.Lock() for _ in range(64)]
+
+
+def lock_phone(db: Session, phone: str) -> threading.Lock:
+    if db.get_bind().dialect.name == "postgresql":
+        db.execute(sql_text("SELECT pg_advisory_xact_lock(hashtext(:p))"), {"p": "otp:" + phone})
+    return _PHONE_LOCKS[int(hashlib.sha256(phone.encode()).hexdigest(), 16) % len(_PHONE_LOCKS)]
+
+
+def seconds_until(moment, now) -> int:
+    return max(1, math.ceil((services.aware(moment) - now).total_seconds()))
+
+
+@router.post("/auth/otp")
 def request_otp(body: OtpRequest, request: Request, db: Session = Depends(get_db),
                 cfg: Settings = Depends(get_settings)):
     if not PHONE_RE.match(body.phone):
         raise ApiError(422, "invalid_phone")
-    # Per address as well as per phone: one script walking through many numbers is what makes SMS bills explode.
-    client = request.client.host if request.client else "unknown"
-    if not request.app.state.otp_limiter.allow(client, time.monotonic()):
-        raise ApiError(429, "rate_limited")
-    now = now_utc()
-    recent = db.scalar(select(func.count(OtpCode.id)).where(OtpCode.phone == body.phone,
-                                                            OtpCode.created_at > now - timedelta(hours=1)))
-    # A fresh code resets the attempt counter, so wrong guesses are also capped per phone per day.
-    failed_today = db.scalar(select(func.coalesce(func.sum(OtpCode.attempts), 0)).where(
-        OtpCode.phone == body.phone, OtpCode.created_at > now - timedelta(days=1)))
-    if recent >= cfg.otp_per_phone_per_hour or failed_today >= OTP_FAILURES_PER_DAY:
-        raise ApiError(429, "rate_limited")
-    last = db.scalar(select(func.max(OtpCode.created_at)).where(OtpCode.phone == body.phone))
-    wait = 0 if last is None else math.ceil((services.aware(last) + cfg.otp_resend_after - now).total_seconds())
-    if wait > 0:
-        raise ApiError(429, "otp_too_soon", str(wait))  # detail: seconds left, so the app can count down
-    code = f"{secrets.randbelow(10**6):06d}"
-    digest = hmac.new(cfg.otp_secret, f"{body.phone}:{code}".encode(), hashlib.sha256).hexdigest()
-    db.add(OtpCode(phone=body.phone, code_hash=digest, expires_at=now_utc() + cfg.otp_ttl))
-    db.commit()
+    with lock_phone(db, body.phone):
+        now = now_utc()
+        hour = select(OtpCode.created_at).where(OtpCode.phone == body.phone,
+                                                OtpCode.created_at > now - timedelta(hours=1))
+        recent = db.scalars(hour.order_by(OtpCode.created_at)).all()
+        # A fresh code resets the attempt counter, so wrong guesses are also capped per phone per day.
+        day = (OtpCode.phone == body.phone, OtpCode.created_at > now - timedelta(days=1))
+        failed_today = db.scalar(select(func.coalesce(func.sum(OtpCode.attempts), 0)).where(*day))
+        # detail: seconds until a new code is possible, so the app can count down instead of inviting more taps.
+        if failed_today >= OTP_FAILURES_PER_DAY:
+            first = db.scalar(select(func.min(OtpCode.created_at)).where(*day, OtpCode.attempts > 0))
+            raise ApiError(429, "rate_limited", str(seconds_until(first + timedelta(days=1), now)))
+        if len(recent) >= cfg.otp_per_phone_per_hour:
+            raise ApiError(429, "rate_limited", str(seconds_until(recent[0] + timedelta(hours=1), now)))
+        # Only a code that can still be typed makes the next one wait: after signing in, or after a code was
+        # locked by wrong guesses, a new one is sent at once.
+        live = db.scalar(select(func.max(OtpCode.created_at)).where(
+            OtpCode.phone == body.phone, OtpCode.used.is_(False), OtpCode.attempts < cfg.otp_max_attempts,
+            OtpCode.expires_at > now))
+        if live is not None and services.aware(live) + cfg.otp_resend_after > now:
+            raise ApiError(429, "otp_too_soon", str(seconds_until(live + cfg.otp_resend_after, now)))
+        # Counted only when a code is really sent: refusals above cost no SMS and do not use up the address.
+        client = request.client.host if request.client else "unknown"
+        if not request.app.state.otp_limiter.allow(client, time.monotonic()):
+            raise ApiError(429, "rate_limited")
+        code = f"{secrets.randbelow(10**6):06d}"
+        digest = hmac.new(cfg.otp_secret, f"{body.phone}:{code}".encode(), hashlib.sha256).hexdigest()
+        db.add(OtpCode(phone=body.phone, code_hash=digest, expires_at=now + cfg.otp_ttl))
+        db.commit()
     # TODO(sms): send `code` through the SMS provider once one is contracted.
-    return {"sent": True, "resend_after": int(cfg.otp_resend_after.total_seconds()),
+    return {"sent": True, "resend_after": math.ceil(cfg.otp_resend_after.total_seconds()),
             **({"dev_code": code} if cfg.debug_otp else {})}
 
 
-@api.post("/auth/verify")
+@router.post("/auth/verify")
 def verify_otp(body: OtpVerify, db: Session = Depends(get_db), cfg: Settings = Depends(get_settings)):
-    otp = db.scalar(select(OtpCode).where(OtpCode.phone == body.phone, OtpCode.used.is_(False))
-                    .order_by(OtpCode.id.desc()))
-    if otp is None or services.aware(otp.expires_at) < now_utc() or otp.attempts >= cfg.otp_max_attempts:
+    # Every code still alive counts: when the first SMS arrives after "send again", the person types that one.
+    # At most a handful are alive (one a minute, five an hour), and wrong guesses stay capped per code and per day.
+    live = db.scalars(select(OtpCode).where(
+        OtpCode.phone == body.phone, OtpCode.used.is_(False), OtpCode.attempts < cfg.otp_max_attempts,
+        OtpCode.expires_at > now_utc()).order_by(OtpCode.id.desc())).all()
+    if not live:
         raise ApiError(400, "otp_expired")
     digest = hmac.new(cfg.otp_secret, f"{body.phone}:{body.code}".encode(), hashlib.sha256).hexdigest()
-    if not hmac.compare_digest(digest, otp.code_hash):
-        # One atomic step, so parallel guesses cannot all pass the attempts check read above.
-        db.execute(update(OtpCode).where(OtpCode.id == otp.id, OtpCode.attempts < cfg.otp_max_attempts)
+    otp = next((o for o in live if hmac.compare_digest(digest, o.code_hash)), None)
+    if otp is None:
+        # One atomic step on the newest code, so parallel guesses cannot all pass the attempts check read above.
+        db.execute(update(OtpCode).where(OtpCode.id == live[0].id, OtpCode.attempts < cfg.otp_max_attempts)
                    .values(attempts=OtpCode.attempts + 1))
         db.commit()
         raise ApiError(400, "otp_invalid")
@@ -81,6 +113,8 @@ def verify_otp(body: OtpVerify, db: Session = Depends(get_db), cfg: Settings = D
     if claimed.rowcount != 1:  # used or locked by a request that got there first
         db.rollback()
         raise ApiError(400, "otp_expired")
+    # Signed in: the other codes of this phone are spent too.
+    db.execute(update(OtpCode).where(OtpCode.phone == body.phone, OtpCode.used.is_(False)).values(used=True))
     otp.used = True
     user = db.scalar(select(User).where(User.phone == body.phone))
     if user is None:
@@ -98,7 +132,7 @@ def verify_otp(body: OtpVerify, db: Session = Depends(get_db), cfg: Settings = D
     return {"token": raw, "user": me_out(user)}
 
 
-@api.post("/auth/logout")
+@router.post("/auth/logout")
 def logout(everywhere: bool = False, authorization: str | None = Header(default=None),
            user: User = Depends(current_user), db: Session = Depends(get_db)):
     """Ends this session on the server, not only on the phone; with everywhere, every session of the account."""
@@ -109,7 +143,7 @@ def logout(everywhere: bool = False, authorization: str | None = Header(default=
     return {"ok": True}
 
 
-@api.get("/health")
+@router.get("/health")
 def health(db: Session = Depends(get_db)):
     """For the load balancer and uptime checks: the process answers and the database does too."""
     try:
@@ -119,7 +153,7 @@ def health(db: Session = Depends(get_db)):
     return {"ok": True}
 
 
-@api.get("/me")
+@router.get("/me")
 def get_me(user: User = Depends(current_user)):
     return me_out(user)
 
@@ -129,12 +163,12 @@ def notification_settings(user: User) -> dict:
     return {"items": [{"kind": k, "on": k not in off} for k in services.OPTIONAL_KINDS]}
 
 
-@api.get("/me/notification-settings")
+@router.get("/me/notification-settings")
 def get_notification_settings(user: User = Depends(current_user)):
     return notification_settings(user)
 
 
-@api.put("/me/notification-settings")
+@router.put("/me/notification-settings")
 def put_notification_settings(body: dict[str, bool], user: User = Depends(current_user),
                               db: Session = Depends(get_db)):
     """Turns optional alerts on or off, e.g. {"price_drop": false}. Kinds that always arrive cannot be listed."""
@@ -149,7 +183,7 @@ def put_notification_settings(body: dict[str, bool], user: User = Depends(curren
     return notification_settings(user)
 
 
-@api.delete("/me")
+@router.delete("/me")
 def delete_me(user: User = Depends(current_user), db: Session = Depends(get_db)):
     """Deletes the account: personal data goes, the person is signed out everywhere and their listings leave the
     catalog. Orders, payments and the ledger stay, without the name, because the law requires keeping them."""
@@ -179,7 +213,7 @@ def delete_me(user: User = Depends(current_user), db: Session = Depends(get_db))
     return {"deleted": True}
 
 
-@api.patch("/me")
+@router.patch("/me")
 def patch_me(body: ProfilePatch, user: User = Depends(current_user), db: Session = Depends(get_db)):
     user = db.merge(user)
     for k, v in body.model_dump(exclude_unset=True).items():
@@ -195,7 +229,7 @@ class AwayIn(BaseModel):
     until: date | None = None  # None ends the holiday
 
 
-@api.put("/me/away")
+@router.put("/me/away")
 def set_away(body: AwayIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     """Holiday mode: listings stay visible with a note, but nobody can order or make an offer until the seller
     is back, so no one pays and then waits for a shop that is closed."""
@@ -217,7 +251,7 @@ class ShopAboutIn(BaseModel):
     text: str | None = Field(default=None, max_length=MAX_SHOP_ABOUT)
 
 
-@api.put("/me/shop-about")
+@router.put("/me/shop-about")
 def set_shop_about(body: ShopAboutIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     """A few lines on the shop page: how the seller ships, returns, answers. Contacts stay in the app's chat."""
     if not user.is_seller:
@@ -231,7 +265,7 @@ def set_shop_about(body: ShopAboutIn, user: User = Depends(current_user), db: Se
     return me_out(user)
 
 
-@api.post("/me/seller")
+@router.post("/me/seller")
 def become_seller(body: SellerOn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     user = db.merge(user)
     user.is_seller, user.shop_name, user.city = True, body.shop_name, body.city

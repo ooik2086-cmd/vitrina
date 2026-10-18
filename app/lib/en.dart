@@ -876,7 +876,6 @@ const en = <String, String>{
   'Қосқан әр фото мен өлшем бірден сақталады.': 'Each photo and size you add is saved right away.',
   'Өшіру: {0}': 'Delete: {0}',
   'Кодты қайта жіберу': 'Send the code again',
-  'Кодты қайта жіберу: {0} сек': 'Send again in {0} s',
   '360° көрініс өшірілді': '360° view deleted',
   '360° көріністі өшіру керек пе?': 'Delete the 360° view?',
   '360° өшіру': 'Delete 360°',
@@ -887,4 +886,9 @@ const en = <String, String>{
   'Тапсырыс берген кездегі фото': 'Photos when ordered',
   'Фотоны ауыстыруға болады. Бұрын тапсырыс бергендер өздері көрген фотоны тапсырыс ішінен көреді.':
       'You can replace photos. Buyers who already ordered see the photos they ordered from in their order.',
+  '{0} мин': '{0} min',
+  '{0} сек': '{0} s',
+  'Жаңа код жіберілді. Бұрынғы код та жарамды.': 'A new code was sent. The earlier one still works too.',
+  'Жаңа код: {0} кейін': 'New code in {0}',
+  'Код {0} нөміріне жіберілді': 'Code sent to {0}',
 };

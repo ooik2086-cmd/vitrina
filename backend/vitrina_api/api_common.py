@@ -1,11 +1,9 @@
-"""What every API module shares: the /api/v1 router the routes register on, and limits they agree on."""
+"""What every API module shares: limits and constants the route modules agree on."""
 from __future__ import annotations
 
 import logging
 import re
 from datetime import timedelta, timezone
-
-from fastapi import APIRouter
 
 from vitrina_core.catalog import Condition
 from vitrina_core.orders import OrderStatus as S
@@ -20,8 +18,6 @@ MAX_LISTING_MEDIA = 60  # the same limit a new listing has
 MAX_LISTING_SIZES = 30
 DEFECT_REQUIRED = {Condition.USED_GOOD.value, Condition.DEFECTIVE.value}
 
-
-api = APIRouter(prefix="/api/v1")
 
 
 ALMATY = timezone(timedelta(hours=5))  # Kazakhstan has one time zone, UTC+5, since March 2024

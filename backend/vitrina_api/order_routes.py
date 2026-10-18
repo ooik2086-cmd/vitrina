@@ -5,7 +5,7 @@ import json
 import re
 from typing import Literal
 
-from fastapi import Depends, Header
+from fastapi import APIRouter, Depends, Header
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -18,10 +18,13 @@ from .config import Settings
 from .deps import current_user, get_db, get_settings
 from .errors import ApiError
 from .models import IdempotencyRecord, Listing, ListingSize, Order, OrderEvent, Review, User
-from .api_common import DECLINABLE, IN_DELIVERY, PHONE_RE, api
+from .api_common import DECLINABLE, IN_DELIVERY, PHONE_RE
 from .schemas import DeliveryIn, OrderIn, ReasonIn, ShipIn
 from .serializers import (away_until, delivery_out, listing_cover, order_out, order_summary, ordered_photos,
                           photo_snapshot)
+
+
+router = APIRouter(prefix="/api/v1")
 
 
 def order_for(db: Session, order_id: int, user: User, *, role: str | None = None, lock: bool = False) -> Order:
@@ -51,7 +54,7 @@ def clean_delivery(body: DeliveryIn) -> dict:
     return values
 
 
-@api.post("/orders", status_code=201)
+@router.post("/orders", status_code=201)
 def create_order(body: OrderIn, user: User = Depends(current_user), db: Session = Depends(get_db),
                  cfg: Settings = Depends(get_settings), idempotency_key: str | None = Header(default=None)):
     if not idempotency_key:
@@ -114,7 +117,7 @@ def create_order(body: OrderIn, user: User = Depends(current_user), db: Session 
     return order_out(order)
 
 
-@api.get("/orders")
+@router.get("/orders")
 def list_orders(role: Literal["buyer", "seller"] = "buyer", user: User = Depends(current_user),
                 db: Session = Depends(get_db)):
     column = Order.buyer_id if role == "buyer" else Order.seller_id
@@ -122,7 +125,7 @@ def list_orders(role: Literal["buyer", "seller"] = "buyer", user: User = Depends
     return {"items": [order_summary(db, o) for o in rows]}
 
 
-@api.get("/orders/{order_id}")
+@router.get("/orders/{order_id}")
 def get_order(order_id: int, user: User = Depends(current_user), db: Session = Depends(get_db),
               cfg: Settings = Depends(get_settings)):
     order = order_for(db, order_id, user)
@@ -134,7 +137,7 @@ def get_order(order_id: int, user: User = Depends(current_user), db: Session = D
             "history": [{"status": e.to_status, "at": services.aware(e.at).isoformat()} for e in events]}
 
 
-@api.post("/orders/{order_id}/pay")
+@router.post("/orders/{order_id}/pay")
 def start_payment(order_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
     order = order_for(db, order_id, user, role="buyer", lock=True)
     if order.status == S.CREATED.value:
@@ -146,7 +149,7 @@ def start_payment(order_id: int, user: User = Depends(current_user), db: Session
     return {"provider": "sandbox", "order_id": order.id, "amount_tiyn": services.total_tiyn(order), "currency": "KZT"}
 
 
-@api.post("/orders/{order_id}/cancel")
+@router.post("/orders/{order_id}/cancel")
 def cancel_order(order_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
     order = order_for(db, order_id, user, role="buyer", lock=True)
     if order.status in (S.CREATED.value, S.PAYMENT_PENDING.value):
@@ -159,7 +162,7 @@ def cancel_order(order_id: int, user: User = Depends(current_user), db: Session 
     return order_out(order)
 
 
-@api.post("/orders/{order_id}/decline")
+@router.post("/orders/{order_id}/decline")
 def decline_order(order_id: int, body: ReasonIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     order = order_for(db, order_id, user, role="seller", lock=True)
     # Only before the pair leaves: a "decline" on a return would refund in full and put back a shoe still away.
@@ -172,7 +175,7 @@ def decline_order(order_id: int, body: ReasonIn, user: User = Depends(current_us
     return order_out(order)
 
 
-@api.post("/orders/{order_id}/accept")
+@router.post("/orders/{order_id}/accept")
 def accept_order(order_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
     order = order_for(db, order_id, user, role="seller", lock=True)
     services.move(db, order, S.SELLER_ACCEPTED, Actor.SELLER, user_id=user.id)
@@ -180,7 +183,7 @@ def accept_order(order_id: int, user: User = Depends(current_user), db: Session 
     return order_out(order)
 
 
-@api.post("/orders/{order_id}/ship")
+@router.post("/orders/{order_id}/ship")
 def ship_order(order_id: int, body: ShipIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     order = order_for(db, order_id, user, role="seller", lock=True)
     # A number already on another parcel would let its delivery complete this order too.
@@ -193,7 +196,7 @@ def ship_order(order_id: int, body: ShipIn, user: User = Depends(current_user), 
     return order_out(order)
 
 
-@api.post("/orders/{order_id}/confirm")
+@router.post("/orders/{order_id}/confirm")
 def confirm_order(order_id: int, user: User = Depends(current_user), db: Session = Depends(get_db),
                   cfg: Settings = Depends(get_settings)):
     order = order_for(db, order_id, user, role="buyer", lock=True)
@@ -203,7 +206,7 @@ def confirm_order(order_id: int, user: User = Depends(current_user), db: Session
     return order_out(order)
 
 
-@api.post("/orders/{order_id}/received")
+@router.post("/orders/{order_id}/received")
 def mark_received(order_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
     """The buyer has the parcel though no courier reported it: this starts the inspection window, it does not
     release the money."""
@@ -213,7 +216,7 @@ def mark_received(order_id: int, user: User = Depends(current_user), db: Session
     return order_out(order)
 
 
-@api.post("/orders/{order_id}/dispute")
+@router.post("/orders/{order_id}/dispute")
 def open_dispute(order_id: int, body: ReasonIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     """The buyer disputes a delivery or a return the seller ignores; the seller disputes only a return."""
     order = order_for(db, order_id, user, lock=True)
@@ -228,7 +231,7 @@ def open_dispute(order_id: int, body: ReasonIn, user: User = Depends(current_use
     return order_out(order)
 
 
-@api.post("/orders/{order_id}/return")
+@router.post("/orders/{order_id}/return")
 def request_return(order_id: int, body: ReasonIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     order = order_for(db, order_id, user, role="buyer", lock=True)
     if not body.reason.strip():
@@ -238,7 +241,7 @@ def request_return(order_id: int, body: ReasonIn, user: User = Depends(current_u
     return order_out(order)
 
 
-@api.post("/orders/{order_id}/approve-return")
+@router.post("/orders/{order_id}/approve-return")
 def approve_return(order_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
     order = order_for(db, order_id, user, role="seller", lock=True)
     services.move(db, order, S.REFUND_PENDING, Actor.SELLER, user_id=user.id, reason="seller approved return")

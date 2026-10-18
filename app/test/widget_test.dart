@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -2653,13 +2654,16 @@ void main() {
     await tester.tap(find.text('Код алу'));
     await tester.pump();
     await tester.pump();
-    expect(find.text('Кодты қайта жіберу: 3 сек'), findsOneWidget);
+    expect(find.text('Жаңа код: 3 сек кейін'), findsOneWidget);
+    expect(find.text('Код +77010000001 нөміріне жіберілді'), findsOneWidget);
     expect(tester.widget<TextButton>(find.byKey(const Key('resend-code'))).onPressed, isNull);
     await tester.pump(const Duration(seconds: 3));
     expect(find.text('Кодты қайта жіберу'), findsOneWidget);
     await tester.tap(find.byKey(const Key('resend-code')));
     await tester.pump();
     expect(asked, 2);
+    await tester.pump();
+    expect(find.text('Жаңа код жіберілді. Бұрынғы код та жарамды.'), findsOneWidget);
     await tester.pumpWidget(const SizedBox()); // stops the timer
   });
 
@@ -2720,29 +2724,52 @@ void main() {
     expect(tester.getTopRight(find.text('Nike Air Force 1').last).dx, greaterThan(maxContentWidth));
   });
 
-  testWidgets('the catalog search field stays usable on a 320 dp phone at the largest text size', (tester) async {
-    tester.view.physicalSize = const Size(320, 640);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.reset);
+  for (final (width, scale) in [(320.0, 2.0), (320.0, 1.0), (360.0, 1.3), (412.0, 1.0)]) {
+    testWidgets('the catalog search field leaves room to type at ${width.toInt()} dp and text x$scale', (tester) async {
+      tester.view.physicalSize = Size(width, 640);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final api = Api(
+          base: 'http://x/api/v1',
+          client: MockClient((req) async => req.url.path == '/api/v1/notifications'
+              ? jsonResponse({'unread': 3, 'items': []})
+              : jsonResponse({'items': []})))
+        ..token = 'tok'; // signed in: the header also carries the saved-search and bell buttons
+      mySize.value = '27,5'; // the longest size label
+      addTearDown(() => mySize.value = null);
+      final recent = recentSearches.value;
+      recentSearches.value = ['Nike Air Force 1', 'Adidas Samba']; // the hints under the field take room too
+      addTearDown(() => recentSearches.value = recent);
+      await tester.pumpWidget(SessionScope(
+          session: Session(api),
+          child: MaterialApp(
+              home: MediaQuery(
+                  data: MediaQueryData(size: Size(width, 640), textScaler: TextScaler.linear(scale)),
+                  child: const Scaffold(body: CatalogScreen())))));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull); // no RenderFlex overflow
+      final field = tester.getRect(find.byKey(const Key('search-field')));
+      expect(field.right, lessThanOrEqualTo(width));
+      final typing = tester
+          .getSize(find.descendant(of: find.byKey(const Key('search-field')), matching: find.byType(EditableText)));
+      expect(typing.width, greaterThanOrEqualTo(min(100 * scale, 170)), reason: 'room left for the typed words');
+      expect(find.text('27,5 см'), findsOneWidget);
+    });
+  }
+
+  testWidgets('after the hourly limit the code button waits it out in minutes', (tester) async {
     final api = Api(
         base: 'http://x/api/v1',
-        client: MockClient((req) async => req.url.path == '/api/v1/notifications'
-            ? jsonResponse({'unread': 3, 'items': []})
-            : jsonResponse({'items': []})))
-      ..token = 'tok'; // signed in: the header also carries the saved-search and bell buttons
-    mySize.value = '27,5'; // the longest size label
-    addTearDown(() => mySize.value = null);
-    await tester.pumpWidget(SessionScope(
-        session: Session(api),
-        child: MaterialApp(
-            home: MediaQuery(
-                data: const MediaQueryData(size: Size(320, 640), textScaler: TextScaler.linear(2)),
-                child: const Scaffold(body: CatalogScreen())))));
-    await tester.pumpAndSettle();
-    expect(tester.takeException(), isNull); // no RenderFlex overflow
-    final field = tester.getRect(find.byKey(const Key('search-field')));
-    expect(field.right, lessThanOrEqualTo(320));
-    expect(field.width, greaterThan(200)); // not squeezed to a sliver beside the size button
-    expect(find.text('27,5 см'), findsOneWidget);
+        client: MockClient((req) async => http.Response(
+            jsonEncode({'code': 'rate_limited', 'message_kk': 'Тым көп сұрау.', 'detail': '1500'}), 429,
+            headers: {'content-type': 'application/json; charset=utf-8'})));
+    await tester.pumpWidget(SessionScope(session: Session(api), child: const MaterialApp(home: LoginScreen())));
+    await tester.enterText(find.byType(TextField).first, '+77010000001');
+    await tester.tap(find.text('Код алу'));
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('Жаңа код: 25 мин кейін'), findsOneWidget);
+    expect(tester.widget<FilledButton>(find.byType(FilledButton)).onPressed, isNull);
+    await tester.pumpWidget(const SizedBox()); // stops the timer
   });
 }

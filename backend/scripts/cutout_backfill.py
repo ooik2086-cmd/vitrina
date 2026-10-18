@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from sqlalchemy import select  # noqa: E402
 
 from vitrina_api import cutout, visual  # noqa: E402
-from vitrina_api.app import cutout_listing, embed_listing  # noqa: E402
+from vitrina_api.listing_routes import cutout_listing, embed_listing  # noqa: E402
 from vitrina_api.config import Settings  # noqa: E402
 from vitrina_api.models import Listing, ListingEmbedding, Media, make_session_factory  # noqa: E402
 from vitrina_api.storage import LocalStorage  # noqa: E402

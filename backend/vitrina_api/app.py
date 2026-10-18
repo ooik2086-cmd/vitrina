@@ -20,14 +20,15 @@ from .share import router as share_router
 from .social import router as social_router
 from .models import make_session_factory
 from .storage import MAX_UPLOAD_BYTES, make_storage
-from .api_common import api, log
+from .api_common import log
 from .auth_routes import OTP_REQUESTS_PER_ADDRESS_PER_HOUR
 from .search_routes import IMAGE_SEARCH_PER_MINUTE, SlidingWindowLimiter
 from .webhook_routes import hooks
-# Each module registers its routes on api when imported, in the order they are matched.
 from . import (auth_routes, listing_routes, order_routes, saved_search_routes, search_routes, seller_routes,
                staff_routes)
 
+# Included in this order, which is the order paths are matched in: a literal path such as /listings/suggest must
+# come before a pattern such as /listings/{listing_id} with the same method.
 ROUTE_MODULES = (auth_routes, listing_routes, search_routes, seller_routes, saved_search_routes, order_routes,
                  staff_routes)
 
@@ -112,7 +113,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             response.headers.setdefault("Content-Security-Policy", ADMIN_CSP if path.startswith("/admin") else SHARE_CSP)
         return response
 
-    app.include_router(api)
+    for module in ROUTE_MODULES:
+        app.include_router(module.router)
     app.include_router(hooks)
     app.include_router(social_router)
     app.include_router(share_router)

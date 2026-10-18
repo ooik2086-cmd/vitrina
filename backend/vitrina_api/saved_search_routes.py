@@ -1,7 +1,7 @@
 """Saved searches, the catalog filter they share with search, and telling followers about a new listing."""
 from __future__ import annotations
 
-from fastapi import Depends
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
@@ -14,8 +14,10 @@ from . import promo
 from .deps import current_user, get_db, now_utc
 from .errors import ApiError
 from .models import Follow, SavedSearch, Favorite, Listing, ListingSize, User
-from .api_common import api
 from .serializers import cm_to_mm, listing_out
+
+
+router = APIRouter(prefix="/api/v1")
 
 
 def catalog_filter(stmt, *, q: str | None = None, category: str | None = None, brand: str | None = None,
@@ -100,7 +102,7 @@ def announce(db: Session, listing: Listing) -> None:
                             f"New match for your search: “{listing.title}”, {price}", listing_id=listing.id)
 
 
-@api.post("/saved-searches", status_code=201)
+@router.post("/saved-searches", status_code=201)
 def save_search(body: SavedSearchIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     values = search_values(body)
     if not any(v is not None for v in values.values()):
@@ -119,13 +121,13 @@ def save_search(body: SavedSearchIn, user: User = Depends(current_user), db: Ses
     return saved_search_out(saved)
 
 
-@api.get("/saved-searches")
+@router.get("/saved-searches")
 def list_saved_searches(user: User = Depends(current_user), db: Session = Depends(get_db)):
     rows = db.scalars(select(SavedSearch).where(SavedSearch.user_id == user.id).order_by(SavedSearch.id.desc())).all()
     return {"items": [saved_search_out(s) for s in rows]}
 
 
-@api.delete("/saved-searches/{search_id}", status_code=204)
+@router.delete("/saved-searches/{search_id}", status_code=204)
 def delete_saved_search(search_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
     saved = db.get(SavedSearch, search_id)
     if saved is None or saved.user_id != user.id:
@@ -134,7 +136,7 @@ def delete_saved_search(search_id: int, user: User = Depends(current_user), db: 
     db.commit()
 
 
-@api.post("/favorites/{listing_id}", status_code=204)
+@router.post("/favorites/{listing_id}", status_code=204)
 def add_favorite(listing_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
     if db.get(Listing, listing_id) is None:
         raise ApiError(404, "not_found")
@@ -145,7 +147,7 @@ def add_favorite(listing_id: int, user: User = Depends(current_user), db: Sessio
         db.rollback()
 
 
-@api.delete("/favorites/{listing_id}", status_code=204)
+@router.delete("/favorites/{listing_id}", status_code=204)
 def remove_favorite(listing_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
     fav = db.scalar(select(Favorite).where(Favorite.user_id == user.id, Favorite.listing_id == listing_id))
     if fav:
@@ -153,7 +155,7 @@ def remove_favorite(listing_id: int, user: User = Depends(current_user), db: Ses
         db.commit()
 
 
-@api.get("/favorites")
+@router.get("/favorites")
 def list_favorites(user: User = Depends(current_user), db: Session = Depends(get_db)):
     ids = db.scalars(select(Favorite.listing_id).where(Favorite.user_id == user.id)).all()
     return {"items": [listing_out(db, db.get(Listing, i)) for i in ids]}

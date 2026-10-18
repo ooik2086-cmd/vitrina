@@ -6,7 +6,7 @@ import csv
 import io
 from datetime import datetime, timedelta, timezone
 
-from fastapi import Depends, Query
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import Response
 from sqlalchemy import case, func, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -20,11 +20,14 @@ from .deps import current_user, get_db, now_utc, optional_user
 from .errors import ApiError
 from .social import reply_time, seller_rating
 from .models import Follow, Offer, ListingDailyViews, Favorite, Listing, ListingSize, Order, Question, User
-from .api_common import ALMATY, api
+from .api_common import ALMATY
 from .serializers import ADDRESS_HIDDEN_UNTIL_PAID, away_out, listing_out
 
 
-@api.get("/me/listings")
+router = APIRouter(prefix="/api/v1")
+
+
+@router.get("/me/listings")
 def my_listings(user: User = Depends(current_user), db: Session = Depends(get_db)):
     rows = db.scalars(select(Listing).where(Listing.seller_id == user.id).order_by(Listing.id.desc()).limit(200)).all()
     preload_stats(db, [r.id for r in rows])
@@ -46,7 +49,7 @@ def preload_stats(db: Session, ids: list[int]) -> None:
                                     "sold": sold.get(i, 0)} for i in ids}
 
 
-@api.get("/me/earnings")
+@router.get("/me/earnings")
 def my_earnings(user: User = Depends(current_user), db: Session = Depends(get_db)):
     """Seller's money, read straight from the ledger: what is held for open orders, what is owed to the
     seller after completed ones, and the commission taken on each."""
@@ -93,7 +96,7 @@ def tenge(tiyn: int | None) -> str:
     return ("-" if tiyn < 0 else "") + (f"{whole},{part:02d}" if part else str(whole))
 
 
-@api.get("/me/sales.csv")
+@router.get("/me/sales.csv")
 def sales_csv(days: int = Query(default=90, ge=1, le=366), user: User = Depends(current_user),
               db: Session = Depends(get_db)):
     """The seller's orders for a spreadsheet or an accountant: price, promo, commission and what was paid out.
@@ -144,7 +147,7 @@ def followers(db: Session, seller_id: int) -> int:
     return int(db.scalar(select(func.count(Follow.id)).where(Follow.seller_id == seller_id)) or 0)
 
 
-@api.get("/sellers/{seller_id}")
+@router.get("/sellers/{seller_id}")
 def seller_profile(seller_id: int, user: User | None = Depends(optional_user), db: Session = Depends(get_db)):
     """Public shop card. Counts come from the platform's own records, not from what the seller typed."""
     seller = public_seller(db, seller_id)
@@ -163,7 +166,7 @@ def seller_profile(seller_id: int, user: User | None = Depends(optional_user), d
             **seller_rating(db, seller.id)}
 
 
-@api.put("/sellers/{seller_id}/follow")
+@router.put("/sellers/{seller_id}/follow")
 def follow_seller(seller_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
     seller = public_seller(db, seller_id)
     if seller.id == user.id:
@@ -177,7 +180,7 @@ def follow_seller(seller_id: int, user: User = Depends(current_user), db: Sessio
     return {"following": True, "followers": followers(db, seller.id)}
 
 
-@api.delete("/sellers/{seller_id}/follow")
+@router.delete("/sellers/{seller_id}/follow")
 def unfollow_seller(seller_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
     for f in db.scalars(select(Follow).where(Follow.user_id == user.id, Follow.seller_id == seller_id)).all():
         db.delete(f)
@@ -185,7 +188,7 @@ def unfollow_seller(seller_id: int, user: User = Depends(current_user), db: Sess
     return {"following": False, "followers": followers(db, seller_id)}
 
 
-@api.get("/me/following")
+@router.get("/me/following")
 def my_following(user: User = Depends(current_user), db: Session = Depends(get_db)):
     """Shops the user follows, newest first, with how many listings each has on sale now."""
     rows = db.execute(select(User, Follow.created_at).join(Follow, Follow.seller_id == User.id).where(
@@ -209,7 +212,7 @@ def unread_messages(db: Session, user_id: int) -> int:
                                 Message.sender_id != user_id, Message.id > last_read)) or 0)
 
 
-@api.get("/me/todo")
+@router.get("/me/todo")
 def my_todo(user: User = Depends(current_user), db: Session = Depends(get_db)):
     """What waits on this person right now, as counts for the profile's to-do card. Seller lines come only for
     sellers. Offers past their answer time are not counted: they have already lapsed."""
@@ -239,7 +242,7 @@ def my_todo(user: User = Depends(current_user), db: Session = Depends(get_db)):
     return out
 
 
-@api.get("/me/analytics")
+@router.get("/me/analytics")
 def seller_analytics(days: int = 14, user: User = Depends(current_user), db: Session = Depends(get_db)):
     """Day-by-day views, orders and sales for the seller's listings, plus the listings that draw most interest."""
     if not user.is_seller:

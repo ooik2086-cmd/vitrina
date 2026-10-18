@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:clock/clock.dart';
 import 'package:flutter/material.dart';
 
 import '../api.dart';
@@ -21,7 +22,10 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _busy = false;
   String? _devCode;
   Timer? _timer;
-  int _wait = 0; // seconds until a new code may be asked for
+  DateTime? _until; // when a new code may be asked for; a deadline, so time spent in the SMS app counts too
+
+  int get _wait =>
+      _until == null ? 0 : (_until!.difference(clock.now()).inMilliseconds / 1000).ceil().clamp(0, 1 << 30);
 
   @override
   void dispose() {
@@ -35,13 +39,26 @@ class _LoginScreenState extends State<LoginScreen> {
 
   void _countDown(int seconds) {
     _timer?.cancel();
-    setState(() => _wait = seconds);
+    setState(() => _until = clock.now().add(Duration(seconds: seconds)));
     _timer = Timer.periodic(const Duration(seconds: 1), (t) {
       if (!mounted) return t.cancel();
-      setState(() => _wait = _wait > 0 ? _wait - 1 : 0);
+      setState(() {});
       if (_wait == 0) t.cancel();
     });
   }
+
+  void _changeNumber() {
+    _timer?.cancel();
+    setState(() {
+      _codeSent = false;
+      _until = null;
+      _devCode = null;
+      _code.clear();
+    });
+  }
+
+  /// "45 сек" for a short wait, "12 мин" once the hourly or daily limit is reached.
+  String get _waitText => _wait > 90 ? trf('{0} мин', [(_wait / 60).ceil()]) : trf('{0} сек', [_wait]);
 
   Future<void> _run(Future<void> Function(Session) step) async {
     setState(() => _busy = true);
@@ -52,6 +69,8 @@ class _LoginScreenState extends State<LoginScreen> {
       if (e.code == 'otp_too_soon' && mounted) {
         setState(() => _codeSent = true);
         _countDown(int.tryParse(e.detail ?? '') ?? 60);
+      } else if (e.code == 'rate_limited' && int.tryParse(e.detail ?? '') != null && mounted) {
+        _countDown(int.parse(e.detail!)); // the hourly or daily limit: the button waits it out instead of failing
       }
       if (mounted) showError(context, e);
     } catch (e) {
@@ -62,8 +81,13 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   void _sendCode() => _run((s) async {
+        final again = _codeSent;
         final sent = await s.api.requestOtp(_normalizedPhone);
         if (!mounted) return;
+        if (again) {
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text(tr('Жаңа код жіберілді. Бұрынғы код та жарамды.'))));
+        }
         setState(() {
           _codeSent = true;
           _devCode = sent.devCode;
@@ -88,7 +112,9 @@ class _LoginScreenState extends State<LoginScreen> {
           decoration: InputDecoration(labelText: tr('Телефон нөмірі'), hintText: '+7 701 000 00 00'),
         ),
         if (_codeSent) ...[
-          const SizedBox(height: 16),
+          const SizedBox(height: 8),
+          Text(trf('Код {0} нөміріне жіберілді', [_normalizedPhone]), style: Theme.of(context).textTheme.bodySmall),
+          const SizedBox(height: 8),
           TextField(
             key: const Key('otp-code'),
             controller: _code,
@@ -104,22 +130,21 @@ class _LoginScreenState extends State<LoginScreen> {
         ],
         const SizedBox(height: 24),
         FilledButton(
-          onPressed: _busy ? null : (_codeSent ? _verify : _sendCode),
-          child: Text(_codeSent ? tr('Растау') : tr('Код алу')),
+          onPressed: _busy || (!_codeSent && _wait > 0) ? null : (_codeSent ? _verify : _sendCode),
+          child: Text(_codeSent
+              ? tr('Растау')
+              : _wait > 0
+                  ? trf('Жаңа код: {0} кейін', [_waitText])
+                  : tr('Код алу')),
         ),
         if (_codeSent) ...[
           TextButton(
             key: const Key('resend-code'),
             onPressed: _busy || _wait > 0 ? null : _sendCode,
-            child: Text(_wait > 0 ? trf('Кодты қайта жіберу: {0} сек', [_wait]) : tr('Кодты қайта жіберу')),
+            child: Text(_wait > 0 ? trf('Жаңа код: {0} кейін', [_waitText]) : tr('Кодты қайта жіберу')),
           ),
           TextButton(
-            onPressed: _busy
-                ? null
-                : () => setState(() {
-                      _codeSent = false;
-                      _code.clear();
-                    }),
+            onPressed: _busy ? null : _changeNumber,
             child: Text(tr('Нөмірді өзгерту')),
           ),
         ],

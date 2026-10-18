@@ -285,12 +285,15 @@ class _CatalogScreenState extends State<CatalogScreen> {
                         ),
                       );
                       final size = _SizeButton(sizeCm: _sizeCm, onTap: _pickSize);
-                      // Side by side the field would be crushed on a narrow phone with large text: stack them then.
-                      if (box.maxWidth < 160 + 110 * MediaQuery.textScalerOf(context).scale(1)) {
+                      // Side by side, what is left for typing is the row minus the size button (about 48 + 62 per
+                      // text scale), the field's two icons (96) and its padding. Below ~110 per text scale the hint
+                      // is cut to a few letters, so the button goes under the field instead.
+                      final scale = MediaQuery.textScalerOf(context).scale(1);
+                      if (box.maxWidth < 178 + 172 * scale) {
                         return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                           field,
                           const SizedBox(height: 8),
-                          size,
+                          Align(alignment: Alignment.centerLeft, child: size),
                         ]);
                       }
                       return Row(children: [Expanded(child: field), const SizedBox(width: 10), size]);
@@ -553,7 +556,8 @@ class _RecentRow extends StatelessWidget {
         ]),
       ),
       SizedBox(
-        height: 166,
+        // Photo 92 + gap 6 + price and title lines, which grow with the text size (166 at the default size).
+        height: 112 + 54 * MediaQuery.textScalerOf(context).scale(1),
         child: ListView.separated(
           key: const Key('recent'),
           scrollDirection: Axis.horizontal,
