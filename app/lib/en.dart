@@ -940,7 +940,7 @@ const en = <String, String>{
       '360° view: {0}. Scroll the page up and down to turn it.',
   'Ашық фон': 'Light backdrop',
   'Бастапқы өлшем': 'Original size',
-  'Жақын': 'Close-up',
+  'Жақыннан': 'Close-up',
   'Қараңғы фон': 'Dark backdrop',
   '360° айналымнан кейін сатып алушы үстін, табанын және жақын көріністі көреді. Бір-бір фото қосыңыз:':
       'After the 360° turn buyers see the top, the sole and a close-up. Add one photo of each:',

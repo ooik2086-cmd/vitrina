@@ -163,7 +163,7 @@ void main() {
     expect(base(tester), 'https://cdn/f0-s.webp');
   });
 
-  showcaseTest('the stops jump straight to the sole, with a tick each time a stop is reached', (tester) async {
+  showcaseTest('the stops jump straight to the sole, with one tick when it is reached', (tester) async {
     final ticks = <MethodCall>[];
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
       if (call.method == 'HapticFeedback.vibrate') ticks.add(call);
@@ -173,7 +173,7 @@ void main() {
     await tester.tap(find.byKey(const Key('showcase-step-sole')));
     await tester.pumpAndSettle();
     expect(base(tester), 'https://cdn/sole-s.webp');
-    expect(ticks, isNotEmpty);
+    expect(ticks, hasLength(1)); // one tick on arrival, not one for the top passed on the way
     await tester.tap(find.byKey(const Key('showcase-step-close')));
     await tester.pumpAndSettle();
     expect(base(tester), 'https://cdn/detail-s.webp');

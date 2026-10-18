@@ -26,7 +26,7 @@ class ShowcaseStep {
         'spin' => '360°',
         'top' => tr('Үстінен'),
         'sole' => tr('Табаны'),
-        _ => tr('Жақын'),
+        _ => tr('Жақыннан'),
       };
 }
 
@@ -128,6 +128,7 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
   Timer? _settle;
   ({int step, int frame}) _shown = (step: 0, frame: 0);
   bool _precached = false;
+  int? _jumpingTo; // a stop button was tapped: tick once on arrival, not for every stop passed
   static bool _hinted = false; // the short turn that shows scrolling turns the shoe, once per app run
 
   final _viewer = GlobalKey();
@@ -241,7 +242,10 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
     final now = _plan.at(_progress);
     if (now != _shown) {
       if (now.step != _shown.step) {
-        HapticFeedback.selectionClick();
+        if (_jumpingTo == null || _jumpingTo == now.step) {
+          HapticFeedback.selectionClick();
+          _jumpingTo = null;
+        }
         _showChip(now.step);
       }
       _shown = now;
@@ -274,6 +278,7 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
   void _goTo(int step) {
     _resetZoom();
     final target = _plan.startOf(step) * _travel + (step == 0 ? 0 : 1);
+    _jumpingTo = step;
     if (_reduceMotion) {
       widget.scroll.jumpTo(target);
     } else {
@@ -411,25 +416,24 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
   }
 
   Widget _chip({required Key key, required VoidCallback? onTap, required Widget child, Color? fill, Color? border}) =>
-      // 36 dp to look at, 48 dp to touch.
-      InkWell(
-        key: key,
-        borderRadius: BorderRadius.circular(99),
-        onTap: onTap,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(minHeight: 48, minWidth: 48),
-          child: Center(
-            widthFactor: 1,
-            child: Container(
-              constraints: const BoxConstraints(minHeight: 36, minWidth: 44),
-              alignment: Alignment.center,
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              decoration: BoxDecoration(
-                color: fill,
-                border: border == null ? null : Border.all(color: border),
-                borderRadius: BorderRadius.circular(99),
+      // 36 dp to look at, 48 dp to touch; the Material carries the fill so the press ripple shows on it.
+      ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 48, minWidth: 48),
+        child: Center(
+          widthFactor: 1,
+          child: Material(
+            color: fill ?? Colors.transparent,
+            shape: StadiumBorder(side: border == null ? BorderSide.none : BorderSide(color: border)),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              key: key,
+              onTap: onTap,
+              child: Container(
+                constraints: const BoxConstraints(minHeight: 36, minWidth: 44),
+                alignment: Alignment.center,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: child,
               ),
-              child: child,
             ),
           ),
         ),
@@ -513,6 +517,7 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
                     _RoundChip(
                       key: const Key('showcase-backdrop'),
                       tooltip: _light ? tr('Қараңғы фон') : tr('Ашық фон'),
+                      toggled: !_light,
                       onTap: () => setState(() => _light = !_light),
                       child: const Icon(Icons.contrast, size: 20, color: Brand.ink),
                     ),
@@ -599,23 +604,28 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
 }
 
 class _RoundChip extends StatelessWidget {
-  const _RoundChip({super.key, required this.child, required this.onTap, required this.tooltip});
+  const _RoundChip({super.key, required this.child, required this.onTap, required this.tooltip, this.toggled});
   final Widget child;
   final VoidCallback onTap;
   final String tooltip;
+  final bool? toggled;
 
   @override
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.only(left: 6),
-        child: Tooltip(
-          message: tooltip,
-          child: Material(
-            color: Colors.white.withValues(alpha: 0.92),
-            shape: const CircleBorder(),
-            child: InkWell(
-              customBorder: const CircleBorder(),
-              onTap: onTap,
-              child: SizedBox(width: 48, height: 48, child: Center(child: child)),
+        child: Semantics(
+          button: true,
+          toggled: toggled,
+          child: Tooltip(
+            message: tooltip,
+            child: Material(
+              color: Colors.white.withValues(alpha: 0.92),
+              shape: const CircleBorder(),
+              child: InkWell(
+                customBorder: const CircleBorder(),
+                onTap: onTap,
+                child: SizedBox(width: 48, height: 48, child: Center(child: child)),
+              ),
             ),
           ),
         ),
