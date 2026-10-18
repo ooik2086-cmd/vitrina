@@ -12,6 +12,7 @@ import 'package:vitrina/screens/listing_screen.dart';
 import 'package:vitrina/session.dart';
 import 'package:vitrina/widgets/common.dart';
 import 'package:vitrina/widgets/scroll_showcase.dart';
+import 'package:vitrina/widgets/studio.dart';
 
 http.Response jsonResponse(Object body, [int status = 200]) =>
     http.Response(jsonEncode(body), status, headers: {'content-type': 'application/json; charset=utf-8'});
@@ -474,9 +475,44 @@ void main() {
     await pump(tester, listing(backdrop: 'dark'));
     BoxDecoration deco() => tester.widget<DecoratedBox>(find.byKey(const Key('showcase'))).decoration as BoxDecoration;
     expect(deco().gradient, isNotNull); // a light shoe on the dark backdrop
+    expect(deco().gradient, isNot(studioGradient));
     await tester.tap(find.byKey(const Key('showcase-backdrop')));
     await tester.pump();
-    expect(deco().gradient, isNull);
+    expect(deco().gradient, studioGradient);
+  });
+
+  showcaseTest('a cut-out stands on the studio floor with its shadow; on the dark backdrop there is none',
+      (tester) async {
+    await pump(tester, listing());
+    final shadow = tester.widget<ContactShadow>(find.byType(ContactShadow));
+    expect(urlOf(shadow.image), base(tester)); // made from the copy already on screen, not a second download
+    expect(shadow.fit, BoxFit.contain);
+    await tester.tap(find.byKey(const Key('showcase-backdrop')));
+    await tester.pump();
+    expect(find.byType(ContactShadow), findsNothing);
+  });
+
+  showcaseTest('photos as taken have their own floor and get no shadow', (tester) async {
+    await pump(tester, listing(cutFrames: false));
+    expect(find.byType(ContactShadow), findsNothing);
+  });
+
+  testWidgets('a catalog card shows a cut-out on the studio backdrop with its shadow, a plain photo without',
+      (tester) async {
+    Future<void> show(Map<String, dynamic> json) => tester.pumpWidget(MaterialApp(
+        home: Scaffold(body: SizedBox(width: 220, height: 400, child: ListingTile(listing: Listing.fromJson(json))))));
+    await show(listing());
+    final card =
+        tester.widget<Container>(find.descendant(of: find.byType(Hero), matching: find.byType(Container)).first);
+    expect((card.decoration as BoxDecoration).gradient, studioGradient);
+    final shadow = tester.widget<ContactShadow>(find.byType(ContactShadow));
+    final photo = tester.widget<Image>(find.descendant(of: find.byType(Hero), matching: find.byType(Image)));
+    expect(shadow.image, photo.image); // one decoded copy for both
+    await show({
+      ...listing(),
+      'media': [media('front', 'front', cut: false)]
+    });
+    expect(find.byType(ContactShadow), findsNothing);
   });
 
   showcaseTest('without a cut-out there is no backdrop switch', (tester) async {

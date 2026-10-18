@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../theme.dart';
 import '../i18n.dart';
+import 'studio.dart';
 
 /// Backdrop per showcase style. Styles change only what surrounds the photos, never the photos.
 BoxDecoration showcaseBackground(String style) => switch (style) {
@@ -13,7 +14,7 @@ BoxDecoration showcaseBackground(String style) => switch (style) {
       'dynamic' => const BoxDecoration(
           gradient: LinearGradient(
               begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFFFFE3D3), Color(0xFFD9E6FF)])),
-      _ => const BoxDecoration(color: Brand.studio),
+      _ => studioBackdrop(),
     };
 
 /// 360° view built from a sequence of real photos taken around the product.

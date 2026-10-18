@@ -503,6 +503,9 @@ class Listing {
   List<MediaItem> get frames => media.where((m) => m.angle == 'frame').toList();
   List<MediaItem> get photos => media.where((m) => m.angle != 'frame').toList();
   String? get coverUrl => (photos.isNotEmpty ? photos : media).firstOrNull?.url;
+
+  /// The cover is the shoe cut out of its photo, so it stands on the app's own backdrop.
+  bool get coverIsCutout => (photos.isNotEmpty ? photos : media).firstOrNull?.processedUrl != null;
 }
 
 /// Where an order goes. The seller gets it only after the buyer pays.

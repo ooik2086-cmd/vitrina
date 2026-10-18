@@ -9,6 +9,7 @@ import '../api.dart';
 import '../i18n.dart';
 import '../theme.dart';
 import 'spin_viewer.dart' show showcaseBackground;
+import 'studio.dart';
 
 /// One stop of the showcase: the turn made of 360° frames, then the top, the sole and a close-up.
 class ShowcaseStep {
@@ -421,14 +422,22 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
           sync || frame != null ? child : const SizedBox.shrink(), // until then the small copy shows through
       errorBuilder: (_, __, ___) => const SizedBox.shrink(),
     );
-    final img = Stack(fit: StackFit.expand, children: [base, if (sharpen) full]);
+    // A cut-out stands on the floor: its shadow, made from the small copy, which stays the same while it sharpens.
+    final shadow = step.cut && !_onDark(step);
+    final img = Stack(
+        fit: StackFit.expand,
+        children: [if (shadow) ContactShadow(image: small, fit: BoxFit.contain), base, if (sharpen) full]);
     return step.cut ? Padding(padding: const EdgeInsets.all(20), child: img) : img;
   }
+
+  /// The step's photos stand on a dark backdrop, where a shadow would not show.
+  bool _onDark(ShowcaseStep step) =>
+      widget.listing.backdrop != null && step.cut ? !_light : widget.listing.showcaseStyle == 'premium';
 
   BoxDecoration get _backdrop {
     if (widget.listing.backdrop == null) return showcaseBackground(widget.listing.showcaseStyle);
     return _light
-        ? const BoxDecoration(color: Brand.studio)
+        ? studioBackdrop()
         : const BoxDecoration(gradient: RadialGradient(colors: [Color(0xFF3A3A40), Color(0xFF111114)], radius: 0.9));
   }
 
@@ -465,7 +474,7 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
     final step = _plan.steps[now.step];
     final media = step.media[now.frame];
     final ownBackdrop = widget.listing.backdrop != null && step.cut;
-    final onDark = ownBackdrop ? !_light : widget.listing.showcaseStyle == 'premium';
+    final onDark = _onDark(step);
     final chipText = onDark ? Colors.white : Brand.ink;
     final index = _photoIndex;
     final top = MediaQuery.paddingOf(context).top + kToolbarHeight; // the shoe stays clear of the app bar

@@ -10,6 +10,7 @@ import '../screens/listing_screen.dart';
 import '../screens/login_screen.dart';
 import '../theme.dart';
 import '../i18n.dart';
+import 'studio.dart';
 
 void showError(BuildContext context, Object error) {
   final text = error is ApiException ? error.message : tr('Байланыс жоқ. Қайта көріңіз.');
@@ -155,6 +156,10 @@ class LanguageSwitch extends StatelessWidget {
   }
 }
 
+/// A listing's cover as tiles and the page opening from them draw it, so both share one decoded copy.
+/// A tile is at most 240 wide; three times that covers dense screens.
+ImageProvider coverImage(String url) => ResizeImage.resizeIfNeeded(720, null, NetworkImage(url));
+
 class ListingTile extends StatelessWidget {
   const ListingTile({super.key, required this.listing});
   final Listing listing;
@@ -164,8 +169,8 @@ class ListingTile extends StatelessWidget {
     final theme = Theme.of(context);
     final cover = listing.coverUrl;
     return GestureDetector(
-      onTap: () => Navigator.of(context)
-          .push(MaterialPageRoute(builder: (_) => ListingScreen(listingId: listing.id, cover: listing.coverUrl))),
+      onTap: () => Navigator.of(context).push(MaterialPageRoute(
+          builder: (_) => ListingScreen(listingId: listing.id, cover: cover, coverIsCutout: listing.coverIsCutout))),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         AspectRatio(
           aspectRatio: 1,
@@ -173,15 +178,17 @@ class ListingTile extends StatelessWidget {
             tag: 'listing-${listing.id}',
             child: Container(
               clipBehavior: Clip.antiAlias,
-              decoration: BoxDecoration(color: Brand.studio, borderRadius: BorderRadius.circular(Brand.radius)),
+              decoration: studioBackdrop(radius: BorderRadius.circular(Brand.radius)),
               child: Stack(fit: StackFit.expand, children: [
                 if (cover == null)
                   const Icon(Icons.image_outlined, color: Colors.black26)
-                else
-                  Image.network(cover,
+                else ...[
+                  if (listing.coverIsCutout) ContactShadow(image: coverImage(cover), fit: BoxFit.cover),
+                  Image(
+                      image: coverImage(cover),
                       fit: BoxFit.cover,
-                      cacheWidth: 720, // a tile is at most 240 wide; three times that covers dense screens
                       errorBuilder: (_, __, ___) => const Icon(Icons.broken_image_outlined, color: Colors.black26)),
+                ],
                 if (listing.frames.isNotEmpty) const Positioned(left: 10, top: 10, child: Badge360()),
                 if (listing.wasPriceTiyn != null) Positioned(right: 10, top: 10, child: SaleBadge(listing: listing)),
               ]),

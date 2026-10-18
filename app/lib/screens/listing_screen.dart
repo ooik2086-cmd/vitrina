@@ -14,6 +14,7 @@ import '../widgets/questions.dart';
 import '../widgets/size_guide.dart';
 import '../widgets/scroll_showcase.dart';
 import '../widgets/spin_viewer.dart';
+import '../widgets/studio.dart';
 import 'chat_screen.dart';
 import 'help_screen.dart';
 import 'login_screen.dart';
@@ -28,11 +29,14 @@ import '../recent.dart';
 const _minSpinFrames = 8;
 
 class ListingScreen extends StatefulWidget {
-  const ListingScreen({super.key, required this.listingId, this.cover});
+  const ListingScreen({super.key, required this.listingId, this.cover, this.coverIsCutout = false});
   final int listingId;
 
   /// The photo the catalog card showed: it flies in and stays while the listing loads.
   final String? cover;
+
+  /// The cover is a cut-out: it keeps the card's studio backdrop and shadow on the way.
+  final bool coverIsCutout;
 
   @override
   State<ListingScreen> createState() => _ListingScreenState();
@@ -252,12 +256,16 @@ class _ListingScreenState extends State<ListingScreen> {
             return Stack(children: [
               Hero(
                 tag: 'listing-${widget.listingId}',
-                child: Image.network(cover,
-                    fit: BoxFit.contain,
-                    width: double.infinity,
-                    height: double.infinity,
-                    cacheWidth: 720,
-                    errorBuilder: (_, __, ___) => const SizedBox.shrink()),
+                child: DecoratedBox(
+                  decoration: widget.coverIsCutout ? studioBackdrop() : const BoxDecoration(),
+                  child: Stack(fit: StackFit.expand, children: [
+                    if (widget.coverIsCutout) ContactShadow(image: coverImage(cover), fit: BoxFit.contain),
+                    Image(
+                        image: coverImage(cover),
+                        fit: BoxFit.contain,
+                        errorBuilder: (_, __, ___) => const SizedBox.shrink()),
+                  ]),
+                ),
               ),
               const Center(child: CircularProgressIndicator()),
             ]);
