@@ -3,6 +3,7 @@ good only with its signature and only until it expires; the bucket's presigned l
 from __future__ import annotations
 
 import hmac
+import re
 import time
 
 from fastapi import APIRouter, Request
@@ -12,13 +13,14 @@ from .errors import ApiError
 from .storage import CONTENT_TYPES, KEY_RE, link_signature
 
 router = APIRouter(prefix="/api/v1")
+SIG_RE = re.compile(r"[0-9a-f]{64}")
 
 
 @router.get("/private-media/{owner}/{name}")
 def private_file(owner: str, name: str, exp: int, sig: str, request: Request):
     files = request.app.state.private
     key = f"{owner}/{name}"
-    if not KEY_RE.fullmatch(key) or exp < time.time() or not hmac.compare_digest(
+    if not KEY_RE.fullmatch(key) or not SIG_RE.fullmatch(sig) or exp < time.time() or not hmac.compare_digest(
             sig, link_signature(files.link_secret, key, exp)):
         raise ApiError(404, "not_found")  # an expired or altered link says no more than a missing file
     path = (files.root / key).resolve()

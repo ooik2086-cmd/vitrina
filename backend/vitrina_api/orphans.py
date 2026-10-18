@@ -37,6 +37,8 @@ KEY_IN_TEXT = re.compile(r"(?<![0-9A-Za-z])" + KEY_BODY)
 
 MIN_AGE = timedelta(days=7)
 MAX_SHARE = 0.2
+# Below this many the share says little (a small store of receipts, 3 unused of 10), so they are deleted anyway.
+FEW = 20
 
 
 class SweepRefused(RuntimeError):
@@ -75,10 +77,12 @@ def referenced_keys(db: Session, only: set[str] | None = None) -> set[str]:
 
 
 def sweep(sessions: sessionmaker, storage: Storage, *, now: datetime, delete: bool = False, force: bool = False,
-          min_age: timedelta = MIN_AGE, max_share: float = MAX_SHARE) -> Sweep:
+          min_age: timedelta = MIN_AGE, max_share: float = MAX_SHARE, before: set[str] | None = None) -> Sweep:
+    """before: the keys the database pointed at, when already read for another store in the same run."""
     result = Sweep()
-    with sessions() as db:
-        before = referenced_keys(db)
+    if before is None:
+        with sessions() as db:
+            before = referenced_keys(db)
     result.referenced = len(before)
     if not before:  # an empty or wrong database would make every file look unused
         raise SweepRefused("no row points at any stored file: check the database settings")
@@ -88,13 +92,12 @@ def sweep(sessions: sessionmaker, storage: Storage, *, now: datetime, delete: bo
             result.stored += 1
             if key not in before:
                 old.append(key)
-    del before
     if not old:
         return result
     with sessions() as db:
         later = referenced_keys(db, only=set(old))
     result.orphans = [key for key in old if key not in later]
-    if delete and not force and len(result.orphans) > max_share * result.stored:
+    if delete and not force and len(result.orphans) > max(max_share * result.stored, FEW):
         raise SweepRefused(f"{len(result.orphans)} of {result.stored} old files look unused, more than "
                            f"{max_share:.0%}: is this the database this storage belongs to? Use --force if it is")
     if delete:
@@ -131,10 +134,12 @@ def main(argv: list[str] | None = None) -> int:
     sessions = make_session_factory(cfg.database_url, create_schema=False)
     print(f"database: {make_url(cfg.database_url).render_as_string(hide_password=True)}")
     code = 0
+    with sessions() as db:  # read once for both stores; each store's candidates are checked again before deleting
+        before = referenced_keys(db)
     for storage in (make_storage(cfg), make_private_storage(cfg)):  # photos, then receipts and dispute evidence
         print(f"storage: {where(storage)}")
         try:
-            result = sweep(sessions, storage, now=now_utc(), delete=args.delete, force=args.force)
+            result = sweep(sessions, storage, now=now_utc(), delete=args.delete, force=args.force, before=before)
         except SweepRefused as e:
             print(f"stopped, nothing deleted here: {e}", file=sys.stderr)
             code = max(code, 2)

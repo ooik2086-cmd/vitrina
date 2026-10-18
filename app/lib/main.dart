@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
@@ -164,8 +165,12 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     final chats = _counts['unread_messages'] ?? 0;
     final orders = ordersWaiting(_counts);
-    // Five labels do not fit a 320 dp phone or large text; then only the chosen tab is named.
-    final roomy = MediaQuery.sizeOf(context).width >= 360 && MediaQuery.textScalerOf(context).scale(14) <= 17;
+    final labels = [tr('Каталог'), tr('Таңдаулы'), tr('Чат'), tr('Тапсырыс'), tr('Профиль')];
+    // Every label on one line: a long one (Russian «Избранное», large text) makes all of them a little smaller;
+    // when that is not enough, only the chosen tab is named, made as small as it needs to fit.
+    final fit = navLabelFit(context, labels);
+    final roomy = fit >= 0.8;
+    final scale = roomy ? fit : navLabelFit(context, [labels[_tab]], tabs: labels.length);
     // Back on another tab returns to the catalog first, rather than closing the app.
     return PopScope(
       canPop: _tab == 0,
@@ -180,33 +185,36 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
           OrdersScreen(),
           ProfileScreen(),
         ]),
-        bottomNavigationBar: NavigationBar(
-          selectedIndex: _tab,
-          labelBehavior: roomy
-              ? NavigationDestinationLabelBehavior.alwaysShow
-              : NavigationDestinationLabelBehavior.onlyShowSelected,
-          onDestinationSelected: (i) {
-            setState(() => _tab = _lastTab = i);
-            _refreshBadges();
-          },
-          destinations: [
-            NavigationDestination(
-                icon: Icon(Icons.storefront_outlined), selectedIcon: Icon(Icons.storefront), label: tr('Каталог')),
-            NavigationDestination(
-                icon: Icon(Icons.favorite_border), selectedIcon: Icon(Icons.favorite), label: tr('Таңдаулы')),
-            NavigationDestination(
-                key: const Key('tab-chat'),
-                icon: _badged(const Icon(Icons.chat_bubble_outline_rounded), chats),
-                selectedIcon: _badged(const Icon(Icons.chat_bubble_rounded), chats),
-                label: tr('Чат')),
-            NavigationDestination(
-                key: const Key('tab-orders'),
-                icon: _badged(const Icon(Icons.receipt_long_outlined), orders),
-                selectedIcon: _badged(const Icon(Icons.receipt_long), orders),
-                label: tr('Тапсырыс')),
-            NavigationDestination(
-                icon: Icon(Icons.person_outline), selectedIcon: Icon(Icons.person), label: tr('Профиль')),
-          ],
+        bottomNavigationBar: NavigationBarTheme(
+          data: navLabelsScaled(context, scale),
+          child: NavigationBar(
+            selectedIndex: _tab,
+            labelBehavior: roomy
+                ? NavigationDestinationLabelBehavior.alwaysShow
+                : NavigationDestinationLabelBehavior.onlyShowSelected,
+            onDestinationSelected: (i) {
+              setState(() => _tab = _lastTab = i);
+              _refreshBadges();
+            },
+            destinations: [
+              NavigationDestination(
+                  icon: Icon(Icons.storefront_outlined), selectedIcon: Icon(Icons.storefront), label: labels[0]),
+              NavigationDestination(
+                  icon: Icon(Icons.favorite_border), selectedIcon: Icon(Icons.favorite), label: labels[1]),
+              NavigationDestination(
+                  key: const Key('tab-chat'),
+                  icon: _badged(const Icon(Icons.chat_bubble_outline_rounded), chats),
+                  selectedIcon: _badged(const Icon(Icons.chat_bubble_rounded), chats),
+                  label: labels[2]),
+              NavigationDestination(
+                  key: const Key('tab-orders'),
+                  icon: _badged(const Icon(Icons.receipt_long_outlined), orders),
+                  selectedIcon: _badged(const Icon(Icons.receipt_long), orders),
+                  label: labels[3]),
+              NavigationDestination(
+                  icon: Icon(Icons.person_outline), selectedIcon: Icon(Icons.person), label: labels[4]),
+            ],
+          ),
         ),
       ),
     );
@@ -221,3 +229,32 @@ int ordersWaiting(Map<String, int> counts) => [
       'to_ship',
       'returns',
     ].fold(0, (sum, k) => sum + (counts[k] ?? 0));
+
+/// How much the bottom bar's labels must shrink so the widest fits on one line in its tab (1 = no shrinking).
+double navLabelFit(BuildContext context, List<String> labels, {int? tabs}) {
+  final style = Theme.of(context).navigationBarTheme.labelTextStyle?.resolve({WidgetState.selected}) ??
+      Theme.of(context).textTheme.labelMedium!;
+  final room = MediaQuery.sizeOf(context).width / (tabs ?? labels.length) - 8; // a tab, less a little air
+  var widest = 0.0;
+  for (final label in labels) {
+    final painter = TextPainter(
+        text: TextSpan(text: label, style: style),
+        textDirection: TextDirection.ltr,
+        textScaler: MediaQuery.textScalerOf(context),
+        maxLines: 1)
+      ..layout();
+    widest = math.max(widest, painter.width);
+    painter.dispose();
+  }
+  return widest <= room ? 1 : room / widest;
+}
+
+/// The bar's theme with its label text made [scale] times its size.
+NavigationBarThemeData navLabelsScaled(BuildContext context, double scale) {
+  final theme = Theme.of(context).navigationBarTheme;
+  if (scale >= 1) return theme;
+  return theme.copyWith(labelTextStyle: WidgetStateProperty.resolveWith((states) {
+    final style = theme.labelTextStyle?.resolve(states) ?? Theme.of(context).textTheme.labelMedium!;
+    return style.copyWith(fontSize: (style.fontSize ?? 12) * scale);
+  }));
+}

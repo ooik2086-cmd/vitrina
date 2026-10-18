@@ -48,6 +48,9 @@ class Settings:
     # serves them at /api/v1/private-media with a signed link.
     s3_private_bucket: str = field(default_factory=lambda: os.environ.get("VITRINA_S3_PRIVATE_BUCKET", ""))
     private_media_dir: str = field(default_factory=lambda: os.environ.get("VITRINA_PRIVATE_MEDIA_DIR", "./media-private-dev"))
+    # The API's own address as phones reach it, for links to private files kept on disk. Empty: the origin of
+    # VITRINA_PUBLIC_MEDIA_URL, which is right while the API serves /media itself (no public bucket).
+    public_api_url: str = field(default_factory=lambda: os.environ.get("VITRINA_PUBLIC_API_URL", ""))
     # Listings may only reference photos uploaded through /media, so sellers cannot embed tracking pixels or hotlinks.
     allow_external_media: bool = field(default_factory=lambda: os.environ.get("VITRINA_ALLOW_EXTERNAL_MEDIA", "0") == "1")
     # Browser origins allowed to call the API (the Flutter web build during development). Empty = none.

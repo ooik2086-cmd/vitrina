@@ -129,8 +129,10 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
   Timer? _settle;
   ({int step, int frame}) _shown = (step: 0, frame: 0);
   bool _precached = false;
-  int _fingers = 0; // on the page: the full photo waits until the finger is lifted
-  ImageProvider? _fullShown; // the full photo decoded for the current frame, dropped from memory when it moves on
+  // The last few full photos shown, newest last. Older ones are dropped from memory so they cannot push the small
+  // scrolling copies out of the image cache, but going back to a photo just seen, or zooming out, finds it ready.
+  final _recentFull = <ImageProvider>[];
+  static const _keepFull = 3;
   int? _jumpingTo; // a stop button was tapped: tick once on arrival, not for every stop passed
   /// How often the stage was built; tests check that scrolling within one frame does not rebuild it.
   @visibleForTesting
@@ -222,6 +224,9 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
     widget.scroll.removeListener(_onScroll);
     _settle?.cancel();
     if (_lockedOffset != null || _zoomed) widget.onLock?.call(false);
+    for (final p in _recentFull) {
+      p.evict();
+    }
     super.dispose();
   }
 
@@ -253,9 +258,6 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
       _shown = now;
       // Small copies while turning; the full photo once the shoe has stopped on one frame for a moment.
       _settled = false;
-      _settle?.cancel();
-      _fullShown?.evict(); // full photos of passed frames would push the small copies out of the image cache
-      _fullShown = null;
       _settleSoon();
       setState(() {});
     }
@@ -264,13 +266,24 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
     if (SemanticsBinding.instance.semanticsEnabled) _pin.currentContext?.findRenderObject()?.markNeedsSemanticsUpdate();
   }
 
-  /// The full photo once the shoe has stopped for a moment and no finger is moving it: decoding one while the finger
-  /// pauses mid-drag made the turn stutter.
+  /// The full photo once the shoe has stopped on one photo for a moment: 140 ms after the finger is lifted, or
+  /// 450 ms while it rests on the shoe. Decoding one at every short pause mid-drag made the turn stutter; a longer
+  /// pause is someone looking closely, who should get the sharp photo.
   void _settleSoon() {
     _settle?.cancel();
-    _settle = Timer(const Duration(milliseconds: 140), () {
-      if (mounted && _fingers == 0 && !_settled) setState(() => _settled = true);
+    _settle = Timer(Duration(milliseconds: _pointers.isEmpty ? 140 : 450), () {
+      if (mounted && !_settled) setState(() => _settled = true);
     });
+  }
+
+  void _remember(ImageProvider full) {
+    if (_recentFull.isNotEmpty && _recentFull.last == full) return;
+    _recentFull
+      ..remove(full)
+      ..add(full);
+    while (_recentFull.length > _keepFull) {
+      _recentFull.removeAt(0).evict();
+    }
   }
 
   void _goTo(int step) {
@@ -303,11 +316,6 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
 
   /// Takes a pointer event from the Listener around the page's list; events outside the stage are ignored.
   void handlePointer(PointerEvent e) {
-    if (e is PointerDownEvent) _fingers++;
-    if (e is PointerUpEvent || e is PointerCancelEvent) {
-      _fingers = math.max(0, _fingers - 1);
-      if (_fingers == 0 && !_settled) _settleSoon();
-    }
     final box = _viewer.currentContext?.findRenderObject() as RenderBox?;
     if (box == null || !box.attached) return;
     final local = box.globalToLocal(e.position);
@@ -332,6 +340,7 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
       if (_pointers.remove(e.pointer) == null) return;
       if (_pointers.length < 2) _pinchStartDistance = 0;
       if (_pointers.isEmpty && !_zoomed) _setLock();
+      if (_pointers.isEmpty && !_settled) _settleSoon(); // lifted: the sharp photo comes sooner
     }
   }
 
@@ -387,9 +396,10 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
 
   Widget _photo(MediaItem m, ShowcaseStep step, double width) {
     final dpr = MediaQuery.devicePixelRatioOf(context);
+    final small = _base(m, step);
     final base = Image(
       key: const ValueKey('showcase-base'),
-      image: _base(m, step),
+      image: small,
       fit: BoxFit.contain,
       gaplessPlayback: true, // the last frame stays until the next is decoded: the shoe never blinks out
       filterQuality: FilterQuality.medium,
@@ -399,10 +409,9 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
     final bucket = _scale <= 1.05 ? 1 : (_scale <= 2 ? 2 : 3);
     final provider = ResizeImage.resizeIfNeeded(
         math.min(6000, (width * dpr * bucket).round()), null, NetworkImage(step.cut ? m.url : m.originalUrl));
-    if ((_settled || _zoomed) && _fullShown != provider) {
-      _fullShown?.evict(); // the size for another zoom level
-      _fullShown = provider;
-    }
+    // With no small copy the base is already this photo at screen size: nothing to lay over it, nothing to drop.
+    final sharpen = (_settled || _zoomed) && provider != small;
+    if (sharpen) _remember(provider);
     final full = Image(
       image: provider,
       key: ValueKey('showcase-full-${m.url}-$bucket'),
@@ -412,7 +421,7 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
           sync || frame != null ? child : const SizedBox.shrink(), // until then the small copy shows through
       errorBuilder: (_, __, ___) => const SizedBox.shrink(),
     );
-    final img = Stack(fit: StackFit.expand, children: [base, if (_settled || _zoomed) full]);
+    final img = Stack(fit: StackFit.expand, children: [base, if (sharpen) full]);
     return step.cut ? Padding(padding: const EdgeInsets.all(20), child: img) : img;
   }
 

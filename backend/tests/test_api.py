@@ -1591,6 +1591,17 @@ class AuthenticityTests(ApiTestCase):
         self.assertEqual(self.c.get(old.removeprefix("http://test")).status_code, 404)  # expired
         other = link.replace(f"/{key.split('/')[0]}/", "/999/")
         self.assertEqual(self.c.get(other.removeprefix("http://test")).status_code, 404)
+        odd = link.split("&sig=")[0] + "&sig=" + "й" * 64  # not hex at all: refused, not a server error
+        self.assertEqual(self.c.get(odd.removeprefix("http://test")).status_code, 404)
+        # The same address for every answer within a window, so the app's image cache works; valid at least an hour.
+        self.assertEqual(self.c.get(f"/api/v1/listings/{lid}/proofs", headers=self.h(self.seller)).json()["proofs"][0]
+                         ["url"], link)
+        at = datetime(2026, 10, 18, 12, 14, 59, tzinfo=timezone.utc)
+        same = private_link(self.app.state.private, stored, now=at)
+        self.assertEqual(private_link(self.app.state.private, stored, now=at.replace(minute=0, second=0)), same)
+        expires = int(same.split("exp=")[1].split("&")[0])
+        self.assertGreaterEqual(expires - at.timestamp(), 3600)
+        self.assertEqual(private_link(self.app.state.private, "private:/../x.jpg"), "")  # damaged: no file
         # A proof saved before private storage keeps its public address.
         self.assertEqual(private_link(self.app.state.private, "http://test/media/1/" + "a" * 32 + ".jpg"),
                          "http://test/media/1/" + "a" * 32 + ".jpg")
@@ -2417,6 +2428,9 @@ class DisputeEvidenceTests(ApiTestCase):
         self.assertEqual((r.json()["from"], r.json()["kind"], r.json()["note"]), ("buyer", "photo", "Табаны"))
         with Image.open(io.BytesIO(self.fetch(r.json()["url"]).content)) as img:
             self.assertNotIn(0x8825, img.getexif())  # no place left in the photo
+        from vitrina_api.models import OrderEvidence
+        with self.db() as db:  # kept apart from the public photos
+            self.assertTrue(db.scalars(select(OrderEvidence.url)).first().startswith("private:/"))
         self.assertEqual(self.add(order, self.seller).status_code, 201)
         self.post(f"/orders/{order['id']}/dispute", self.seller, {"reason": "Аяқ киім киілген"})
         self.assertEqual(self.add(order, self.seller).status_code, 201)
@@ -2633,9 +2647,9 @@ class OrphanSweepTests(ApiTestCase):
     def test_refuses_when_too_many_files_look_unused_or_the_database_points_at_nothing(self):
         kept = self.stored(8)
         self.point_at(kept)
-        lost = [self.stored(8) for _ in range(3)]
+        lost = [self.stored(8) for _ in range(21)]
         with self.assertRaises(self.orphans.SweepRefused):
-            self.sweep(delete=True)  # 3 of 4: more likely the wrong database than real leftovers
+            self.sweep(delete=True)  # 21 of 22: more likely the wrong database than real leftovers
         for url in lost:
             self.assertEqual(self.storage.read(url), self.jpeg)
         self.point_at()
@@ -2644,6 +2658,38 @@ class OrphanSweepTests(ApiTestCase):
             db.commit()
         with self.assertRaises(self.orphans.SweepRefused):
             self.sweep(delete=True, force=True)
+
+    def test_a_small_store_loses_its_few_leftovers_even_when_they_are_most_of_it(self):
+        kept = self.stored(8)
+        self.point_at(kept)
+        lost = [self.stored(8) for _ in range(3)]
+        self.assertEqual(len(self.sweep(delete=True).deleted), 3)  # 3 of 4, but only 3: no reason to stop
+        self.assertEqual(self.storage.read(kept), self.jpeg)
+        with self.assertRaises(FileNotFoundError):
+            self.storage.read(lost[0])
+
+    def test_the_command_sweeps_private_files_too_and_keeps_the_ones_in_use(self):
+        from contextlib import redirect_stdout
+        from unittest import mock
+        from vitrina_api.models import AuthProof
+        private = self.app.state.private
+        lid = self.publish()["id"]
+        r = self.c.post(f"/api/v1/listings/{lid}/proofs", headers=self.h(self.seller),
+                        files={"file": ("receipt.jpg", jpeg(), "image/jpeg")})
+        self.assertEqual(r.status_code, 201, r.text)
+        stray = private.put(self.jpeg, owner_id=1)
+        when = (self.now - timedelta(days=8)).timestamp()
+        with self.db() as db:
+            proof = db.scalars(select(AuthProof.url)).one()
+        for ref in (stray, proof):
+            os.utime(os.path.join(self.cfg.private_media_dir, ref.removeprefix("private:/")), (when, when))
+        self.point_at(*(self.stored(8) for _ in range(3)))
+        with mock.patch("vitrina_api.config.Settings", lambda: self.cfg), redirect_stdout(io.StringIO()):
+            self.assertEqual(self.orphans.main(["--delete"]), 0)
+        with self.assertRaises(FileNotFoundError):
+            private.read(stray)
+        proofs = self.c.get(f"/api/v1/listings/{lid}/proofs", headers=self.h(self.seller)).json()["proofs"]
+        self.fetch(proofs[0]["url"])  # the receipt in use is still there
 
     def test_the_command_lists_by_default_and_records_a_delete(self):
         from contextlib import redirect_stdout

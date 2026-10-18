@@ -105,8 +105,10 @@ ThemeData buildTheme(Brightness brightness) {
       height: 68,
       iconTheme: WidgetStateProperty.resolveWith(
           (s) => IconThemeData(color: s.contains(WidgetState.selected) ? scheme.onPrimary : scheme.onSurfaceVariant)),
-      labelTextStyle:
-          WidgetStateProperty.resolveWith((s) => _w(text.labelSmall!, s.contains(WidgetState.selected) ? 650 : 500)),
+      // The size is given here: base.textTheme carries no sizes yet (Theme.of adds them later), and without one
+      // the labels took the 14 of body text, which split «Избранное» over two lines.
+      labelTextStyle: WidgetStateProperty.resolveWith((s) =>
+          _w(text.labelSmall!, s.contains(WidgetState.selected) ? 650 : 500).copyWith(fontSize: 12, height: 16 / 12)),
     ),
     segmentedButtonTheme: SegmentedButtonThemeData(
       style: ButtonStyle(

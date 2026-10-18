@@ -126,8 +126,26 @@ class PrivateBucketTests(unittest.TestCase):
         self.assertRegex(ref, r"^private:/4/[0-9a-f]{32}\.jpg$")
         link = private_link(s3, ref, now=datetime(2026, 10, 18, tzinfo=timezone.utc), ttl=600)
         self.assertTrue(link.startswith(f"https://s3.example.kz/vitrina-private/{ref.removeprefix('private:/')}?"))
-        self.assertIn("X-Amz-Expires=600", link)
-        self.assertIsNone(private_link(s3, "private:/../secret"))
+        self.assertIn("X-Amz-Expires=1500", link)  # 600 from the start of its 15-minute window
+        self.assertEqual(private_link(s3, "private:/../secret"), "")  # damaged: shown as no file
+
+
+class PrivateSettingsTests(unittest.TestCase):
+    def test_private_files_never_sit_under_the_public_folder_or_link_to_the_cdn(self):
+        import os
+        import tempfile
+        from vitrina_api.storage import make_private_storage
+        with tempfile.TemporaryDirectory() as root:
+            public = os.path.join(root, "media")
+            with self.assertRaises(RuntimeError):
+                make_private_storage(Settings(media_dir=public, private_media_dir=os.path.join(public, "private")))
+            with self.assertRaises(RuntimeError):  # /media is the bucket: the CDN's host cannot serve private links
+                make_private_storage(Settings(media_dir=public, private_media_dir=os.path.join(root, "p"),
+                                              s3_bucket="vitrina", public_media_url="https://cdn.vitrina.kz"))
+            files = make_private_storage(Settings(media_dir=public, private_media_dir=os.path.join(root, "p"),
+                                                  s3_bucket="vitrina", public_media_url="https://cdn.vitrina.kz",
+                                                  public_api_url="https://api.vitrina.kz/"))
+            self.assertEqual(files.link_base, "https://api.vitrina.kz/api/v1/private-media")
 
 
 class LocalListingTests(unittest.TestCase):

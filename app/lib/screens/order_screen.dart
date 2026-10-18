@@ -1,6 +1,7 @@
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:clock/clock.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:share_plus/share_plus.dart';
@@ -125,7 +126,11 @@ class OrderScreen extends StatefulWidget {
 /// From payment until the box has left: when a printed slip is useful.
 const _slipStatuses = {'PAID', 'SELLER_ACCEPTED', 'PREPARING', 'SHIPPED'};
 
-class _OrderScreenState extends State<OrderScreen> {
+/// Links to evidence photos and videos stop working an hour after the server gives them; the order is fetched again
+/// before that, so an old screen never opens a dead link.
+const linkFreshFor = Duration(minutes: 50);
+
+class _OrderScreenState extends State<OrderScreen> with WidgetsBindingObserver {
   /// A6 page with the recipient, address, pair and size, to print and put on the box.
   Future<void> _slip() async {
     try {
@@ -142,6 +147,7 @@ class _OrderScreenState extends State<OrderScreen> {
   }
 
   OrderInfo? _order;
+  DateTime? _loadedAt;
   Object? _error;
   bool _busy = false;
   bool _paymentStarted = false;
@@ -150,9 +156,34 @@ class _OrderScreenState extends State<OrderScreen> {
   Api get _api => SessionScope.of(context).api;
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     if (_order == null && _error == null) _refresh();
+  }
+
+  bool get _stale => _loadedAt == null || clock.now().difference(_loadedAt!) > linkFreshFor;
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && _order != null && _stale) _refresh();
+  }
+
+  /// The address to open an evidence item at: the one on screen, or a new one if that may have expired.
+  Future<String> _evidenceUrl(Evidence e) async {
+    if (_stale) await _refresh();
+    return _order?.evidence.where((x) => x.id == e.id).firstOrNull?.url ?? e.url;
   }
 
   /// Loads the order. With nothing on screen yet a failure shows in place of it with a retry; once the order is
@@ -163,6 +194,7 @@ class _OrderScreenState extends State<OrderScreen> {
       if (mounted) {
         setState(() {
           _order = o;
+          _loadedAt = clock.now();
           _error = null;
         });
       }
@@ -359,6 +391,7 @@ class _OrderScreenState extends State<OrderScreen> {
                     canAdd: _canAddEvidence(o, me?.id),
                     meId: me?.id,
                     onAdded: _refresh,
+                    urlOf: _evidenceUrl,
                   ),
                   const SizedBox(height: 16),
                 ],
@@ -430,11 +463,13 @@ class _OrderedDetails extends StatelessWidget {
 
 /// Photos and videos each side added to the return or dispute. Nothing here can be edited or removed.
 class _EvidenceCard extends StatefulWidget {
-  const _EvidenceCard({required this.order, required this.canAdd, required this.meId, required this.onAdded});
+  const _EvidenceCard(
+      {required this.order, required this.canAdd, required this.meId, required this.onAdded, required this.urlOf});
   final OrderInfo order;
   final bool canAdd;
   final int? meId;
   final Future<void> Function() onAdded;
+  final Future<String> Function(Evidence e) urlOf;
 
   @override
   State<_EvidenceCard> createState() => _EvidenceCardState();
@@ -628,14 +663,18 @@ class _EvidenceCardState extends State<_EvidenceCard> {
             borderRadius: BorderRadius.circular(12),
             onTap: video
                 ? () async {
-                    final opened = await launchUrl(Uri.parse(e.url), mode: LaunchMode.externalApplication)
-                        .catchError((_) => false);
+                    final url = await widget.urlOf(e);
+                    final opened =
+                        await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication).catchError((_) => false);
                     if (!opened && mounted) {
                       ScaffoldMessenger.of(context)
                           .showSnackBar(SnackBar(content: Text(tr('Видеоны ашатын бағдарлама табылмады.'))));
                     }
                   }
-                : () => _OrderedPhotos.open(context, e.url),
+                : () async {
+                    final url = await widget.urlOf(e);
+                    if (mounted) _OrderedPhotos.open(context, url);
+                  },
             child: ClipRRect(
               borderRadius: BorderRadius.circular(12),
               child: ColoredBox(
@@ -647,6 +686,7 @@ class _EvidenceCardState extends State<_EvidenceCard> {
                       ? const Icon(Icons.play_circle_outline, size: 36, color: Colors.black87)
                       : Image.network(e.url,
                           cacheWidth: 216,
+                          gaplessPlayback: true, // a reload with a new link keeps the old picture until it is in
                           fit: BoxFit.cover,
                           errorBuilder: (_, __, ___) => const Icon(Icons.image_outlined, color: Colors.black54)),
                 ),

@@ -246,6 +246,108 @@ void main() {
     expect(flies(), isFalse);
   });
 
+  showcaseTest('one ordinary swipe turns the shoe once round, and a short one moves one stop', (tester) async {
+    await pump(tester, listing());
+    final stage = tester.getSize(find.byKey(const Key('showcase'))).height;
+    final list = find.byType(Scrollable).first;
+    await tester.dragFrom(const Offset(200, 600), Offset(0, -stage * 0.6 + 2)); // a drag, no fling
+    await tester.pump(const Duration(milliseconds: 200));
+    // Nearly the whole turn (the first few pixels of a drag only decide it is a drag), and not past it.
+    expect(int.parse(RegExp(r'f(\d+)-s').firstMatch(base(tester))!.group(1)!), greaterThanOrEqualTo(21));
+    await tester.drag(list, Offset(0, -stage * 0.3));
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(base(tester), 'https://cdn/top-s.webp');
+  });
+
+  showcaseTest('the full photo waits for the finger to lift, or for a long look', (tester) async {
+    await pump(tester, listing());
+    final finger = await tester.startGesture(tester.getCenter(find.byKey(const Key('showcase'))));
+    await finger.moveBy(const Offset(0, -40));
+    await finger.moveBy(const Offset(0, -60));
+    await tester.pump(const Duration(milliseconds: 300)); // a short pause mid-drag: no decoding
+    expect(full(tester), isEmpty);
+    await tester.pump(const Duration(milliseconds: 200)); // holding still to look closely
+    expect(full(tester), hasLength(1));
+    await finger.moveBy(const Offset(0, -60)); // turning on
+    await tester.pump();
+    expect(full(tester), isEmpty);
+    await finger.up();
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(full(tester), hasLength(1));
+  });
+
+  showcaseTest('without small copies the photo is drawn once, not twice', (tester) async {
+    final body = listing(cutFrames: false);
+    for (final m in body['media'] as List) {
+      (m as Map)['thumb_url'] = null;
+      if (m['angle'] == 'frame') m['processed_url'] = null;
+    }
+    await pump(tester, body);
+    await tester.pump(const Duration(milliseconds: 200));
+    // The base is already the photo at screen size; a full layer with the same cache entry would also be dropped
+    // from memory with it once the shoe moves on.
+    expect(full(tester), isEmpty);
+    expect(base(tester), 'https://cdn/f0.jpg');
+  });
+
+  showcaseTest('a screen reader\'s focus boxes move with the stage between frames', (tester) async {
+    final semantics = tester.ensureSemantics();
+    await pump(tester, listing());
+    Rect onScreen(SemanticsNode node) {
+      var rect = node.rect;
+      for (SemanticsNode? n = node; n != null; n = n.parent) {
+        if (n.transform != null) rect = MatrixUtils.transformRect(n.transform!, rect);
+      }
+      return rect;
+    }
+
+    final dot = find.byKey(const Key('showcase-step-sole'));
+    page(tester).jumpTo(200);
+    await tester.pumpAndSettle();
+    page(tester).jumpTo(204); // same frame: nothing is rebuilt
+    await tester.pump();
+    expect(onScreen(tester.getSemantics(dot)).top, moreOrLessEquals(tester.getRect(dot).top, epsilon: 0.5));
+    semantics.dispose();
+  });
+
+  showcaseTest('the catalog card\'s photo flies in while the listing loads', (tester) async {
+    final card = Listing.fromJson(listing());
+    final loaded = Completer<http.Response>();
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient(
+            (req) => req.url.path.endsWith('/similar') ? Future.value(jsonResponse({'items': []})) : loaded.future));
+    tester.view.physicalSize = const Size(400, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(SessionScope(
+        session: Session(api),
+        child:
+            MaterialApp(home: Scaffold(body: Center(child: SizedBox(width: 180, child: ListingTile(listing: card)))))));
+    await tester.tap(find.byType(Hero));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    // Mid-flight: the cover is drawn in flight, on the way to the waiting listing page.
+    expect(find.byWidgetPredicate((w) => w is Image && w.fit == BoxFit.contain), findsOneWidget);
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    loaded.complete(jsonResponse(listing()));
+    await tester.pumpAndSettle();
+    expect(find.byType(ScrollShowcase), findsOneWidget);
+  });
+
+  showcaseTest('a zoomed photo does not fly back into the card', (tester) async {
+    await pump(tester, listing());
+    bool flies() =>
+        tester.widget<HeroMode>(find.ancestor(of: find.byType(Hero), matching: find.byType(HeroMode)).first).enabled;
+    expect(flies(), isTrue);
+    final at = tester.getCenter(find.byKey(const Key('showcase')));
+    await tester.tapAt(at);
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tapAt(at);
+    await tester.pumpAndSettle();
+    expect(flies(), isFalse);
+  });
+
   showcaseTest('one ordinary swipe turns the shoe once round', (tester) async {
     await pump(tester, listing());
     final stage = tester.getSize(find.byKey(const Key('showcase'))).height;

@@ -127,6 +127,7 @@ function orderCard(o, withResolve) {
       const [ev, led] = await Promise.all([call('GET', `/admin/orders/${o.id}/evidence`), call('GET', `/admin/orders/${o.id}/ledger`)]);
       const who = { buyer: 'Сатып алушы', seller: 'Сатушы' };
       box.replaceChildren($(`<div>
+        <div class="muted">Чек пен дәлел сілтемелері 1 сағат жарамды: ескірсе, «Жаңарту» батырмасын басыңыз (${when(new Date().toISOString())}).</div>
         <div class="muted">Трек-нөмір: ${esc(ev.tracking_number || '—')} · Қала: ${esc(ev.delivery_city || '—')}${ev.delivered_at ? ' · Жеткізілді: ' + when(ev.delivered_at) : ''}</div>
         ${ev.statements.length ? `<b>Тараптардың сөзі</b><ol class="hist">${ev.statements.map(x => `<li>${when(x.at)} · ${esc(actor(x.actor))}: «${esc(x.reason)}»</li>`).join('')}</ol>` : ''}
         ${ev.listing_photos ? `<b>Тапсырыс кезіндегі фото</b><div>${ev.listing_photos.filter(p => p.angle !== 'frame').map(p => `<a href="${esc(webUrl(p.original_url || p.url))}" target="_blank" rel="noopener" title="Түпнұсқа фото"><img src="${esc(webUrl(p.url))}" alt="${esc(p.angle)}" style="width:64px;height:64px;object-fit:cover;background:#f3f2ef"></a>`).join(' ')}${ev.listing_photos.some(p => p.angle === 'frame') ? ` <span class="muted">+ 360°: ${ev.listing_photos.filter(p => p.angle === 'frame').length} кадр</span>` : ''}</div>` : ''}
@@ -138,7 +139,9 @@ function orderCard(o, withResolve) {
         <b>Чат</b>${ev.messages.length ? `<ol class="hist">${ev.messages.map(m => `<li>${when(m.at)} · ${who[m.from]}: ${esc(m.body)}${m.photo_url ? ` <a href="${esc(webUrl(m.photo_url))}" target="_blank" rel="noopener"><img src="${esc(webUrl(m.photo_url))}" alt="Чаттағы фото" style="width:64px;height:64px"></a>` : ''}</li>`).join('')}</ol>` : '<div class="muted">Хат жоқ.</div>'}
         <b>Ақша қозғалысы</b><table>${led.transactions.map(t => t.entries.map(x => `<tr><td>${esc(t.kind)}</td><td>${esc(x.account)}</td><td>${x.debit ? '−' + tenge(x.debit) : ''}</td><td>${x.credit ? '+' + tenge(x.credit) : ''}</td></tr>`).join('')).join('') || '<tr><td class="muted">Әзірге жоқ</td></tr>'}</table>
       </div>`));
-    } catch (x) { box.textContent = x.message; e.target.disabled = false; }
+      e.target.textContent = 'Жаңарту';  // links to receipts and evidence expire: fetch fresh ones on demand
+    } catch (x) { box.textContent = x.message; }
+    e.target.disabled = false;
   };
   if (o.status === 'SHIPPED' || o.status === 'IN_TRANSIT') {
     const d = $(`<form class="inline"><input name="reason" placeholder="Неге жеткізілді деп санаймыз (міндетті)" required style="grid-column:1/3">

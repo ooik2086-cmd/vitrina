@@ -171,15 +171,22 @@ def checked_key(key: str) -> str:
 # expires (private_link), so a link that leaks from a screenshot or a log stops working.
 PRIVATE_BASE = "private:"
 PRIVATE_LINK_TTL = 3600
+# Links are signed as of the start of a 15-minute window, so every response within it gives the same address and the
+# app's image cache keeps working; each link stays valid at least PRIVATE_LINK_TTL after it is handed out.
+PRIVATE_LINK_WINDOW = 900
 
 
 def private_link(files, ref: str | None, *, now: datetime | None = None, ttl: int = PRIVATE_LINK_TTL) -> str | None:
     """What a response shows for a stored file: a public address as it is, a private one as a link that expires.
-    Files from before private storage existed keep their public address."""
+    Files from before private storage existed keep their public address; a damaged reference shows as no file."""
     if not ref or not ref.startswith(PRIVATE_BASE + "/"):
         return ref
     key = key_of(PRIVATE_BASE, ref)
-    return files.signed_url(key, ttl, now=now) if key else None
+    if key is None:
+        return ""
+    now = now or datetime.now(timezone.utc)
+    window = datetime.fromtimestamp(int(now.timestamp()) // PRIVATE_LINK_WINDOW * PRIVATE_LINK_WINDOW, timezone.utc)
+    return files.signed_url(key, ttl + PRIVATE_LINK_WINDOW, now=window)
 
 
 def link_signature(secret: bytes, key: str, expires: int) -> str:
@@ -235,6 +242,13 @@ class LocalStorage:
         path.unlink(missing_ok=True)
 
 
+def signing_key(secret_key: str, day: str, region: str) -> bytes:
+    key = f"AWS4{secret_key}".encode()
+    for part in (day, region, "s3", "aws4_request"):
+        key = hmac.new(key, part.encode(), hashlib.sha256).digest()
+    return key
+
+
 def sigv4_headers(method: str, url: str, *, region: str, access_key: str, secret_key: str, payload: bytes = b"",
                   headers: dict[str, str] | None = None, now: datetime | None = None,
                   payload_hash: str | None = None) -> dict[str, str]:
@@ -253,10 +267,7 @@ def sigv4_headers(method: str, url: str, *, region: str, access_key: str, secret
         "".join(f"{k}:{signed[k]}\n" for k in names), ";".join(names), signed["x-amz-content-sha256"]])
     scope = f"{day}/{region}/s3/aws4_request"
     to_sign = "\n".join(["AWS4-HMAC-SHA256", amz_date, scope, hashlib.sha256(canonical.encode()).hexdigest()])
-    key = f"AWS4{secret_key}".encode()
-    for part in (day, region, "s3", "aws4_request"):
-        key = hmac.new(key, part.encode(), hashlib.sha256).digest()
-    signature = hmac.new(key, to_sign.encode(), hashlib.sha256).hexdigest()
+    signature = hmac.new(signing_key(secret_key, day, region), to_sign.encode(), hashlib.sha256).hexdigest()
     return {**{k: v for k, v in signed.items() if k != "host"},
             "authorization": f"AWS4-HMAC-SHA256 Credential={access_key}/{scope}, SignedHeaders={';'.join(names)}, "
                              f"Signature={signature}"}
@@ -275,10 +286,8 @@ def presign(url: str, *, region: str, access_key: str, secret_key: str, expires:
     canonical = "\n".join(["GET", quote(parts.path or "/", safe="/-_.~"), query, f"host:{parts.netloc}\n", "host",
                            "UNSIGNED-PAYLOAD"])
     to_sign = "\n".join(["AWS4-HMAC-SHA256", amz_date, scope, hashlib.sha256(canonical.encode()).hexdigest()])
-    key = f"AWS4{secret_key}".encode()
-    for part in (day, region, "s3", "aws4_request"):
-        key = hmac.new(key, part.encode(), hashlib.sha256).digest()
-    return f"{url}?{query}&X-Amz-Signature={hmac.new(key, to_sign.encode(), hashlib.sha256).hexdigest()}"
+    signature = hmac.new(signing_key(secret_key, day, region), to_sign.encode(), hashlib.sha256).hexdigest()
+    return f"{url}?{query}&X-Amz-Signature={signature}"
 
 
 class S3Storage:
@@ -350,9 +359,19 @@ def make_private_storage(settings):
     if settings.s3_private_bucket:
         return S3Storage(endpoint=settings.s3_endpoint, bucket=settings.s3_private_bucket, region=settings.s3_region,
                          access_key=settings.s3_access_key, secret_key=settings.s3_secret_key, public_base=PRIVATE_BASE)
-    origin = urlsplit(settings.public_media_url)
-    return LocalStorage(settings.private_media_dir, PRIVATE_BASE,
-                        link_base=f"{origin.scheme}://{origin.netloc}/api/v1/private-media",
+    media, private = Path(settings.media_dir).resolve(), Path(settings.private_media_dir).resolve()
+    if private == media or media in private.parents:
+        raise RuntimeError("VITRINA_PRIVATE_MEDIA_DIR must not be inside VITRINA_MEDIA_DIR: /media serves that folder "
+                           "to anyone")
+    if settings.s3_bucket and not settings.public_api_url:  # /media is then the bucket, not the API
+        raise RuntimeError("set VITRINA_PUBLIC_API_URL (or VITRINA_S3_PRIVATE_BUCKET): links to private files on disk "
+                           "need the API's own address")
+    if settings.public_api_url:
+        api = settings.public_api_url.rstrip("/")
+    else:  # development: the API serves /media itself, so the media address names the API too
+        origin = urlsplit(settings.public_media_url)
+        api = f"{origin.scheme}://{origin.netloc}"
+    return LocalStorage(settings.private_media_dir, PRIVATE_BASE, link_base=f"{api}/api/v1/private-media",
                         link_secret=hashlib.sha256(b"private-media|" + settings.otp_secret).digest())
 
 

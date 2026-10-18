@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:clock/clock.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -89,6 +90,29 @@ void main() {
     expect(find.text('Табаны жарылған'), findsOneWidget);
     expect(find.byIcon(Icons.play_circle_outline), findsOneWidget);
     expect(find.text('Дәлел қосу (9 қалды)'), findsOneWidget);
+  });
+
+  testWidgets('a photo opened an hour later gets a fresh link first', (tester) async {
+    var loads = 0;
+    final start = DateTime(2026, 10, 18, 12);
+    await withClock(Clock.fixed(start), () async {
+      await pump(tester, MockClient((req) async {
+        loads++;
+        final item = evidence(1, 'buyer');
+        item['url'] = 'https://cdn/e1.jpg?sig=$loads'; // every load signs the link anew
+        return jsonResponse(order('DISPUTED', [item]));
+      }));
+    });
+    await tester.scrollUntilVisible(find.byKey(const Key('evidence-1')), 200,
+        scrollable: find.byType(Scrollable).first);
+    expect(loads, 1);
+    await withClock(Clock.fixed(start.add(const Duration(minutes: 55))), () async {
+      await tester.tap(find.byKey(const Key('evidence-1')));
+      await tester.pumpAndSettle();
+    });
+    expect(loads, 2);
+    final shown = tester.widgetList<Image>(find.descendant(of: find.byType(Dialog), matching: find.byType(Image)));
+    expect(shown.map((i) => (i.image as NetworkImage).url), contains('https://cdn/e1.jpg?sig=2'));
   });
 
   testWidgets('evidence can be read after a decision but no longer added', (tester) async {

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:clock/clock.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -371,9 +372,22 @@ class AuthenticityCard extends StatefulWidget {
   State<AuthenticityCard> createState() => _AuthenticityCardState();
 }
 
-class _AuthenticityCardState extends State<AuthenticityCard> {
+class _AuthenticityCardState extends State<AuthenticityCard> with WidgetsBindingObserver {
   Proofs? _p;
+  DateTime? _loadedAt;
   bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
 
   @override
   void didChangeDependencies() {
@@ -381,10 +395,25 @@ class _AuthenticityCardState extends State<AuthenticityCard> {
     if (_p == null) _load();
   }
 
+  // Links to the receipts stop working an hour after they are given: back in the app after that, fetch new ones.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed &&
+        _loadedAt != null &&
+        clock.now().difference(_loadedAt!) > const Duration(minutes: 50)) {
+      _load();
+    }
+  }
+
   Future<void> _load() async {
     try {
       final p = await SessionScope.of(context).api.proofs(widget.listingId);
-      if (mounted) setState(() => _p = p);
+      if (mounted) {
+        setState(() {
+          _p = p;
+          _loadedAt = clock.now();
+        });
+      }
     } catch (_) {
       // The card simply stays hidden; the rest of the page works without it.
     }
@@ -395,7 +424,10 @@ class _AuthenticityCardState extends State<AuthenticityCard> {
     try {
       final p = await action(SessionScope.of(context).api);
       if (!mounted) return;
-      setState(() => _p = p);
+      setState(() {
+        _p = p;
+        _loadedAt = clock.now();
+      });
       widget.onChanged?.call();
     } catch (e) {
       if (mounted) showError(context, e);
@@ -453,6 +485,7 @@ class _AuthenticityCardState extends State<AuthenticityCard> {
                       width: 72,
                       height: 72,
                       cacheWidth: 216,
+                      gaplessPlayback: true,
                       fit: BoxFit.cover,
                       errorBuilder: (_, __, ___) => Container(width: 72, height: 72, color: Brand.studio)),
                 ),

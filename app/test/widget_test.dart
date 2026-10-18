@@ -4,6 +4,8 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -12,6 +14,7 @@ import 'package:vitrina/api.dart';
 import 'package:vitrina/appearance.dart';
 import 'package:vitrina/demo.dart';
 import 'package:vitrina/i18n.dart';
+import 'package:vitrina/theme.dart';
 import 'package:vitrina/labels.dart';
 import 'package:vitrina/my_size.dart';
 import 'package:vitrina/quick_replies.dart';
@@ -1804,6 +1807,47 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Сатушы 25.10 дейін демалыста, жауабы кешігуі мүмкін.'), findsOneWidget);
   });
+
+  for (final lang in ['kk', 'ru', 'en']) {
+    for (final (width, scale) in [(360.0, 1.0), (412.0, 1.0), (412.0, 1.3), (360.0, 1.15), (412.0, 1.6)]) {
+      testWidgets('every tab label stays on one line in $lang at ${width.toInt()} dp and text x$scale', (tester) async {
+        // The real font: the test font draws every letter as a square, far wider than Inter.
+        await tester.runAsync(() async {
+          final inter = FontLoader('Inter')..addFont(rootBundle.load('assets/fonts/Inter.ttf'));
+          await inter.load();
+        });
+        SharedPreferences.setMockInitialValues({});
+        final was = appLanguage.value;
+        appLanguage.value = lang;
+        addTearDown(() => appLanguage.value = was);
+        tester.view.physicalSize = Size(width, 760);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        final api =
+            Api(base: 'http://x/api/v1', client: MockClient((req) async => jsonResponse({'items': [], 'unread': 0})))
+              ..token = 'tok';
+        final session = Session(api)..update(Me.fromJson({'id': 2, 'phone': '+77010000002', 'is_seller': true}));
+        await tester.pumpWidget(SessionScope(
+            session: session,
+            child: MaterialApp(
+                theme: buildTheme(Brightness.light),
+                home: MediaQuery(
+                    data: MediaQueryData(size: Size(width, 760), textScaler: TextScaler.linear(scale)),
+                    child: const HomeShell()))));
+        await tester.pump();
+        // The labels shown (with large text only the chosen tab's is): each one line high.
+        final labels = find.descendant(of: find.byType(NavigationBar), matching: find.byType(Text)).hitTestable();
+        final shown = [for (final e in labels.evaluate()) (e.renderObject! as RenderParagraph)];
+        expect(shown, isNotEmpty);
+        for (final p in shown) {
+          final line = p.getFullHeightForCaret(const TextPosition(offset: 0));
+          expect(p.size.height, lessThan(line * 1.5), reason: p.text.toPlainText());
+        }
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox()); // stops the polling timer
+      });
+    }
+  }
 
   testWidgets('chat and orders tabs show what waits on the person', (tester) async {
     SharedPreferences.setMockInitialValues({});
