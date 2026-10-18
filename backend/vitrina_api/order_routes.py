@@ -3,9 +3,13 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
+import subprocess
+import tempfile
+from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Header
+from fastapi import APIRouter, Depends, File, Form, Header, UploadFile
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -15,13 +19,14 @@ from vitrina_core.orders import Actor, OrderStatus as S
 from . import services
 from . import coupons, offers
 from .config import Settings
-from .deps import current_user, get_db, get_settings
+from .deps import current_user, get_db, get_settings, get_storage
 from .errors import ApiError
-from .models import IdempotencyRecord, Listing, ListingSize, Order, OrderEvent, Review, User
+from .models import IdempotencyRecord, Listing, ListingSize, Order, OrderEvent, OrderEvidence, Review, User
 from .api_common import DECLINABLE, IN_DELIVERY, PHONE_RE
 from .schemas import DeliveryIn, OrderIn, ReasonIn, ShipIn
-from .serializers import (away_until, delivery_out, listing_cover, order_out, order_summary, ordered_photos,
-                          photo_snapshot, photos_version)
+from .serializers import (away_until, delivery_out, details_snapshot, evidence_out, listing_cover, order_out,
+                          order_summary, ordered_details, ordered_photos, photo_snapshot, photos_version)
+from .storage import MAX_UPLOAD_BYTES, Storage, normalize_image
 
 
 router = APIRouter(prefix="/api/v1")
@@ -98,7 +103,7 @@ def create_order(body: OrderIn, user: User = Depends(current_user), db: Session 
                   recipient_name=delivery["recipient_name"], recipient_phone=delivery["recipient_phone"],
                   delivery_city=delivery["city"], delivery_address=delivery["address"],
                   delivery_note=delivery["note"], listing_title=listing.title, listing_cover=listing_cover(listing),
-                  listing_photos=photo_snapshot(listing))
+                  listing_photos=photo_snapshot(listing), listing_details=details_snapshot(listing))
     user.last_delivery = json.dumps(delivery, ensure_ascii=False)
     db.add(order)
     db.flush()
@@ -136,6 +141,7 @@ def get_order(order_id: int, user: User = Depends(current_user), db: Session = D
     act_by = services.deadline(db, order, cfg.confirm_window)
     return {**order_summary(db, order), "reviewed": reviewed, "delivery": delivery_out(order, user),
             "deadline": act_by.isoformat() if act_by else None, "listing_photos": ordered_photos(order),
+            "listing_details": ordered_details(order), "evidence": order_evidence_list(db, order),
             "history": [{"status": e.to_status, "at": services.aware(e.at).isoformat()} for e in events]}
 
 
@@ -250,3 +256,74 @@ def approve_return(order_id: int, user: User = Depends(current_user), db: Sessio
     order.pending_refund_tiyn = services.total_tiyn(order)
     db.commit()
     return order_out(order)
+
+
+# While a return or dispute is open, each side shows what it has: the pair as it arrived, the parcel, the label.
+EVIDENCE_OPEN = {S.RETURN_REQUESTED.value, S.DISPUTED.value}
+MAX_EVIDENCE = 10
+
+
+def order_evidence_list(db: Session, order: Order) -> list[dict]:
+    rows = db.scalars(select(OrderEvidence).where(OrderEvidence.order_id == order.id).order_by(OrderEvidence.id)).all()
+    return [evidence_out(order, e) for e in rows]
+
+
+def clean_video(data: bytes) -> bytes:
+    """The same MP4 with its metadata (phone model, place, time) dropped; the picture is copied, not re-encoded.
+    Raises ValueError for anything ffmpeg cannot read as an MP4."""
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None:
+        raise RuntimeError("ffmpeg not found")
+    with tempfile.TemporaryDirectory() as tmp:
+        src, out = Path(tmp) / "in.mp4", Path(tmp) / "out.mp4"
+        src.write_bytes(data)
+        run = subprocess.run([ffmpeg, "-loglevel", "error", "-y", "-protocol_whitelist", "file", "-f", "mp4", "-i", str(src), "-map", "0:v:0",
+                              "-map", "0:a:0?", "-map_metadata", "-1", "-map_chapters", "-1", "-c", "copy",
+                              "-fflags", "+bitexact", "-movflags", "+faststart", str(out)],
+                             capture_output=True, timeout=60)
+        if run.returncode != 0 or not out.exists() or out.stat().st_size == 0:
+            raise ValueError("not a readable mp4")
+        return out.read_bytes()
+
+
+@router.post("/orders/{order_id}/evidence", status_code=201)
+def add_evidence(order_id: int, file: UploadFile = File(...), note: str | None = Form(default=None, max_length=500),
+                 user: User = Depends(current_user), db: Session = Depends(get_db),
+                 storage: Storage = Depends(get_storage)):
+    """A photo or short MP4 for an open return or dispute. Kept as sent: it cannot be edited or taken back."""
+
+    def check(order: Order) -> None:
+        if user.id not in (order.buyer_id, order.seller_id):
+            raise ApiError(404, "not_found")
+        if order.status not in EVIDENCE_OPEN:
+            raise ApiError(409, "invalid_status")
+        count = len(db.scalars(select(OrderEvidence.id).where(OrderEvidence.order_id == order.id,
+                                                              OrderEvidence.user_id == user.id)).all())
+        if count >= MAX_EVIDENCE:
+            raise ApiError(409, "too_much_evidence")
+
+    check(order_for(db, order_id, user))
+    data = file.file.read(MAX_UPLOAD_BYTES + 1)
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise ApiError(413, "file_too_large")
+    # The file is cleaned before the order is locked, so a slow video does not hold up the order's other steps.
+    if data[4:8] == b"ftyp":
+        try:
+            clean, ext, kind = clean_video(data), "mp4", "video"
+        except RuntimeError:
+            raise ApiError(422, "video_unavailable")
+        except (ValueError, subprocess.TimeoutExpired):
+            raise ApiError(415, "unsupported_media", "the video could not be read")
+    else:
+        clean, ext, kind = normalize_image(data), "jpg", "photo"
+    order = order_for(db, order_id, user, lock=True)
+    check(order)  # the order may have been resolved, or this side's limit reached, while the file was cleaned
+    url = storage.put(clean, owner_id=user.id, ext=ext)
+    item = OrderEvidence(order_id=order.id, user_id=user.id, url=url, kind=kind, note=(note or "").strip() or None)
+    db.add(item)
+    other = order.seller_id if user.id == order.buyer_id else order.buyer_id
+    services.notify(db, other, "evidence", f"Тапсырыс №{order.id}: екінші тарап дәлел қосты.",
+                    f"Заказ №{order.id}: другая сторона добавила доказательство.",
+                    f"Order No. {order.id}: the other side added evidence.", order_id=order.id)
+    db.commit()
+    return evidence_out(order, item)

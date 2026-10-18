@@ -182,6 +182,24 @@ def photo_snapshot(listing: Listing) -> str:
                        for m in sorted(listing.media, key=lambda m: m.position)], ensure_ascii=False)
 
 
+LISTING_DETAILS = ("title", "brand", "model_name", "color", "category", "condition", "defects", "description")
+
+
+def details_snapshot(listing: Listing) -> str:
+    return json.dumps({f: getattr(listing, f) for f in LISTING_DETAILS}, ensure_ascii=False)
+
+
+def ordered_details(order: Order) -> dict | None:
+    """What the listing said when ordered: its condition and defects as the buyer read them."""
+    return json.loads(order.listing_details) if order.listing_details else None
+
+
+def evidence_out(order: Order, item) -> dict:
+    side = "buyer" if item.user_id == order.buyer_id else "seller" if item.user_id == order.seller_id else "support"
+    return {"id": item.id, "from": side, "url": item.url, "kind": item.kind, "note": item.note,
+            "at": services.aware(item.created_at).isoformat()}
+
+
 def ordered_photos(order: Order) -> list[dict] | None:
     """The photos the buyer saw when ordering; None for orders placed before snapshots were kept."""
     return json.loads(order.listing_photos) if order.listing_photos else None

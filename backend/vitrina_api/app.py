@@ -50,7 +50,7 @@ def logging_setup() -> None:
 # Largest request body accepted: one photo or video upload plus the multipart framing around it.
 MAX_REQUEST_BYTES = MAX_UPLOAD_BYTES + 64 * 1024
 # The console loads only its own files; share pages may also show photos from the media host.
-ADMIN_CSP = "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' https: data:; frame-ancestors 'none'"
+ADMIN_CSP = "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' https: data:; media-src 'self' https:; frame-ancestors 'none'"
 SHARE_CSP = "default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'unsafe-inline'; img-src 'self' https: data:; media-src 'self' https:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
 
 

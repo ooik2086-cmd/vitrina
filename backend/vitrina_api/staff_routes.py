@@ -14,10 +14,10 @@ from .deps import get_db, get_settings, staff_user
 from .errors import ApiError
 from .models import AuditLog, ListingReport, Listing, Order, OrderEvent, User
 from .schemas import ReasonIn, ReportCloseIn, ResolveIn
-from .serializers import listing_out, moderation_out, order_out, order_summary, ordered_photos
+from .serializers import listing_out, moderation_out, order_out, order_summary, ordered_details, ordered_photos
 from .saved_search_routes import announce
 from .listing_routes import split_codes
-from .order_routes import order_for
+from .order_routes import order_evidence_list, order_for
 
 
 router = APIRouter(prefix="/api/v1")
@@ -30,6 +30,8 @@ def resolve_dispute(order_id: int, body: ResolveIn, staff: User = Depends(staff_
     # Only a dispute: on an order that never shipped a partial refund would pay the seller for nothing sent.
     if order.status != S.DISPUTED.value:
         raise ApiError(409, "invalid_status")
+    if not body.reason.strip():
+        raise ApiError(422, "reason_required")  # both sides are told why, and the audit log keeps it
     if body.refund_tiyn > services.total_tiyn(order):
         raise ApiError(422, "validation", "refund exceeds the order total")
     if body.refund_tiyn == 0:
@@ -246,6 +248,7 @@ def order_evidence(order_id: int, staff: User = Depends(staff_user), db: Session
     db.commit()
     return {"tracking_number": order.tracking_number, "dispute_reason": order.dispute_reason,
             "listing_title": order.listing_title, "listing_photos": ordered_photos(order),
+            "listing_details": ordered_details(order), "evidence": order_evidence_list(db, order),
             "delivery_city": order.delivery_city,
             "delivered_at": services.aware(order.delivered_at).isoformat() if order.delivered_at else None,
             "statements": [{"actor": e.actor, "status": e.to_status, "reason": e.reason,

@@ -2296,5 +2296,97 @@ class ListingEditTests(ApiTestCase):
         self.assertEqual(r.json()["code"], "foreign_media")
 
 
+def mp4(tag="Almaty 43.25 76.95") -> bytes:
+    """A one-second clip carrying a location tag, as phones write one."""
+    import subprocess
+    with tempfile.TemporaryDirectory() as tmp:
+        out = os.path.join(tmp, "v.mp4")
+        subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=size=160x120:rate=10",
+                        "-t", "1", "-pix_fmt", "yuv420p", "-metadata", f"title={tag}",
+                        "-metadata", "comment=Phone XYZ", out], check=True)
+        with open(out, "rb") as f:
+            return f.read()
+
+
+class DisputeEvidenceTests(ApiTestCase):
+    def get(self, path, token):
+        return self.c.get(f"/api/v1{path}", headers=self.h(token))
+
+    def add(self, order, token, data=None, name="p.jpg", ctype="image/jpeg", note=None):
+        return self.c.post(f"/api/v1/orders/{order['id']}/evidence", headers=self.h(token),
+                           files={"file": (name, data or jpeg(gps=True), ctype)},
+                           data={"note": note} if note is not None else None)
+
+    def test_the_order_keeps_what_the_listing_said(self):
+        listing, order = self.ordered()
+        r = self.c.patch(f"/api/v1/listings/{listing['id']}", headers=self.h(self.seller),
+                         json={"description": "Жаңа сипаттама"})
+        self.assertEqual(r.status_code, 200, r.text)
+        details = self.get(f"/orders/{order['id']}", self.buyer).json()["listing_details"]
+        self.assertEqual(details["title"], listing["title"])
+        self.assertEqual(details["condition"], listing["condition"])
+        self.assertNotEqual(details["description"], "Жаңа сипаттама")
+        staff = self.make_staff()
+        seen = self.get(f"/admin/orders/{order['id']}/evidence", staff).json()
+        self.assertEqual(seen["listing_details"], details)
+
+    def test_both_sides_add_evidence_only_while_a_return_or_dispute_is_open(self):
+        _, order = self.delivered()
+        self.assertEqual(self.add(order, self.buyer).json()["code"], "invalid_status")
+        self.post(f"/orders/{order['id']}/return", self.buyer, {"reason": "Табанында жарық бар"})
+        r = self.add(order, self.buyer, note="  Табаны  ")
+        self.assertEqual(r.status_code, 201, r.text)
+        self.assertEqual((r.json()["from"], r.json()["kind"], r.json()["note"]), ("buyer", "photo", "Табаны"))
+        path = os.path.join(self.tmp.name, "media", r.json()["url"].removeprefix("http://test/media/"))
+        with Image.open(path) as img:
+            self.assertNotIn(0x8825, img.getexif())  # no place left in the photo
+        self.assertEqual(self.add(order, self.seller).status_code, 201)
+        self.post(f"/orders/{order['id']}/dispute", self.seller, {"reason": "Аяқ киім киілген"})
+        self.assertEqual(self.add(order, self.seller).status_code, 201)
+        got = self.get(f"/orders/{order['id']}", self.buyer).json()["evidence"]
+        self.assertEqual([e["from"] for e in got], ["buyer", "seller", "seller"])
+        self.assertEqual(self.get(f"/orders/{order['id']}", self.seller).json()["evidence"], got)
+        staff = self.make_staff()
+        self.assertEqual(self.get(f"/admin/orders/{order['id']}/evidence", staff).json()["evidence"], got)
+        # Support cannot add to a side's evidence, and strangers do not learn the order exists.
+        self.assertEqual(self.add(order, staff).status_code, 404)
+        self.post(f"/admin/orders/{order['id']}/resolve", staff, {"refund_tiyn": 0, "reason": "Киілген"})
+        self.assertEqual(self.add(order, self.buyer).json()["code"], "invalid_status")
+
+    def test_evidence_is_capped_and_must_be_a_picture_or_a_video(self):
+        _, order = self.delivered()
+        self.post(f"/orders/{order['id']}/dispute", self.buyer, {"reason": "Басқа модель келді"})
+        self.assertEqual(self.add(order, self.buyer, b"hello", "x.txt", "text/plain").status_code, 415)
+        for _ in range(10):
+            self.assertEqual(self.add(order, self.buyer).status_code, 201)
+        self.assertEqual(self.add(order, self.buyer).json()["code"], "too_much_evidence")
+        self.assertEqual(self.add(order, self.seller).status_code, 201)  # the cap is per side
+
+    @unittest.skipUnless(promo.available(), "ffmpeg not installed")
+    def test_a_video_is_kept_without_its_metadata(self):
+        _, order = self.delivered()
+        self.post(f"/orders/{order['id']}/dispute", self.buyer, {"reason": "Басқа модель келді"})
+        clip = mp4()
+        self.assertTrue(b"Almaty" in clip and b"Phone XYZ" in clip)
+        r = self.add(order, self.buyer, clip, "v.mp4", "video/mp4")
+        self.assertEqual(r.status_code, 201, r.text)
+        self.assertEqual(r.json()["kind"], "video")
+        self.assertTrue(r.json()["url"].endswith(".mp4"))
+        path = os.path.join(self.tmp.name, "media", r.json()["url"].removeprefix("http://test/media/"))
+        with open(path, "rb") as f:
+            kept = f.read()
+        self.assertFalse(b"Almaty" in kept or b"Phone XYZ" in kept)
+        broken = b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 100
+        self.assertEqual(self.add(order, self.buyer, broken, "v.mp4", "video/mp4").status_code, 415)
+
+    def test_support_gives_a_reason_for_a_decision(self):
+        _, order = self.delivered()
+        self.post(f"/orders/{order['id']}/dispute", self.buyer, {"reason": "Басқа модель келді"})
+        staff = self.make_staff()
+        r = self.post(f"/admin/orders/{order['id']}/resolve", staff, {"refund_tiyn": 0, "reason": "  "})
+        self.assertEqual(r.json()["code"], "reason_required")
+        self.assertEqual(self.get(f"/orders/{order['id']}", self.buyer).json()["status"], "DISPUTED")
+
+
 if __name__ == "__main__":
     unittest.main()

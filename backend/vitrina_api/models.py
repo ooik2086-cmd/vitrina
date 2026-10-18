@@ -147,6 +147,9 @@ class Order(Base):
     # may replace photos later; this is what the buyer chose, shown to both sides and to support in a dispute.
     # Uploaded files are never deleted, so these addresses keep working.
     listing_photos: Mapped[str | None] = mapped_column(Text)
+    # JSON of what the listing said when ordered (brand, model, colour, condition, defects, description): the
+    # seller may still mark the condition worse or rewrite the text later.
+    listing_details: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(40), index=True)
     item_price_tiyn: Mapped[int] = mapped_column(BigInteger)
     delivery_price_tiyn: Mapped[int] = mapped_column(BigInteger)
@@ -323,6 +326,19 @@ class Message(Base):
     photo_url: Mapped[str | None] = mapped_column(String(500))
     # Set when the text looks like a phone number or link: the other side sees a reminder to pay only in the app.
     contact_warning: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class OrderEvidence(Base):
+    """A photo or short video a buyer or seller adds to a return or dispute. Never edited or removed: support
+    decides on what both sides showed, and both sides see the same."""
+    __tablename__ = "order_evidence"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    url: Mapped[str] = mapped_column(String(500))
+    kind: Mapped[str] = mapped_column(String(10))  # photo | video
+    note: Mapped[str | None] = mapped_column(String(500))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
