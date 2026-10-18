@@ -17,7 +17,7 @@ down_revision: Union[str, None] = 'c4f9e2a1b736'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
-DETAILS = ('title', 'brand', 'model_name', 'color', 'category', 'condition', 'defects', 'description')
+DETAILS = ('title', 'brand', 'model_name', 'color', 'category', 'condition', 'defects', 'description', 'authenticity')
 
 
 def upgrade() -> None:

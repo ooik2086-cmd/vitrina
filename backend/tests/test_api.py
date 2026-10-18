@@ -635,7 +635,7 @@ class OrderFlowTests(ApiTestCase):
         staff = self.make_staff()
         self.assertEqual(self.post(f"/admin/orders/{order['id']}/resolve", self.buyer,
                                    {"refund_tiyn": 1, "reason": "x"}).status_code, 403)
-        r = self.post(f"/admin/orders/{order['id']}/resolve", staff, {"refund_tiyn": 1_000_000, "reason": "Фото ақауды растайды"})
+        r = self.post(f"/admin/orders/{order['id']}/resolve", staff, {"refund_tiyn": 1_000_000, "reason": "Фото ақауды растайды", "early": True})
         self.assertEqual(r.json()["status"], "REFUND_PENDING")
         bad = self.hook("payments/sandbox", self.cfg.payment_webhook_secret, {
             "id": "rf_0", "type": "refund.succeeded", "order_id": order["id"], "amount_tiyn": 5, "currency": "KZT"})
@@ -1881,7 +1881,7 @@ class AdminTests(ApiTestCase):
         self.assertEqual(overview["orders"], {"DISPUTED": 1})
         self.assertEqual(overview["queues"], {"moderation": 0, "authenticity": 0, "disputes": 1, "reports": 0,
                                               "payouts": 0})
-        self.post(f"/admin/orders/{order['id']}/resolve", staff, {"refund_tiyn": 0, "reason": "Өлшем кестесіне сай"})
+        self.post(f"/admin/orders/{order['id']}/resolve", staff, {"refund_tiyn": 0, "reason": "Өлшем кестесіне сай", "early": True})
         audit = self.c.get("/api/v1/admin/audit", headers=self.h(staff)).json()["items"]
         self.assertEqual(audit[0]["action"], "resolve_dispute")
 
@@ -2380,7 +2380,8 @@ class DisputeEvidenceTests(ApiTestCase):
 
     def test_both_sides_add_evidence_only_while_a_return_or_dispute_is_open(self):
         _, order = self.delivered()
-        self.assertEqual(self.add(order, self.buyer).json()["code"], "invalid_status")
+        # The buyer may photograph the pair during the inspection days; the seller has nothing to answer yet.
+        self.assertEqual(self.add(order, self.seller).json()["code"], "invalid_status")
         self.post(f"/orders/{order['id']}/return", self.buyer, {"reason": "Табанында жарық бар"})
         r = self.add(order, self.buyer, note="  Табаны  ")
         self.assertEqual(r.status_code, 201, r.text)
@@ -2393,12 +2394,17 @@ class DisputeEvidenceTests(ApiTestCase):
         self.assertEqual(self.add(order, self.seller).status_code, 201)
         got = self.get(f"/orders/{order['id']}", self.buyer).json()["evidence"]
         self.assertEqual([e["from"] for e in got], ["buyer", "seller", "seller"])
+        self.assertIsNotNone(self.get(f"/orders/{order['id']}", self.buyer).json()["evidence_until"])
         self.assertEqual(self.get(f"/orders/{order['id']}", self.seller).json()["evidence"], got)
         staff = self.make_staff()
         self.assertEqual(self.get(f"/admin/orders/{order['id']}/evidence", staff).json()["evidence"], got)
         # Support cannot add to a side's evidence, and strangers do not learn the order exists.
         self.assertEqual(self.add(order, staff).status_code, 404)
         self.post(f"/admin/orders/{order['id']}/resolve", staff, {"refund_tiyn": 0, "reason": "Киілген"})
+        self.assertEqual(self.add(order, self.buyer).json()["code"], "invalid_status")
+
+    def test_nothing_can_be_added_before_the_pair_arrives(self):
+        _, order = self.ordered()
         self.assertEqual(self.add(order, self.buyer).json()["code"], "invalid_status")
 
     def test_evidence_is_capped_and_must_be_a_picture_or_a_video(self):
@@ -2472,7 +2478,7 @@ class DisputeEvidenceTests(ApiTestCase):
         real = storage_module.normalize_image
 
         def resolve_meanwhile(data):
-            self.post(f"/admin/orders/{order['id']}/resolve", staff, {"refund_tiyn": 0, "reason": "Шешілді"})
+            self.post(f"/admin/orders/{order['id']}/resolve", staff, {"refund_tiyn": 0, "reason": "Шешілді", "early": True})
             return real(data)
 
         with mock.patch("vitrina_api.order_routes.normalize_image", side_effect=resolve_meanwhile):
@@ -2489,6 +2495,45 @@ class DisputeEvidenceTests(ApiTestCase):
                 "photos_version": listing["photos_version"]}
         r = self.post("/orders", self.buyer, body, **{"Idempotency-Key": "dv1"})
         self.assertEqual((r.status_code, r.json()["code"]), (409, "photos_changed"))
+
+    def test_support_waits_for_both_sides_or_decides_early_on_purpose(self):
+        order = self.disputed()
+        staff = self.make_staff()
+        decide = {"refund_tiyn": 0, "reason": "Аяқ киім сай"}
+        r = self.post(f"/admin/orders/{order['id']}/resolve", staff, decide)
+        self.assertEqual((r.status_code, r.json()["code"]), (409, "evidence_window_open"))
+        self.assertEqual(self.post(f"/admin/orders/{order['id']}/request-evidence", staff,
+                                   {"side": "seller", "note": "Жіберер алдындағы фото керек"}).status_code, 200)
+        with self.db() as db:
+            from vitrina_api.models import Notification
+            texts = [n.text_kk for n in db.query(Notification).filter_by(user_id=order["seller_id"]).all()]
+        self.assertTrue(any("Жіберер алдындағы фото керек" in t for t in texts))
+        seen = self.get(f"/admin/orders/{order['id']}/evidence", staff).json()
+        self.assertEqual(seen["evidence_requests"][0]["reason"], "seller: Жіберер алдындағы фото керек")
+        self.add(order, self.buyer)
+        self.add(order, self.seller)
+        row = next(o for o in self.get("/admin/orders?status=DISPUTED", staff).json()["items"] if o["id"] == order["id"])
+        self.assertEqual(row["evidence_count"], 2)
+        self.assertEqual(self.post(f"/admin/orders/{order['id']}/resolve", staff, decide).json()["status"], "COMPLETED")
+
+    def test_support_may_decide_inside_the_window_when_it_says_so(self):
+        order = self.disputed()
+        staff = self.make_staff()
+        r = self.post(f"/admin/orders/{order['id']}/resolve", staff,
+                      {"refund_tiyn": 0, "reason": "Сатып алушы дауды қайтарды", "early": True})
+        self.assertEqual(r.json()["status"], "COMPLETED")
+
+    def test_the_order_keeps_the_authenticity_claim_and_paid_proofs_stay(self):
+        listing, order = self.ordered()
+        self.assertEqual(self.get(f"/orders/{order['id']}", self.buyer).json()["listing_details"]["authenticity"],
+                         listing["authenticity"])
+        r = self.c.post(f"/api/v1/listings/{listing['id']}/proofs", headers=self.h(self.seller),
+                        files={"file": ("p.jpg", jpeg(), "image/jpeg")})
+        proof = r.json()["proofs"][0]["id"]
+        self.post(f"/orders/{order['id']}/pay", self.buyer)
+        self.pay(order)
+        r = self.c.delete(f"/api/v1/listings/{listing['id']}/proofs/{proof}", headers=self.h(self.seller))
+        self.assertEqual(r.json()["code"], "proof_in_use")
 
     def test_support_gives_a_reason_for_a_decision(self):
         _, order = self.delivered()

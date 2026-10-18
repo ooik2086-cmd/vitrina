@@ -247,4 +247,26 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('evidence-video')).hitTestable(), findsOneWidget);
   });
+
+  testWidgets('a dispute says until when evidence can be added', (tester) async {
+    await pump(
+        tester,
+        MockClient(
+            (req) async => jsonResponse({...order('DISPUTED', []), 'evidence_until': '2026-10-20T08:00:00+00:00'})));
+    await tester.scrollUntilVisible(find.byKey(const Key('evidence-until')), 200,
+        scrollable: find.byType(Scrollable).first);
+    expect(find.textContaining('Дәлел қосу мерзімі: 20.10'), findsOneWidget);
+  });
+
+  testWidgets('during the inspection days only the buyer can add photos', (tester) async {
+    await pump(tester, MockClient((req) async => jsonResponse(order('DELIVERED_PENDING_CONFIRMATION', []))));
+    await tester.scrollUntilVisible(find.byKey(const Key('add-evidence')), 200,
+        scrollable: find.byType(Scrollable).first);
+    expect(find.textContaining('Ақау байқасаңыз'), findsOneWidget);
+  });
+
+  testWidgets('the seller has nothing to add during the inspection days', (tester) async {
+    await pump(tester, MockClient((req) async => jsonResponse(order('DELIVERED_PENDING_CONFIRMATION', []))), meId: 1);
+    expect(find.byKey(const Key('evidence')), findsNothing);
+  });
 }

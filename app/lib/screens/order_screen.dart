@@ -353,10 +353,10 @@ class _OrderScreenState extends State<OrderScreen> {
                     ),
                   ),
                 // Next to the buttons that open a return or dispute, so it is where the next step is.
-                if (o.evidence.isNotEmpty || _evidenceOpen.contains(o.status)) ...[
+                if (o.evidence.isNotEmpty || _canAddEvidence(o, me?.id)) ...[
                   _EvidenceCard(
                     order: o,
-                    canAdd: _evidenceOpen.contains(o.status) && (me?.id == o.buyerId || me?.id == o.sellerId),
+                    canAdd: _canAddEvidence(o, me?.id),
                     meId: me?.id,
                     onAdded: _refresh,
                   ),
@@ -378,6 +378,12 @@ class _OrderScreenState extends State<OrderScreen> {
 
 /// While a return or dispute is open, both sides may add photos or a video; support decides on them.
 const _evidenceOpen = {'RETURN_REQUESTED', 'DISPUTED'};
+
+/// The buyer may also photograph the pair during the inspection days, before deciding on a return.
+bool _canAddEvidence(OrderInfo o, int? me) =>
+    me != null &&
+    (me == o.sellerId && _evidenceOpen.contains(o.status) ||
+        me == o.buyerId && (_evidenceOpen.contains(o.status) || o.status == 'DELIVERED_PENDING_CONFIRMATION'));
 const _maxEvidence = 10;
 const _maxUploadBytes = 12 * 1024 * 1024;
 const _videoSeconds = 15; // about what a phone records at 1080p within 12 MB
@@ -674,6 +680,20 @@ class _EvidenceCardState extends State<_EvidenceCard> {
           const SizedBox(height: 2),
           Text(tr('Екі тарап та, қолдау қызметі де көреді. Жіберілген дәлелді өзгертуге не өшіруге болмайды.'),
               style: theme.textTheme.bodySmall),
+          if (widget.order.evidenceUntil case final until?) ...[
+            const SizedBox(height: 4),
+            Text(
+                trf('Дәлел қосу мерзімі: {0} дейін. Содан кейін қолдау қызметі шешеді.', [
+                  '${formatDay(until)} ${until.hour.toString().padLeft(2, '0')}:${until.minute.toString().padLeft(2, '0')}'
+                ]),
+                key: const Key('evidence-until'),
+                style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600)),
+          ],
+          if (widget.order.status == 'DELIVERED_PENDING_CONFIRMATION') ...[
+            const SizedBox(height: 4),
+            Text(tr('Ақау байқасаңыз, қазір түсіріп қойыңыз: қайтару сұрағанда сатушы бірден көреді.'),
+                style: theme.textTheme.bodySmall),
+          ],
           const SizedBox(height: 10),
           if (widget.order.evidence.isEmpty)
             Padding(

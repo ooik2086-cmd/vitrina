@@ -5,6 +5,7 @@ import json
 import logging
 import re
 import time
+from datetime import timedelta
 from typing import Literal
 
 from fastapi import APIRouter, Depends, File, Form, Header, Request, UploadFile
@@ -141,6 +142,7 @@ def get_order(order_id: int, user: User = Depends(current_user), db: Session = D
     return {**order_summary(db, order), "reviewed": reviewed, "delivery": delivery_out(order, user),
             "deadline": act_by.isoformat() if act_by else None, "listing_photos": ordered_photos(order),
             "listing_details": ordered_details(order), "evidence": order_evidence_list(db, order),
+            "evidence_until": evidence_until_out(db, order),
             "history": [{"status": e.to_status, "at": services.aware(e.at).isoformat()} for e in events]}
 
 
@@ -258,7 +260,26 @@ def approve_return(order_id: int, user: User = Depends(current_user), db: Sessio
 
 
 # While a return or dispute is open, each side shows what it has: the pair as it arrived, the parcel, the label.
+# The buyer may start during the inspection days, so the photos are there when the seller reads the request.
 EVIDENCE_OPEN = {S.RETURN_REQUESTED.value, S.DISPUTED.value}
+BUYER_EVIDENCE_OPEN = EVIDENCE_OPEN | {S.DELIVERED_PENDING_CONFIRMATION.value}
+DISPUTE_EVIDENCE_WINDOW = timedelta(hours=48)  # both sides' time to show their case before support decides
+
+
+def evidence_open_for(order: Order, user_id: int) -> bool:
+    return order.status in (BUYER_EVIDENCE_OPEN if user_id == order.buyer_id else EVIDENCE_OPEN)
+
+
+def evidence_until_out(db: Session, order: Order) -> str | None:
+    until = dispute_evidence_until(db, order) if order.status == S.DISPUTED.value else None
+    return until.isoformat() if until else None
+
+
+def dispute_evidence_until(db: Session, order: Order):
+    """End of the evidence window of the order's latest dispute, or None if it was never disputed."""
+    at = db.scalar(select(func.max(OrderEvent.at)).where(OrderEvent.order_id == order.id,
+                                                         OrderEvent.to_status == S.DISPUTED.value))
+    return services.aware(at) + DISPUTE_EVIDENCE_WINDOW if at else None
 MAX_EVIDENCE = 10
 
 
@@ -288,7 +309,7 @@ def add_evidence(order_id: int, request: Request, file: UploadFile = File(...),
                                                          OrderEvidence.client_key == key))
             if seen is not None:
                 return seen
-        if order.status not in EVIDENCE_OPEN:
+        if not evidence_open_for(order, user.id):
             raise ApiError(409, "invalid_status")
         count = db.scalar(select(func.count(OrderEvidence.id)).where(OrderEvidence.order_id == order.id,
                                                                      OrderEvidence.user_id == user.id))

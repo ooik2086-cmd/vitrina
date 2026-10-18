@@ -641,6 +641,7 @@ class OrderInfo {
             (url: (p as Map)['url'] as String, angle: p['angle'] as String),
         ],
         listingDetails = (j['listing_details'] as Map?)?.cast<String, dynamic>(),
+        evidenceUntil = j['evidence_until'] == null ? null : DateTime.parse(j['evidence_until'] as String).toLocal(),
         evidence = [for (final e in (j['evidence'] as List?) ?? const []) Evidence.fromJson(e as Map<String, dynamic>)],
         history = [
           for (final h in (j['history'] as List?) ?? const [])
@@ -677,6 +678,9 @@ class OrderInfo {
 
   /// Photos and videos the buyer and the seller added to a return or dispute, oldest first.
   final List<Evidence> evidence;
+
+  /// While a dispute is open: until when both sides can still add evidence before support decides.
+  final DateTime? evidenceUntil;
 
   /// When the order cancels itself (unpaid) or refunds itself (seller silent), if nobody acts first.
   final DateTime? deadline;

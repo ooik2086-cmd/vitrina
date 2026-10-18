@@ -122,3 +122,10 @@ class ReportCloseIn(BaseModel):
 class ResolveIn(BaseModel):
     refund_tiyn: int = Field(ge=0)
     reason: str = Field(max_length=2000)
+    # Decide before both sides had their 48 hours (the case is plain, or one side has already said all it will).
+    early: bool = False
+
+
+class EvidenceRequestIn(BaseModel):
+    side: Literal["buyer", "seller"]
+    note: str = Field(min_length=3, max_length=500)

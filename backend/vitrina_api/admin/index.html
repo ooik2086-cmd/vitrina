@@ -116,6 +116,7 @@ function orderCard(o, withResolve) {
       <div style="flex:1"><b>№${o.id} · ${esc(o.listing_title)}</b> <span class="pill">${esc(STATUS[o.status] || o.status)}</span>
       <div class="muted">Өлшем ${esc(o.size_label)} (${esc(o.size_cm)} см) · ${tenge(o.total_tiyn)} · сатып алушы #${o.buyer_id} · сатушы #${o.seller_id}</div>
       <ol class="hist">${o.history.map(h => `<li>${when(h.at)} · ${esc(STATUS[h.status] || h.status)} · ${esc(actor(h.actor))}${h.reason ? ' — «' + esc(h.reason) + '»' : ''}</li>`).join('')}</ol>
+      ${o.evidence_count ? `<div class="muted">Тараптардың дәлелі: ${o.evidence_count} · соңғысы ${when(o.last_evidence_at)}</div>` : ''}
       <button class="ghost" data-act="evidence">Дәлелдер мен ақша қозғалысы</button><div class="evidence"></div>
       </div></div></div>`);
   const body = n.querySelector('.card > .row > div');
@@ -130,6 +131,9 @@ function orderCard(o, withResolve) {
         ${ev.statements.length ? `<b>Тараптардың сөзі</b><ol class="hist">${ev.statements.map(x => `<li>${when(x.at)} · ${esc(actor(x.actor))}: «${esc(x.reason)}»</li>`).join('')}</ol>` : ''}
         ${ev.listing_photos ? `<b>Тапсырыс кезіндегі фото</b><div>${ev.listing_photos.filter(p => p.angle !== 'frame').map(p => `<a href="${esc(webUrl(p.original_url || p.url))}" target="_blank" rel="noopener" title="Түпнұсқа фото"><img src="${esc(webUrl(p.url))}" alt="${esc(p.angle)}" style="width:64px;height:64px;object-fit:cover;background:#f3f2ef"></a>`).join(' ')}${ev.listing_photos.some(p => p.angle === 'frame') ? ` <span class="muted">+ 360°: ${ev.listing_photos.filter(p => p.angle === 'frame').length} кадр</span>` : ''}</div>` : ''}
         ${ev.listing_details ? `<b>${ev.listing_details.backfilled ? 'Тауар беті (жаңарту күнгі нұсқа, тапсырыс кезіндегі көшірме емес)' : 'Тапсырыс кезіндегі сипаттама'}</b><div class="muted">${esc([ev.listing_details.brand, ev.listing_details.model_name, ev.listing_details.color].filter(Boolean).join(' · '))} · Жағдайы: ${esc(CONDITION[ev.listing_details.condition] || ev.listing_details.condition)}</div>${ev.listing_details.defects ? `<div>Ақаулар: ${esc(ev.listing_details.defects)}</div>` : ''}${ev.listing_details.description ? `<div class="muted">${esc(ev.listing_details.description)}</div>` : ''}` : ''}
+        ${ev.evidence_until ? `<div class="muted">Дәлел қосу мерзімі: ${when(ev.evidence_until)} дейін</div>` : ''}
+        ${ev.evidence_requests.length ? `<b>Қолдау сұрағаны</b><ol class="hist">${ev.evidence_requests.map(r => `<li>${when(r.at)} · ${esc(r.reason)}</li>`).join('')}</ol>` : ''}
+        ${ev.authenticity_proofs.length ? `<b>Түпнұсқалық дәлелі</b><div>${ev.authenticity_proofs.map(u => `<a href="${esc(webUrl(u))}" target="_blank" rel="noopener"><img src="${esc(webUrl(u))}" alt="Түпнұсқалық дәлелі" style="width:64px;height:64px;object-fit:cover"></a>`).join(' ')}</div>` : ''}
         <b>Тараптардың дәлелі</b>${ev.evidence.length ? `<ol class="hist">${ev.evidence.map(x => `<li>${when(x.at)} · ${who[x.from]}${x.note ? `: ${esc(x.note)}` : ''}<br>${x.kind === 'video' ? `<video src="${esc(webUrl(x.url))}" controls preload="metadata" style="width:160px;max-height:120px;vertical-align:middle"></video>` : `<a href="${esc(webUrl(x.url))}" target="_blank" rel="noopener"><img src="${esc(webUrl(x.url))}" alt="Дәлел фото" style="width:64px;height:64px;object-fit:cover"></a>`}</li>`).join('')}</ol>` : '<div class="muted">Дәлел жоқ.</div>'}
         <b>Чат</b>${ev.messages.length ? `<ol class="hist">${ev.messages.map(m => `<li>${when(m.at)} · ${who[m.from]}: ${esc(m.body)}${m.photo_url ? ` <a href="${esc(webUrl(m.photo_url))}" target="_blank" rel="noopener"><img src="${esc(webUrl(m.photo_url))}" alt="Чаттағы фото" style="width:64px;height:64px"></a>` : ''}</li>`).join('')}</ol>` : '<div class="muted">Хат жоқ.</div>'}
         <b>Ақша қозғалысы</b><table>${led.transactions.map(t => t.entries.map(x => `<tr><td>${esc(t.kind)}</td><td>${esc(x.account)}</td><td>${x.debit ? '−' + tenge(x.debit) : ''}</td><td>${x.credit ? '+' + tenge(x.credit) : ''}</td></tr>`).join('')).join('') || '<tr><td class="muted">Әзірге жоқ</td></tr>'}</table>
@@ -148,14 +152,24 @@ function orderCard(o, withResolve) {
     body.append(d);
   }
   if (withResolve) {
+    const q = $(`<form class="inline"><select name="side"><option value="buyer">Сатып алушыдан</option><option value="seller">Сатушыдан</option></select>
+      <input name="note" placeholder="Қандай дәлел керек (мысалы, табанының фотосы)" required minlength="3" maxlength="500">
+      <button class="ghost">Дәлел сұрау</button><div class="err" style="grid-column:1/-1"></div></form>`).querySelector('form');
+    q.onsubmit = async (e) => {
+      e.preventDefault();
+      try { await call('POST', `/admin/orders/${o.id}/request-evidence`, { side: q.side.value, note: q.note.value.trim() }); q.note.value = ''; q.querySelector('.err').textContent = 'Сұрау жіберілді.'; }
+      catch (x) { q.querySelector('.err').textContent = x.message; }
+    };
+    body.append(q);
     const f = $(`<form class="inline"><input name="refund" type="number" min="0" step="1" placeholder="Қайтару, ₸">
       <input name="reason" placeholder="Шешімнің себебі (міндетті)" required><button class="primary">Шешу</button>
+      <label class="muted" style="grid-column:1/-1"><input type="checkbox" name="early"> 48 сағаттық дәлел мерзімі біткенше шешу (себебін жазыңыз)</label>
       <div class="err" style="grid-column:1/-1"></div></form>`).querySelector('form');
     f.onsubmit = async (e) => {
       e.preventDefault();
       const refund = Math.round(Number(f.refund.value || 0) * 100);
       if (!confirm(refund ? `№${o.id}: сатып алушыға ${tenge(refund)} қайтару?` : `№${o.id}: ақшаны сатушыға беру?`)) return;
-      try { await call('POST', `/admin/orders/${o.id}/resolve`, { refund_tiyn: refund, reason: f.reason.value.trim() }); show(); }
+      try { await call('POST', `/admin/orders/${o.id}/resolve`, { refund_tiyn: refund, reason: f.reason.value.trim(), early: f.early.checked }); show(); }
       catch (x) { f.querySelector('.err').textContent = x.message; }
     };
     body.append(f);

@@ -933,4 +933,8 @@ const en = <String, String>{
       'Return request sent to the seller. Add a photo of the defect in the Evidence section.',
   'Қолдау қызметіне жіберілді. «Дәлелдер» бөлімінде өз дәлеліңізді қосыңыз.':
       'Sent to support. Add your evidence in the Evidence section.',
+  'Дәлел қосу мерзімі: {0} дейін. Содан кейін қолдау қызметі шешеді.':
+      'Evidence can be added until {0}. Then support decides.',
+  'Ақау байқасаңыз, қазір түсіріп қойыңыз: қайтару сұрағанда сатушы бірден көреді.':
+      'Spotted a defect? Photograph it now: the seller sees it as soon as you ask for a return.',
 };

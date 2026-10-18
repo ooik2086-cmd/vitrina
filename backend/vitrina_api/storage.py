@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import io
+import logging
 import re
 import resource
 import secrets
@@ -21,6 +22,8 @@ import httpx
 from PIL import Image, ImageOps, UnidentifiedImageError
 
 from .errors import ApiError
+
+log = logging.getLogger("vitrina.storage")
 
 MAX_UPLOAD_BYTES = 12 * 1024 * 1024
 MAX_SIDE_PX = 2000
@@ -81,6 +84,8 @@ def clean_video(data: bytes) -> bytes:
             size = out.stat().st_size if out.exists() else 0
             # -fs stops at the cap, so a copy that reached it was cut short: refuse it rather than store half.
             if run.returncode != 0 or size == 0 or size >= VIDEO_COPY_CAP or size > 2 * len(data):
+                log.info("video refused: exit %s, %s of %s bytes, %s", run.returncode, size, len(data),
+                         run.stderr.decode(errors="replace")[-300:].strip())
                 raise ApiError(415, "unsupported_video", "the video could not be read")
             return out.read_bytes()
     finally:

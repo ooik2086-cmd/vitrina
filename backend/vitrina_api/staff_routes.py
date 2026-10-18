@@ -12,12 +12,12 @@ from . import services
 from .config import Settings
 from .deps import get_db, get_settings, staff_user
 from .errors import ApiError
-from .models import AuditLog, ListingReport, Listing, Order, OrderEvent, User
-from .schemas import ReasonIn, ReportCloseIn, ResolveIn
+from .models import AuditLog, AuthProof, ListingReport, Listing, Order, OrderEvent, OrderEvidence, User, utcnow
+from .schemas import EvidenceRequestIn, ReasonIn, ReportCloseIn, ResolveIn
 from .serializers import listing_out, moderation_out, order_out, order_summary, ordered_details, ordered_photos
 from .saved_search_routes import announce
 from .listing_routes import split_codes
-from .order_routes import order_evidence_list, order_for
+from .order_routes import dispute_evidence_until, order_evidence_list, order_for
 
 
 router = APIRouter(prefix="/api/v1")
@@ -32,6 +32,11 @@ def resolve_dispute(order_id: int, body: ResolveIn, staff: User = Depends(staff_
         raise ApiError(409, "invalid_status")
     if not body.reason.strip():
         raise ApiError(422, "reason_required")  # both sides are told why, and the audit log keeps it
+    until = dispute_evidence_until(db, order)
+    sides = set(db.scalars(select(OrderEvidence.user_id).where(OrderEvidence.order_id == order.id)).all())
+    both_shown = {order.buyer_id, order.seller_id} <= sides
+    if until and utcnow() < until and not both_shown and not body.early:
+        raise ApiError(409, "evidence_window_open", until.isoformat())
     if body.refund_tiyn > services.total_tiyn(order):
         raise ApiError(422, "validation", "refund exceeds the order total")
     if body.refund_tiyn == 0:
@@ -43,6 +48,24 @@ def resolve_dispute(order_id: int, body: ResolveIn, staff: User = Depends(staff_
     services.audit(db, staff.id, "resolve_dispute", f"order:{order.id}", f"refund={body.refund_tiyn}; {body.reason}")
     db.commit()
     return order_out(order)
+
+
+@router.post("/admin/orders/{order_id}/request-evidence")
+def request_evidence(order_id: int, body: EvidenceRequestIn, staff: User = Depends(staff_user),
+                     db: Session = Depends(get_db)):
+    """Support asks one side for something the case still lacks (the label, the sole, the parcel)."""
+    order = order_for(db, order_id, staff)
+    if order.status != S.DISPUTED.value:
+        raise ApiError(409, "invalid_status")
+    note = body.note.strip()
+    short = note if len(note) <= 200 else note[:199] + "…"  # a notice holds 300 characters; the log keeps it all
+    who = order.buyer_id if body.side == "buyer" else order.seller_id
+    services.notify(db, who, "evidence_request", f"Тапсырыс №{order.id}: қолдау қызметі дәлел сұрайды. {short}",
+                    f"Заказ №{order.id}: поддержка просит доказательство. {short}",
+                    f"Order No. {order.id}: support asks for evidence. {short}", order_id=order.id)
+    services.audit(db, staff.id, "request_evidence", f"order:{order.id}", f"{body.side}: {note}")
+    db.commit()
+    return {"ok": True}
 
 
 @router.post("/admin/orders/{order_id}/delivered")
@@ -114,9 +137,16 @@ def admin_orders(status: str | None = None, staff: User = Depends(staff_user), d
     if status:
         stmt = stmt.where(Order.status == status)
     items = []
-    for o in db.scalars(stmt).all():
+    rows = db.scalars(stmt).all()
+    # Support sees which disputes have new evidence without opening each one.
+    evidence = {oid: (n, at) for oid, n, at in db.execute(
+        select(OrderEvidence.order_id, func.count(OrderEvidence.id), func.max(OrderEvidence.created_at))
+        .where(OrderEvidence.order_id.in_([o.id for o in rows])).group_by(OrderEvidence.order_id)).all()}
+    for o in rows:
         events = db.scalars(select(OrderEvent).where(OrderEvent.order_id == o.id).order_by(OrderEvent.id)).all()
-        items.append({**order_summary(db, o), "history": [
+        n, last = evidence.get(o.id, (0, None))
+        items.append({**order_summary(db, o), "evidence_count": n,
+                      "last_evidence_at": services.aware(last).isoformat() if last else None, "history": [
             {"status": e.to_status, "actor": e.actor, "reason": e.reason, "at": services.aware(e.at).isoformat()}
             for e in events]})
     return {"items": items}
@@ -249,6 +279,12 @@ def order_evidence(order_id: int, staff: User = Depends(staff_user), db: Session
     return {"tracking_number": order.tracking_number, "dispute_reason": order.dispute_reason,
             "listing_title": order.listing_title, "listing_photos": ordered_photos(order),
             "listing_details": ordered_details(order), "evidence": order_evidence_list(db, order),
+            "evidence_until": (until.isoformat() if (until := dispute_evidence_until(db, order)) else None),
+            "evidence_requests": [{"reason": r.reason, "at": services.aware(r.at).isoformat()} for r in db.scalars(
+                select(AuditLog).where(AuditLog.action == "request_evidence", AuditLog.target == f"order:{order.id}")
+                .order_by(AuditLog.id)).all()],
+            "authenticity_proofs": [p.url for p in db.scalars(select(AuthProof).where(
+                AuthProof.listing_id == order.listing_id).order_by(AuthProof.id)).all()],
             "delivery_city": order.delivery_city,
             "delivered_at": services.aware(order.delivered_at).isoformat() if order.delivered_at else None,
             "statements": [{"actor": e.actor, "status": e.to_status, "reason": e.reason,

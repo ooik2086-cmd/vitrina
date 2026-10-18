@@ -184,7 +184,8 @@ def photo_snapshot(listing: Listing) -> str:
                        for m in sorted(listing.media, key=lambda m: m.position)], ensure_ascii=False)
 
 
-LISTING_DETAILS = ("title", "brand", "model_name", "color", "category", "condition", "defects", "description")
+LISTING_DETAILS = ("title", "brand", "model_name", "color", "category", "condition", "defects", "description",
+                   "authenticity")
 
 
 def details_snapshot(listing: Listing) -> str:

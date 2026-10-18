@@ -44,9 +44,13 @@ STATUS_NOTICES: dict[OrderStatus, tuple[tuple[str, ...], str, str, str]] = {
                                                  "Order No. {id} was delivered. Check it and confirm receipt."),
     OrderStatus.COMPLETED: (("buyer", "seller"), "Тапсырыс №{id} аяқталды.", "Заказ №{id} завершён.",
                             "Order No. {id} is complete."),
-    OrderStatus.DISPUTED: (("buyer", "seller"), "Тапсырыс №{id} бойынша дау ашылды. Қолдау қызметі қарайды.",
-                           "По заказу №{id} открыт спор. Его рассмотрит поддержка.",
-                           "A dispute was opened on order No. {id}. Support will review it."),
+    OrderStatus.DISPUTED: (("buyer", "seller"),
+                           "Тапсырыс №{id} бойынша дау ашылды. 48 сағат ішінде тапсырыс бетінде фото не видео дәлел қосыңыз, "
+                           "содан кейін қолдау қызметі шешеді.",
+                           "По заказу №{id} открыт спор. В течение 48 часов добавьте фото или видео на странице заказа, "
+                           "затем поддержка примет решение.",
+                           "A dispute was opened on order No. {id}. Add photos or a video on the order page within 48 "
+                           "hours, then support decides."),
     OrderStatus.RETURN_REQUESTED: (("seller",), "Сатып алушы №{id} тапсырысты қайтаруды сұрады.",
                                    "Покупатель запросил возврат заказа №{id}.",
                                    "The buyer asked to return order No. {id}."),

@@ -64,6 +64,13 @@ MESSAGES: dict[str, tuple[str, str, str]] = {  # code: (Kazakh, Russian, English
     "video_unavailable": ("Видеоны қазір өңдеу мүмкін емес. Біраз кейін қайталаңыз не фото жіберіңіз.",
                           "Видео сейчас не обработать. Повторите позже или отправьте фото.",
                           "The video can't be processed right now. Try again later or send a photo."),
+    "evidence_window_open": ("Екі тараптың дәлел қосуына 48 сағат беріледі. Шешімді мерзім біткенде шығарыңыз не "
+                             "«мерзімнен бұрын» белгісін қойыңыз.",
+                             "У сторон есть 48 часов на доказательства. Решите после срока или отметьте «досрочно».",
+                             "Both sides have 48 hours to add evidence. Decide after that, or mark the decision as early."),
+    "proof_in_use": ("Бұл тауар сатылған: түпнұсқалық дәлелі сатып алушы үшін сақталады.",
+                     "Товар уже продан: доказательство подлинности сохраняется для покупателя.",
+                     "This listing has been sold: its authenticity proof is kept for the buyer."),
     "unsupported_video": ("Видео ашылмады. Телефонмен түсірілген MP4 не MOV видеосын жіберіңіз (12 МБ-қа дейін).",
                           "Видео не открылось. Отправьте MP4 или MOV, снятое на телефон (до 12 МБ).",
                           "The video could not be read. Send an MP4 or MOV recorded on a phone (up to 12 MB)."),

@@ -17,7 +17,7 @@ from vitrina_core.catalog import Authenticity
 from . import services
 from .deps import current_user, get_db, get_storage, staff_user
 from .errors import ApiError
-from .models import AuthProof, Listing, User
+from .models import AuthProof, Listing, Order, User
 from .storage import MAX_UPLOAD_BYTES, Storage, normalize_image
 
 router = APIRouter(prefix="/api/v1")
@@ -72,6 +72,10 @@ def delete_proof(listing_id: int, proof_id: int, user: User = Depends(current_us
     proof = db.get(AuthProof, proof_id)
     if proof is None or proof.listing_id != listing.id:
         raise ApiError(404, "not_found")
+    # Once someone has paid, the proofs are part of what they bought on: support needs them for an "it's fake" case.
+    paid = Order.status.not_in(("CREATED", "PAYMENT_PENDING", "CANCELLED"))
+    if db.scalar(select(Order.id).where(Order.listing_id == listing.id, paid).limit(1)) is not None:
+        raise ApiError(409, "proof_in_use")
     db.delete(proof)
     db.flush()
     left = db.scalar(select(AuthProof.id).where(AuthProof.listing_id == listing.id))
