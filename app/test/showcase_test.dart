@@ -323,6 +323,15 @@ void main() {
     expect(find.text('Nike Air Force 1').hitTestable(), findsOneWidget);
   });
 
+  showcaseTest('the stops are dots with no text beside the shoe, named for screen readers', (tester) async {
+    await pump(tester, listing());
+    final dots = find.byKey(const Key('showcase-step-sole'));
+    expect(find.descendant(of: dots, matching: find.byType(Text)), findsNothing);
+    expect(find.text('Табаны'), findsNothing);
+    expect(tester.getSemantics(dots), isSemantics(label: 'Табаны', isButton: true, hasTapAction: true));
+    expect(tester.getSize(dots), const Size(40, 48));
+  });
+
   showcaseTest('on a narrow phone the stop being shown stays in view and the photos button never scrolls away',
       (tester) async {
     await pump(tester, listing(), size: const Size(320, 700));

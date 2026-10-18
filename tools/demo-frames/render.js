@@ -17,6 +17,10 @@ const srv = http.createServer((q, s) => { const f = path.join(dir, decodeURIComp
       const url = await p.evaluate(([v, i, n]) => window.frame(v, i, n), [v, i, n]);
       fs.writeFileSync(path.join(vd, `f${String(i).padStart(2, '0')}.jpg`), Buffer.from(url.split(',')[1], 'base64'));
     }
+    for (const kind of ['top', 'sole', 'detail']) {
+      const url = await p.evaluate(([v, k]) => window.view(v, k), [v, kind]);
+      fs.writeFileSync(path.join(vd, `${kind}.jpg`), Buffer.from(url.split(',')[1], 'base64'));
+    }
   }
   await b.close(); srv.close();
 });

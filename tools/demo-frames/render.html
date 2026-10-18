@@ -52,5 +52,28 @@ window.frame = async (variant, i, n) => {
   renderer.render(scene, camera);
   return renderer.domElement.toDataURL('image/jpeg', 0.9);
 };
+// The stops after the turn: the top, the sole and a close-up of the stitching, all from the same real scan.
+const home = { pos: camera.position.clone(), fov: camera.fov };
+window.view = async (variant, kind) => {
+  await setVariant(variant);
+  pivot.rotation.set(0, 0, 0); pivot.position.set(0, 0, 0); ground.visible = true;
+  camera.fov = home.fov;
+  if (kind === 'top') {
+    pivot.rotation.y = -Math.PI / 2;
+    camera.position.set(0, r * 2.35, r * 0.1); camera.lookAt(0, 0, 0);
+  } else if (kind === 'sole') {
+    pivot.rotation.set(Math.PI, Math.PI / 2, 0); pivot.position.y = size.y; ground.visible = false;
+    camera.position.set(0, size.y + r * 2.35, r * 0.1); camera.lookAt(0, size.y, 0);
+  } else {
+    camera.fov = 18;
+    camera.position.set(r * 0.9, size.y * 1.1, r * 0.9); camera.lookAt(r * 0.12, size.y * 0.4, 0);
+  }
+  camera.updateProjectionMatrix();
+  renderer.render(scene, camera);
+  const url = renderer.domElement.toDataURL('image/jpeg', 0.92);
+  pivot.rotation.set(0, 0, 0); pivot.position.set(0, 0, 0); ground.visible = true;
+  camera.fov = home.fov; camera.position.copy(home.pos); camera.lookAt(0, size.y * 0.42, 0); camera.updateProjectionMatrix();
+  return url;
+};
 window.ready = true;
 </script></body></html>

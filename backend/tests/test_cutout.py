@@ -194,6 +194,15 @@ class CutoutApiTests(MediaTests):
 
 
 class ShowcaseUnitTests(unittest.TestCase):
+    def test_a_black_shoe_on_a_white_sole_still_gets_a_light_backdrop(self):
+        img = Image.new("RGBA", (200, 200), (0, 0, 0, 0))
+        d = ImageDraw.Draw(img)
+        d.rectangle((20, 40, 180, 130), fill=(20, 20, 24, 255))     # the black upper, the larger part
+        d.rectangle((20, 131, 180, 180), fill=(250, 250, 250, 255))  # a thick white sole
+        out = io.BytesIO()
+        img.save(out, "PNG")
+        self.assertEqual(backdrop_for(out.getvalue()), "light")
+
     def test_backdrop_ignores_the_transparent_surroundings(self):
         img = Image.new("RGBA", (300, 300), (255, 255, 255, 0))  # bright but see-through
         ImageDraw.Draw(img).rectangle((100, 100, 200, 200), fill=(10, 10, 10, 255))

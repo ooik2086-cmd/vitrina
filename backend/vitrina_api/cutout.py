@@ -123,7 +123,7 @@ def process_photo(data: bytes, segment: Segmenter, *, min_share: float = 0.03,
 
 
 THUMB_SIDE_PX = 480
-DARK_SHOE = 0.34  # mean luminance of the shoe's own pixels below which it gets a light backdrop
+DARK_SHOE = 0.34  # median luminance of the shoe's own pixels below which it gets a light backdrop
 
 
 def make_thumb(data: bytes) -> bytes:
@@ -150,8 +150,13 @@ def backdrop_for(cutout_bytes: bytes) -> str | None:
     count = sum(hist)
     if count == 0:
         return None
-    mean = sum(i * n for i, n in enumerate(hist)) / count / 255
-    return "light" if mean < DARK_SHOE else "dark"
+    # The median, not the mean: a black shoe on a big white sole is still a black shoe and needs a light backdrop.
+    seen = 0
+    for level, n in enumerate(hist):
+        seen += n
+        if seen * 2 >= count:
+            return "light" if level / 255 < DARK_SHOE else "dark"
+    return None
 
 
 def process_listing_media(media: list, read: Callable[[str], bytes], write: Callable[[bytes], str],

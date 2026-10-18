@@ -122,7 +122,6 @@ class ScrollShowcase extends StatefulWidget {
 
 class ScrollShowcaseState extends State<ScrollShowcase> {
   late ShowcasePlan _plan;
-  late List<GlobalKey> _chipKeys;
   late bool _light;
   bool _settled = true;
   Timer? _settle;
@@ -132,8 +131,6 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
   static bool _hinted = false; // the short turn that shows scrolling turns the shoe, once per app run
 
   final _viewer = GlobalKey();
-  final _chipRow = GlobalKey();
-  final _chips = ScrollController();
 
   // Zoom and pan. The page is held still while two fingers are down or the picture is zoomed in.
   final _pointers = <int, Offset>{};
@@ -161,7 +158,6 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
 
   void _setUp() {
     _plan = ShowcasePlan.of(widget.listing);
-    _chipKeys = [for (final _ in _plan.steps) GlobalKey()];
     _light = widget.listing.backdrop != 'dark';
     _shown = (step: 0, frame: 0);
     _scale = 1;
@@ -217,7 +213,6 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
   void dispose() {
     widget.scroll.removeListener(_onScroll);
     _settle?.cancel();
-    _chips.dispose();
     if (_lockedOffset != null || _zoomed) widget.onLock?.call(false);
     super.dispose();
   }
@@ -246,7 +241,6 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
           HapticFeedback.selectionClick();
           _jumpingTo = null;
         }
-        _showChip(now.step);
       }
       _shown = now;
       // Small copies while turning; the full photo once the shoe has stopped on one frame for a moment.
@@ -257,22 +251,6 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
       });
     }
     setState(() {}); // the stage moves with the scroll offset
-  }
-
-  /// On a narrow phone the stops row scrolls; keep the stop being shown in view. Only this row moves:
-  /// Scrollable.ensureVisible would also scroll the page and undo the turn.
-  void _showChip(int step) {
-    final chip = _chipKeys[step].currentContext?.findRenderObject() as RenderBox?;
-    final row = _chipRow.currentContext?.findRenderObject();
-    if (chip == null || row == null || !_chips.hasClients) return;
-    final x = chip.localToGlobal(Offset.zero, ancestor: row).dx + chip.size.width / 2;
-    final p = _chips.position;
-    final to = (x - p.viewportDimension / 2).clamp(0.0, p.maxScrollExtent);
-    if (_reduceMotion) {
-      _chips.jumpTo(to);
-    } else {
-      _chips.animateTo(to, duration: const Duration(milliseconds: 200), curve: Curves.easeOut);
-    }
   }
 
   void _goTo(int step) {
@@ -523,40 +501,47 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
                     ),
                 ]),
               ),
-              // The stops, as buttons: jump straight to the top, sole or close-up without scrolling there.
+              // The stops as dots (Aza's choice: nothing written beside the shoe). Each is a 48 dp button that jumps
+              // straight to its view; its name is read out and shown on long press.
               Padding(
                 padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
                 child: Row(children: [
                   Expanded(
-                    child: SingleChildScrollView(
-                      controller: _chips,
-                      scrollDirection: Axis.horizontal,
-                      child: Row(key: _chipRow, children: [
-                        for (var i = 0; i < _plan.steps.length; i++)
-                          Padding(
-                            key: _chipKeys[i],
-                            padding: const EdgeInsets.only(right: 2),
-                            child: Semantics(
-                              button: true,
-                              selected: i == now.step,
-                              child: _chip(
-                                key: Key('showcase-step-${_plan.steps[i].kind}'),
-                                onTap: () => _goTo(i),
-                                fill: i == now.step
-                                    ? (onDark ? Colors.white : Brand.ink)
-                                    : (onDark ? Colors.white24 : Colors.white.withValues(alpha: 0.85)),
-                                child: Text(_plan.steps[i].label,
-                                    style: TextStyle(
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w600,
-                                        color: i == now.step ? (onDark ? Brand.ink : Colors.white) : chipText)),
+                    child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                      for (var i = 0; i < _plan.steps.length; i++)
+                        Semantics(
+                          button: true,
+                          selected: i == now.step,
+                          label: _plan.steps[i].label,
+                          child: Tooltip(
+                            message: _plan.steps[i].label,
+                            excludeFromSemantics: true,
+                            child: InkWell(
+                              key: Key('showcase-step-${_plan.steps[i].kind}'),
+                              customBorder: const CircleBorder(),
+                              onTap: () => _goTo(i),
+                              child: SizedBox(
+                                width: 40,
+                                height: 48,
+                                child: Center(
+                                  child: AnimatedContainer(
+                                    duration: _reduceMotion ? Duration.zero : const Duration(milliseconds: 180),
+                                    width: i == now.step ? 22 : 9,
+                                    height: 9,
+                                    decoration: BoxDecoration(
+                                      color: i == now.step
+                                          ? (onDark ? Colors.white : Brand.ink)
+                                          : (onDark ? Colors.white38 : Brand.ink.withValues(alpha: 0.25)),
+                                      borderRadius: BorderRadius.circular(99),
+                                    ),
+                                  ),
+                                ),
                               ),
                             ),
                           ),
-                      ]),
-                    ),
+                        ),
+                    ]),
                   ),
-                  // Kept outside the scrolling stops so they are always on screen, however many stops there are.
                   if (widget.onPhotos != null)
                     Semantics(
                       button: true,

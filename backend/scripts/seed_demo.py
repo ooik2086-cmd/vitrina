@@ -3,7 +3,8 @@
     python3 scripts/seed_demo.py                      # uses demo/frames next to this script
     python3 scripts/seed_demo.py --api http://127.0.0.1:8000/api/v1
 
-Each folder in demo/frames is one shoe: an ordered 360° sequence (see demo/ATTRIBUTION.md for the source).
+Each folder in demo/frames is one shoe: an ordered 360° sequence fNN.jpg plus top, sole and detail views
+(see demo/ATTRIBUTION.md for the source).
 Photos go through the normal upload endpoint, so they are cleaned and stored like a seller's.
 Needs VITRINA_DEBUG_OTP=1 on the server, because sign-in reads the code from the response.
 """
@@ -48,8 +49,9 @@ def login(c: httpx.Client, phone: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
 
 
-def upload(c: httpx.Client, auth: dict, path: Path) -> str:
-    return c.post("/media", files={"file": (path.name, path.read_bytes())}, headers=auth).raise_for_status().json()["url"]
+def upload(c: httpx.Client, auth: dict, path: Path, detail: bool = False) -> str:
+    return c.post("/media", params={"detail": "true"} if detail else None, files={"file": (path.name, path.read_bytes())},
+                  headers=auth).raise_for_status().json()["url"]
 
 
 def main() -> None:
@@ -62,7 +64,7 @@ def main() -> None:
         seller = login(c, "+77010000001")
         c.post("/me/seller", json={"shop_name": "Qadam Store", "city": "Алматы"}, headers=seller)
         for folder, listings in LISTINGS.items():
-            files = sorted((args.frames / folder).glob("*.jpg"))
+            files = sorted((args.frames / folder).glob("f*.jpg"))
             if len(files) < 8:
                 raise SystemExit(f"{folder}: need at least 8 frames")
             urls = [upload(c, seller, f) for f in files]
@@ -71,12 +73,16 @@ def main() -> None:
             shots = [{"url": urls[(i * q) % len(urls)], "angle": a}
                      for i, a in enumerate(("outer", "front", "inner", "back"))]
             frames = [{"url": u, "angle": "frame"} for u in urls]
+            # The showcase's stops after the turn, rendered from the same scan (tools/demo-frames).
+            stops = [{"url": upload(c, seller, args.frames / folder / f"{a}.jpg", detail=True), "angle": a}
+                     for a in ("top", "sole", "detail") if (args.frames / folder / f"{a}.jpg").exists()]
             for spec in listings:
                 spec = dict(spec)
                 sizes = spec.pop("sizes", [(label, cm, 2) for label, cm in SIZES])
                 body = {"category": "sneakers", **spec,
                         "sizes": [{"label": s, "insole_cm": cm, "quantity": n} for s, cm, n in sizes],
-                        "photos": shots + ([{"url": urls[q // 2], "angle": "defect"}] if spec.get("defects") else [])
+                        "photos": shots + stops
+                                  + ([{"url": urls[q // 2], "angle": "defect"}] if spec.get("defects") else [])
                                   + frames}
                 r = c.post("/listings", json=body, headers=seller).raise_for_status().json()
                 c.post(f"/listings/{r['id']}/publish", headers=seller).raise_for_status()
