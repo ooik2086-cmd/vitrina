@@ -145,7 +145,8 @@ def new_key(owner_id: int, ext: str) -> str:
 
 
 # The only shape new_key produces. Anything else (quotes, "</script>", "?", "#", "..") was not written by us.
-KEY_RE = re.compile(r"(\d+)/[0-9a-f]{32}\.(?:jpg|webp|png|mp4)")
+KEY_BODY = r"(\d+)/[0-9a-f]{32}\.(?:jpg|webp|png|mp4)"
+KEY_RE = re.compile(KEY_BODY)
 
 
 def key_of(public_base: str, url: str, owner_id: int | None = None) -> str | None:
@@ -156,6 +157,13 @@ def key_of(public_base: str, url: str, owner_id: int | None = None) -> str | Non
     m = KEY_RE.fullmatch(key)
     if m is None or (owner_id is not None and int(m.group(1)) != owner_id):
         return None
+    return key
+
+
+def checked_key(key: str) -> str:
+    """A key about to be deleted must be one new_key could have made."""
+    if not KEY_RE.fullmatch(key):
+        raise ValueError("not a key we wrote")
     return key
 
 
@@ -192,13 +200,14 @@ class LocalStorage:
     def keys(self) -> Iterator[tuple[str, datetime]]:
         for path in self.root.glob("*/*"):
             key = path.relative_to(self.root).as_posix()
-            if KEY_RE.fullmatch(key) and path.is_file():
+            if KEY_RE.fullmatch(key) and path.is_file() and not path.is_symlink():
                 yield key, datetime.fromtimestamp(path.stat().st_mtime, timezone.utc)
 
     def delete(self, key: str) -> None:
-        if not KEY_RE.fullmatch(key):
-            raise ValueError("not a key we wrote")
-        (self.root / key).unlink(missing_ok=True)
+        path = (self.root / checked_key(key)).resolve()
+        if self.root.resolve() not in path.parents:
+            raise ValueError("outside storage root")
+        path.unlink(missing_ok=True)
 
 
 def sigv4_headers(method: str, url: str, *, region: str, access_key: str, secret_key: str, payload: bytes = b"",
@@ -272,21 +281,18 @@ class S3Storage:
         while True:
             query = {"list-type": "2", **({"continuation-token": token} if token else {})}
             root = ElementTree.fromstring(self._send("GET", "", query=query).content)
-            ns = {"s3": root.tag[1:].split("}")[0]} if root.tag.startswith("{") else {}
-            find = (lambda node, name: node.find(f"s3:{name}", ns)) if ns else (lambda node, name: node.find(name))
-            for item in (root.findall("s3:Contents", ns) if ns else root.findall("Contents")):
-                key, when = find(item, "Key"), find(item, "LastModified")
-                if key is not None and when is not None and KEY_RE.fullmatch(key.text or ""):
-                    yield key.text, datetime.fromisoformat((when.text or "").replace("Z", "+00:00"))
-            more, nxt = find(root, "IsTruncated"), find(root, "NextContinuationToken")
-            if more is None or more.text != "true" or nxt is None or not nxt.text:
+            for item in root.iterfind("{*}Contents"):
+                key, when = item.findtext("{*}Key") or "", item.findtext("{*}LastModified") or ""
+                if KEY_RE.fullmatch(key) and when:
+                    yield key, datetime.fromisoformat(when.replace("Z", "+00:00"))
+            if root.findtext("{*}IsTruncated") != "true":
                 return
-            token = nxt.text
+            token = root.findtext("{*}NextContinuationToken")
+            if not token:  # a provider that cuts the list short without saying where to go on
+                raise RuntimeError("storage listing is truncated but gives no continuation token")
 
     def delete(self, key: str) -> None:
-        if not KEY_RE.fullmatch(key):
-            raise ValueError("not a key we wrote")
-        self._send("DELETE", key)
+        self._send("DELETE", checked_key(key))
 
 
 def make_storage(settings) -> Storage:

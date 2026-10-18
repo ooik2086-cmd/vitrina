@@ -30,6 +30,12 @@ class FakeBucket:
     def __call__(self, request: httpx.Request) -> httpx.Response:
         if not request.headers.get("authorization", "").startswith("AWS4-HMAC-SHA256 Credential=key/"):
             return httpx.Response(403)
+        if request.method in ("GET", "DELETE"):  # recompute the signature over the request exactly as it arrived
+            when = datetime.strptime(request.headers["x-amz-date"], "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
+            expected = sigv4_headers(request.method, str(request.url), region="kz-1", access_key="key",
+                                     secret_key="secret", now=when)["authorization"]
+            if request.headers["authorization"] != expected:
+                return httpx.Response(403)
         path = request.url.path
         if request.method == "GET" and path == "/vitrina" and request.url.params.get("list-type") == "2":
             return self.listing(request.url.params.get("continuation-token"))
@@ -46,11 +52,11 @@ class FakeBucket:
     def listing(self, token):
         """ListObjectsV2, one object per page so the client has to follow the continuation token."""
         keys = sorted(p.removeprefix("/vitrina/") for p in self.objects) + ["notes/readme.txt"]
-        at = int(token or 0)
+        at = int(token.removeprefix("p/+=")) if token else 0
         more = at + 1 < len(keys)
         body = ('<?xml version="1.0" encoding="UTF-8"?><ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">'
                 f'<IsTruncated>{"true" if more else "false"}</IsTruncated>'
-                + (f"<NextContinuationToken>{at + 1}</NextContinuationToken>" if more else "")
+                + (f"<NextContinuationToken>p/+={at + 1}</NextContinuationToken>" if more else "")
                 + f"<Contents><Key>{keys[at]}</Key><LastModified>2026-10-01T08:00:00.000Z</LastModified></Contents>"
                 "</ListBucketResult>")
         return httpx.Response(200, content=body.encode())
@@ -92,6 +98,12 @@ class S3StorageTests(unittest.TestCase):
         self.assertEqual(set(dict(self.s3.keys())), {key_b})
         with self.assertRaises(ValueError):
             self.s3.delete("7/../../secret")
+
+    def test_a_listing_cut_short_without_a_token_stops_instead_of_looking_complete(self):
+        self.s3.client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, content=(
+            b"<ListBucketResult><IsTruncated>true</IsTruncated></ListBucketResult>"))))
+        with self.assertRaises(RuntimeError):
+            list(self.s3.keys())
 
 
 class LocalListingTests(unittest.TestCase):

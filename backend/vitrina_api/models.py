@@ -149,7 +149,7 @@ class Order(Base):
     listing_cover: Mapped[str | None] = mapped_column(String(500))
     # JSON list of {"url", "angle"}: every photo and 360° frame the listing had when the order was placed. The seller
     # may replace photos later; this is what the buyer chose, shown to both sides and to support in a dispute.
-    # Uploaded files are never deleted, so these addresses keep working.
+    # The orphan sweep (orphans.py) reads this column too, so files listed here are never removed.
     listing_photos: Mapped[str | None] = mapped_column(Text)
     # JSON of what the listing said when ordered (brand, model, colour, condition, defects, description): the
     # seller may still mark the condition worse or rewrite the text later.

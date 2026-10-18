@@ -2545,42 +2545,97 @@ class DisputeEvidenceTests(ApiTestCase):
 
 
 class OrphanSweepTests(ApiTestCase):
-    def test_only_old_files_no_row_points_at_are_removed(self):
+    def setUp(self):
+        super().setUp()
         from vitrina_api import orphans
-        storage, now = self.app.state.storage, datetime.now(timezone.utc)
+        self.orphans, self.storage, self.now = orphans, self.app.state.storage, datetime.now(timezone.utc)
         jpeg = io.BytesIO()
         Image.new("RGB", (8, 8)).save(jpeg, "JPEG")
-        listed, ordered, moved, young, lost = (storage.put(jpeg.getvalue(), owner_id=1) for _ in range(5))
+        self.jpeg = jpeg.getvalue()
+
+    def stored(self, days_old):
+        url = self.storage.put(self.jpeg, owner_id=1)
+        when = (self.now - timedelta(days=days_old)).timestamp()
+        os.utime(os.path.join(self.cfg.media_dir, self.key(url)), (when, when))
+        return url
+
+    def key(self, url):
+        return url.split("/media/")[1]
+
+    def point_at(self, *texts):
+        with self.db() as db:
+            db.query(User).filter_by(phone="+77010000002").one().last_delivery = json.dumps(list(texts))
+            db.commit()
+
+    def sweep(self, **kw):
+        return self.orphans.sweep(self.app.state.sessions, self.storage, now=self.now, **kw)
+
+    def test_only_old_files_no_row_points_at_are_removed(self):
+        listed, ordered, moved, escaped, lost = (self.stored(8) for _ in range(5))
+        young, almost = self.stored(0), self.stored(6.9)
         photos = [{**p, "url": listed} if p["angle"] == "front" else p for p in PHOTOS]
         listing = self.publish(photos=photos)
-        with self.db() as db:
-            u = db.query(User).filter_by(phone="+77010000002").one()
-            # Inside a JSON text, and under an address saved before the public media URL changed.
-            u.last_delivery = json.dumps({"photos": [ordered, "https://old-cdn.example/" + moved.split("/media/")[1]]})
-            db.commit()
-        two_days_ago = (now - timedelta(days=3)).timestamp()
-        for url in (listed, ordered, moved, lost):
-            os.utime(os.path.join(self.cfg.media_dir, url.split("/media/")[1]), (two_days_ago, two_days_ago))
-        self.assertEqual(orphans.sweep(self.app.state.sessions, storage, now=now), [lost.split("/media/")[1]])
-        self.assertTrue(storage.read(lost))  # a dry run deletes nothing
-        orphans.sweep(self.app.state.sessions, storage, now=now, delete=True)
+        # Inside a JSON text, under an address saved before the public media URL changed, and percent-encoded.
+        self.point_at(ordered, "https://old-cdn.example/" + self.key(moved),
+                      "https://cdn.example/" + self.key(escaped).replace("/", "%2F"))
+        found = self.sweep()
+        self.assertEqual(found.orphans, [self.key(lost)])
+        self.assertTrue(self.storage.read(lost))  # a dry run deletes nothing
+        done = self.sweep(delete=True, force=True)
+        self.assertEqual(done.deleted, [self.key(lost)])
         with self.assertRaises(FileNotFoundError):
-            storage.read(lost)
-        for url in (listed, ordered, moved, young):
-            self.assertEqual(storage.read(url), jpeg.getvalue())
+            self.storage.read(lost)
+        for url in (listed, ordered, moved, escaped, young, almost):
+            self.assertEqual(self.storage.read(url), self.jpeg)
         with self.db() as db:  # the listing's photo is still there
-            self.assertIn(listed, json.dumps([m.original_url for m in db.get(Listing, listing["id"]).media]))
+            self.assertIn(listed, [m.original_url for m in db.get(Listing, listing["id"]).media])
 
-    def test_refuses_to_sweep_when_the_database_points_at_nothing(self):
-        from vitrina_api import orphans
-        from vitrina_api.storage import LocalStorage
-        empty = LocalStorage(os.path.join(self.tmp.name, "other"), "http://test/media")
-        empty.put(b"x", owner_id=1)
+    def test_a_row_written_while_the_files_are_listed_still_keeps_its_file(self):
+        self.point_at(*(self.stored(8) for _ in range(9)))
+        late = self.stored(8)
+        listing = self.storage.keys
+
+        def keys():
+            for item in listing():
+                yield item
+            self.point_at(late)  # the seller saves while the sweep is listing the files
+
+        self.storage.keys = keys
+        self.assertEqual(self.sweep(delete=True).orphans, [])
+        self.assertEqual(self.storage.read(late), self.jpeg)
+
+    def test_refuses_when_too_many_files_look_unused_or_the_database_points_at_nothing(self):
+        kept = self.stored(8)
+        self.point_at(kept)
+        lost = [self.stored(8) for _ in range(3)]
+        with self.assertRaises(self.orphans.SweepRefused):
+            self.sweep(delete=True)  # 3 of 4: more likely the wrong database than real leftovers
+        for url in lost:
+            self.assertEqual(self.storage.read(url), self.jpeg)
+        self.point_at()
         with self.db() as db:
             db.execute(Base.metadata.tables["media"].delete())
             db.commit()
-        with self.assertRaises(RuntimeError):
-            orphans.sweep(self.app.state.sessions, empty, now=datetime.now(timezone.utc), delete=True)
+        with self.assertRaises(self.orphans.SweepRefused):
+            self.sweep(delete=True, force=True)
+
+    def test_the_command_lists_by_default_and_records_a_delete(self):
+        from contextlib import redirect_stdout
+        from unittest import mock
+        from vitrina_api.models import AuditLog
+        self.point_at(*(self.stored(8) for _ in range(9)))
+        lost = self.stored(8)
+        out = io.StringIO()
+        with mock.patch("vitrina_api.config.Settings", lambda: self.cfg), redirect_stdout(out):
+            self.assertEqual(self.orphans.main([]), 0)
+            self.assertEqual(self.storage.read(lost), self.jpeg)
+            self.assertEqual(self.orphans.main(["--delete"]), 0)
+        self.assertIn(self.key(lost), out.getvalue())
+        self.assertIn("deleted 1, failed 0", out.getvalue())
+        with self.assertRaises(FileNotFoundError):
+            self.storage.read(lost)
+        with self.db() as db:
+            self.assertEqual(db.query(AuditLog).filter_by(action="orphans.delete").count(), 1)
 
 
 if __name__ == "__main__":

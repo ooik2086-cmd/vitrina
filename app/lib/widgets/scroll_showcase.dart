@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 
 import '../api.dart';
@@ -134,6 +135,7 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
   static bool _hinted = false; // the short turn that shows scrolling turns the shoe, once per app run
 
   final _viewer = GlobalKey();
+  final _pin = GlobalKey();
 
   // Zoom and pan. The page is held still while two fingers are down or the picture is zoomed in.
   final _pointers = <int, Offset>{};
@@ -254,7 +256,9 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
       });
       setState(() {});
     }
-    // Otherwise only the stage's position changes, which _PinStage repaints without rebuilding anything.
+    // Otherwise only the stage's position changes, which _PinStage repaints without rebuilding anything. A screen
+    // reader still needs the moved boxes, or its focus frames stay where the stage was.
+    if (SemanticsBinding.instance.semanticsEnabled) _pin.currentContext?.findRenderObject()?.markNeedsSemanticsUpdate();
   }
 
   void _goTo(int step) {
@@ -436,7 +440,7 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
     final top = MediaQuery.paddingOf(context).top + kToolbarHeight; // the shoe stays clear of the app bar
     return SizedBox(
       height: h + travel,
-      child: Flow(delegate: _PinStage(widget.scroll, h, travel), children: [
+      child: Flow(key: _pin, delegate: _PinStage(widget.scroll, h, travel), children: [
         RepaintBoundary(
           child: DecoratedBox(
             key: const Key('showcase'),
@@ -471,12 +475,19 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
                                 ..translateByDouble(_pan.dx, _pan.dy, 0, 1)
                                 ..scaleByDouble(_scale, _scale, 1, 1),
                               filterQuality: _zoomed ? FilterQuality.high : null,
-                              // The catalog card's photo flies into place here, as it does on the Photo tab.
-                              child: Hero(
-                                tag: 'listing-${widget.listing.id}',
-                                child: Material(
-                                  type: MaterialType.transparency,
-                                  child: SizedBox.expand(child: _photo(media, step, box.maxWidth)),
+                              // The catalog card's photo flies into place here, as it does on the Photo tab. Not
+                              // while zoomed (it would fly from the magnified photo) or with reduced motion.
+                              child: HeroMode(
+                                enabled: !_zoomed && !_reduceMotion,
+                                child: Hero(
+                                  tag: 'listing-${widget.listing.id}',
+                                  // Going back, the shoe as it is turned now shrinks into the card.
+                                  flightShuttleBuilder: (_, __, direction, from, to) =>
+                                      (direction == HeroFlightDirection.pop ? from : to).widget,
+                                  child: Material(
+                                    type: MaterialType.transparency,
+                                    child: SizedBox.expand(child: _photo(media, step, box.maxWidth)),
+                                  ),
                                 ),
                               ),
                             ),

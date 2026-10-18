@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -8,6 +10,7 @@ import 'package:http/testing.dart';
 import 'package:vitrina/api.dart';
 import 'package:vitrina/screens/listing_screen.dart';
 import 'package:vitrina/session.dart';
+import 'package:vitrina/widgets/common.dart';
 import 'package:vitrina/widgets/scroll_showcase.dart';
 
 http.Response jsonResponse(Object body, [int status = 200]) =>
@@ -183,6 +186,64 @@ void main() {
     expect(
         find.descendant(of: find.byType(Hero), matching: find.byKey(const ValueKey('showcase-base'))), findsOneWidget);
     expect(tester.widget<Hero>(find.byType(Hero)).tag, 'listing-7');
+  });
+
+  showcaseTest('a screen reader\'s focus boxes move with the stage between frames', (tester) async {
+    final semantics = tester.ensureSemantics();
+    await pump(tester, listing());
+    Rect onScreen(SemanticsNode node) {
+      var rect = node.rect;
+      for (SemanticsNode? n = node; n != null; n = n.parent) {
+        if (n.transform != null) rect = MatrixUtils.transformRect(n.transform!, rect);
+      }
+      return rect;
+    }
+
+    final dot = find.byKey(const Key('showcase-step-sole'));
+    page(tester).jumpTo(200);
+    await tester.pumpAndSettle();
+    page(tester).jumpTo(204); // same frame: nothing is rebuilt
+    await tester.pump();
+    expect(onScreen(tester.getSemantics(dot)).top, moreOrLessEquals(tester.getRect(dot).top, epsilon: 0.5));
+    semantics.dispose();
+  });
+
+  showcaseTest('the catalog card\'s photo flies in while the listing loads', (tester) async {
+    final card = Listing.fromJson(listing());
+    final loaded = Completer<http.Response>();
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient(
+            (req) => req.url.path.endsWith('/similar') ? Future.value(jsonResponse({'items': []})) : loaded.future));
+    tester.view.physicalSize = const Size(400, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(SessionScope(
+        session: Session(api),
+        child:
+            MaterialApp(home: Scaffold(body: Center(child: SizedBox(width: 180, child: ListingTile(listing: card)))))));
+    await tester.tap(find.byType(Hero));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    // Mid-flight: the cover is drawn in flight, on the way to the waiting listing page.
+    expect(find.byWidgetPredicate((w) => w is Image && w.fit == BoxFit.contain), findsOneWidget);
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    loaded.complete(jsonResponse(listing()));
+    await tester.pumpAndSettle();
+    expect(find.byType(ScrollShowcase), findsOneWidget);
+  });
+
+  showcaseTest('a zoomed photo does not fly back into the card', (tester) async {
+    await pump(tester, listing());
+    bool flies() =>
+        tester.widget<HeroMode>(find.ancestor(of: find.byType(Hero), matching: find.byType(HeroMode)).first).enabled;
+    expect(flies(), isTrue);
+    final at = tester.getCenter(find.byKey(const Key('showcase')));
+    await tester.tapAt(at);
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tapAt(at);
+    await tester.pumpAndSettle();
+    expect(flies(), isFalse);
   });
 
   showcaseTest('the stops jump straight to the sole, with one tick when it is reached', (tester) async {

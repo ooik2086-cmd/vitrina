@@ -28,8 +28,11 @@ import '../recent.dart';
 const _minSpinFrames = 8;
 
 class ListingScreen extends StatefulWidget {
-  const ListingScreen({super.key, required this.listingId});
+  const ListingScreen({super.key, required this.listingId, this.cover});
   final int listingId;
+
+  /// The photo the catalog card showed: it flies in and stays while the listing loads.
+  final String? cover;
 
   @override
   State<ListingScreen> createState() => _ListingScreenState();
@@ -241,7 +244,24 @@ class _ListingScreenState extends State<ListingScreen> {
           if (snap.hasError && snap.connectionState == ConnectionState.done) {
             return SafeArea(child: ErrorRetry(error: snap.error, onRetry: () => setState(_loadListing)));
           }
-          if (!snap.hasData) return const Center(child: CircularProgressIndicator());
+          if (!snap.hasData) {
+            final cover = widget.cover;
+            if (cover == null || MediaQuery.of(context).disableAnimations) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            return Stack(children: [
+              Hero(
+                tag: 'listing-${widget.listingId}',
+                child: Image.network(cover,
+                    fit: BoxFit.contain,
+                    width: double.infinity,
+                    height: double.infinity,
+                    cacheWidth: 720,
+                    errorBuilder: (_, __, ___) => const SizedBox.shrink()),
+              ),
+              const Center(child: CircularProgressIndicator()),
+            ]);
+          }
           return _body(context, snap.data!);
         },
       ),
