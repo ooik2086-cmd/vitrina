@@ -40,12 +40,12 @@ class ShowcasePlan {
   factory ShowcasePlan.of(Listing l) {
     final frames = l.frames;
     MediaItem? first(String angle) => l.media.where((m) => m.angle == angle).firstOrNull;
-    final detail = math.max(6.0, frames.length / 6);
+    // Twice as much scrolling for the whole turn as for each stop: see ScrollShowcase.travelFor.
     return ShowcasePlan([
-      ShowcaseStep('spin', frames, frames.length.toDouble()),
-      if (first('top') case final m?) ShowcaseStep('top', [m], detail),
-      if (first('sole') case final m?) ShowcaseStep('sole', [m], detail),
-      if (first('detail') case final m?) ShowcaseStep('close', [m], detail),
+      ShowcaseStep('spin', frames, 2),
+      if (first('top') case final m?) ShowcaseStep('top', [m], 1),
+      if (first('sole') case final m?) ShowcaseStep('sole', [m], 1),
+      if (first('detail') case final m?) ShowcaseStep('close', [m], 1),
     ]);
   }
 
@@ -114,8 +114,9 @@ class ScrollShowcase extends StatefulWidget {
   /// True while the page must not scroll: during a pinch and while zoomed in.
   final ValueChanged<bool>? onLock;
 
-  /// How far the page scrolls while the stage stays in place: one screen for the turn, a little more per stop.
-  static double travelFor(double stageHeight, int steps) => stageHeight * (1.0 + 0.3 * (steps - 1));
+  /// How far the page scrolls while the stage stays in place: 0.6 of the stage for the whole turn, so one ordinary
+  /// swipe turns the shoe once round (a full screen per turn felt slow and heavy under the finger), and 0.3 per stop.
+  static double travelFor(double stageHeight, int steps) => stageHeight * (0.6 + 0.3 * (steps - 1));
 
   @override
   State<ScrollShowcase> createState() => ScrollShowcaseState();
@@ -128,6 +129,8 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
   Timer? _settle;
   ({int step, int frame}) _shown = (step: 0, frame: 0);
   bool _precached = false;
+  int _fingers = 0; // on the page: the full photo waits until the finger is lifted
+  ImageProvider? _fullShown; // the full photo decoded for the current frame, dropped from memory when it moves on
   int? _jumpingTo; // a stop button was tapped: tick once on arrival, not for every stop passed
   /// How often the stage was built; tests check that scrolling within one frame does not rebuild it.
   @visibleForTesting
@@ -251,14 +254,23 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
       // Small copies while turning; the full photo once the shoe has stopped on one frame for a moment.
       _settled = false;
       _settle?.cancel();
-      _settle = Timer(const Duration(milliseconds: 140), () {
-        if (mounted) setState(() => _settled = true);
-      });
+      _fullShown?.evict(); // full photos of passed frames would push the small copies out of the image cache
+      _fullShown = null;
+      _settleSoon();
       setState(() {});
     }
     // Otherwise only the stage's position changes, which _PinStage repaints without rebuilding anything. A screen
     // reader still needs the moved boxes, or its focus frames stay where the stage was.
     if (SemanticsBinding.instance.semanticsEnabled) _pin.currentContext?.findRenderObject()?.markNeedsSemanticsUpdate();
+  }
+
+  /// The full photo once the shoe has stopped for a moment and no finger is moving it: decoding one while the finger
+  /// pauses mid-drag made the turn stutter.
+  void _settleSoon() {
+    _settle?.cancel();
+    _settle = Timer(const Duration(milliseconds: 140), () {
+      if (mounted && _fingers == 0 && !_settled) setState(() => _settled = true);
+    });
   }
 
   void _goTo(int step) {
@@ -291,6 +303,11 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
 
   /// Takes a pointer event from the Listener around the page's list; events outside the stage are ignored.
   void handlePointer(PointerEvent e) {
+    if (e is PointerDownEvent) _fingers++;
+    if (e is PointerUpEvent || e is PointerCancelEvent) {
+      _fingers = math.max(0, _fingers - 1);
+      if (_fingers == 0 && !_settled) _settleSoon();
+    }
     final box = _viewer.currentContext?.findRenderObject() as RenderBox?;
     if (box == null || !box.attached) return;
     final local = box.globalToLocal(e.position);
@@ -380,11 +397,16 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
     );
     // At rest: the full photo over the small copy, faded in once decoded, at the pixels the zoom needs.
     final bucket = _scale <= 1.05 ? 1 : (_scale <= 2 ? 2 : 3);
-    final full = Image.network(
-      step.cut ? m.url : m.originalUrl,
+    final provider = ResizeImage.resizeIfNeeded(
+        math.min(6000, (width * dpr * bucket).round()), null, NetworkImage(step.cut ? m.url : m.originalUrl));
+    if ((_settled || _zoomed) && _fullShown != provider) {
+      _fullShown?.evict(); // the size for another zoom level
+      _fullShown = provider;
+    }
+    final full = Image(
+      image: provider,
       key: ValueKey('showcase-full-${m.url}-$bucket'),
       fit: BoxFit.contain,
-      cacheWidth: math.min(6000, (width * dpr * bucket).round()),
       filterQuality: FilterQuality.high,
       frameBuilder: (_, child, frame, sync) =>
           sync || frame != null ? child : const SizedBox.shrink(), // until then the small copy shows through

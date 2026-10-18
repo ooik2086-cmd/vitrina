@@ -246,6 +246,26 @@ void main() {
     expect(flies(), isFalse);
   });
 
+  showcaseTest('one ordinary swipe turns the shoe once round', (tester) async {
+    await pump(tester, listing());
+    final stage = tester.getSize(find.byKey(const Key('showcase'))).height;
+    final plan = ShowcasePlan.of(Listing.fromJson(listing()));
+    final turn = plan.startOf(1) * ScrollShowcase.travelFor(stage, plan.steps.length);
+    expect(turn, moreOrLessEquals(stage * 0.6, epsilon: 1));
+  });
+
+  showcaseTest('the full photo waits until the finger is lifted', (tester) async {
+    await pump(tester, listing());
+    final finger = await tester.startGesture(tester.getCenter(find.byKey(const Key('showcase'))));
+    await finger.moveBy(const Offset(0, -40));
+    await finger.moveBy(const Offset(0, -60));
+    await tester.pump(const Duration(milliseconds: 400)); // the finger rests mid-drag
+    expect(full(tester), isEmpty);
+    await finger.up();
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(full(tester), hasLength(1));
+  });
+
   showcaseTest('the stops jump straight to the sole, with one tick when it is reached', (tester) async {
     final ticks = <MethodCall>[];
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
