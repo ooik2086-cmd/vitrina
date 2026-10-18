@@ -128,6 +128,9 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
   ({int step, int frame}) _shown = (step: 0, frame: 0);
   bool _precached = false;
   int? _jumpingTo; // a stop button was tapped: tick once on arrival, not for every stop passed
+  /// How often the stage was built; tests check that scrolling within one frame does not rebuild it.
+  @visibleForTesting
+  int builds = 0;
   static bool _hinted = false; // the short turn that shows scrolling turns the shoe, once per app run
 
   final _viewer = GlobalKey();
@@ -249,8 +252,9 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
       _settle = Timer(const Duration(milliseconds: 140), () {
         if (mounted) setState(() => _settled = true);
       });
+      setState(() {});
     }
-    setState(() {}); // the stage moves with the scroll offset
+    // Otherwise only the stage's position changes, which _PinStage repaints without rebuilding anything.
   }
 
   void _goTo(int step) {
@@ -419,12 +423,12 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
 
   @override
   Widget build(BuildContext context) {
+    builds++;
     final travel = _travel;
     final h = widget.stageHeight;
     final now = _plan.at(_progress);
     final step = _plan.steps[now.step];
     final media = step.media[now.frame];
-    final offset = widget.scroll.hasClients ? widget.scroll.offset.clamp(0.0, travel) : 0.0;
     final ownBackdrop = widget.listing.backdrop != null && step.cut;
     final onDark = ownBackdrop ? !_light : widget.listing.showcaseStyle == 'premium';
     final chipText = onDark ? Colors.white : Brand.ink;
@@ -432,12 +436,8 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
     final top = MediaQuery.paddingOf(context).top + kToolbarHeight; // the shoe stays clear of the app bar
     return SizedBox(
       height: h + travel,
-      child: Stack(children: [
-        Positioned(
-          top: offset,
-          left: 0,
-          right: 0,
-          height: h,
+      child: Flow(delegate: _PinStage(widget.scroll, h, travel), children: [
+        RepaintBoundary(
           child: DecoratedBox(
             key: const Key('showcase'),
             decoration: ownBackdrop ? _backdrop : showcaseBackground(widget.listing.showcaseStyle),
@@ -471,7 +471,14 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
                                 ..translateByDouble(_pan.dx, _pan.dy, 0, 1)
                                 ..scaleByDouble(_scale, _scale, 1, 1),
                               filterQuality: _zoomed ? FilterQuality.high : null,
-                              child: SizedBox.expand(child: _photo(media, step, box.maxWidth)),
+                              // The catalog card's photo flies into place here, as it does on the Photo tab.
+                              child: Hero(
+                                tag: 'listing-${widget.listing.id}',
+                                child: Material(
+                                  type: MaterialType.transparency,
+                                  child: SizedBox.expand(child: _photo(media, step, box.maxWidth)),
+                                ),
+                              ),
                             ),
                           ),
                         ),
@@ -586,6 +593,31 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
       ]),
     );
   }
+}
+
+/// Keeps the stage in view while its stretch of the page scrolls past. It moves the painted stage only: nothing is
+/// rebuilt or laid out again for each scroll pixel, and touches follow the stage because Flow hit-tests through
+/// the same transform.
+class _PinStage extends FlowDelegate {
+  _PinStage(this.scroll, this.height, this.travel) : super(repaint: scroll);
+  final ScrollController scroll;
+  final double height, travel;
+
+  @override
+  BoxConstraints getConstraintsForChild(int i, BoxConstraints constraints) =>
+      BoxConstraints.tightFor(width: constraints.maxWidth, height: height);
+
+  @override
+  void paintChildren(FlowPaintingContext context) {
+    final offset = scroll.hasClients ? scroll.offset.clamp(0.0, travel) : 0.0;
+    context.paintChild(0, transform: Matrix4.translationValues(0, offset, 0));
+  }
+
+  @override
+  bool shouldRepaint(_PinStage old) => old.scroll != scroll || old.height != height || old.travel != travel;
+
+  @override
+  bool shouldRelayout(_PinStage old) => old.height != height;
 }
 
 class _RoundChip extends StatelessWidget {

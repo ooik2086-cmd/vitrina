@@ -163,6 +163,28 @@ void main() {
     expect(base(tester), 'https://cdn/f0-s.webp');
   });
 
+  showcaseTest('scrolling within one frame moves the stage without rebuilding it', (tester) async {
+    await pump(tester, listing());
+    final state = tester.state<ScrollShowcaseState>(find.byType(ScrollShowcase));
+    page(tester).jumpTo(200);
+    await tester.pumpAndSettle();
+    final before = state.builds;
+    page(tester).jumpTo(204); // a few pixels: still the same frame
+    await tester.pump();
+    expect(state.builds, before);
+    expect(tester.getTopLeft(find.byKey(const Key('showcase'))).dy, 0); // still pinned
+    page(tester).jumpTo(400); // the next frames
+    await tester.pump();
+    expect(state.builds, greaterThan(before));
+  });
+
+  showcaseTest('the catalog photo flies into the turning shoe', (tester) async {
+    await pump(tester, listing());
+    expect(
+        find.descendant(of: find.byType(Hero), matching: find.byKey(const ValueKey('showcase-base'))), findsOneWidget);
+    expect(tester.widget<Hero>(find.byType(Hero)).tag, 'listing-7');
+  });
+
   showcaseTest('the stops jump straight to the sole, with one tick when it is reached', (tester) async {
     final ticks = <MethodCall>[];
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
