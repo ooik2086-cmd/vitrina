@@ -26,10 +26,10 @@ RUN if [ -n "$SEARCH_MODEL" ]; then \
       && echo "$SEARCH_SHA256  models/$SEARCH_MODEL.onnx" | sha256sum -c -; fi
 ENV VITRINA_SEARCH_MODEL=/app/models/${SEARCH_MODEL}.onnx
 
-# Run as an unprivileged user; uploaded photos live in a mounted volume.
-RUN useradd --create-home vitrina && mkdir -p /data/media && chown -R vitrina /data
+# Run as an unprivileged user; uploaded photos, and receipts and dispute evidence (private), live in mounted volumes.
+RUN useradd --create-home vitrina && mkdir -p /data/media /data/private && chown -R vitrina /data
 USER vitrina
-ENV VITRINA_MEDIA_DIR=/data/media VITRINA_AUTO_CREATE_SCHEMA=0
+ENV VITRINA_MEDIA_DIR=/data/media VITRINA_PRIVATE_MEDIA_DIR=/data/private VITRINA_AUTO_CREATE_SCHEMA=0
 # Client addresses (used for rate limits) are read from X-Forwarded-For only when the request comes from these
 # proxies. Set it to the load balancer's address range; with the default, every user would share one limit.
 ENV FORWARDED_ALLOW_IPS=127.0.0.1

@@ -25,8 +25,9 @@ services:
       VITRINA_CORS_ORIGINS: http://localhost:5000
       VITRINA_JOBS_INTERVAL: "300"   # expire unpaid orders, refund ignored ones, auto-complete, review reminders
     ports: ["8000:8000"]
-    volumes: [media:/data/media]
+    volumes: [media:/data/media, private:/data/private]
 
 volumes:
   pgdata:
   media:
+  private:
