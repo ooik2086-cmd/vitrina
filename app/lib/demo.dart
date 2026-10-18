@@ -77,6 +77,10 @@ class DemoClient extends http.BaseClient {
         }
       );
     }
+    if (RegExp(r'^/listings/\d+$').hasMatch(path) && _answers['GET $path'] is Map) {
+      final one = _answers['GET $path'] as Map<String, dynamic>;
+      return (200, {...one, 'colors': _colors(one)});
+    }
     final keys = [
       'GET $path${query.isEmpty ? '' : '?${_sorted(query)}'}',
       'GET $path',
@@ -119,6 +123,47 @@ class DemoClient extends http.BaseClient {
         for (final l in (_answers['GET /listings'] as Map)['items'] as List)
           (_answers['GET /listings/${(l as Map)['id']}'] as Map<String, dynamic>?) ?? l as Map<String, dynamic>,
       ];
+
+  /// The server's colour choice (listing_routes.colorways), worked out from the recorded listings.
+  List<Map<String, dynamic>> _colors(Map<String, dynamic> l) {
+    String same(Object? t) => '${t ?? ''}'.trim().split(RegExp(r'\s+')).join(' ').toLowerCase();
+    final model = same(l['model_name']);
+    if (model.isEmpty) return const [];
+    final best = <String, Map<String, dynamic>>{};
+    bool inStock(Map o) => (o['sizes'] as List).any((s) => (s as Map)['available'] == true);
+    for (final o in _all) {
+      final color = same(o['color']);
+      if (o['id'] == l['id'] ||
+          same(o['model_name']) != model ||
+          same(o['brand']) != same(l['brand']) ||
+          (o['seller'] as Map)['id'] != (l['seller'] as Map)['id'] ||
+          color.isEmpty ||
+          color == same(l['color'])) {
+        continue;
+      }
+      final was = best[color];
+      int rank(Map o) => (inStock(o) ? 0 : 1 << 40) + (o['price_tiyn'] as int);
+      if (was == null || rank(o) < rank(was)) best[color] = o;
+    }
+    if (best.isEmpty) return const [];
+    Map<String, dynamic> out(Map<String, dynamic> o) {
+      final media = (o['media'] as List).cast<Map>();
+      final photos = media.where((m) => m['angle'] != 'frame').toList();
+      final cover = (photos.isNotEmpty ? photos : media).firstOrNull;
+      return {
+        'id': o['id'],
+        'color': o['color'],
+        'price_tiyn': o['price_tiyn'],
+        'current': o['id'] == l['id'],
+        'in_stock': inStock(o),
+        'thumb_url': cover == null ? null : cover['thumb_url'] ?? cover['processed_url'] ?? cover['original_url'],
+        'cutout': cover?['processed_url'] != null,
+      };
+    }
+
+    final others = best.values.toList()..sort((a, b) => same(a['color']).compareTo(same(b['color'])));
+    return [out(l), for (final o in others.take(11)) out(o)];
+  }
 
   /// The server's catalog filters, applied to the recorded listings.
   List<Map<String, dynamic>> _catalog(Map<String, String> q) {

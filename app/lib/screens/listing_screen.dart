@@ -8,6 +8,7 @@ import '../api.dart';
 import '../labels.dart';
 import '../session.dart';
 import '../theme.dart';
+import '../widgets/color_choice.dart';
 import '../widgets/common.dart';
 import '../widgets/delivery_eta.dart';
 import '../widgets/delivery_sheet.dart';
@@ -448,6 +449,8 @@ class _ListingScreenState extends State<ListingScreen> {
                       padding: contentPadding(context, const EdgeInsets.fromLTRB(20, 20, 20, 24)),
                       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                         Text(l.title, style: theme.textTheme.headlineSmall),
+                        const SizedBox(height: 6),
+                        ColorChoice(listing: l),
                         const SizedBox(height: 6),
                         PriceLine(listing: l, style: weight(theme.textTheme.headlineSmall!, 800)),
                         if (l.wasPriceTiyn != null)

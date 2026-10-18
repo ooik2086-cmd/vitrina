@@ -442,6 +442,7 @@ class Listing {
         stockAlerts = {for (final id in (j['stock_alerts'] as List?) ?? const []) id as int},
         soldRecently = ((j['popularity'] as Map?)?['sold_30d'] as int?) ?? 0,
         savedBy = ((j['popularity'] as Map?)?['favorites'] as int?) ?? 0,
+        colors = [for (final c in (j['colors'] as List?) ?? const []) Colorway.fromJson(c as Map<String, dynamic>)],
         modelName = j['model_name'] as String?,
         everOnSale = (j['ever_on_sale'] as bool?) ?? false,
         photosVersion = j['photos_version'] as String?;
@@ -487,6 +488,10 @@ class Listing {
 
   /// Sold-out sizes the signed-in buyer asked to hear about when they are back.
   final Set<int> stockAlerts;
+
+  /// The same model from the same shop in each colour, this one first; only on the product page, and empty when
+  /// there is no other colour.
+  final List<Colorway> colors;
 
   /// Pairs bought in the last 30 days and people who saved it; 0 when the server says nothing worth showing.
   final int soldRecently;
@@ -782,6 +787,25 @@ class Conversation {
 
   /// The seller's last holiday day while it lasts.
   final DateTime? sellerAwayUntil;
+}
+
+/// One colour of a model in a shop: the listing to open for it and a small photo to pick it by.
+class Colorway {
+  Colorway.fromJson(Map<String, dynamic> j)
+      : id = j['id'] as int,
+        color = j['color'] as String,
+        priceTiyn = j['price_tiyn'] as int,
+        current = j['current'] as bool,
+        inStock = j['in_stock'] as bool,
+        thumbUrl = j['thumb_url'] as String?,
+        cutout = j['cutout'] as bool;
+  final int id;
+  final String color;
+  final int priceTiyn;
+  final bool current;
+  final bool inStock;
+  final String? thumbUrl;
+  final bool cutout;
 }
 
 /// How buyers said a model's size felt, from their reviews.

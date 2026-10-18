@@ -669,7 +669,8 @@ const en = <String, String>{
   'Модель атауын жазыңыз: нақты модельді іздейтіндер табады.': 'Add the model name so people searching for it find it.',
   'Сипаттамаға 2–3 сөйлем жазыңыз: материалы, қалай отырады, неге сатылады.':
       'Write 2–3 sentences: the material, how it fits, why you are selling.',
-  'Табанын, үстінен, жақыннан (тігіс, логотип) және өлшем жапсырмасын түсіріңіз: тозуы, сапасы мен өлшемі көрінеді.': 'Photograph the sole, the top, a close-up (stitching, logo) and the size label: wear, quality and size show.',
+  'Табанын, үстінен, жақыннан (тігіс, логотип) және өлшем жапсырмасын түсіріңіз: тозуы, сапасы мен өлшемі көрінеді.':
+      'Photograph the sole, the top, a close-up (stitching, logo) and the size label: wear, quality and size show.',
   'Тауар бетінің толықтығы': 'Listing completeness',
   'Толықтыруға болады': 'Could be fuller',
   'Түпнұсқалығын дәлелдеңіз: чек, қорап жапсырмасы не бирка фотосы.':
@@ -947,4 +948,5 @@ const en = <String, String>{
   '360° айналымнан кейін сатып алушы үстін, табанын және жақын көріністі көреді. Бір-бір фото қосыңыз:':
       'After the 360° turn buyers see the top, the sole and a close-up. Add one photo of each:',
   'Жақыннан (тігіс, логотип)': 'Close-up (stitching, logo)',
+  '{0}, өлшемдері таусылған': '{0}, sold out',
 };

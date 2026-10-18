@@ -16,7 +16,7 @@ os.environ.setdefault("VITRINA_LOG_LEVEL", "WARNING")  # keep test output to wha
 from vitrina_api import promo
 from vitrina_api.app import create_app
 from vitrina_api.config import Settings
-from vitrina_api.models import Base, Conversation, Listing, Message, Offer, SavedSearch, User
+from vitrina_api.models import Base, Conversation, Listing, ListingSize, Message, Offer, SavedSearch, User
 from vitrina_api import jobs
 from vitrina_api.services import (balance, run_auto_complete, run_expire_orders, run_review_reminders,
                                    run_stale_listing_tips)
@@ -419,6 +419,43 @@ class PopularityTests(ApiTestCase):
             token = self.buyer if i == 0 else self.login(f"+7701000010{i}")
             self.post(f"/favorites/{listing['id']}", token)
         self.assertEqual(self.c.get(url).json()["popularity"], {"sold_30d": 1, "favorites": 3})
+
+
+class ColorwayTests(ApiTestCase):
+    def colors(self, listing_id):
+        return self.c.get(f"/api/v1/listings/{listing_id}").json()["colors"]
+
+    def test_same_model_in_other_colours_from_the_same_shop(self):
+        sand = self.publish()
+        self.assertEqual(self.colors(sand["id"]), [])  # one colour: nothing to choose
+        black = self.publish(color="Қара", model_name="runner  01", brand="найк", price_tiyn=4_000_000)
+        dear_black = self.publish(color="қара", price_tiyn=4_900_000)
+        sold_out = self.publish(color="көк", price_tiyn=3_000_000)
+        with self.db() as db:
+            db.query(ListingSize).filter_by(listing_id=sold_out["id"]).update({"quantity": 0})
+            db.commit()
+        self.publish(color="ақ", model_name="Runner 02")  # another model
+        self.publish(color="ақ", brand="Адидас")  # another brand
+        other_shop = self.login("+77010000003")
+        self.post("/me/seller", other_shop, {"shop_name": "Басқа", "city": "Алматы"})
+        r = self.post("/listings", other_shop, {**LISTING, "color": "қызыл"})
+        self.post(f"/listings/{r.json()['id']}/publish", other_shop)
+        paused = self.publish(color="жасыл")
+        self.post(f"/listings/{paused['id']}/pause", self.seller)
+
+        got = self.colors(sand["id"])
+        self.assertEqual([(c["id"], c["current"]) for c in got],
+                         [(sand["id"], True), (sold_out["id"], False), (black["id"], False)])  # own first, then by name
+        self.assertFalse(got[1]["in_stock"])
+        self.assertTrue(got[0]["thumb_url"])
+        # From the black one, its own colour is itself, not the dearer black pair.
+        self.assertEqual([c["id"] for c in self.colors(black["id"])], [black["id"], sold_out["id"], sand["id"]])
+        self.assertNotIn(dear_black["id"], [c["id"] for c in got])
+
+    def test_no_model_name_no_colours(self):
+        a = self.publish(model_name=None)
+        self.publish(model_name=None, color="қара")
+        self.assertEqual(self.colors(a["id"]), [])
 
 
 class DidYouMeanTests(ApiTestCase):

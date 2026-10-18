@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -10,6 +11,7 @@ import 'package:http/testing.dart';
 import 'package:vitrina/api.dart';
 import 'package:vitrina/screens/listing_screen.dart';
 import 'package:vitrina/session.dart';
+import 'package:vitrina/widgets/color_choice.dart';
 import 'package:vitrina/widgets/common.dart';
 import 'package:vitrina/widgets/scroll_showcase.dart';
 import 'package:vitrina/widgets/spin_viewer.dart';
@@ -635,6 +637,42 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(ContactShadow), findsNothing); // the sole stands on nothing
     expect(showcaseBackground('clean').gradient, studioGradient);
+  });
+
+  Map<String, dynamic> colorway(int id, String color, {bool current = false, bool inStock = true}) => {
+        'id': id,
+        'color': color,
+        'price_tiyn': 4500000,
+        'current': current,
+        'in_stock': inStock,
+        'thumb_url': 'https://cdn/c$id-s.webp',
+        'cutout': true,
+      };
+
+  showcaseTest('the other colours sit beside the turning shoe, and one tap opens that colour in place', (tester) async {
+    await pump(tester, {
+      ...listing(),
+      'colors': [colorway(7, 'қара', current: true), colorway(8, 'көк'), colorway(9, 'ақ', inStock: false)],
+    });
+    final stage = find.byKey(const Key('showcase'));
+    expect(find.descendant(of: stage, matching: find.byType(ColorSwatches)), findsOneWidget);
+    expect(find.descendant(of: stage, matching: find.text('қара')), findsNothing); // no words beside the shoe
+    expect(tester.getSemantics(find.byKey(const Key('color-9'))).label, 'ақ, өлшемдері таусылған');
+    expect(tester.getSemantics(find.byKey(const Key('color-7'))).flagsCollection.isSelected, ui.Tristate.isTrue);
+    await tester.tap(find.descendant(of: stage, matching: find.byKey(const Key('color-8'))));
+    await tester.pumpAndSettle();
+    expect(tester.widget<ListingScreen>(find.byType(ListingScreen)).listingId, 8);
+    expect(find.byType(ListingScreen), findsOneWidget); // in place of the black one, so back leads out
+  });
+
+  showcaseTest('the colour is named under the title, with no swatches when there is only one', (tester) async {
+    await pump(tester, listing());
+    expect(find.byType(ColorSwatches), findsNothing);
+    await tester.tap(find.byKey(const Key('showcase-details')));
+    await tester.pumpAndSettle();
+    expect(find.byType(ColorSwatches), findsNothing);
+    final name = tester.widget<Text>(find.byKey(const Key('color-name')));
+    expect(name.textSpan!.toPlainText(), 'Түсі: қара');
   });
 
   showcaseTest('photos as taken have their own floor and get no shadow', (tester) async {

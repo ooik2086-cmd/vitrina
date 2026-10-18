@@ -574,7 +574,50 @@ def get_listing(listing_id: int, user: User | None = Depends(optional_user), db:
     alerts = [] if user is None else list(db.scalars(select(StockAlert.size_id).where(
         StockAlert.user_id == user.id, StockAlert.listing_id == listing.id)).all())
     return {**listing_out(db, listing, owner=owner), "size_fit": size_fit(db, listing), "stock_alerts": alerts,
-            "popularity": popularity(db, listing)}
+            "popularity": popularity(db, listing), "colors": colorways(db, listing)}
+
+
+MAX_COLORWAYS = 12
+
+
+def _same(text: str | None) -> str:
+    return " ".join((text or "").split()).casefold()
+
+
+def colorways(db: Session, listing: Listing) -> list[dict]:
+    """The same model from the same shop in other colours, so a buyer can switch colour beside the shoe. One entry
+    per colour, this listing first: for another colour the cheapest published listing with a size in stock, or the
+    cheapest if none has. Empty without a model name or without another colour.
+
+    Brand and model are compared ignoring case and spacing here, not in SQL: SQLite's lower() leaves Cyrillic alone."""
+    model = _same(listing.model_name)
+    if not model:
+        return []
+    brand, own = _same(listing.brand), _same(listing.color)
+    best: dict[str, tuple[tuple, Listing]] = {}
+    for other in db.scalars(select(Listing).where(
+            Listing.seller_id == listing.seller_id, Listing.status == "published", Listing.id != listing.id,
+            Listing.model_name.is_not(None))):
+        color = _same(other.color)
+        if _same(other.model_name) != model or _same(other.brand) != brand or not color or color == own:
+            continue
+        rank = (not any(s.quantity > 0 for s in other.sizes), other.price_tiyn, other.id)
+        if color not in best or rank < best[color][0]:
+            best[color] = (rank, other)
+    if not best:
+        return []
+    others = sorted((pick for _, pick in best.values()), key=lambda l: _same(l.color))[:MAX_COLORWAYS - 1]
+    return [colorway_out(c, current=c.id == listing.id) for c in [listing, *others]]
+
+
+def colorway_out(listing: Listing, *, current: bool) -> dict:
+    photos = [m for m in listing.media if m.angle != "frame"] or listing.media
+    cover = photos[0] if photos else None
+    return {"id": listing.id, "color": listing.color, "price_tiyn": listing.price_tiyn, "current": current,
+            "in_stock": any(s.quantity > 0 for s in listing.sizes),
+            # The small copy is made from the cut-out when there is one.
+            "thumb_url": cover and (cover.thumb_url or cover.processed_url or cover.original_url),
+            "cutout": bool(cover and cover.processed_url)}
 
 
 POPULAR_DAYS = 30

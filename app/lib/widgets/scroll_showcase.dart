@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import '../api.dart';
 import '../i18n.dart';
 import 'spin_viewer.dart' show showcaseBackground;
+import 'color_choice.dart';
 import 'studio.dart';
 
 /// The colours of the stage, taken from the approved Scroll 3D demo page: a light studio for dark shoes and a dark
@@ -788,10 +789,19 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
                   ),
                 ),
               ),
-              // Zoom reset, backdrop switch, the photos as taken and the details, on the right above the stops.
+              // The model's other colours on the left (no words beside the shoe, as for the stops); zoom reset, backdrop
+              // switch, the photos as taken and the details on the right, above the stops.
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 8),
-                child: Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+                child: Row(children: [
+                  Expanded(
+                    child: widget.listing.colors.length > 1
+                        ? Align(
+                            alignment: Alignment.centerLeft,
+                            child: ColorSwatches(listing: widget.listing, onDark: onDark),
+                          )
+                        : const SizedBox.shrink(),
+                  ),
                   if (_zoomed)
                     _RoundChip(
                       key: const Key('showcase-reset-zoom'),
