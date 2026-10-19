@@ -392,6 +392,33 @@ class CutoutApiTests(MediaTests):
         self.assertEqual(self.mine(r.json()["id"])["cover_frame"], frames[3]["url"])
         self.assertEqual(self.mine(r.json()["id"])["angle_frames"]["front"], frames[3]["url"])
 
+    def test_the_backfill_carries_on_past_a_listing_that_fails_and_says_so(self):
+        from scripts import cutout_backfill
+        shades = [(20 + 25 * i,) * 3 for i in range(8)]
+        ids = [self.post("/listings", self.seller, {**LISTING, "photos": self.four(shades[3]) + self.frames(shades)}
+                         ).json()["id"] for _ in range(2)]
+        from vitrina_api.models import Listing
+        with self.app.state.sessions() as db:
+            for lid in ids:
+                db.get(Listing, lid).cover_frame = None
+            db.commit()
+        real = cutout_backfill.Settings, cutout_backfill.make_storage, cutout_backfill.thumb_listing
+
+        def thumbs(state, lid):
+            if lid == ids[0]:
+                raise RuntimeError("storage went away")
+            return real[2](state, lid)
+        cutout_backfill.Settings, cutout_backfill.make_storage = (lambda: self.cfg), (lambda cfg: self.app.state.storage)
+        cutout_backfill.thumb_listing = thumbs
+        try:
+            with self.assertLogs(level="ERROR"), self.assertRaises(SystemExit) as stop:
+                cutout_backfill.main()
+        finally:
+            cutout_backfill.Settings, cutout_backfill.make_storage, cutout_backfill.thumb_listing = real
+        self.assertEqual(stop.exception.code, 1)
+        self.assertIsNone(self.mine(ids[0])["cover_frame"])
+        self.assertIsNotNone(self.mine(ids[1])["cover_frame"])  # the next listing was still done
+
     def test_images_with_too_many_pixels_are_refused_before_decoding(self):
         out = io.BytesIO()
         Image.new("1", (8000, 7000)).save(out, "PNG")  # 56 MP, a few KB on the wire

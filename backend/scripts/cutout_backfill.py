@@ -4,10 +4,12 @@ the 360° frame that matches the cover and search-by-photo vectors.
     VITRINA_CUTOUT_MODEL=models/isnet-general-use.onnx VITRINA_SEARCH_MODEL=models/mobilenetv2-12.onnx \
         python3 scripts/cutout_backfill.py
 
-Uses the same database and storage settings as the API. Safe to run again: done photos are skipped.
+Uses the same database and storage settings as the API. Safe to run again: done photos are skipped. A listing
+that fails is reported and skipped, the rest carry on; the script then exits with 1, so a deploy step sees it.
 """
 from __future__ import annotations
 
+import logging
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -38,11 +40,21 @@ def main() -> None:
                                                | Listing.angle_frames.is_(None) & Listing.id.in_(sided))
         ids = db.scalars(select(Listing.id).where(Listing.id.in_(uncut) | Listing.id.not_in(current) | unmatched)
                          .order_by(Listing.id)).all()
+    failed = []
     for lid in ids:
-        cut = cutout_listing(state, lid)
-        thumbs = thumb_listing(state, lid)
-        print(f"listing {lid}: {cut} photos cut out, {thumbs} small copies, search vector {'ok' if embed_listing(state, lid) else 'skipped'}",
+        try:
+            cut = cutout_listing(state, lid)
+            thumbs = thumb_listing(state, lid)
+            embedded = embed_listing(state, lid)
+        except Exception:
+            logging.exception("listing %s failed", lid)
+            failed.append(lid)
+            continue
+        print(f"listing {lid}: {cut} photos cut out, {thumbs} small copies, search vector {'ok' if embedded else 'skipped'}",
               flush=True)
+    print(f"{len(ids) - len(failed)} of {len(ids)} listings done" + (f", failed: {failed}" if failed else ""), flush=True)
+    if failed:
+        sys.exit(1)
 
 
 if __name__ == "__main__":
