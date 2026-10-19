@@ -111,7 +111,7 @@ ThemeData buildTheme(Brightness brightness) {
   ).copyWith(
     primary: dark ? Colors.white : Brand.ink,
     onPrimary: dark ? Brand.ink : Colors.white,
-    secondary: Brand.accent,
+    secondary: Brand.accentStrong, // white reads 5.6:1 on it; the bright accent only gives 3.1
     onSecondary: Colors.white,
     surface: dark ? const Color(0xFF151518) : Colors.white,
     surfaceContainerLowest: dark ? Brand.canvasDark : Brand.canvasLight,

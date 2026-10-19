@@ -19,7 +19,7 @@ class ShowcaseScene {
   final Color ink, panel, line, fg, muted, glow, halo;
 
   static const light = ShowcaseScene._(Color(0xFFE8E6EE), Color(0xFFF7F6FA), Color(0xFFD3D0DE), Color(0xFF17161D),
-      Color(0xFF66637A), Color(0xFF6D5BD0), Color(0xF2FFFFFF));
+      Color(0xFF5E5B72), Color(0xFF6D5BD0), Color(0xF2FFFFFF)); // muted: 4.5:1 on the photo's light backdrop too
   static const dark = ShowcaseScene._(Color(0xFF0E0E14), Color(0xFF17161F), Color(0xFF2A2836), Color(0xFFECEBF3),
       Color(0xFF9A97AB), Color(0xFFB9A8FF), Color(0x4D9684E6));
 }

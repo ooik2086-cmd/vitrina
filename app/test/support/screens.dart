@@ -17,7 +17,12 @@ import 'package:vitrina/demo.dart';
 import 'package:vitrina/i18n.dart';
 import 'package:vitrina/session.dart';
 import 'package:vitrina/theme.dart';
+import 'package:vitrina/main.dart';
 import 'package:vitrina/screens/analytics_screen.dart';
+import 'package:vitrina/screens/compare_screen.dart';
+import 'package:vitrina/screens/seller_reviews_screen.dart';
+import 'package:vitrina/widgets/questions.dart';
+import 'package:vitrina/widgets/shop_sale.dart';
 import 'package:vitrina/screens/catalog_screen.dart';
 import 'package:vitrina/screens/chat_screen.dart';
 import 'package:vitrina/screens/earnings_screen.dart';
@@ -45,8 +50,18 @@ import 'package:vitrina/screens/shop_screen.dart';
 Future<void> loadFonts(WidgetTester tester) =>
     tester.runAsync(() => (FontLoader('Inter')..addFont(rootBundle.load('assets/fonts/Inter.ttf'))).load());
 
-final listing1 = Listing.fromJson(
-    (jsonDecode(File('demo/api.json').readAsStringSync()) as Map)['GET /listings/1'] as Map<String, dynamic>);
+final _demo = jsonDecode(File('demo/api.json').readAsStringSync()) as Map;
+final listing1 = Listing.fromJson(_demo['GET /listings/1'] as Map<String, dynamic>);
+final listing4 = Listing.fromJson(_demo['GET /listings/4'] as Map<String, dynamic>);
+
+/// The demo has no answered question, so the seller's answer is shown here as it would be.
+Question _question(String? answer) => Question.fromJson({
+      'id': answer == null ? 2 : 1,
+      'text': 'Өлшемі кіші ме, үлкен бе?',
+      'answer': answer,
+      'asked_at': '2026-10-10T10:00:00Z',
+      'mine': false,
+    });
 
 /// Every main screen, by name.
 final screens = <String, Widget Function()>{
@@ -76,6 +91,14 @@ final screens = <String, Widget Function()>{
   'shop1': () => const ShopScreen(sellerId: 1),
   'login': () => const LoginScreen(),
   'onboarding': () => const OnboardingScreen(),
+  'home': () => const HomeShell(),
+  'compare': () => CompareScreen(items: [listing1, listing4]),
+  'seller-reviews': () => const SellerReviewsScreen(sellerId: 1, shopName: 'Qadam Store'),
+  'questions': () => Scaffold(
+          body: ListView(padding: const EdgeInsets.all(16), children: [
+        QuestionTile(question: _question('Өлшеміне сай, әдеттегі өлшеміңізді алыңыз.')),
+        QuestionTile(question: _question(null)),
+      ])),
 };
 
 /// The sheets that slide up over a screen, by name.
@@ -85,6 +108,7 @@ final sheets = <String, Widget Function()>{
   'filters': () => const FilterSheet(initial: CatalogFilter()),
   'size guide': () => const SizeGuideSheet(),
   'report': () => const ReportSheet(listingId: 1),
+  'shop sale': () => ShopSaleSheet(listings: [listing1, listing4]),
 };
 
 /// Opens [screen] on the demo data in [lang] at [size] with text [scale], goes through all of it, and returns the
@@ -167,6 +191,7 @@ Future<List<String>> visit(WidgetTester tester, String lang, Size size, double s
     for (var i = 0; i < 20 && main.mounted && main.position.pixels < main.position.maxScrollExtent; i++) {
       await tester.dragFrom(tester.getCenter(find.byWidget(main.widget)), Offset(0, up ? 300 : -300));
       await tester.pump(const Duration(milliseconds: 200));
+      await look?.call(tester, errors); // each screenful, not only the first and the last
     }
     if (main.position.pixels <= 0) errors.add('the page did not scroll');
   }
@@ -189,5 +214,5 @@ Future<List<String>> visit(WidgetTester tester, String lang, Size size, double s
   for (var i = 0; i < 3; i++) {
     await tester.pump(const Duration(seconds: 2));
   }
-  return errors;
+  return errors.toSet().toList(); // one finding seen at several stops is one
 }

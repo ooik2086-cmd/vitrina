@@ -131,27 +131,32 @@ class _SellerReviewsScreenState extends State<SellerReviewsScreen> {
                       const SizedBox(height: 10),
                       Wrap(spacing: 8, children: [
                         for (final url in r.photos)
-                          GestureDetector(
-                            onTap: () => showDialog<void>(
-                              context: context,
-                              builder: (_) => Dialog(
-                                insetPadding: const EdgeInsets.all(12),
-                                clipBehavior: Clip.antiAlias,
-                                child: InteractiveViewer(
-                                    child: Image.network(url,
-                                        fit: BoxFit.contain,
-                                        errorBuilder: (_, __, ___) => const SizedBox(
-                                            height: 200, child: Center(child: Icon(Icons.broken_image_outlined))))),
+                          Semantics(
+                            button: true,
+                            label: tr('Фотоны ашу'),
+                            child: GestureDetector(
+                              onTap: () => showDialog<void>(
+                                context: context,
+                                builder: (_) => Dialog(
+                                  insetPadding: const EdgeInsets.all(12),
+                                  clipBehavior: Clip.antiAlias,
+                                  child: InteractiveViewer(
+                                      child: Image.network(url,
+                                          fit: BoxFit.contain,
+                                          errorBuilder: (_, __, ___) => const SizedBox(
+                                              height: 200, child: Center(child: Icon(Icons.broken_image_outlined))))),
+                                ),
                               ),
-                            ),
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(12),
-                              child: Image.network(url,
-                                  key: Key('review-photo-$url'),
-                                  width: 84,
-                                  height: 84,
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (_, __, ___) => Container(width: 84, height: 84, color: Brand.studio)),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(12),
+                                child: Image.network(url,
+                                    key: Key('review-photo-$url'),
+                                    width: 84,
+                                    height: 84,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, __, ___) =>
+                                        Container(width: 84, height: 84, color: Brand.studio)),
+                              ),
                             ),
                           ),
                       ]),

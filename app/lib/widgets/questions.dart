@@ -138,7 +138,8 @@ class QuestionTile extends StatelessWidget {
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(tr('Сатушы'), style: theme.textTheme.labelSmall?.copyWith(color: accentText(context))),
+                  // The plain ink: on this grey even the deeper accent reads under 4.5:1 at this size.
+                  Text(tr('Сатушы'), style: weight(theme.textTheme.labelSmall!, 750)),
                   const SizedBox(height: 2),
                   Text(q.answer!, style: theme.textTheme.bodyMedium),
                 ]),

@@ -118,30 +118,36 @@ class _Pick extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cover = listing.coverUrl;
-    return GestureDetector(
-      key: Key('compare-pick-${listing.id}'),
-      onTap: onTap,
-      child: Container(
-        width: 76,
-        clipBehavior: Clip.antiAlias,
-        decoration: BoxDecoration(
-          gradient: studioGradient,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: picked ? Theme.of(context).colorScheme.primary : Colors.transparent, width: 2),
-        ),
-        child: Stack(fit: StackFit.expand, children: [
-          if (cover != null) Image.network(cover, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const SizedBox()),
-          if (picked)
-            Positioned(
-              right: 4,
-              top: 4,
-              child: CircleAvatar(
-                radius: 10,
-                backgroundColor: Theme.of(context).colorScheme.primary,
-                child: Icon(Icons.check_rounded, size: 14, color: Theme.of(context).colorScheme.onPrimary),
+    // A picture only, so a screen reader is told which shoe it is and whether it is in the comparison.
+    return Semantics(
+      button: true,
+      selected: picked,
+      label: listing.title,
+      child: GestureDetector(
+        key: Key('compare-pick-${listing.id}'),
+        onTap: onTap,
+        child: Container(
+          width: 76,
+          clipBehavior: Clip.antiAlias,
+          decoration: BoxDecoration(
+            gradient: studioGradient,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: picked ? Theme.of(context).colorScheme.primary : Colors.transparent, width: 2),
+          ),
+          child: Stack(fit: StackFit.expand, children: [
+            if (cover != null) Image.network(cover, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const SizedBox()),
+            if (picked)
+              Positioned(
+                right: 4,
+                top: 4,
+                child: CircleAvatar(
+                  radius: 10,
+                  backgroundColor: Theme.of(context).colorScheme.primary,
+                  child: Icon(Icons.check_rounded, size: 14, color: Theme.of(context).colorScheme.onPrimary),
+                ),
               ),
-            ),
-        ]),
+          ]),
+        ),
       ),
     );
   }

@@ -59,7 +59,8 @@ class _ShopSaleSheetState extends State<ShopSaleSheet> {
     final onSale = widget.listings.where((l) => l.wasPriceTiyn != null).length;
     final sample = live.isEmpty ? null : live.first;
     return SafeArea(
-      child: Padding(
+      // Scrolls when large text makes it taller than the sheet may be, so the buttons stay in reach.
+      child: SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Text(tr('Дүкен жеңілдігі'), style: weight(theme.textTheme.titleLarge!, 750)),

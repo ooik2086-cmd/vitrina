@@ -67,12 +67,12 @@ Future<void> textContrast(WidgetTester tester, List<String> errors) async {
   }
 
   final screen = Offset.zero & Size(width.toDouble(), height.toDouble());
-  for (final element in find.byType(RichText).hitTestable().evaluate()) {
+  for (final element in find.byType(RichText).evaluate()) {
     final paragraph = element.renderObject! as RenderParagraph;
     if (!paragraph.hasSize || paragraph.size.isEmpty || _disabled(paragraph)) continue;
     final box =
         MatrixUtils.transformRect(paragraph.getTransformTo(null), Offset.zero & paragraph.size).intersect(screen);
-    if (box.width < 4 || box.height < 4) continue;
+    if (box.width < 4 || box.height < 4 || !_onTop(tester, paragraph, box.center)) continue;
     // Each run of text with its colour and size.
     final runs = <(Color, double, bool, String)>[];
     void walk(InlineSpan span, TextStyle inherited) {
@@ -92,17 +92,32 @@ Future<void> textContrast(WidgetTester tester, List<String> errors) async {
 
     walk(paragraph.text, const TextStyle());
     if (runs.isEmpty) continue;
-    final counts = <int, int>{};
+    // Pixels by shade, so the paper's fine grain counts as one colour; each shade keeps its pixels' average.
+    final counts = <int, List<int>>{}, all = <int, List<int>>{};
+    void count(Map<int, List<int>> m, Color c) {
+      final r = (c.r * 255).round(), g = (c.g * 255).round(), b = (c.b * 255).round();
+      final sums = m.putIfAbsent((r >> 3) << 10 | (g >> 3) << 5 | b >> 3, () => [0, 0, 0, 0]);
+      sums[0]++;
+      sums[1] += r;
+      sums[2] += g;
+      sums[3] += b;
+    }
+
     for (var y = box.top.ceil(); y < box.bottom.floor(); y++) {
       for (var x = box.left.ceil(); x < box.right.floor(); x++) {
         final c = at(x, y);
+        count(all, c);
         // Not the text itself, nor the soft edge of a letter.
         if (runs.any((r) => _close(Color.alphaBlend(r.$1, c), c) || _close(c, r.$1))) continue;
-        counts.update(c.toARGB32(), (n) => n + 1, ifAbsent: () => 1);
+        count(counts, c);
       }
     }
-    if (counts.isEmpty) continue;
-    final behind = Color(counts.entries.reduce((a, b) => a.value >= b.value ? a : b).key);
+    List<int> most(Map<int, List<int>> m) => m.values.reduce((a, b) => a[0] >= b[0] ? a : b);
+    // What is behind fills much of a text's box. When hardly anything is left once the text's own colour is taken
+    // out, the background is about the text's colour, and the text hardly shows.
+    final pixels = all.values.fold(0, (n, s) => n + s[0]);
+    final shade = counts.isNotEmpty && most(counts)[0] * 10 >= pixels ? most(counts) : most(all);
+    final behind = Color.fromARGB(255, shade[1] ~/ shade[0], shade[2] ~/ shade[0], shade[3] ~/ shade[0]);
     for (final (color, size, large, text) in runs) {
       final ratio = _ratio(Color.alphaBlend(color, behind), behind);
       final need = large ? 3.0 : 4.5;
@@ -112,6 +127,18 @@ Future<void> textContrast(WidgetTester tester, List<String> errors) async {
       }
     }
   }
+}
+
+/// Whether [paragraph] is what a person sees at [point], not text under a sheet or a dimmed backdrop. Text a finger
+/// passes through (a badge on a photo) counts when the hit lands in the box it is drawn on.
+bool _onTop(WidgetTester tester, RenderObject paragraph, Offset point) {
+  RenderObject target = paragraph;
+  for (RenderObject? o = paragraph; o != null; o = o.parent) {
+    if ((o is RenderIgnorePointer && o.ignoring) || (o is RenderAbsorbPointer && o.absorbing)) target = o.parent!;
+  }
+  final result = HitTestResult();
+  tester.binding.hitTestInView(result, point, tester.view.viewId);
+  return result.path.any((entry) => entry.target == target);
 }
 
 bool _close(Color a, Color b) =>
