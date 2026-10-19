@@ -117,7 +117,7 @@ class ShowcasePlan {
       for (final (kind, angle) in const [('top', 'top'), ('sole', 'sole'), ('close', 'detail')])
         if (first(angle) case final m?) (kind: kind, photo: m),
     ];
-    final at = [for (final s in stops) frames.indexWhere((f) => f.url == s.photo.url)];
+    final at = [for (final s in stops) frames.indexWhere((f) => f.originalUrl == s.photo.originalUrl)];
     var scan = stops.isNotEmpty && at.first > 0;
     for (var i = 1; i < at.length && scan; i++) {
       scan = at[i] > at[i - 1];
@@ -151,7 +151,7 @@ class ShowcasePlan {
   late final int turn = () {
     final f = steps.first.media;
     for (var k = 1; k < f.length; k++) {
-      if (f[k].url == f.first.url) return k;
+      if (f[k].originalUrl == f.first.originalUrl) return k;
     }
     return f.length;
   }();

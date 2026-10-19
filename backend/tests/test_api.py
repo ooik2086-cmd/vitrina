@@ -2311,6 +2311,53 @@ class AuditFixTests(ApiTestCase):
         self.assertEqual(len(small), 10)  # up to where the camera rises over the top
         self.assertEqual((first, full[-1]), ("https://cdn.example/s0.jpg", "https://cdn.example/s9.jpg"))
 
+    def test_share_page_turn_edges_match_the_app(self):
+        from vitrina_api.models import Listing
+        from vitrina_api.share import turn_shots
+        frames = [{"url": f"https://cdn.example/f{i}.jpg", "angle": "frame"} for i in range(10)]
+        frames += [{"url": "https://cdn.example/f0.jpg", "angle": "frame"}]  # the first frame comes round again
+        listing = self.publish(photos=LISTING["photos"] + [{"url": "https://cdn.example/top.jpg", "angle": "top"}]
+                               + frames)
+        page = self.c.get(f"/l/{listing['id']}").text
+        small, full, _ = self.shared_turn(page)
+        self.assertEqual(len(small), 10)
+        # Dragging right turns back, as a finger does in the app; no small copies means no turn on its own.
+        self.assertIn("show(k0 - Math.round(", page)
+        self.assertIn("light = false", page)
+        self.assertEqual(small, full)
+        with self.app.state.sessions() as db:
+            row = db.get(Listing, listing["id"])
+            media = sorted(row.media, key=lambda m: m.position)
+            turn = [m for m in media if m.angle == "frame"]
+            top, sole = (next(m for m in media if m.angle == a) for a in ("top", "sole"))
+            # Stops out of order, or a stop at the first frame, are not a scan: the whole turn from the cover.
+            top.original_url, sole.original_url = turn[6].original_url, turn[3].original_url
+            self.assertEqual(len(turn_shots(row, media)[0]), 10)
+            top.original_url, sole.original_url = turn[0].original_url, turn[4].original_url
+            self.assertEqual(len(turn_shots(row, media)[0]), 10)
+            # A scan starts where the camera did, whatever frame the cover matches.
+            top.original_url, sole.original_url = turn[5].original_url, turn[7].original_url
+            row.cover_frame, row.cover_frame_of = turn[3].original_url, next(m for m in media
+                                                                             if m.angle != "frame").original_url
+            shots = turn_shots(row, media)[0]
+            self.assertEqual((len(shots), shots[0][1]), (5, "https://cdn.example/f0.jpg"))
+            db.rollback()
+
+    def test_share_page_cut_turn_stands_on_the_apps_stage(self):
+        from vitrina_api.models import Listing
+        frames = [{"url": f"https://cdn.example/f{i}.jpg", "angle": "frame"} for i in range(8)]
+        listing = self.publish(photos=LISTING["photos"] + frames)
+        with self.app.state.sessions() as db:
+            row = db.get(Listing, listing["id"])
+            for m in row.media:
+                if m.angle == "frame":
+                    m.processed_url, m.thumb_url = m.original_url + "?cut", m.original_url + "?small"
+            row.backdrop = "dark"
+            db.commit()
+        page = self.c.get(f"/l/{listing['id']}").text
+        self.assertIn("#0e0e14", page)
+        self.assertIn("light = true", page)
+
     def test_sales_file_never_runs_a_formula_typed_by_a_buyer(self):
         listing = self.publish()
         address = {**ADDRESS, "city": '=HYPERLINK("http://evil/","Алматы")'}

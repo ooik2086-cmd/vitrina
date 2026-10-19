@@ -36,18 +36,21 @@ TEXT = {
            "free": "тегін", "protected": "Ақша сатып алушы тауарды алып, растағанша сақталады.",
            "gone": "Бұл тауар енді сатылымда жоқ.", "seller": "Сатушы", "open_shop": "Дүкенді қосымшада ашу",
            "shop_gone": "Бұл дүкен табылмады.", "empty": "Дүкенде қазір тауар жоқ.", "goods": "тауар",
-           "reviews": "пікір", "away": "Сатушы демалыста, тапсырыстар кейін қабылданады."},
+           "reviews": "пікір", "away": "Сатушы демалыста, тапсырыстар кейін қабылданады.",
+           "keys": "Бұру үшін солға не оңға көрсеткі пернесін басыңыз."},
     "ru": {"open": "Открыть в приложении", "drag": "Проведите, чтобы повернуть", "sizes": "Размеры",
            "delivery": "Доставка", "free": "бесплатно",
            "protected": "Деньги хранятся, пока покупатель не получит товар и не подтвердит это.",
            "gone": "Этот товар больше не продаётся.", "seller": "Продавец", "open_shop": "Открыть магазин в приложении",
            "shop_gone": "Этот магазин не найден.", "empty": "Сейчас в магазине нет товаров.", "goods": "товаров",
-           "reviews": "отзывов", "away": "Продавец в отпуске, заказы примет позже."},
+           "reviews": "отзывов", "away": "Продавец в отпуске, заказы примет позже.",
+           "keys": "Чтобы повернуть, нажимайте стрелки влево и вправо."},
     "en": {"open": "Open in the app", "drag": "Drag to turn", "sizes": "Sizes", "delivery": "Delivery", "free": "free",
            "protected": "The money is held until the buyer receives the item and confirms it.",
            "gone": "This listing is no longer on sale.", "seller": "Seller", "open_shop": "Open the shop in the app",
            "shop_gone": "This shop wasn't found.", "empty": "The shop has nothing on sale right now.",
-           "goods": "items", "reviews": "reviews", "away": "The seller is away and will take orders later."},
+           "goods": "items", "reviews": "reviews", "away": "The seller is away and will take orders later.",
+           "keys": "Use the left and right arrow keys to turn it."},
 }
 ALMATY = timezone(timedelta(hours=5))
 SHOWCASE = ("front", "outer", "inner", "back", "top")
@@ -73,7 +76,7 @@ def page(title: str, body: str, *, lang: str, meta: str = "", status: int = 200)
 *{{box-sizing:border-box}}body{{margin:0;font-family:Inter,system-ui,-apple-system,sans-serif;background:var(--studio);color:var(--ink)}}
 main{{max-width:520px;margin:0 auto;padding:0 0 32px}}
 .brand{{letter-spacing:.35em;font-weight:700;font-size:13px;padding:18px 20px}}
-.stage{{position:relative;aspect-ratio:1;touch-action:pan-y;cursor:grab;user-select:none}}
+.stage{{position:relative;aspect-ratio:1;touch-action:pan-y pinch-zoom;cursor:grab;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}}
 .stage img{{position:absolute;inset:6%;width:88%;height:88%;object-fit:contain;-webkit-user-drag:none}}
 .hint{{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);background:#fff;border-radius:99px;
 padding:6px 14px;font-size:13px;white-space:nowrap;box-shadow:0 2px 10px rgba(0,0,0,.08)}}
@@ -105,7 +108,8 @@ def shared_listing(listing_id: int, request: Request, db: Session = Depends(get_
     media = sorted(listing.media, key=lambda m: m.position)
     showcase = [m for m in media if m.angle in SHOWCASE]
     # Each shot: the small copy shown while turning, and the full photo shown at rest.
-    shots = turn_shots(listing, media) or [(m.processed_url or m.original_url,) * 2 for m in showcase]
+    shots, cut = turn_shots(listing, media)
+    shots = shots or [(m.processed_url or m.original_url,) * 2 for m in showcase]
     # Previews use the original JPEG: some messengers do not show WebP.
     cover = next((m.original_url for m in showcase), media[0].original_url if media else None)
     price = promo.format_tenge(listing.price_tiyn)
@@ -122,34 +126,59 @@ def shared_listing(listing_id: int, request: Request, db: Session = Depends(get_
     sizes = "".join(f'<span class="chip{"" if s.quantity > 0 else " off"}">{esc(s.label)} · '
                     f'{s.insole_mm // 10},{s.insole_mm % 10} см</span>' for s in listing.sizes)
     delivery = (t["free"] if listing.delivery_price_tiyn == 0 else promo.format_tenge(listing.delivery_price_tiyn))
-    backdrop = BACKDROPS.get(listing.showcase_style, "var(--studio)")
+    backdrop = (SCENES[listing.backdrop] if cut and listing.backdrop in SCENES
+                else BACKDROPS.get(listing.showcase_style, "var(--studio)"))
     spin_js = ""
     if len(shots) > 1:
         # Inside <script> a "</script>" in any string would end the block, so "<" never appears raw.
         small_js = json.dumps([small for small, _ in shots]).replace("<", "\\u003c")
         full_js = json.dumps([full for _, full in shots]).replace("<", "\\u003c")
+        # Only real small copies are fetched ahead and turned through on arrival: full photos would cost megabytes
+        # of someone's mobile data before they touched anything.
+        light = all(small != full for small, full in shots)
         spin_js = f"""<script>
 (() => {{
-  // Small copies while the shoe turns, the full photo once it rests; one slow turn on arrival, unless the phone
-  // asks for less motion. The small copies load one after another, so the first ones come first on slow data.
+  // Small copies while the shoe turns, the full photo once it rests. One slow turn on arrival, unless the phone
+  // asks for less motion or data saving. Dragging right turns the shoe to the right, as in the app.
   const small = {small_js}, full = {full_js}, img = document.getElementById('shot'), stage = document.getElementById('stage');
-  const n = small.length, calm = matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const ready = new Set();
-  (function load(i) {{ if (i >= n) return; const p = new Image();
-    p.onload = p.onerror = () => {{ if (p.complete && p.naturalWidth) ready.add(i); load(i + 1); }}; p.src = small[i]; }})(0);
-  let k = 0, x0 = null, k0 = 0, rest = null, auto = null;
+  const n = small.length, light = {"true" if light else "false"};
+  const net = navigator.connection || {{}}, calm = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const ready = new Set(), done = new Set();
+  let next = 0, k = 0, rest = null, auto = null, finger = null, x0 = 0, k0 = 0, moved = false;
+  // A few at a time, in turn order, so the first frames come first.
+  const load = () => {{ if (next >= n) return; const i = next++, p = new Image();
+    p.onload = p.onerror = () => {{ if (p.naturalWidth) ready.add(i); done.add(i); load(); }}; p.src = small[i]; }};
+  const fetchAll = () => {{ if (next === 0) for (let w = 0; w < 3; w++) load(); }};
+  const label = () => stage.setAttribute('aria-valuenow', k + 1);
   const settle = () => {{ clearTimeout(rest); rest = setTimeout(() => {{ img.src = full[k]; }}, 250); }};
-  const show = m => {{ m = ((m % n) + n) % n; if (m === k) return; k = m; if (ready.has(k) || !auto) img.src = small[k]; settle(); }};
-  const stop = () => {{ clearInterval(auto); auto = null; }};
-  stage.addEventListener('pointerdown', e => {{ stop(); x0 = e.clientX; k0 = k; stage.setPointerCapture(e.pointerId); }});
-  stage.addEventListener('pointermove', e => {{ if (x0 !== null) show(k0 + Math.round((e.clientX - x0) * n / (stage.clientWidth * 1.5))); }});
-  stage.addEventListener('pointerup', () => {{ x0 = null; }});
-  stage.addEventListener('pointercancel', () => {{ x0 = null; }});
-  if (!calm) {{ let step = 0; auto = setInterval(() => {{ if (!ready.has((k + 1) % n)) return; show(k + 1);
-    if (++step >= n) {{ stop(); settle(); }} }}, Math.max(40, Math.round(2400 / n))); }}
+  const show = m => {{ m = ((m % n) + n) % n; if (m === k) return; k = m; label();
+    if (ready.has(k) || !light) img.src = small[k]; if (!auto) settle(); }};
+  const stop = () => {{ if (auto) {{ clearInterval(auto); auto = null; settle(); }} }};
+  stage.addEventListener('pointerdown', e => {{ if (finger !== null) return; fetchAll();
+    finger = e.pointerId; x0 = e.clientX; k0 = k; moved = false; }});
+  stage.addEventListener('pointermove', e => {{ if (e.pointerId !== finger) return;
+    // A vertical scroll that starts on the shoe leaves the turn alone; a sideways drag takes it over.
+    if (!moved && Math.abs(e.clientX - x0) < 8) return;
+    if (!moved) {{ moved = true; stop(); stage.setPointerCapture(e.pointerId); x0 = e.clientX; k0 = k; }}
+    show(k0 - Math.round((e.clientX - x0) * n / (stage.clientWidth * 1.5))); }});
+  const lift = e => {{ if (e.pointerId === finger) finger = null; }};
+  stage.addEventListener('pointerup', lift);
+  stage.addEventListener('pointercancel', lift);
+  stage.addEventListener('keydown', e => {{ const d = {{ArrowLeft: 1, ArrowRight: -1}}[e.key];
+    if (d) {{ e.preventDefault(); stop(); fetchAll(); show(k + d); }} }});
+  if (light && !calm && !net.saveData && !/2g/.test(net.effectiveType || '')) {{
+    fetchAll();
+    // Waits for each small copy, steps over one that fails, and gives up rather than turning for ever.
+    let step = 0; const until = Date.now() + 8000;
+    auto = setInterval(() => {{ const j = (k + 1) % n; if (Date.now() > until) {{ stop(); return; }}
+      if (!done.has(j)) return; if (ready.has(j)) show(j); else {{ k = j; label(); }}
+      if (++step >= n) stop(); }}, Math.max(40, Math.round(2400 / n)));
+  }}
 }})();
 </script>"""
-    stage = (f'<div class="stage" id="stage" style="background:{backdrop}">'
+    stage = (f'<div class="stage" id="stage" style="background:{backdrop}"'
+             + (f' tabindex="0" role="slider" aria-label="{esc(listing.title)}: 360°. {t["keys"]}" aria-valuemin="1"'
+                f' aria-valuemax="{len(shots)}" aria-valuenow="1"' if len(shots) > 1 else "") + ">"
              f'<img id="shot" alt="{esc(listing.title)}" src="{esc(shots[0][1])}" draggable="false">'
              + (f'<div class="hint">↔ {t["drag"]}</div>' if len(shots) > 1 else "") + "</div>") if shots else ""
     body = f"""{stage}
@@ -165,25 +194,34 @@ def shared_listing(listing_id: int, request: Request, db: Session = Depends(get_
     return page(f"{listing.title} · {price} · VITRINA", body, lang=lang, meta=meta)
 
 
-def turn_shots(listing: Listing, media: list) -> list[tuple[str, str]]:
-    """The 360° turn as the app shows it: one turn, from the frame matching the cover, cut-outs only when every
-    frame has one (else the photos as taken). Each shot is (small copy, full photo); the small copy is the full
-    photo when there is none. A scan carries on over the top and under the sole after its turn: only the turn."""
+def turn_shots(listing: Listing, media: list) -> tuple[list[tuple[str, str]], bool]:
+    """The 360° turn as the app shows it (ShowcasePlan.of): one turn, from the frame matching the cover, cut-outs
+    only when every frame has one (else the photos as taken). Each shot is (small copy, full photo); the small copy
+    is the full photo when there is none. A scan carries on over the top and under the sole after its turn: only
+    the turn, from where the camera started. Also says whether the turn is cut out."""
     frames = [m for m in media if m.angle == "frame"]
     if not frames:
-        return []
+        return [], False
     at = [next((i for i, f in enumerate(frames) if f.original_url == m.original_url), -1)
           for m in (next((m for m in media if m.angle == angle), None) for angle in ("top", "sole", "detail")) if m]
-    if at and at[0] > 0 and all(b > a for a, b in zip(at, at[1:])):
-        frames = frames[:at[0]]  # a scan: its turn starts where the camera did
-    else:
-        start = next((i for i, f in enumerate(frames) if f.original_url == cover_frame(listing)), 0)
-        frames = frames[start:] + frames[:start]
+    scan = bool(at) and at[0] > 0 and all(b > a for a, b in zip(at, at[1:]))
+    if scan:
+        frames = frames[:at[0]]
+    # One turn: up to where its first frame comes round again.
     frames = next((frames[:k] for k in range(1, len(frames)) if frames[k].original_url == frames[0].original_url),
                   frames)
+    if not scan:
+        matched = cover_frame(listing)
+        start = next((i for i, f in enumerate(frames) if f.original_url == matched), 0)
+        frames = frames[start:] + frames[:start]
     cut = all(f.processed_url for f in frames)
     return [(f.thumb_url if f.thumb_url and (cut or not f.processed_url) else full, full)
-            for f in frames for full in [f.processed_url if cut else f.original_url]]
+            for f in frames for full in [f.processed_url if cut else f.original_url]], cut
+
+
+# The app's stage behind a cut-out turn, light or dark as suits the shoe (ShowcaseScene in scroll_showcase.dart).
+SCENES = {"light": "radial-gradient(circle at 50% 50%, #f7f6fa, #e8e6ee 70%)",
+          "dark": "radial-gradient(circle at 50% 50%, #17161f, #0e0e14 70%)"}
 
 
 def cover_url(listing: Listing) -> str | None:

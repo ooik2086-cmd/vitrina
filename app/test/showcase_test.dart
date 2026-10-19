@@ -132,6 +132,19 @@ void main() {
       expect(photosOnly.progressFor((kind: 'spin', at: 0.5)), isNull);
     });
 
+    test('a scan stays a scan once its stop photos and frames are cut out apart', () {
+      // The server cuts out the stop row and its frame row separately, under different keys.
+      final cut = {
+        ...scan(),
+        'media': [
+          for (final m in (scan()['media'] as List).cast<Map<String, dynamic>>())
+            m['angle'] == 'frame' ? m : <String, dynamic>{...m, 'processed_url': '${m['processed_url']}?stop'},
+        ],
+      };
+      final plan = ShowcasePlan.of(Listing.fromJson(cut));
+      expect((plan.scan, plan.turn), (true, 8));
+    });
+
     test('skips stops the seller did not photograph', () {
       final plan = ShowcasePlan.of(Listing.fromJson(listing(details: false)));
       expect([for (final s in plan.steps) s.kind], ['spin']);
