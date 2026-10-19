@@ -975,5 +975,13 @@ const en = <String, String>{
   'түрлі түсті': 'multicolour',
   'Мысалы: мәрмәр': 'For example: marble',
   'Өзгерту': 'Change',
+  '360° айналым осы бұрыштан басталады': 'The 360° turn now starts from this angle',
+  'Айналым қай бұрыштан басталады': 'Where the turn starts',
+  'Кадр {0} / {1}': 'Frame {0} of {1}',
+  'Мұқаба': 'Cover',
+  'Мұқабадағыдай бұрышты таңдаңыз: карточка мен тауар беті сол жерден айналады.':
+      'Pick the angle that matches the cover: the card and the listing page turn from there.',
+  'Сырғытпаны жылжытып, мұқабадағыдай көрінетін кадрды табыңыз.':
+      'Move the slider to find the frame that looks like the cover.',
   'Түсті алып тастау': 'Remove colour',
 };

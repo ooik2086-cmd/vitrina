@@ -85,6 +85,7 @@ class ListingPatch(BaseModel):
     photos: list[PhotoIn] | None = Field(default=None, max_length=60)  # the whole set, replacing the current one
     add_photos: list[PhotoIn] | None = Field(default=None, max_length=60)
     add_sizes: list[SizeIn] | None = Field(default=None, max_length=30)
+    cover_frame: str | None = Field(default=None, max_length=500)  # the 360° frame that matches the cover
 
     _color = field_validator("color", mode="before")(lambda v: canonical_color(v) if isinstance(v, str) else v)
 

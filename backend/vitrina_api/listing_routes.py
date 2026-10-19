@@ -27,7 +27,8 @@ from .models import (PriceChange, StockAlert, ListingDailyViews, ListingEmbeddin
 from .storage import DETAIL_SIDE_PX, MAX_SIDE_PX, MAX_UPLOAD_BYTES, Storage, normalize_image
 from .api_common import ALMATY, DEFECT_REQUIRED, MAX_LISTING_MEDIA, MAX_LISTING_SIZES, MIN_SPIN_FRAMES, log
 from .schemas import ListingIn, ListingPatch, PhotoIn, ReportIn
-from .serializers import cm_to_mm, listing_out, mark_price_change, photo_snapshot, was_price
+from .serializers import (cm_to_mm, cover_frame, cover_photo, listing_out, mark_price_change, photo_snapshot,
+                          was_price)
 from .saved_search_routes import announce
 
 
@@ -124,6 +125,24 @@ def render_listing_promo(state, listing_id: int, lang: str) -> bool:
 PROMO_ANGLES = ("outer", "front", "inner", "back", "top")
 
 
+def match_cover_frame(storage: Storage, listing: Listing) -> None:
+    """Finds the 360° frame that shows the shoe as the cover does, unless one is set for this cover and these
+    frames already (the seller's own choice stays). Compares the small copies, which are cheap to read."""
+    cover = cover_photo(listing)
+    frames = [m for m in listing.media if m.angle == "frame"]
+    if cover is None or not frames or cover_frame(listing) is not None:
+        return
+    if not all(m.thumb_url and storage.owns(m.thumb_url) for m in [cover, *frames]):
+        return  # until every small copy is made; the next run fills it in
+    try:
+        best = cutout.closest_frame(storage.read(cover.thumb_url), [storage.read(m.thumb_url) for m in frames])
+    except Exception:
+        log.exception("cover frame match failed for listing %s", listing.id)
+        return
+    if best is not None:
+        listing.cover_frame, listing.cover_frame_of = frames[best].original_url, cover.original_url
+
+
 def thumb_listing(state, listing_id: int) -> int:
     """Background job: the small copies the showcase shows while scrolling, and the backdrop that suits the shoe."""
     storage = state.storage
@@ -142,6 +161,7 @@ def thumb_listing(state, listing_id: int) -> int:
                 done += 1
             except Exception:
                 log.exception("thumbnail failed for %s", source)
+        match_cover_frame(storage, listing)
         shown = sorted(listing.media, key=lambda m: (m.angle != "frame", m.angle != "front", m.position))
         first = next((m for m in shown if m.processed_url and storage.owns(m.processed_url)), None)
         try:
@@ -371,6 +391,11 @@ def edit_contents(db: Session, cfg: Settings, storage: Storage, listing: Listing
         start = max((m.position for m in listing.media), default=-1) + 1
         listing.media.extend(Media(original_url=p.url, angle=p.angle, position=start + i) for i, p in enumerate(added))
         changed.add("photos")
+    if body.cover_frame is not None:
+        cover = cover_photo(listing)
+        if cover is None or not any(m.angle == "frame" and m.original_url == body.cover_frame for m in listing.media):
+            raise ApiError(422, "validation", "cover_frame is not one of the listing's 360° frames")
+        listing.cover_frame, listing.cover_frame_of = body.cover_frame, cover.original_url
     if body.add_sizes:
         known = {s.label.strip().lower() for s in listing.sizes}
         if len(listing.sizes) + len(body.add_sizes) > MAX_LISTING_SIZES:

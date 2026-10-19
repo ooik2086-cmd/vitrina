@@ -83,7 +83,7 @@ def listing_out(db: Session, listing: Listing, *, owner: bool = False) -> dict:
         # Three separate facts, never merged into one "quality" label.
         "segment": segment_for(db, listing), "condition": listing.condition, "authenticity": listing.authenticity,
         "defects": listing.defects, "description": listing.description, "showcase_style": listing.showcase_style,
-        "backdrop": listing.backdrop,
+        "backdrop": listing.backdrop, "cover_frame": cover_frame(listing),
         "sizes": [{"id": s.id, "label": s.label, "insole_cm": mm_to_cm(s.insole_mm), "available": s.quantity > 0,
                    **({"quantity": s.quantity} if owner else {})} for s in listing.sizes],
         "media": [{"original_url": m.original_url, "processed_url": m.processed_url, "thumb_url": m.thumb_url,
@@ -167,6 +167,20 @@ def delivery_out(order: Order, viewer: User) -> dict | None:
         return None
     return {"recipient_name": order.recipient_name, "recipient_phone": order.recipient_phone,
             "city": order.delivery_city, "address": order.delivery_address, "note": order.delivery_note}
+
+
+def cover_photo(listing: Listing):
+    """The photo shown on cards: the first that is not a 360° frame."""
+    return next((m for m in listing.media if m.angle != "frame"), None)
+
+
+def cover_frame(listing: Listing) -> str | None:
+    """The frame matching the cover, while both are still the listing's."""
+    cover = cover_photo(listing)
+    if (cover is None or listing.cover_frame is None or listing.cover_frame_of != cover.original_url
+            or not any(m.angle == "frame" and m.original_url == listing.cover_frame for m in listing.media)):
+        return None
+    return listing.cover_frame
 
 
 def listing_cover(listing: Listing) -> str | None:

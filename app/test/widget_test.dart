@@ -56,6 +56,7 @@ import 'package:vitrina/session.dart';
 import 'package:vitrina/widgets/common.dart';
 import 'package:vitrina/widgets/delivery_sheet.dart';
 import 'package:vitrina/widgets/questions.dart';
+import 'package:vitrina/widgets/scroll_showcase.dart';
 import 'package:vitrina/widgets/size_guide.dart';
 import 'package:vitrina/widgets/card_turn.dart';
 import 'package:vitrina/widgets/filter_sheet.dart';
@@ -2737,6 +2738,36 @@ void main() {
       {'original_url': 'https://cdn/b.jpg', 'processed_url': null, 'angle': 'outer'},
     ];
 
+    testWidgets('the seller sets which 360° frame matches the cover', (tester) async {
+      final frames = [
+        for (var i = 0; i < 8; i++)
+          {
+            'original_url': 'https://cdn/f$i.jpg',
+            'processed_url': null,
+            'thumb_url': 'https://cdn/t$i.webp',
+            'angle': 'frame'
+          }
+      ];
+      final sent = await show(tester, {
+        ...listingJson(media: [...photos, ...frames]),
+        'cover_frame': 'https://cdn/f2.jpg'
+      });
+      await tester.ensureVisible(find.byKey(const Key('cover-frame')));
+      await tester.tap(find.byKey(const Key('cover-frame')));
+      await tester.pumpAndSettle();
+      expect(find.text('Кадр 3 / 8'), findsOneWidget); // opens at the frame set now
+      final slider = find.byKey(const Key('cover-frame-slider'));
+      final box = tester.getRect(slider);
+      await tester.tapAt(Offset(box.left + 24 + (box.width - 48) * 5 / 7, box.center.dy)); // the sixth frame
+      await tester.pumpAndSettle();
+      expect(find.text('Кадр 6 / 8'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('cover-frame-save')));
+      await tester.pumpAndSettle();
+      expect(sent, [
+        {'cover_frame': 'https://cdn/f5.jpg'}
+      ]);
+    });
+
     testWidgets('one Save sends only the name fields the seller changed', (tester) async {
       final sent = await show(
           tester, {...listingJson(media: photos), 'ever_on_sale': true, 'condition': 'used_excellent'},
@@ -3062,6 +3093,21 @@ void main() {
       }
       return g;
     }
+
+    test('the listing page and the card start the turn at the frame matching the cover', () {
+      final l = Listing.fromJson({
+        ...listingJson(media: [
+          {'original_url': 'https://cdn/side.jpg', 'processed_url': 'https://cdn/side.webp', 'angle': 'side'},
+          for (var i = 0; i < 12; i++) frame(i),
+        ]),
+        'cover_frame': 'https://cdn/f9.jpg',
+      });
+      expect(ShowcasePlan.of(l).steps.first.media.first.originalUrl, 'https://cdn/f9.jpg');
+      expect(ShowcasePlan.of(l).steps.first.media.length, 12); // the whole turn, only started elsewhere
+      expect(CardTurn.framesOf(l).first.originalUrl, 'https://cdn/f9.jpg');
+      final unset = listing([for (var i = 0; i < 12; i++) frame(i)]);
+      expect(ShowcasePlan.of(unset).steps.first.media.first.originalUrl, 'https://cdn/f0.jpg');
+    });
 
     test('through at most 24 frames of one turn, from the cover, and only when it turns as the listing page does', () {
       expect(CardTurn.framesOf(listing([for (var i = 0; i < 7; i++) frame(i)])), isEmpty);

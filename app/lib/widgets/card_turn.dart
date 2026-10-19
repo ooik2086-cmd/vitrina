@@ -30,7 +30,7 @@ class CardTurn extends StatefulWidget {
   @visibleForTesting
   static ImageProvider Function(String url) network = NetworkImage.new;
 
-  /// The frames a card turns through, starting at the cover when the cover is one of them; none when the card
+  /// The frames a card turns through, starting at the one that matches the cover; none when the card
   /// cannot turn as the listing page does:
   /// - fewer than 8 frames in the turn (the server asks for 8);
   /// - a frame without its small copy, which would mean fetching full-size photos;
@@ -43,7 +43,9 @@ class CardTurn extends StatefulWidget {
     var turn = spin.media.take(plan.turn).toList();
     if (turn.length < 8) return const [];
     if (!spin.media.every((m) => m.thumbUrl != null && (spin.cut || m.processedUrl == null))) return const [];
-    final start = math.max(0, turn.indexWhere((m) => m.url == l.coverUrl));
+    // From the frame matching the cover: the one the seller or the server marked, else the cover itself.
+    var start = turn.indexWhere((m) => m.originalUrl == l.coverFrame);
+    if (start < 0) start = math.max(0, turn.indexWhere((m) => m.url == l.coverUrl));
     turn = [...turn.skip(start), ...turn.take(start)];
     if (turn.length <= maxFrames) return turn;
     return [for (var i = 0; i < maxFrames; i++) turn[i * turn.length ~/ maxFrames]];

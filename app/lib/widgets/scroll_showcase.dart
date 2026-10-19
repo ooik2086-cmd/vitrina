@@ -130,9 +130,12 @@ class ShowcasePlan {
           part(stops[i].kind, at[i], i + 1 < at.length ? at[i + 1] : frames.length),
       ], scan: true);
     }
+    // The turn starts at the frame that shows the shoe as the cover does, so the cover flies into the same view.
+    final start = math.max(0, frames.indexWhere((f) => f.originalUrl == l.coverFrame));
+    final turn = [...frames.skip(start), ...frames.take(start)];
     // Twice as much scrolling for the whole turn as for each stop: see ScrollShowcase.travelFor.
     return ShowcasePlan([
-      ShowcaseStep('spin', frames, 2),
+      ShowcaseStep('spin', turn, 2),
       for (final s in stops) ShowcaseStep(s.kind, [s.photo], 1),
     ]);
   }

@@ -137,6 +137,40 @@ def make_thumb(data: bytes) -> bytes:
     return out.getvalue()
 
 
+MATCH_SIZE = (64, 40)  # wide enough for a shoe seen from the side
+
+
+def _match_print(data: bytes) -> Image.Image:
+    """A small grey picture of the shoe alone, scaled to fill the same box whatever its size in the photo: the
+    outline and the shading, which is what tells one angle of a shoe from another."""
+    img = Image.open(io.BytesIO(data))
+    img.load()
+    img = img.convert("RGBA")
+    box = img.getchannel("A").getbbox()
+    if box and box != (0, 0, *img.size):
+        img = img.crop(box)  # a cut-out: the shoe without the empty canvas around it
+    flat = Image.new("RGBA", img.size, (128, 128, 128, 255))
+    flat.alpha_composite(img)
+    return flat.convert("L").resize(MATCH_SIZE, Image.Resampling.BILINEAR)
+
+
+def closest_frame(cover: bytes, frames: list[bytes]) -> int | None:
+    """Which of the 360° frames shows the shoe as the cover photo does, so a turn can start from the cover's angle.
+    None when no frame can be read."""
+    target = list(_match_print(cover).getdata())
+    best, best_gap = None, None
+    for i, data in enumerate(frames):
+        try:
+            seen = list(_match_print(data).getdata())
+        except Exception:
+            log.exception("frame %s could not be compared", i)
+            continue
+        gap = sum(abs(a - b) for a, b in zip(target, seen))
+        if best_gap is None or gap < best_gap:
+            best, best_gap = i, gap
+    return best
+
+
 def backdrop_for(cutout_bytes: bytes) -> str | None:
     """light or dark, from how bright the shoe itself is (transparent pixels are ignored); None without alpha."""
     img = Image.open(io.BytesIO(cutout_bytes))

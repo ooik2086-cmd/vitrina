@@ -453,6 +453,7 @@ class Listing {
         description = j['description'] as String?,
         showcaseStyle = j['showcase_style'] as String,
         backdrop = j['backdrop'] as String?,
+        coverFrame = j['cover_frame'] as String?,
         sizes = [for (final s in j['sizes'] as List) ShoeSize.fromJson(s as Map<String, dynamic>)],
         media = [for (final m in j['media'] as List) MediaItem.fromJson(m as Map<String, dynamic>)],
         shopName = (j['seller'] as Map)['shop_name'] as String?,
@@ -501,6 +502,9 @@ class Listing {
 
   /// light or dark: what the cut-out shoe stands out on, chosen by the server from the shoe's own brightness.
   final String? backdrop;
+
+  /// The 360° frame (its original url) that shows the shoe as the cover does: a turn starts there.
+  final String? coverFrame;
   final String showcaseStyle;
   final List<ShoeSize> sizes;
   final List<MediaItem> media;
@@ -1075,7 +1079,8 @@ class Api {
           String? condition,
           List<Map<String, String>>? photos,
           List<Map<String, String>>? addPhotos,
-          List<Map<String, Object>>? addSizes}) async =>
+          List<Map<String, Object>>? addSizes,
+          String? coverFrame}) async =>
       Listing.fromJson(await _send('PATCH', '/listings/$id', body: {
         if (priceTiyn != null) 'price_tiyn': priceTiyn,
         if (deliveryPriceTiyn != null) 'delivery_price_tiyn': deliveryPriceTiyn,
@@ -1094,6 +1099,7 @@ class Api {
         if (photos != null) 'photos': photos,
         if (addPhotos != null) 'add_photos': addPhotos,
         if (addSizes != null) 'add_sizes': addSizes,
+        if (coverFrame != null) 'cover_frame': coverFrame,
       }) as Map<String, dynamic>);
 
   Future<Suggestion> suggestDetails(String photoUrl) async => Suggestion.fromJson(

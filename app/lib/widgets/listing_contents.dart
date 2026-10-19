@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
@@ -240,6 +242,13 @@ class _ListingContentsCardState extends State<ListingContentsCard> {
     await _run((api) => api.editListing(_l.id, photos: keep), tr('360° көрініс өшірілді'));
   }
 
+  Future<void> _pickCoverFrame() async {
+    final picked = await showModalBottomSheet<String>(
+        context: context, isScrollControlled: true, builder: (_) => CoverFramePicker(listing: _l));
+    if (picked == null || picked == _l.coverFrame || !mounted) return;
+    await _run((api) => api.editListing(_l.id, coverFrame: picked), tr('360° айналым осы бұрыштан басталады'));
+  }
+
   Future<void> _addSize() async {
     final size = await showDialog<Map<String, Object>>(context: context, builder: (_) => const _NewSizeDialog());
     if (size != null) await _run((api) => api.editListing(_l.id, addSizes: [size]), tr('Өлшем қосылды'));
@@ -356,10 +365,105 @@ class _ListingContentsCardState extends State<ListingContentsCard> {
             label: Text(tr('360° өшіру')),
           ),
         ]),
+        if (_l.coverUrl != null)
+          ListTile(
+            key: const Key('cover-frame'),
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.flip_camera_android_outlined),
+            title: Text(tr('Айналым қай бұрыштан басталады')),
+            subtitle: Text(tr('Мұқабадағыдай бұрышты таңдаңыз: карточка мен тауар беті сол жерден айналады.')),
+            trailing: const Icon(Icons.chevron_right),
+            enabled: !_busy,
+            onTap: _pickCoverFrame,
+          ),
         ShowcaseStopsHint(have: {for (final m in _l.media) m.angle}, onPick: _addPhotoAt, enabled: !_busy),
       ],
       if (_busy) const Padding(padding: EdgeInsets.only(top: 8), child: LinearProgressIndicator()),
     ]);
+  }
+}
+
+/// The cover beside one 360° frame, and a slider through the frames: the seller sets the frame that shows the shoe
+/// as the cover does. Pops with that frame's original url.
+class CoverFramePicker extends StatefulWidget {
+  const CoverFramePicker({super.key, required this.listing});
+  final Listing listing;
+
+  @override
+  State<CoverFramePicker> createState() => _CoverFramePickerState();
+}
+
+class _CoverFramePickerState extends State<CoverFramePicker> {
+  late final List<MediaItem> _frames = widget.listing.frames;
+  late int _at = math.max(0, _frames.indexWhere((f) => f.originalUrl == widget.listing.coverFrame));
+
+  Widget _photo(String url, String label) {
+    final theme = Theme.of(context);
+    return Expanded(
+      child: Column(children: [
+        AspectRatio(
+          aspectRatio: 1,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(14),
+            child: ColoredBox(
+              color: Brand.studio, // cut-outs are transparent
+              child: Image.network(url,
+                  fit: BoxFit.contain,
+                  cacheWidth: 480,
+                  gaplessPlayback: true, // the last frame stays while the next loads
+                  semanticLabel: label,
+                  errorBuilder: (_, __, ___) => const Icon(Icons.image_outlined, color: Colors.black54)),
+            ),
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(label, style: theme.textTheme.labelMedium),
+      ]),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cover = widget.listing.coverUrl!;
+    final frame = _frames[_at];
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Text(tr('Айналым қай бұрыштан басталады'), style: theme.textTheme.titleLarge),
+          const SizedBox(height: 4),
+          Text(tr('Сырғытпаны жылжытып, мұқабадағыдай көрінетін кадрды табыңыз.'), style: theme.textTheme.bodySmall),
+          const SizedBox(height: 16),
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            _photo(cover, tr('Мұқаба')),
+            const SizedBox(width: 12),
+            _photo(frame.thumbUrl ?? frame.url, trf('Кадр {0} / {1}', [_at + 1, _frames.length])),
+          ]),
+          const SizedBox(height: 8),
+          Slider(
+            key: const Key('cover-frame-slider'),
+            value: _at.toDouble(),
+            max: (_frames.length - 1).toDouble(),
+            divisions: math.max(1, _frames.length - 1),
+            label: '${_at + 1}',
+            semanticFormatterCallback: (v) => trf('Кадр {0} / {1}', [v.round() + 1, _frames.length]),
+            onChanged: (v) => setState(() => _at = v.round()),
+          ),
+          const SizedBox(height: 8),
+          Row(children: [
+            Expanded(child: OutlinedButton(onPressed: () => Navigator.pop(context), child: Text(tr('Болдырмау')))),
+            const SizedBox(width: 12),
+            Expanded(
+              child: FilledButton(
+                  key: const Key('cover-frame-save'),
+                  onPressed: () => Navigator.pop(context, frame.originalUrl),
+                  child: Text(tr('Сақтау'))),
+            ),
+          ]),
+        ]),
+      ),
+    );
   }
 }
 
