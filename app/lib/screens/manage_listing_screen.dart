@@ -63,7 +63,7 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
   @override
   void initState() {
     super.initState();
-    if (widget.showPhotos && widget.listing.status != 'hidden') {
+    if (widget.showPhotos && !_locked(widget.listing)) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _bringPhotos());
     }
   }
@@ -77,8 +77,13 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
       // The list builds only what is near the screen: go down until the photos are built.
       _scroll.jumpTo(_scroll.position.maxScrollExtent);
       WidgetsBinding.instance.addPostFrameCallback((_) => _bringPhotos());
+    } else if (_scroll.hasClients) {
+      _scroll.jumpTo(0); // not found: the page opens from the top as usual
     }
   }
+
+  /// A hidden listing is only shown, not edited: it has no photos section.
+  static bool _locked(Listing l) => l.status == 'hidden';
 
   @override
   void dispose() {
@@ -159,7 +164,7 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final locked = _l.status == 'hidden';
+    final locked = _locked(_l);
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
@@ -344,6 +349,7 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
                   ListingContentsCard(
                     key: _photos,
                     listing: _l,
+                    showNoShoe: widget.showPhotos,
                     onChanged: (l) => setState(() {
                       _l = l;
                       for (final s in l.sizes) {

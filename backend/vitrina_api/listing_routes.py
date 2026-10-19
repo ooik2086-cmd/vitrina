@@ -168,7 +168,7 @@ def _settle_cutouts(db: Session, storage: Storage, listing_id: int, part: list, 
                              f"видно в разделе фото на странице товара.",
                              f"“{t}”: no shoe was found in a photo, so its background is not removed. The photos "
                              f"section of the listing's page shows which one.")
-                services.notify(db, listing.seller_id, "listing_tip", *texts, listing_id=listing_id)
+                services.notify(db, listing.seller_id, "photo_no_shoe", *texts, listing_id=listing_id)
             m.no_cutout = model
         if m.id in cuts and not m.processed_url:
             m.processed_url, m.thumb_url, m.no_cutout = cuts[m.id], None, None

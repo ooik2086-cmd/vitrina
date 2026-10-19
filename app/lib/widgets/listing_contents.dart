@@ -115,9 +115,12 @@ class ListingNameFields extends StatelessWidget {
 
 /// What the listing shows besides its name: photos, 360° view and sizes, each saved the moment it is added.
 class ListingContentsCard extends StatefulWidget {
-  const ListingContentsCard({super.key, required this.listing, required this.onChanged});
+  const ListingContentsCard({super.key, required this.listing, required this.onChanged, this.showNoShoe = false});
   final Listing listing;
   final ValueChanged<Listing> onChanged;
+
+  /// Opened from the note about a photo with no shoe found: the strip starts at that photo and its line is in view.
+  final bool showNoShoe;
 
   @override
   State<ListingContentsCard> createState() => _ListingContentsCardState();
@@ -126,9 +129,42 @@ class ListingContentsCard extends StatefulWidget {
 class _ListingContentsCardState extends State<ListingContentsCard> {
   final _picker = ImagePicker();
   bool _busy = false;
+  final _strip = ScrollController();
+  final _note = GlobalKey();
 
   Listing get _l => widget.listing;
   bool get _hasSpin => _l.media.any((m) => m.angle == 'frame');
+
+  /// Where the strip starts so the first marked photo shows, with the photo before it for context.
+  double _firstMarked() {
+    final photos = _l.media.where((m) => m.angle != 'frame').toList();
+    final i = photos.indexWhere((m) => m.noShoe);
+    return i <= 0 ? 0 : (i - 1) * _tile;
+  }
+
+  static const _tile = 96.0 + 12;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.showNoShoe) {
+      // Runs after the page has brought the card's top up: with large text the line below may still be out of view.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        if (_strip.hasClients) _strip.jumpTo(math.min(_firstMarked(), _strip.position.maxScrollExtent));
+        final at = _note.currentContext;
+        if (at != null) {
+          Scrollable.ensureVisible(at, alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtEnd);
+        }
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _strip.dispose();
+    super.dispose();
+  }
 
   Future<void> _run(Future<Listing> Function(Api api) action, String done) async {
     setState(() => _busy = true);
@@ -286,7 +322,7 @@ class _ListingContentsCardState extends State<ListingContentsCard> {
     }
 
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(tr('Фото, 360° және өлшемдер'), style: theme.textTheme.titleMedium),
+      Semantics(header: true, child: Text(tr('Фото, 360° және өлшемдер'), style: theme.textTheme.titleMedium)),
       const SizedBox(height: 4),
       Text(
         _l.everOnSale
@@ -298,10 +334,10 @@ class _ListingContentsCardState extends State<ListingContentsCard> {
       const SizedBox(height: 12),
       SizedBox(
         height: 96,
-        child: ListView(scrollDirection: Axis.horizontal, children: [
+        child: ListView(controller: _strip, scrollDirection: Axis.horizontal, children: [
           for (final i in photos)
             Padding(
-              padding: const EdgeInsets.only(right: 12),
+              padding: const EdgeInsets.only(right: _tile - 96),
               child: SizedBox(
                 width: 96,
                 height: 96,
@@ -371,7 +407,7 @@ class _ListingContentsCardState extends State<ListingContentsCard> {
         Padding(
           key: const Key('photos-no-shoe'),
           padding: const EdgeInsets.only(top: 8),
-          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          child: Row(key: _note, crossAxisAlignment: CrossAxisAlignment.start, children: [
             Icon(Icons.hide_image_outlined, size: 18, color: theme.colorScheme.error),
             const SizedBox(width: 8),
             Expanded(
@@ -418,15 +454,18 @@ class _ListingContentsCardState extends State<ListingContentsCard> {
           Padding(
             key: const Key('spin-no-shoe'),
             padding: const EdgeInsets.only(bottom: 4),
-            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Icon(Icons.hide_image_outlined, size: 18, color: theme.colorScheme.error),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                    tr('Бір кадрында аяқкиім табылмады, сондықтан айналымның фоны алынбайды. Қайта түсіру үшін 360° өшіріп, жаңасын қосыңыз.'),
-                    style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.error)),
-              ),
-            ]),
+            child: Row(
+                key: photos.any((i) => _l.media[i].noShoe) ? null : _note,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.hide_image_outlined, size: 18, color: theme.colorScheme.error),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                        tr('Бір кадрында аяқкиім табылмады, сондықтан айналымның фоны алынбайды. Қайта түсіру үшін 360° өшіріп, жаңасын қосыңыз.'),
+                        style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.error)),
+                  ),
+                ]),
           ),
         // A scan turns from where the camera started; a listing without photos has only frames for a cover.
         if (_l.photos.isNotEmpty && !ShowcasePlan.of(_l).scan)

@@ -52,7 +52,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   }
 
   void _open(AppNotification n) {
-    if ((n.kind == 'sold_out' || n.kind == 'listing_tip') && n.listingId != null) {
+    if (const {'sold_out', 'listing_tip', 'photo_no_shoe'}.contains(n.kind) && n.listingId != null) {
       _openOwnListing(n);
       return;
     }
@@ -75,10 +75,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     try {
       final listing = await SessionScope.of(context).api.listing(n.listingId!);
       if (!mounted) return;
-      // A tip about a photo the model found no shoe in leads to the photos, where that photo is marked.
-      final photos = n.kind == 'listing_tip' && listing.media.any((m) => m.noShoe);
-      await Navigator.of(context)
-          .push(MaterialPageRoute(builder: (_) => ManageListingScreen(listing: listing, showPhotos: photos)));
+      // A photo the model found no shoe in is marked in the photos section, so that note opens there.
+      await Navigator.of(context).push(MaterialPageRoute(
+          builder: (_) => ManageListingScreen(listing: listing, showPhotos: n.kind == 'photo_no_shoe')));
     } catch (e) {
       if (mounted) showError(context, e);
     }
@@ -125,6 +124,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                 'moderation' => Icons.fact_check_outlined,
                 'listing_hidden' || 'report_closed' => Icons.flag_outlined,
                 'listing_tip' => Icons.tips_and_updates_outlined,
+                'photo_no_shoe' => Icons.hide_image_outlined,
                 _ => Icons.local_shipping_outlined,
               };
               return ListTile(

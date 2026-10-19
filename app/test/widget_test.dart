@@ -2764,39 +2764,41 @@ void main() {
   });
 
   group('a note about a listing opens its page', () {
-    Future<void> tapNote(WidgetTester tester, String kind, {bool noShoe = true, String status = 'published'}) async {
-      final listing = {
-        ...listingJson(media: [
-          {'original_url': 'https://cdn/a.jpg', 'processed_url': null, 'angle': 'front', 'no_shoe': noShoe},
-          {'original_url': 'https://cdn/b.jpg', 'processed_url': null, 'angle': 'outer'},
-        ]),
-        'status': status,
-      };
+    final twoPhotos = [
+      {'original_url': 'https://cdn/a.jpg', 'processed_url': null, 'angle': 'front', 'no_shoe': true},
+      {'original_url': 'https://cdn/b.jpg', 'processed_url': null, 'angle': 'outer'},
+    ];
+    Future<void> tapNote(WidgetTester tester, String kind,
+        {List<Map<String, dynamic>>? media,
+        Map<String, dynamic> extra = const {},
+        Size size = const Size(400, 800),
+        double textScale = 1}) async {
+      final listing = {...listingJson(media: media ?? twoPhotos), 'status': 'published', ...extra};
       final api = Api(
           base: 'http://x/api/v1',
-          client: MockClient((req) async {
-            return switch (req.url.path) {
-              '/api/v1/notifications' => jsonResponse({
-                  'unread': 1,
-                  'items': [
-                    {
-                      'id': 1,
-                      'kind': kind,
-                      'text': 'Хабарлама',
-                      'listing_id': 7,
-                      'read': false,
-                      'created_at': '2026-10-19T10:00:00Z'
-                    }
-                  ]
-                }),
-              '/api/v1/notifications/read-all' => jsonResponse({}),
-              '/api/v1/listings/7/proofs' => jsonResponse({'authenticity': 'unverified', 'note': null, 'proofs': []}),
-              _ => jsonResponse(listing),
-            };
-          }));
-      tester.view.physicalSize = const Size(400, 800);
+          client: MockClient((req) async => switch (req.url.path) {
+                '/api/v1/notifications' => jsonResponse({
+                    'unread': 1,
+                    'items': [
+                      {
+                        'id': 1,
+                        'kind': kind,
+                        'text': 'Хабарлама',
+                        'listing_id': 7,
+                        'read': false,
+                        'created_at': '2026-10-19T10:00:00Z'
+                      }
+                    ]
+                  }),
+                '/api/v1/notifications/read-all' => jsonResponse({}),
+                '/api/v1/listings/7/proofs' => jsonResponse({'authenticity': 'unverified', 'note': null, 'proofs': []}),
+                _ => jsonResponse(listing),
+              }));
+      tester.view.physicalSize = size;
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
+      tester.platformDispatcher.textScaleFactorTestValue = textScale;
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
       await tester
           .pumpWidget(SessionScope(session: Session(api), child: const MaterialApp(home: NotificationsScreen())));
       await tester.pumpAndSettle();
@@ -2807,27 +2809,52 @@ void main() {
 
     double offset(WidgetTester tester) => tester.widget<ListView>(find.byType(ListView).first).controller!.offset;
 
-    bool onScreen(WidgetTester tester, Finder f) {
+    /// Wholly inside the screen, under the app bar.
+    bool inView(WidgetTester tester, Finder f) {
       if (f.evaluate().isEmpty) return false;
-      final y = tester.getTopLeft(f).dy;
-      return y >= 0 && y < 800;
+      final r = tester.getRect(f);
+      final screen = tester.view.physicalSize;
+      return r.top >= 56 && r.bottom <= screen.height && r.left >= 0 && r.right <= screen.width;
     }
 
-    testWidgets('a tip about a photo with no shoe found opens the page on the photos', (tester) async {
-      await tapNote(tester, 'listing_tip');
+    testWidgets('the note about a photo with no shoe found opens the page on the photos', (tester) async {
+      await tapNote(tester, 'photo_no_shoe');
       expect(offset(tester), greaterThan(0));
-      expect(tester.getTopLeft(find.byType(ListingContentsCard)).dy, lessThan(200)); // as high as the page goes
-      expect(onScreen(tester, find.byKey(const Key('photos-no-shoe'))), isTrue);
-      expect(onScreen(tester, find.byKey(const Key('price'))), isFalse);
+      expect(inView(tester, find.byKey(const Key('no-shoe-0'))), isTrue);
+      expect(inView(tester, find.byKey(const Key('photos-no-shoe'))), isTrue);
+      expect(inView(tester, find.byKey(const Key('price'))), isFalse);
     });
 
-    testWidgets('a tip about something else opens the page from the top', (tester) async {
-      await tapNote(tester, 'listing_tip', noShoe: false);
+    testWidgets('a marked photo far along the strip is scrolled into view', (tester) async {
+      await tapNote(tester, 'photo_no_shoe', media: [
+        for (final (i, a) in ['front', 'outer', 'inner', 'back', 'sole', 'top', 'defect'].indexed)
+          {'original_url': 'https://cdn/$a.jpg', 'processed_url': null, 'angle': a, 'no_shoe': i == 5},
+      ]);
+      expect(inView(tester, find.byKey(const Key('no-shoe-5'))), isTrue);
+    });
+
+    testWidgets('with large text on a small phone the line about the photo is still in view', (tester) async {
+      await tapNote(tester, 'photo_no_shoe', extra: {'ever_on_sale': true}, size: const Size(360, 640), textScale: 2);
+      expect(tester.takeException(), isNull);
+      expect(inView(tester, find.byKey(const Key('photos-no-shoe'))), isTrue);
+    });
+
+    testWidgets('a 360° frame with no shoe found brings its own line into view', (tester) async {
+      await tapNote(tester, 'photo_no_shoe', size: const Size(360, 640), textScale: 1.5, media: [
+        for (final p in twoPhotos) {...p, 'no_shoe': false},
+        for (var i = 0; i < 8; i++)
+          {'original_url': 'https://cdn/f$i.jpg', 'processed_url': null, 'angle': 'frame', 'no_shoe': i == 3},
+      ]);
+      expect(inView(tester, find.byKey(const Key('spin-no-shoe'))), isTrue);
+    });
+
+    testWidgets('another tip opens the page from the top, even on a listing with a marked photo', (tester) async {
+      await tapNote(tester, 'listing_tip');
       expect(offset(tester), 0);
     });
 
     testWidgets('a hidden listing has no photos section, so its page opens from the top', (tester) async {
-      await tapNote(tester, 'listing_tip', status: 'hidden');
+      await tapNote(tester, 'photo_no_shoe', extra: {'status': 'hidden'});
       expect(offset(tester), 0);
     });
 
