@@ -4,7 +4,8 @@ the 360° frame that matches the cover and search-by-photo vectors.
     VITRINA_CUTOUT_MODEL=models/isnet-general-use.onnx VITRINA_SEARCH_MODEL=models/mobilenetv2-12.onnx \
         python3 scripts/cutout_backfill.py
 
-Uses the same database and storage settings as the API. Safe to run again: done photos are skipped.
+Uses the same database and storage settings as the API. Safe to run again, and meant to run on a schedule:
+only what is missing is done, and listings with nothing missing are not even read from the storage.
 
 A listing whose work fails, or logs an error on one of its photos, is counted as failed and the rest carry on;
 five failures in a row stop the run, as that is the database or the storage being down, not one listing. The
@@ -23,9 +24,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from sqlalchemy import select  # noqa: E402
 from sqlalchemy.exc import DBAPIError  # noqa: E402
+from sqlalchemy.orm import selectinload  # noqa: E402
 
 from vitrina_api import cutout, visual  # noqa: E402
-from vitrina_api.listing_routes import cutout_listing, embed_listing, thumb_listing  # noqa: E402
+from vitrina_api.listing_routes import cutout_listing, embed_listing, media_work, thumb_listing  # noqa: E402
 from vitrina_api.config import Settings  # noqa: E402
 from vitrina_api.models import Listing, ListingEmbedding, Media, make_session_factory  # noqa: E402
 from vitrina_api.storage import make_storage  # noqa: E402
@@ -62,13 +64,22 @@ def main(argv: list[str] | None = None) -> None:
                             sessions=make_session_factory(cfg.database_url, create_schema=False))
     with state.sessions() as db:
         uncut = select(Media.listing_id).where(Media.processed_url.is_(None) | Media.thumb_url.is_(None))
-        current = select(ListingEmbedding.listing_id).where(ListingEmbedding.model == visual.MODEL_NAME)
+        current = set(db.scalars(select(ListingEmbedding.listing_id)
+                                 .where(ListingEmbedding.model == visual.MODEL_NAME)))
         turning = select(Media.listing_id).where(Media.angle == "frame")
-        sided = select(Media.listing_id).where(Media.angle.in_(["outer", "front", "inner", "back"]))
-        unmatched = Listing.id.in_(turning) & (Listing.cover_frame.is_(None)
-                                               | Listing.angle_frames.is_(None) & Listing.id.in_(sided))
-        ids = db.scalars(select(Listing.id).where(Listing.id.in_(uncut) | Listing.id.not_in(current) | unmatched)
-                         .order_by(Listing.id)).all()
+        unshown = Listing.backdrop.is_(None) | Listing.id.in_(turning)
+        # Only listings with something to do, so a nightly run over listings that are done reads no photos: a
+        # label left as taken, or a photo the model found no shoe in, is not cut out again every night.
+        due: dict[int, list] = {}
+        for listing in db.scalars(select(Listing).options(selectinload(Listing.media))
+                                  .where(Listing.id.in_(uncut) | unshown | Listing.id.not_in(current))
+                                  .order_by(Listing.id)):
+            cut, thumbs = media_work(state, listing)
+            jobs = ([cutout_listing] if cut else []) + ([thumb_listing] if thumbs else []) \
+                + ([embed_listing] if embedder is not None and listing.id not in current else [])
+            if jobs:
+                due[listing.id] = jobs
+    ids = list(due)
     errors = _Errors()
     logging.getLogger().addHandler(errors)
     failed: list[int] = []
@@ -78,16 +89,21 @@ def main(argv: list[str] | None = None) -> None:
             logged = errors.count
             # Each job on its own, as after an upload: small copies and the search vector are still made when the
             # cut-outs fail, and the other way round. Any failure counts the listing as failed.
-            results, broke = [], []
+            results, broke = {}, []
+            jobs = due[lid]
             for job in (cutout_listing, thumb_listing, embed_listing):
+                if job not in jobs:
+                    continue
                 try:
-                    results.append(job(state, lid))
+                    results[job] = job(state, lid)
                 except Exception as e:
                     logging.getLogger(__name__).exception("listing %s: %s failed", lid, job.__name__)
-                    results.append(None)
                     broke.append(job.__name__)
                     if isinstance(e, DBAPIError):  # the database is away: the other jobs need it too
                         break
+                    continue
+                if job is cutout_listing and results[job]:  # new cut-outs want small copies and a new vector
+                    jobs += [thumb_listing] + ([embed_listing] if embedder is not None else [])
             if broke or errors.count > logged:
                 failed.append(lid)
                 in_a_row += 1
@@ -98,11 +114,11 @@ def main(argv: list[str] | None = None) -> None:
                           flush=True)
                     break
                 continue
-            cut, thumbs, embedded = results
             done += 1
             in_a_row = 0
-            print(f"listing {lid}: {cut} photos cut out, {thumbs} small copies, "
-                  f"search vector {'ok' if embedded else 'skipped'}", flush=True)
+            print(f"listing {lid}: {results.get(cutout_listing, 0)} photos cut out, "
+                  f"{results.get(thumb_listing, 0)} small copies, "
+                  f"search vector {'ok' if results.get(embed_listing) else 'skipped'}", flush=True)
     finally:
         logging.getLogger().removeHandler(errors)
     print(f"{done} of {len(ids)} listings done"

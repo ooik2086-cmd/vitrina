@@ -170,10 +170,11 @@ class CutoutApiTests(MediaTests):
         from scripts import cutout_backfill
         from vitrina_api.models import Media
         lid = self.post("/listings", self.seller, {**LISTING, "photos": self.four((120, 90, 60))}).json()["id"]
-        with self.app.state.sessions() as db:
+        with self.app.state.sessions() as db:  # from before the cut-outs and the small copies
             for m in db.query(Media).filter(Media.listing_id == lid):
-                m.thumb_url = None
+                m.processed_url = m.thumb_url = None
             db.commit()
+        self.with_segmenter()
         real = cutout_backfill.cutout_listing
 
         def broken(state, listing_id):
@@ -698,6 +699,7 @@ class CutoutApiTests(MediaTests):
             return embed_listing(state, lid)
         cutout_backfill.embed_listing = embed
         self.addCleanup(setattr, cutout_backfill, "embed_listing", embed_listing)
+        self.with_embedder()
         with self.assertLogs(level="ERROR"):
             code, out = self.backfill("--without-models", thumbs=thumbs)
         self.assertEqual(code, 1)
@@ -705,6 +707,48 @@ class CutoutApiTests(MediaTests):
         self.assertEqual(embedded, ids)  # the failed small copies did not keep the search vector from being made
         self.assertIsNone(self.mine(ids[0])["cover_frame"])
         self.assertIsNotNone(self.mine(ids[2])["cover_frame"])  # the next listing was still done
+
+    def with_embedder(self):
+        """The backfill gets a search model, as it would have with VITRINA_SEARCH_MODEL set."""
+        import numpy
+        from scripts import cutout_backfill
+        real = cutout_backfill.visual.load_embedder
+        cutout_backfill.visual.load_embedder = lambda path: (lambda data: numpy.ones(4, numpy.float32))
+        self.addCleanup(setattr, cutout_backfill.visual, "load_embedder", real)
+
+    def with_segmenter(self):
+        """The backfill gets the cut-out model the API has, as it would with VITRINA_CUTOUT_MODEL set."""
+        from scripts import cutout_backfill
+        real = cutout_backfill.cutout.load_segmenter
+        cutout_backfill.cutout.load_segmenter = lambda path: self.app.state.segmenter
+        self.addCleanup(setattr, cutout_backfill.cutout, "load_segmenter", real)
+
+    def test_a_backfill_over_listings_that_are_done_reads_no_photos(self):
+        from vitrina_api.models import Media
+        shades = [(20 + 25 * i,) * 3 for i in range(8)]
+        self.no_shoe_in(shades[2], (77, 77, 77))
+        label = self.upload(self.seller, solid((9, 9, 9))).json()["url"]
+        # A turn shown as taken, with a label left as taken; and photos all as taken: no backdrop, no cover frame.
+        uncut = [self.post("/listings", self.seller, {**LISTING, "photos": self.four(shades[5]) + self.frames(shades)
+                                                     + [{"url": label, "angle": "label"}]}).json()["id"],
+                 self.post("/listings", self.seller, {**LISTING, "photos": self.four((77, 77, 77))
+                                                      + self.frames(shades)}).json()["id"]]
+        self.with_embedder()
+        self.with_segmenter()
+        code, out = self.backfill()  # the first run makes what is missing: here the search vectors
+        self.assertEqual(code, 0, out)
+        self.assertIn("2 of 2 listings done", out)
+        storage, reads = self.app.state.storage, []
+        real_read = storage.read
+        storage.read = lambda url: reads.append(url) or real_read(url)
+        self.addCleanup(setattr, storage, "read", real_read)
+        code, out = self.backfill()
+        self.assertEqual((code, out.strip(), reads), (0, "0 of 0 listings done", []))
+        with self.app.state.sessions() as db:  # a photo missing its small copy is all a run then does
+            db.query(Media).filter(Media.listing_id == uncut[1], Media.angle == "front").update({"thumb_url": None})
+            db.commit()
+        code, out = self.backfill()
+        self.assertIn(f"listing {uncut[1]}: 0 photos cut out, 1 small copies, search vector skipped", out)
 
     def test_the_backfill_stops_when_everything_fails_and_wants_its_models(self):
         from scripts import cutout_backfill

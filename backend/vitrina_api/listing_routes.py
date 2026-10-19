@@ -60,6 +60,22 @@ def upload_photo(file: UploadFile = File(...), detail: bool = False, user: User 
 CUTOUT_ANGLES = {"front", "outer", "inner", "back", "top", "sole", "frame"}
 
 
+def cutout_parts(media: list) -> list[list]:
+    """The photos cut out together: each part of the 360° turn (see showcase_parts), and each other showcase photo
+    on its own."""
+    return showcase_parts(media) + [[m] for m in media if m.angle in CUTOUT_ANGLES and m.angle != "frame"]
+
+
+def can_cut(todo: list, model: str, storage: Storage) -> bool:
+    """False when a photo of these is known not to cut out: the model found no shoe in it, or it is not ours."""
+    return not any(m.no_cutout == model or not storage.owns(m.original_url) for m in todo)
+
+
+def cutout_model(segment) -> str:
+    """The name photos the model found no shoe in are marked with (Media.no_cutout)."""
+    return getattr(segment, "name", None) or "segmenter"
+
+
 def cutout_listing(state, listing_id: int) -> int:
     """Background job: add a transparent-background version of each showcase photo of one listing.
 
@@ -70,7 +86,7 @@ def cutout_listing(state, listing_id: int) -> int:
     segment, storage = state.segmenter, state.storage
     if segment is None:
         return 0
-    model = getattr(segment, "name", None) or "segmenter"
+    model = cutout_model(segment)
     with state.sessions() as db:
         listing = db.get(Listing, listing_id)
         if listing is None:
@@ -78,8 +94,7 @@ def cutout_listing(state, listing_id: int) -> int:
         # The photos as they were read: the seller may change them while the shoes are cut out, which takes a while.
         parts = [[SimpleNamespace(id=m.id, original_url=m.original_url, processed_url=m.processed_url,
                                   no_cutout=m.no_cutout, angle=m.angle) for m in part]
-                 for part in showcase_parts(listing.media)
-                 + [[m] for m in listing.media if m.angle in CUTOUT_ANGLES and m.angle != "frame"]]
+                 for part in cutout_parts(listing.media)]
         seller = listing.seller_id
         db.rollback()
     done = 0
@@ -89,7 +104,7 @@ def cutout_listing(state, listing_id: int) -> int:
             continue
         cuts: dict[int, str] = {}
         failed = None
-        if any(m.no_cutout == model or not storage.owns(m.original_url) for m in todo):
+        if not can_cut(todo, model, storage):
             failed = True  # known already: nothing to cut out again
         for m in todo if failed is None else ():
             try:
@@ -210,11 +225,9 @@ class TurnMatches:
     tried: bool  # some side photo was compared, found or not
 
 
-def match_turn_frames(storage: Storage, listing: Listing, made: dict[str, bytes] | None = None) -> TurnMatches | None:
-    """Finds the 360° frame that shows the shoe as the cover does, and the frame of one turn that shows each side
-    photographed, unless they are set for these photos and frames already (the seller's own cover frame stays).
-    Compares the small copies of the cut-outs, which are cheap to read and show the shoe's outline whatever the
-    room; made holds the copies this run has just made. Writes nothing: see put_turn_matches."""
+def _turn_match_due(storage: Storage, listing: Listing):
+    """What match_turn_frames has to look for: the frames, the cover and the side photos to match, and one turn;
+    None when there is nothing to match yet or any more."""
     frames = [m for m in listing.media if m.angle == "frame"]
 
     def cut(m) -> bool:  # not cut out (yet): a backdrop compared with a backdrop says nothing about the angle
@@ -230,6 +243,34 @@ def match_turn_frames(storage: Storage, listing: Listing, made: dict[str, bytes]
     turn, _ = one_turn(listing.media)
     if cover is None and (not sides or len(turn) < 8):
         return None
+    return frames, cover, sides, turn
+
+
+def media_work(state, listing: Listing) -> tuple[bool, bool]:
+    """Whether cutout_listing and thumb_listing have anything to do for the listing as it is: a photo to cut out
+    that has not been tried with this model, a small copy missing, or a 360° match to look for. The backfill
+    runs only those, so a run over listings that are done reads no photos."""
+    storage, segment = state.storage, state.segmenter
+    model = cutout_model(segment)
+    # A part with a photo known not to cut out has work only when it still holds cut-outs to drop.
+    cut = segment is not None and any(
+        (todo := [m for m in part if not m.processed_url]) and (can_cut(todo, model, storage) or len(todo) < len(part))
+        for part in cutout_parts(listing.media))
+    thumbs = (any(not m.thumb_url and storage.owns(m.processed_url or m.original_url) for m in listing.media)
+              or listing.backdrop is None and _first_shown(storage, listing) is not None
+              or _turn_match_due(storage, listing) is not None)
+    return cut, thumbs
+
+
+def match_turn_frames(storage: Storage, listing: Listing, made: dict[str, bytes] | None = None) -> TurnMatches | None:
+    """Finds the 360° frame that shows the shoe as the cover does, and the frame of one turn that shows each side
+    photographed, unless they are set for these photos and frames already (the seller's own cover frame stays).
+    Compares the small copies of the cut-outs, which are cheap to read and show the shoe's outline whatever the
+    room; made holds the copies this run has just made. Writes nothing: see put_turn_matches."""
+    due = _turn_match_due(storage, listing)
+    if due is None:
+        return None
+    frames, cover, sides, turn = due
     made = made or {}
 
     def read(url: str) -> bytes:
