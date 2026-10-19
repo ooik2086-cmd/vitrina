@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import unittest
+from pathlib import Path
 
 from PIL import Image, ImageDraw
 
@@ -484,6 +485,43 @@ class ShowcaseUnitTests(unittest.TestCase):
         self.assertEqual(thumb.size, (480, 360))
         r, g, b = thumb.convert("RGB").getpixel((240, 180))
         self.assertTrue(abs(r - 200) < 8 and abs(g - 30) < 8 and abs(b - 30) < 8, (r, g, b))
+
+
+DEMO = Path(__file__).resolve().parents[2] / "app" / "demo"
+
+
+@unittest.skipUnless((DEMO / "api.json").exists(), "the app is not next to the backend here")
+class RealPhotoSideTests(unittest.TestCase):
+    """The side matching on real photos: the demo's turntable shoes and camera scans, whose sides were checked by
+    eye on the phone (the toe faces the viewer at the front, the heel at the back)."""
+
+    CHECKED = {  # listing: side: frame of one turn
+        1: {"outer": 36, "front": 14, "inner": 20, "back": 26},  # a scan, the camera going round unevenly
+        2: {"outer": 0, "front": 9, "inner": 18, "back": 27},
+        3: {"outer": 36, "front": 14, "inner": 20, "back": 26},
+        4: {"outer": 35, "front": 9, "inner": 18, "back": 27},
+    }
+
+    def test_each_side_photo_finds_the_frame_seen_on_the_phone_and_the_sides_go_round_in_order(self):
+        from types import SimpleNamespace
+        from vitrina_api.cutout import side_frames
+        from vitrina_api.serializers import one_turn
+        answers = json.loads((DEMO / "api.json").read_text())
+
+        def read(url):
+            return (DEMO / "media" / url.split("/demo/media/")[1]).read_bytes()
+        for lid, checked in self.CHECKED.items():
+            with self.subTest(listing=lid):
+                media = [SimpleNamespace(**m) for m in answers[f"GET /listings/{lid}"]["media"]]
+                turn, _ = one_turn(media)
+                photos = {side: next(m for m in media if m.angle == side) for side in checked}
+                found = side_frames({side: read(m.thumb_url) for side, m in photos.items()},
+                                    [read(m.thumb_url) for m in turn])
+                self.assertEqual(found, checked)
+                # Outer, front, inner, back: one way round, each a stretch of the turn after the one before.
+                at = [found[side] for side in ("outer", "front", "inner", "back")]
+                steps = [(b - a) % len(turn) for a, b in zip(at, at[1:] + at[:1])]
+                self.assertEqual(sum(steps), len(turn), steps)
 
 
 @unittest.skipUnless(os.environ.get("VITRINA_TEST_POSTGRES"), "set VITRINA_TEST_POSTGRES to a Postgres URL")
