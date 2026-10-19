@@ -11,7 +11,7 @@ from __future__ import annotations
 import io
 import logging
 from pathlib import Path
-from typing import Callable, Protocol
+from typing import Protocol
 
 from PIL import Image, ImageChops, ImageDraw
 
@@ -77,7 +77,7 @@ class OnnxSegmenter:
         import onnxruntime as ort
 
         self._np = np
-        name = Path(model_path).name
+        self.name = name = Path(model_path).name  # photos it found no shoe in are not tried again with it
         self.size, mean, std = self.PRESETS["isnet" if name.startswith("isnet") else "u2net"]
         self._mean, self._std = np.array(mean, np.float32), np.array(std, np.float32)
         opts = ort.SessionOptions()
@@ -247,22 +247,3 @@ def backdrop_for(cutout_bytes: bytes) -> str | None:
         if seen * 2 >= count:
             return "light" if level / 255 < DARK_SHOE else "dark"
     return None
-
-
-def process_listing_media(media: list, read: Callable[[str], bytes], save: Callable[[object, bytes], None],
-                          segment: Segmenter) -> int:
-    """Cut out each photo that has no cut-out yet; save(photo, cut_out) keeps each one as soon as it is made.
-    Returns how many were cut out."""
-    done = 0
-    for m in media:
-        if m.processed_url:
-            continue
-        try:
-            result = process_photo(read(m.original_url), segment)
-        except Exception:
-            log.exception("cutout failed for %s", m.original_url)
-            continue
-        if result is not None:
-            save(m, result)
-            done += 1
-    return done

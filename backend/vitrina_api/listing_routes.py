@@ -32,7 +32,7 @@ from .storage import DETAIL_SIDE_PX, MAX_SIDE_PX, MAX_UPLOAD_BYTES, Storage, nor
 from .api_common import ALMATY, DEFECT_REQUIRED, MAX_LISTING_MEDIA, MAX_LISTING_SIZES, MIN_SPIN_FRAMES, log
 from .schemas import ListingIn, ListingPatch, PhotoIn, ReportIn
 from .serializers import (angle_frames, cm_to_mm, cover_frame, cover_photo, listing_out, mark_price_change, one_turn,
-                          photo_snapshot, side_photo, was_price)
+                          photo_snapshot, showcase_parts, side_photo, was_price)
 from .saved_search_routes import announce
 
 
@@ -61,43 +61,88 @@ CUTOUT_ANGLES = {"front", "outer", "inner", "back", "top", "sole", "frame"}
 
 
 def cutout_listing(state, listing_id: int) -> int:
-    """Background job: add a transparent-background version of each showcase photo of one listing."""
+    """Background job: add a transparent-background version of each showcase photo of one listing.
+
+    A part of the 360° turn (see showcase_parts) shows its cut-outs only when every frame of it has one, and
+    otherwise the photos as taken, whose small copies must then be of those photos. So its frames are kept cut out
+    all together or not at all: a part with a frame that cannot be cut out keeps the photos as taken, and the
+    frame is marked so that later runs (the backfill) do not cut the whole part out again only to throw it away."""
     segment, storage = state.segmenter, state.storage
     if segment is None:
         return 0
+    model = getattr(segment, "name", None) or "segmenter"
     with state.sessions() as db:
         listing = db.get(Listing, listing_id)
         if listing is None:
             return 0
         # The photos as they were read: the seller may change them while the shoes are cut out, which takes a while.
-        media = [SimpleNamespace(id=m.id, original_url=m.original_url, processed_url=m.processed_url)
-                 for m in listing.media if m.angle in CUTOUT_ANGLES and storage.owns(m.original_url)]
+        parts = [[SimpleNamespace(id=m.id, original_url=m.original_url, processed_url=m.processed_url,
+                                  no_cutout=m.no_cutout, angle=m.angle) for m in part]
+                 for part in showcase_parts(listing.media)
+                 + [[m] for m in listing.media if m.angle in CUTOUT_ANGLES and m.angle != "frame"]]
         seller = listing.seller_id
         db.rollback()
+    done = 0
+    for part in parts:
+        todo = [m for m in part if not m.processed_url]
+        if not todo:
+            continue
+        cuts: dict[int, str] = {}
+        failed = None
+        if any(m.no_cutout == model or not storage.owns(m.original_url) for m in todo):
+            failed = True  # known already: nothing to cut out again
+        for m in todo if failed is None else ():
+            try:
+                result = cutout.process_photo(storage.read(m.original_url), segment)
+            except Exception:  # may work next time: the storage was away, say
+                log.exception("cutout failed for %s", m.original_url)
+                failed = True
+                break
+            if result is None:  # the model finds no shoe in it, and would not next time either
+                failed = m
+                break
+            cuts[m.id] = storage.put(result, owner_id=seller, ext="webp")
+        with state.sessions() as db:
+            done += _settle_cutouts(db, listing_id, part, {} if failed else cuts,
+                                    failed.id if isinstance(failed, SimpleNamespace) else None, model)
+    return done
 
-        def save(m, data: bytes) -> None:
-            # One photo at a time, kept at once. A photo deleted meanwhile matches no row; its small copy is made
-            # again from the cut-out, even one another job has just made from the photo as taken.
-            db.execute(update(Media).where(Media.id == m.id, Media.original_url == m.original_url)
-                       .values(processed_url=storage.put(data, owner_id=seller, ext="webp"), thumb_url=None))
-            db.commit()
-        done = cutout.process_listing_media(media, storage.read, save, segment)
-        # The 360° turn shows its cut-outs only when every frame has one (ShowcasePlan in the app, turn_shots on the
-        # shared page); otherwise the photos as taken, whose small copies must be of those photos. So when some
-        # frames could not be cut out, the others' cut-outs are dropped and their small copies made again from the
-        # photos as taken: else the app fetched each of those frames at full size. The next run (the backfill)
-        # tries the whole turn again.
-        frames = db.execute(select(Media.id, Media.processed_url)
-                            .where(Media.listing_id == listing_id, Media.angle == "frame")).all()
-        if any(url for _, url in frames) and not all(url for _, url in frames):
-            for mid, url in frames:
-                if url:  # only onto the cut-out as read: a newer one landing meanwhile is not touched
-                    db.execute(update(Media).where(Media.id == mid, Media.processed_url == url)
-                               .values(processed_url=None, thumb_url=None))
-            db.commit()
-            log.info("listing %s: %d of %d frames not cut out; its turn shows the photos as taken", listing_id,
-                     sum(not url for _, url in frames), len(frames))
-        return done
+
+def _settle_cutouts(db: Session, listing_id: int, part: list, cuts: dict[int, str], no_shoe: int | None,
+                    model: str) -> int:
+    """Writes one part's cut-outs once the listing is locked (see lock_fresh), only onto its photos as they are
+    now: when the seller changed a part of the turn meanwhile, the job for the new photos decides it. Leaves no
+    part of the turn with some frames cut out and some not. Returns how many cut-outs were kept."""
+    db.execute(select(Listing.id).where(Listing.id == listing_id).with_for_update())
+    listing = db.get(Listing, listing_id)
+    if listing is None:
+        return 0
+    read = {m.id: m.original_url for m in part}
+    if part[0].angle == "frame":
+        now = next((p for p in showcase_parts(listing.media) if [m.id for m in p] == list(read)), None)
+    else:
+        now = [m for m in listing.media if m.id in read]
+    if not now or any(m.original_url != read[m.id] for m in now):
+        db.rollback()
+        return 0
+    kept = 0
+    for m in now:
+        if m.id == no_shoe:
+            m.no_cutout = model
+        if m.id in cuts and not m.processed_url:
+            m.processed_url, m.thumb_url, m.no_cutout = cuts[m.id], None, None
+            kept += 1
+    if part[0].angle == "frame" and any(m.processed_url for m in now) and not all(m.processed_url for m in now):
+        # Cut out on an earlier run, or by another job, while another frame is not: the photos as taken, with new
+        # small copies of them to match. Dropped cut-outs go with the orphans sweep.
+        log.info("listing %s: %d of %d frames of a part of its turn not cut out; it shows the photos as taken",
+                 listing_id, sum(not m.processed_url for m in now), len(now))
+        for m in now:
+            if m.processed_url:
+                m.processed_url, m.thumb_url = None, None
+        kept = 0
+    db.commit()
+    return kept
 
 
 def embed_listing(state, listing_id: int) -> bool:

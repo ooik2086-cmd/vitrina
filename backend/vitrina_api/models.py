@@ -134,6 +134,8 @@ class Media(Base):
     angle: Mapped[str] = mapped_column(String(20))  # front|outer|inner|back|top|sole|detail|label|defect|frame
     position: Mapped[int] = mapped_column(Integer, default=0)
     phash: Mapped[str | None] = mapped_column(String(16), index=True)  # difference hash, for reused photos
+    # The cut-out model that found no shoe in this photo: it is not tried again until the model changes.
+    no_cutout: Mapped[str | None] = mapped_column(String(100))
 
 
 class Favorite(Base):

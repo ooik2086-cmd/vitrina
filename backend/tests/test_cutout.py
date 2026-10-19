@@ -187,31 +187,122 @@ class CutoutApiTests(MediaTests):
         self.assertIn(f"listing {lid}: failed in cutout_listing", out)
         self.assertTrue(all(m["thumb_url"] for m in self.mine(lid)["media"]))
 
-    def test_a_turn_with_a_frame_that_cannot_be_cut_out_is_kept_as_taken_with_small_copies_to_match(self):
-        shades = [(20 + 25 * i,) * 3 for i in range(8)]
+    def no_shoe_in(self, *shades):
+        """A segmenter that finds no shoe in the frames of these shades (as a real model may), and counts its calls."""
+        calls = []
 
-        def segment(img):  # the fourth frame cannot be cut out (a real model may find no shoe in it)
-            if img.convert("RGB").getpixel((0, 0)) == shades[3]:
-                raise RuntimeError("no shoe found")
+        def segment(img):
+            calls.append(img.convert("RGB").getpixel((0, 0)))
+            if calls[-1] in shades:
+                return Image.new("L", img.size, 0)
             return center_segmenter(img)
         self.app.state.segmenter = segment
-        with self.assertLogs("vitrina", level="INFO") as logs:
-            lid = self.post("/listings", self.seller, {**LISTING, "photos": self.four((200, 40, 40))
-                                                       + self.frames(shades)}).json()["id"]
-        self.assertIn("1 of 8 frames not cut out", "\n".join(logs.output))
-        media = self.mine(lid)["media"]
-        frames = [m for m in media if m["angle"] == "frame"]
-        # The turn is shown as taken (as the app and the shared page would anyway), now with small copies of those
-        # photos to turn through; the side photos keep their cut-outs.
-        self.assertTrue(all(m["processed_url"] is None and m["thumb_url"] for m in frames), frames)
+        return calls
+
+    def stored(self):
+        return sum(len(files) for _, _, files in os.walk(self.cfg.media_dir))
+
+    def test_a_turn_with_a_frame_that_cannot_be_cut_out_is_kept_as_taken_with_small_copies_to_match(self):
+        from vitrina_api.listing_routes import cutout_listing, thumb_listing
         from vitrina_api.models import Listing
         from vitrina_api.share import turn_shots
+        shades = [(20 + 25 * i,) * 3 for i in range(8)]
+        calls = self.no_shoe_in(shades[3])
+        lid = self.post("/listings", self.seller, {**LISTING, "photos": self.four((200, 40, 40))
+                                                   + self.frames(shades)}).json()["id"]
+        self.assertEqual(calls.count(shades[3]), 1)
+        self.assertNotIn(shades[4], calls)  # the turn is given up at its first frame with no shoe
+        media = self.mine(lid)["media"]
+        frames = [m for m in media if m["angle"] == "frame"]
+        # The turn is shown as taken (as the app and the shared page would anyway), with small copies of those
+        # photos to turn through; the side photos keep their cut-outs.
+        self.assertTrue(all(m["processed_url"] is None and m["thumb_url"] for m in frames), frames)
         with self.app.state.sessions() as db:
             row = db.get(Listing, lid)
             shots, cut = turn_shots(row, row.media)
         self.assertFalse(cut)
         self.assertTrue(all(small != full for small, full in shots))  # light: small copies, not full photos
         self.assertTrue(all(m["processed_url"] for m in media if m["angle"] in ("front", "outer", "inner", "back")))
+        # Later runs (the backfill) know the turn cannot be cut out: no model time, no files thrown away.
+        calls.clear()
+        files = self.stored()
+        self.assertEqual((cutout_listing(self.app.state, lid), thumb_listing(self.app.state, lid)), (0, 0))
+        self.assertEqual((calls, self.stored()), ([], files))
+
+    def test_a_scan_keeps_the_cut_outs_of_the_parts_whose_frames_were_all_cut_out(self):
+        from vitrina_api.models import Listing
+        from vitrina_api.share import turn_shots
+        shades = [(20 + 18 * i,) * 3 for i in range(12)]
+        self.no_shoe_in(shades[10])  # straight under the sole
+        frames = self.frames(shades)
+        stops = [{"url": frames[8]["url"], "angle": "top"}, {"url": frames[10]["url"], "angle": "sole"}]
+        lid = self.post("/listings", self.seller, {**LISTING, "photos": self.four((200, 40, 40)) + frames + stops}
+                        ).json()["id"]
+        media = [m for m in self.mine(lid)["media"] if m["angle"] == "frame"]
+        self.assertTrue(all(m["processed_url"] for m in media[:10]), media)  # the turn and the top
+        self.assertTrue(all(m["processed_url"] is None and m["thumb_url"] for m in media[10:]), media)  # the sole
+        with self.app.state.sessions() as db:
+            row = db.get(Listing, lid)
+            self.assertTrue(turn_shots(row, row.media)[1])
+
+    def test_a_turn_that_failed_for_a_while_is_cut_out_on_the_next_run(self):
+        from vitrina_api.listing_routes import cutout_listing
+        shades = [(20 + 25 * i,) * 3 for i in range(8)]
+        away = []
+
+        def segment(img):  # the storage or the model fails once, half way round
+            if img.convert("RGB").getpixel((0, 0)) == shades[3] and not away:
+                away.append(1)
+                raise RuntimeError("away")
+            return center_segmenter(img)
+        self.app.state.segmenter = segment
+        with self.assertLogs("vitrina", level="ERROR"):
+            lid = self.post("/listings", self.seller, {**LISTING, "photos": self.frames(shades)}).json()["id"]
+        self.assertTrue(all(m["processed_url"] is None for m in self.mine(lid)["media"]))
+        self.assertEqual(cutout_listing(self.app.state, lid), 8)
+        self.assertTrue(all(m["processed_url"] for m in self.mine(lid)["media"]))
+
+    def test_a_turn_left_half_cut_out_is_shown_as_taken(self):
+        from vitrina_api.listing_routes import cutout_listing
+        from sqlalchemy import select
+        from vitrina_api.models import Media
+        shades = [(20 + 25 * i,) * 3 for i in range(8)]
+        lid = self.post("/listings", self.seller, {**LISTING, "photos": self.frames(shades)}).json()["id"]
+        with self.app.state.sessions() as db:  # cut out by an older version, but for one frame
+            row = db.scalars(select(Media).where(Media.listing_id == lid).order_by(Media.position)).all()[3]
+            row.processed_url, row.no_cutout = None, "segmenter"
+            db.commit()
+        with self.assertLogs("vitrina", level="INFO") as logs:
+            self.assertEqual(cutout_listing(self.app.state, lid), 0)
+        self.assertIn("1 of 8 frames", "\n".join(logs.output))
+        self.assertTrue(all(m["processed_url"] is None for m in self.mine(lid)["media"]))
+
+    def test_a_turn_the_seller_changes_meanwhile_is_left_to_the_job_for_the_new_photos(self):
+        from vitrina_api import cutout
+        from vitrina_api.listing_routes import cutout_listing
+        from vitrina_api.models import Listing, Media
+        shades = [(20 + 25 * i,) * 3 for i in range(8)]
+        self.app.state.segmenter = None
+        lid = self.post("/listings", self.seller, {**LISTING, "photos": self.frames(shades)}).json()["id"]
+        self.app.state.segmenter = center_segmenter
+        real = cutout.process_photo
+
+        def meanwhile(*args):  # the seller adds a frame while this job cuts the turn out
+            cutout.process_photo = real
+            with self.app.state.sessions() as db:
+                url = self.frames(shades[:1])[0]["url"]
+                row = db.get(Listing, lid)
+                row.media.append(Media(original_url=url, angle="frame", position=9))
+                db.commit()
+            return real(*args)
+        cutout.process_photo = meanwhile
+        try:
+            with self.assertNoLogs("vitrina", level="ERROR"):
+                self.assertEqual(cutout_listing(self.app.state, lid), 0)
+        finally:
+            cutout.process_photo = real
+        self.assertTrue(all(m["processed_url"] is None for m in self.mine(lid)["media"]))
+        self.assertEqual(cutout_listing(self.app.state, lid), 9)  # what the job for the new photos does
 
     def test_without_a_model_photos_stay_original(self):
         self.app.state.segmenter = None

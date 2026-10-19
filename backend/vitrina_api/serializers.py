@@ -184,16 +184,24 @@ def cover_frame(listing: Listing) -> str | None:
     return listing.cover_frame
 
 
-def one_turn(media: list) -> tuple[list, bool]:
-    """The frames of one 360° turn as the app shows it (ShowcasePlan.of), in the order taken, and whether they
-    are a scan: a scan carries on over the top and under the sole after its turn, its stop photos being frames
-    at increasing places. One turn ends where its first frame comes round again."""
+def showcase_parts(media: list) -> list[list]:
+    """The frames as the app splits them into showcase steps (ShowcasePlan.of), in the order taken: a scan's
+    turn, then each stop's own frames; otherwise all of them, one turn. Each part shows its cut-outs only when
+    every frame of it has one. A scan carries on over the top and under the sole after its turn, its stop photos
+    being frames at increasing places."""
     frames = [m for m in media if m.angle == "frame"]
     at = [next((i for i, f in enumerate(frames) if f.original_url == m.original_url), -1)
           for m in (next((m for m in media if m.angle == angle), None) for angle in ("top", "sole", "detail")) if m]
-    scan = bool(frames) and bool(at) and at[0] > 0 and all(b > a for a, b in zip(at, at[1:]))
-    if scan:
-        frames = frames[:at[0]]
+    if frames and at and at[0] > 0 and all(b > a for a, b in zip(at, at[1:])):
+        return [frames[a:b] for a, b in zip([0, *at], [*at, len(frames)])]
+    return [frames] if frames else []
+
+
+def one_turn(media: list) -> tuple[list, bool]:
+    """The frames of one 360° turn as the app shows it, in the order taken, and whether they are a scan (see
+    showcase_parts). One turn ends where its first frame comes round again."""
+    parts = showcase_parts(media)
+    frames, scan = (parts[0] if parts else []), len(parts) > 1
     return next((frames[:k] for k in range(1, len(frames)) if frames[k].original_url == frames[0].original_url),
                 frames), scan
 
