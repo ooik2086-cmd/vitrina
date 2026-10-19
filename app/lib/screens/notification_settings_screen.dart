@@ -61,8 +61,8 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
         if (!mounted) return;
         if (_wanted[kind] == wish) {
           _wanted.remove(kind);
-          // Other switches still saving keep what was asked of them.
-          setState(() => _on = {...saved, ..._wanted});
+          // Only this switch is taken from the answer: another switch's answer may already be newer than this one.
+          setState(() => _on = {..._on!, kind: confirmed});
           return;
         }
       }

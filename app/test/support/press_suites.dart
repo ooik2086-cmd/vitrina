@@ -43,30 +43,21 @@ Future<List<String>> pressAll(WidgetTester tester, Widget Function() screen, {Wi
       }
     });
 
-const _changes = {'POST', 'PUT', 'PATCH', 'DELETE'};
-
 Future<List<String>> pressTwice(WidgetTester tester, Widget Function() screen, {Widget? sheet}) =>
     forEveryPress(tester, screen, sheet, (label, line, popups, at, errors) async {
       final slow = Completer<void>();
       line.slow = slow.future;
-      final from = line.asked.length;
+      final from = line.overlaps.length;
       await tester.tapAt(at);
       await tester.pump(const Duration(milliseconds: 150));
       await tester.tapAt(at);
       await tester.pump(const Duration(milliseconds: 150));
-      final waiting = line.asked.length;
       slow.complete();
       line.slow = null;
       await settle(tester);
-      // A change asked again before the first is answered is done twice, or answered out of order, unless both carry
-      // the same key, which the server answers once. Asked again after the answer, it is a person's next wish.
-      final changes = line.asked.sublist(from, waiting).where((r) => _changes.contains(r.$1.split(' ').first)).toList();
-      final once = <String>{};
-      for (final (what, key) in changes) {
-        if (!once.add('$what $key') || (key == null && changes.where((c) => c.$1 == what).length > 1)) {
-          errors.add('"$label": sent twice ($what)');
-          break;
-        }
+      // Till everything settles: a change can follow a read the slow line held.
+      if (line.overlaps.length > from) {
+        errors.add('"$label": sent twice (${line.overlaps.skip(from).toSet().join(', ')})');
       }
       if (popups.opened > 1) errors.add('"$label": opened twice (${popups.opened} dialogs or sheets)');
       if (popups.pages > 1) errors.add('"$label": opened twice (${popups.pages} pages)');

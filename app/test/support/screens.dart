@@ -135,6 +135,11 @@ class Line extends http.BaseClient {
   /// Every request asked, in order, with the key that makes asking again safe, if it has one.
   final asked = <(String, String?)>[];
 
+  /// Changes asked again while the same change was still on its way, not under the same key: done twice by the
+  /// server, or answered out of order. A change asked again after its answer is a person's next wish.
+  final overlaps = <String>[];
+  final _onTheWay = <(String, String?)>[];
+
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
     final what = '${request.method} ${request.url.path.replaceFirst(RegExp(r'^.*/api/v1'), '')}';
@@ -144,8 +149,18 @@ class Line extends http.BaseClient {
       throw http.ClientException('offline', request.url);
     }
     served.add(what);
-    if (slow case final wait?) await wait;
-    return _inner.send(request);
+    final key = request.headers['Idempotency-Key'];
+    final change = !const {'GET', 'HEAD'}.contains(request.method);
+    if (change) {
+      if (_onTheWay.any((o) => o.$1 == what && (key == null || o.$2 != key))) overlaps.add(what);
+      _onTheWay.add((what, key));
+    }
+    try {
+      if (slow case final wait?) await wait;
+      return await _inner.send(request);
+    } finally {
+      if (change) _onTheWay.remove((what, key));
+    }
   }
 }
 

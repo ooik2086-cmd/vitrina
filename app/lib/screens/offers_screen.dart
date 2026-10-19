@@ -255,9 +255,10 @@ class _OffersScreenState extends State<OffersScreen> {
     _items = shown(SessionScope.of(context).api.offers(role: _seller ? 'seller' : 'buyer'));
   }
 
-  /// One answer at a time: the offers move once it is given.
-  Future<void> _run(Future<Offer> Function(Api api) action, String done) =>
-      once((this, #answer), () => _runNow(action, done));
+  /// One answer at a time to each offer, the same key its card on the listing page uses: a second tap on the same
+  /// offer is let go, an answer to another offer is not.
+  Future<void> _run(int offerId, Future<Offer> Function(Api api) action, String done) =>
+      once(('offer', offerId), () => _runNow(action, done));
 
   Future<void> _runNow(Future<Offer> Function(Api api) action, String done) async {
     try {
@@ -273,7 +274,7 @@ class _OffersScreenState extends State<OffersScreen> {
   Future<void> _counter(Offer o) async {
     final tenge = await showDialog<int>(context: context, builder: (_) => _CounterDialog(offer: o));
     if (tenge == null) return;
-    await _run((api) => api.counterOffer(o.id, tenge * 100), tr('Бағаңыз жіберілді'));
+    await _run(o.id, (api) => api.counterOffer(o.id, tenge * 100), tr('Бағаңыз жіберілді'));
   }
 
   @override
@@ -335,8 +336,10 @@ class _OffersScreenState extends State<OffersScreen> {
                   itemBuilder: (context, i) => _OfferTile(
                     offer: items[i],
                     seller: _seller,
-                    onAccept: () => _run((api) => api.answerOffer(items[i].id, 'accept'), tr('Ұсыныс қабылданды')),
-                    onDecline: () => _run((api) => api.answerOffer(items[i].id, 'decline'), tr('Ұсыныс қабылданбады')),
+                    onAccept: () =>
+                        _run(items[i].id, (api) => api.answerOffer(items[i].id, 'accept'), tr('Ұсыныс қабылданды')),
+                    onDecline: () =>
+                        _run(items[i].id, (api) => api.answerOffer(items[i].id, 'decline'), tr('Ұсыныс қабылданбады')),
                     onCounter: () => _counter(items[i]),
                   ),
                 ),

@@ -232,7 +232,10 @@ class _ListingScreenState extends State<ListingScreen> {
         }
       });
 
-  Future<void> _order(Listing listing) async {
+  /// Once at a time: a second tap while the agreed price or sign-in is awaited would open a second order sheet.
+  Future<void> _order(Listing listing) => once((this, #order), () => _orderNow(listing));
+
+  Future<void> _orderNow(Listing listing) async {
     if (!await _ensureSignedIn() || !mounted) return;
     // Whether the buyer has an agreed price is known first.
     if (_offerError != null) {
@@ -286,7 +289,9 @@ class _ListingScreenState extends State<ListingScreen> {
         }
       });
 
-  Future<void> _report(Listing listing) async {
+  Future<void> _report(Listing listing) => once((this, #report), () => _reportNow(listing));
+
+  Future<void> _reportNow(Listing listing) async {
     if (!await _ensureSignedIn() || !mounted) return;
     final sent = await showModalBottomSheet<bool>(
       context: context,
