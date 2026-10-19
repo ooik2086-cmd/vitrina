@@ -19,7 +19,14 @@ const RECORD = () => {
   const src = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src');
   Object.defineProperty(HTMLImageElement.prototype, 'src', {
     get() { return src.get.call(this); },
-    set(v) { if (this.id === 'shot') window.__shown.push(v); src.set.call(this, v); },
+    set(v) {
+      if (this.id === 'shot') {
+        // The photo the page opened on, kept before the turn changes it: a slow machine may look only after.
+        if (window.__first === undefined) window.__first = this.getAttribute('src');
+        window.__shown.push(v);
+      }
+      src.set.call(this, v);
+    },
   });
 };
 
@@ -56,7 +63,7 @@ async function run(browser, c, mode) {
   const now = () => page.$eval('#stage', s => +s.getAttribute('aria-valuenow'));
   const shown = () => page.evaluate(() => window.__shown.slice());
   const box = await (await page.$('#stage')).boundingBox();
-  seen.first = await src();
+  seen.first = await page.evaluate(() => window.__first ?? document.getElementById('shot').getAttribute('src'));
   seen.stage = { width: box.width, height: box.height };
   seen.hint = await page.$eval('.hint', h => h.textContent);
   if (mode === 'touch') {
