@@ -77,13 +77,37 @@ class TurnTogether extends ChangeNotifier {
   double? _at;
   double? get at => _at;
 
-  /// Turns every shoe to show [side] (a shared angle; see [TurnMap.sides]), or their covers when null.
-  void showSide(double? side) => _set(side);
+  /// The side last picked by name (a key of [TurnMap.sides]), [cover], or null once a drag has turned the shoes
+  /// somewhere between.
+  final picked = ValueNotifier<String?>(cover);
+  static const cover = 'cover';
+
+  /// Whether the shoes are on a side picked by name, which only a turn with known sides can show for sure.
+  bool get named => picked.value != null && picked.value != cover;
+
+  /// Turns every shoe to show [side] (a key of [TurnMap.sides]), or their covers when null.
+  void showSide(String? side) {
+    assert(side == null || TurnMap.sides.containsKey(side), side);
+    picked.value = side ?? cover;
+    _at = side == null ? null : TurnMap.sides[side];
+    notifyListeners(); // even at the same angle: shoes with unknown sides go back to their covers
+  }
+
+  void _drag(double? at) {
+    picked.value = at == null ? cover : null;
+    _set(at);
+  }
 
   void _set(double? at) {
     if (_at == at) return;
     _at = at;
     notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    picked.dispose();
+    super.dispose();
   }
 }
 
@@ -196,7 +220,7 @@ class _CardTurnState extends State<CardTurn> with SingleTickerProviderStateMixin
   void _put(double? at) {
     final together = widget.together;
     if (together != null && _frames.isNotEmpty) {
-      together._set(at == null ? null : _map.angle(at / _frames.length));
+      together._drag(at == null ? null : _map.angle(at / _frames.length));
     } else {
       _show(at);
     }
@@ -220,9 +244,13 @@ class _CardTurnState extends State<CardTurn> with SingleTickerProviderStateMixin
   void _follow() {
     final together = widget.together!;
     if (!mounted || _frames.isEmpty) return;
-    final at = together.at;
+    // A side picked by name is only shown where the sides are known; a guess could put the heel under "front".
+    final at = together.named && !_map.sided ? null : together.at;
     if (at != null && _at == null) _fetchMore();
-    _show(at == null ? null : (_map.place(at) * _frames.length) % _frames.length);
+    final place = at == null ? null : (_map.place(at) * _frames.length) % _frames.length;
+    // A tapped side can be the far side of the turn, which the fetching outward from the start reaches last.
+    if (place != null && together.named) precacheImage(_image(_frames[_nearest(place)]), context, onError: (_, __) {});
+    _show(place);
   }
 
   /// The same feel as the listing page: one and a half card widths turn the shoe once round.

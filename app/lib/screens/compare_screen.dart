@@ -7,7 +7,6 @@ import '../labels.dart';
 import '../my_size.dart';
 import '../theme.dart';
 import '../widgets/card_turn.dart';
-import '../widgets/scroll_showcase.dart' show TurnMap;
 import '../widgets/common.dart';
 import '../widgets/studio.dart';
 import 'listing_screen.dart';
@@ -50,6 +49,10 @@ class _CompareScreenState extends State<CompareScreen> {
     super.dispose();
   }
 
+  List<Listing> get _shown => [
+        for (final id in _picked) ...widget.items.where((l) => l.id == id),
+      ];
+
   void _toggle(Listing l) {
     setState(() {
       if (_picked.contains(l.id)) {
@@ -61,14 +64,17 @@ class _CompareScreenState extends State<CompareScreen> {
             SnackBar(content: Text(trf('Бір уақытта ең көбі {0} тауарды салыстыруға болады.', [maxCompared]))));
       }
     });
+    // Without the controls to bring them back, the shoes left go back to their covers.
+    final shown = _shown;
+    if (_Table.turning(shown).length < 2 || _together.named && _Table.sided(shown).length < 2) {
+      _together.showSide(null);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final shown = [
-      for (final id in _picked) ...widget.items.where((l) => l.id == id),
-    ];
+    final shown = _shown;
     return Scaffold(
       appBar: AppBar(title: Text(tr('Салыстыру'))),
       body: ListView(padding: contentPadding(context, const EdgeInsets.fromLTRB(16, 4, 16, 32)), children: [
@@ -145,16 +151,23 @@ class _Table extends StatelessWidget {
   final List<Listing> items;
   final TurnTogether together;
 
+  /// The shoes that turn together.
+  static Iterable<Listing> turning(List<Listing> items) => items.where((l) => CardTurn.framesOf(l).isNotEmpty);
+
+  /// Those whose sides are known, which the side chips can name.
+  static Iterable<Listing> sided(List<Listing> items) => turning(items).where((l) => CardTurn.mapOf(l).sided);
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final cheapest = cheapestIds(items);
+    final turn = turning(items).length > 1;
     final strong = weight(theme.textTheme.bodyMedium!, 700);
     return ValueListenableBuilder<String?>(
       valueListenable: mySize,
       builder: (context, size, _) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         _Row(items: items, cell: (l) => _Head(listing: l, together: together)),
-        if (items.where((l) => CardTurn.framesOf(l).isNotEmpty).length > 1)
+        if (turn)
           // The turn is a gesture only; screen readers compare on the listing pages.
           ExcludeSemantics(
             child: Padding(
@@ -164,7 +177,7 @@ class _Table extends StatelessWidget {
                   style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
             ),
           ),
-        if (items.where((l) => CardTurn.framesOf(l).isNotEmpty).length > 1) _Sides(together: together),
+        if (turn && sided(items).length > 1) _Sides(together: together),
         _Row(
           label: tr('Барлығы, жеткізумен'),
           items: items,
@@ -238,34 +251,38 @@ class _Table extends StatelessWidget {
   }
 }
 
-/// One tap shows every compared shoe from the same side, for those who would rather not drag (and for screen
-/// readers, which cannot): the sides as the listing editor names them, then the covers again.
+/// One tap shows every compared shoe whose sides are known from the same side, for those who would rather not
+/// drag: the main photos, then the sides as the listing editor names them. Like the turn, a picture only, so
+/// screen readers compare on the listing pages.
 class _Sides extends StatelessWidget {
   const _Sides({required this.together});
   final TurnTogether together;
 
-  static const _names = {'outer': 'Сырт бүйірі', 'front': 'Алдынан', 'inner': 'Ішкі бүйірі', 'back': 'Өкшесі'};
+  static const _names = {
+    TurnTogether.cover: 'Негізгі фото',
+    'outer': 'Сырт бүйірі',
+    'front': 'Алдынан',
+    'inner': 'Ішкі бүйірі',
+    'back': 'Өкшесі',
+  };
 
   @override
-  Widget build(BuildContext context) => ListenableBuilder(
-        listenable: together,
-        builder: (context, _) => Padding(
-          padding: const EdgeInsets.only(bottom: 8),
-          child: Wrap(spacing: 8, runSpacing: 4, children: [
-            for (final MapEntry(key: side, value: name) in _names.entries)
-              ChoiceChip(
-                key: Key('compare-side-$side'),
-                label: Text(tr(name)),
-                selected: together.at == TurnMap.sides[side],
-                onSelected: (_) => together.showSide(TurnMap.sides[side]),
-              ),
-            ChoiceChip(
-              key: const Key('compare-side-cover'),
-              label: Text(tr('Мұқаба')),
-              selected: together.at == null,
-              onSelected: (_) => together.showSide(null),
-            ),
-          ]),
+  Widget build(BuildContext context) => ExcludeSemantics(
+        child: ValueListenableBuilder<String?>(
+          valueListenable: together.picked,
+          builder: (context, picked, _) => Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            // The chips' tap targets already leave a gap between the rows.
+            child: Wrap(spacing: 8, children: [
+              for (final MapEntry(key: side, value: name) in _names.entries)
+                ChoiceChip(
+                  key: Key('compare-side-$side'),
+                  label: Text(tr(name)),
+                  selected: picked == side,
+                  onSelected: (_) => together.showSide(side == TurnTogether.cover ? null : side),
+                ),
+            ]),
+          ),
         ),
       );
 }
@@ -287,17 +304,44 @@ class _Head extends StatelessWidget {
           child: Container(
             clipBehavior: Clip.antiAlias,
             decoration: studioBackdrop(radius: BorderRadius.circular(14)),
-            child: cover == null
-                ? const Icon(Icons.image_outlined, color: Colors.black26)
-                : CardTurn(
-                    listing: listing,
-                    together: together,
-                    cover: CoverPhoto(
-                        image: coverImage(cover),
-                        cutout: listing.coverIsCutout,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => const Icon(Icons.broken_image_outlined, color: Colors.black26)),
+            child: Stack(fit: StackFit.expand, children: [
+              cover == null
+                  ? const Icon(Icons.image_outlined, color: Colors.black26)
+                  : CardTurn(
+                      listing: listing,
+                      together: together,
+                      cover: CoverPhoto(
+                          image: coverImage(cover),
+                          cutout: listing.coverIsCutout,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => const Icon(Icons.broken_image_outlined, color: Colors.black26)),
+                    ),
+              // A shoe that cannot show the side picked by name says so, rather than look like that side.
+              if (_Table.sided([listing]).isEmpty)
+                ExcludeSemantics(
+                  child: ValueListenableBuilder<String?>(
+                    valueListenable: together.picked,
+                    builder: (context, _, __) => !together.named
+                        ? const SizedBox.shrink()
+                        : Align(
+                            alignment: Alignment.topCenter, // the shoe sits lower, under empty backdrop
+                            child: Container(
+                              key: Key('compare-no-side-${listing.id}'),
+                              margin: const EdgeInsets.all(4),
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: 0.9), borderRadius: BorderRadius.circular(8)),
+                              child: Text(tr('Бұл жағынан фото жоқ'),
+                                  textAlign: TextAlign.center,
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .labelSmall
+                                      ?.copyWith(color: Colors.black87, fontSize: 10, height: 1.2)),
+                            ),
+                          ),
                   ),
+                ),
+            ]),
           ),
         ),
         const SizedBox(height: 6),

@@ -982,6 +982,8 @@ const en = <String, String>{
   'Алдыңғы кадр': 'Previous frame',
   'Келесі кадр': 'Next frame',
   'Кадр {0} / {1}': 'Frame {0} of {1}',
+  'Негізгі фото': 'Main photo',
+  'Бұл жағынан фото жоқ': 'No photo from this side',
   'Мұқаба': 'Cover',
   'Мұқабадағыдай бұрышты таңдаңыз: карточка мен тауар беті сол жерден айналады.':
       'Pick the angle that matches the cover: the card and the listing page turn from there.',

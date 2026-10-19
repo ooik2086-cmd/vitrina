@@ -3409,6 +3409,64 @@ void main() {
         expect((shownIn(tester, 7), shownIn(tester, 8)), (null, null));
       });
 
+      testWidgets('a side picked by name is shown only where the sides are known; the others say so', (tester) async {
+        tester.view.physicalSize = const Size(2400, 3600);
+        addTearDown(tester.view.reset);
+        await pumpCompare(tester, [
+          marked(7, {'outer': 0, 'front': 3}),
+          marked(8, {'outer': 0, 'front': 9}),
+          listing([for (var i = 0; i < 12; i++) frame(i)], id: 9), // turns, but which way is a guess
+        ]);
+        await tester.tap(find.byKey(const Key('compare-pick-9')));
+        await tester.pump();
+        await tester.pump();
+        expect(find.byKey(const Key('compare-no-side-9')), findsNothing);
+        await tester.tap(find.byKey(const Key('compare-side-front')));
+        await tester.pump();
+        expect((shownIn(tester, 7), shownIn(tester, 8), shownIn(tester, 9)),
+            ('https://cdn/t3.webp', 'https://cdn/t9.webp', null));
+        expect(find.byKey(const Key('compare-no-side-9')), findsOneWidget);
+        expect(find.byKey(const Key('compare-no-side-7')), findsNothing);
+        await tester.tap(find.byKey(const Key('compare-side-outer')));
+        await tester.pump();
+        expect((shownIn(tester, 7), shownIn(tester, 8), shownIn(tester, 9)),
+            ('https://cdn/t0.webp', 'https://cdn/t0.webp', null));
+        await tester.tap(find.byKey(const Key('compare-side-inner')));
+        await tester.pump();
+        expect((shownIn(tester, 7), shownIn(tester, 8)), ('https://cdn/t6.webp', 'https://cdn/t6.webp'));
+        // A drag claims no side, so every shoe follows it again.
+        final g = await turn(tester, 7, 1 / 12);
+        await g.up();
+        await tester.pump();
+        expect(shownIn(tester, 9), isNotNull);
+        expect(find.byKey(const Key('compare-no-side-9')), findsNothing);
+      });
+
+      testWidgets('no side chips unless two shoes have known sides; dropping one brings the covers back',
+          (tester) async {
+        tester.view.physicalSize = const Size(2400, 3600);
+        addTearDown(tester.view.reset);
+        await pumpCompare(tester, [
+          marked(7, {'outer': 0, 'front': 3}),
+          listing([for (var i = 0; i < 12; i++) frame(i)], id: 8),
+          marked(9, {'outer': 0, 'front': 3}),
+        ]);
+        expect(find.byKey(const Key('compare-turn-hint')), findsOneWidget);
+        expect(find.byKey(const Key('compare-side-front')), findsNothing);
+        await tester.tap(find.byKey(const Key('compare-pick-9')));
+        await tester.pump();
+        await tester.pump();
+        await tester.tap(find.byKey(const Key('compare-side-back')));
+        await tester.pump();
+        expect((shownIn(tester, 7), shownIn(tester, 9)), ('https://cdn/t9.webp', 'https://cdn/t9.webp'));
+        // Without a second known shoe the chips go, and with them the named side.
+        await tester.tap(find.byKey(const Key('compare-pick-9')));
+        await tester.pump();
+        await tester.pump();
+        expect(find.byKey(const Key('compare-side-cover')), findsNothing);
+        expect((shownIn(tester, 7), shownIn(tester, 8)), (null, null));
+      });
+
       test('the shared angle lays each turn through its sides, whichever way and however evenly it goes', () {
         const outer = 0.0, front = 0.25, inner = 0.5, back = 0.75;
         final even = TurnMap({});
