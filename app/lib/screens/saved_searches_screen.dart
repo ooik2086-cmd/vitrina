@@ -40,12 +40,12 @@ class _SavedSearchesScreenState extends State<SavedSearchesScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _items = SessionScope.of(context).api.savedSearches();
+    _items = shown(SessionScope.of(context).api.savedSearches());
   }
 
   void _retry() {
     setState(() {
-      _items = SessionScope.of(context).api.savedSearches();
+      _items = shown(SessionScope.of(context).api.savedSearches());
     });
   }
 
@@ -54,7 +54,7 @@ class _SavedSearchesScreenState extends State<SavedSearchesScreen> {
       await SessionScope.of(context).api.deleteSavedSearch(s.id);
       if (!mounted) return;
       setState(() {
-        _items = SessionScope.of(context).api.savedSearches();
+        _items = shown(SessionScope.of(context).api.savedSearches());
       });
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr('Іздеу өшірілді'))));
     } catch (e) {

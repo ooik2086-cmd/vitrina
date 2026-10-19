@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../api.dart';
 import '../i18n.dart';
 import '../session.dart';
+import 'common.dart';
 
 /// Cities the server can place, the same list it returns with an estimate.
 const kzCities = [
@@ -61,7 +62,8 @@ class _DeliveryEtaState extends State<DeliveryEta> {
     if (!_loaded) _load(pickedDeliveryCity.value);
   }
 
-  Future<void> _load(String? city) async {
+  /// [asked]: the buyer picked the city, so a failure is said; the first, unasked load stays quiet.
+  Future<void> _load(String? city, {bool asked = false}) async {
     _loaded = true;
     try {
       final (e, cities) = await SessionScope.of(context).api.deliveryEstimate(widget.listingId, city: city);
@@ -71,8 +73,9 @@ class _DeliveryEtaState extends State<DeliveryEta> {
           _cities = cities;
         });
       }
-    } catch (_) {
+    } catch (e) {
       // An estimate is a convenience; the page works without it.
+      if (asked && mounted) showError(context, e);
     }
   }
 
@@ -89,7 +92,7 @@ class _DeliveryEtaState extends State<DeliveryEta> {
     );
     if (city == null) return;
     pickedDeliveryCity.value = city;
-    await _load(city);
+    await _load(city, asked: true);
   }
 
   @override

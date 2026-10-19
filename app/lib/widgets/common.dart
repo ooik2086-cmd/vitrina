@@ -18,6 +18,13 @@ void showError(BuildContext context, Object error) {
   ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
 }
 
+/// A load a FutureBuilder shows. Its failure is the builder's to show, so it is never also reported as unhandled,
+/// even when it fails before the builder listens (a phone in flight mode fails at once).
+Future<T> shown<T>(Future<T> load) => load..ignore();
+
+/// Waits for [load] for a pull to refresh. A failure is shown on the screen, not thrown here as well.
+Future<void> settled(Future<Object?> load) => load.then((_) {}, onError: (_) {});
+
 /// A failed load in people's words: the server's own message when it sent one, never a raw exception.
 String errorText(Object? error) => error is ApiException ? error.message : tr('Серверге қосылу мүмкін болмады.');
 

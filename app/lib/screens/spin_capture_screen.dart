@@ -64,8 +64,10 @@ class _SpinCaptureScreenState extends State<SpinCaptureScreen> with WidgetsBindi
         return;
       }
       setState(() => _controller = c);
-    } on CameraException catch (e) {
-      setState(() => _error = e.code == 'CameraAccessDenied'
+    } catch (e) {
+      // Any failure is said: a platform error other than the camera's own would otherwise spin forever.
+      if (!mounted) return;
+      setState(() => _error = e is CameraException && e.code == 'CameraAccessDenied'
           ? tr('Камераға рұқсат берілмеді. Телефон баптауларынан рұқсат беріңіз.')
           : tr('Камераны ашу мүмкін болмады.'));
     }

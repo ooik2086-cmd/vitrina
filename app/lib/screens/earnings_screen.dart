@@ -66,15 +66,15 @@ class _EarningsScreenState extends State<EarningsScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _data ??= _load();
+    _data ??= shown(_load());
   }
 
   Future<void> _reload() async {
     final f = _load();
     setState(() {
-      _data = f;
+      _data = shown(f);
     });
-    await f;
+    await settled(f);
   }
 
   Future<bool> _editAccount() async {
@@ -301,7 +301,10 @@ class _PayoutAccountSheetState extends State<PayoutAccountSheet> {
           _iban.text = a.iban;
           _tax.text = a.taxId;
         });
-      }, onError: (_) {});
+      }, onError: (Object e) {
+        // Said, so empty fields are not taken for «no account saved».
+        if (mounted) setState(() => _error = errorText(e));
+      });
     }
   }
 

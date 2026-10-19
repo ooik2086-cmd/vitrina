@@ -41,12 +41,12 @@ class _SellerReviewsScreenState extends State<SellerReviewsScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _items ??= SessionScope.of(context).api.sellerReviews(widget.sellerId);
+    _items ??= shown(SessionScope.of(context).api.sellerReviews(widget.sellerId));
   }
 
   void _retry() {
     setState(() {
-      _items = SessionScope.of(context).api.sellerReviews(widget.sellerId);
+      _items = shown(SessionScope.of(context).api.sellerReviews(widget.sellerId));
     });
   }
 
@@ -75,7 +75,7 @@ class _SellerReviewsScreenState extends State<SellerReviewsScreen> {
       await SessionScope.of(context).api.replyToReview(r.id, answer);
       if (mounted) {
         setState(() {
-          _items = SessionScope.of(context).api.sellerReviews(widget.sellerId);
+          _items = shown(SessionScope.of(context).api.sellerReviews(widget.sellerId));
         });
       }
     } catch (e) {

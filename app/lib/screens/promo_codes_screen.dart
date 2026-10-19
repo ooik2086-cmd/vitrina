@@ -21,11 +21,11 @@ class _PromoCodesScreenState extends State<PromoCodesScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _items = SessionScope.of(context).api.promoCodes();
+    _items = shown(SessionScope.of(context).api.promoCodes());
   }
 
   void _reload() => setState(() {
-        _items = SessionScope.of(context).api.promoCodes();
+        _items = shown(SessionScope.of(context).api.promoCodes());
       });
 
   Future<void> _create() async {

@@ -20,12 +20,12 @@ class _BlockedScreenState extends State<BlockedScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _items = SessionScope.of(context).api.blockedUsers();
+    _items = shown(SessionScope.of(context).api.blockedUsers());
   }
 
   void _retry() {
     setState(() {
-      _items = SessionScope.of(context).api.blockedUsers();
+      _items = shown(SessionScope.of(context).api.blockedUsers());
     });
   }
 
@@ -35,7 +35,7 @@ class _BlockedScreenState extends State<BlockedScreen> {
       await api.unblock(b.userId);
       if (!mounted) return;
       setState(() {
-        _items = api.blockedUsers();
+        _items = shown(api.blockedUsers());
       });
     } catch (e) {
       if (mounted) showError(context, e);

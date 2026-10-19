@@ -179,12 +179,17 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
         if (!didPop) setState(() => _tab = _lastTab = 0);
       },
       child: Scaffold(
-        body: IndexedStack(index: _tab, children: const [
-          CatalogScreen(),
-          FavoritesScreen(),
-          ChatsScreen(),
-          OrdersScreen(),
-          ProfileScreen(),
+        // The hidden tabs stay alive but fly no photos: the catalog and favourites show the same shoe under one
+        // hero tag, and two such heroes on one route break the flight to the listing page.
+        body: IndexedStack(index: _tab, children: [
+          for (final (i, tab) in const [
+            CatalogScreen(),
+            FavoritesScreen(),
+            ChatsScreen(),
+            OrdersScreen(),
+            ProfileScreen(),
+          ].indexed)
+            HeroMode(enabled: i == _tab, child: tab),
         ]),
         bottomNavigationBar: NavigationBarTheme(
           data: navLabelsScaled(context, scale),

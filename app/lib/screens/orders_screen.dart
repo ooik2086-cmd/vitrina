@@ -62,7 +62,7 @@ class _OrderListState extends State<_OrderList> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _orders ??= _load();
+    _orders ??= shown(_load());
   }
 
   Future<List<OrderInfo>> _load() => SessionScope.of(context).api.orders(role: widget.role);
@@ -70,9 +70,9 @@ class _OrderListState extends State<_OrderList> {
   Future<void> _reload() async {
     final f = _load();
     setState(() {
-      _orders = f;
+      _orders = shown(f);
     });
-    await f;
+    await settled(f);
   }
 
   @override

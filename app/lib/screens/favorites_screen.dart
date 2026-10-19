@@ -23,13 +23,13 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
     final session = SessionScope.of(context);
     if (_loadedSignedIn != session.signedIn) {
       _loadedSignedIn = session.signedIn;
-      _items = session.signedIn ? session.api.favorites() : null;
+      _items = session.signedIn ? shown(session.api.favorites()) : null;
     }
   }
 
   void _retry() {
     setState(() {
-      _items = SessionScope.of(context).api.favorites();
+      _items = shown(SessionScope.of(context).api.favorites());
     });
   }
 
@@ -59,9 +59,9 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
             onRefresh: () async {
               final f = SessionScope.of(context).api.favorites();
               setState(() {
-                _items = f;
+                _items = shown(f);
               });
-              await f;
+              await settled(f);
             },
             child: ListingGrid(items: snap.data!),
           );

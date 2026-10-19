@@ -131,7 +131,8 @@ class _ListingScreenState extends State<ListingScreen> {
     _ready = null; // a reload fetches again
     final pending = _pending;
     _pending = null;
-    _listing = ready != null ? Future.value(ready) : pending ?? SessionScope.of(context).api.listing(widget.listingId);
+    _listing =
+        shown(ready != null ? Future.value(ready) : pending ?? SessionScope.of(context).api.listing(widget.listingId));
     _listing.then((l) {
       if (l.status == 'published') rememberViewed(l);
     }, onError: (_) {});

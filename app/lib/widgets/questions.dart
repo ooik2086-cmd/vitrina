@@ -24,11 +24,11 @@ class _QuestionsSectionState extends State<QuestionsSection> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _data ??= SessionScope.of(context).api.questions(widget.listingId);
+    _data ??= shown(SessionScope.of(context).api.questions(widget.listingId));
   }
 
   void _reload() => setState(() {
-        _data = SessionScope.of(context).api.questions(widget.listingId);
+        _data = shown(SessionScope.of(context).api.questions(widget.listingId));
       });
 
   Future<void> _ask() async {
@@ -71,7 +71,16 @@ class _QuestionsSectionState extends State<QuestionsSection> {
                     : trf('Барлығы ({0})', [items.length])),
               ),
           ]),
-          if (shown.isEmpty && !seller)
+          // Not loaded for want of a connection: said, so «no questions yet» is not believed.
+          if (snap.error case ApiException(passing: true) && final error)
+            Card(
+              child: RetryLine(
+                  what: tr('Сұрақ-жауап'),
+                  error: error,
+                  busy: snap.connectionState == ConnectionState.waiting,
+                  onRetry: _reload),
+            )
+          else if (shown.isEmpty && !seller)
             Padding(
               padding: const EdgeInsets.only(bottom: 4),
               child: Text(tr('Өлшемі, қорабы не жағдайы туралы сұраңыз: жауапты бәрі көреді.'),
@@ -171,11 +180,11 @@ class _QuestionsScreenState extends State<QuestionsScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _data = SessionScope.of(context).api.questions(widget.listingId);
+    _data = shown(SessionScope.of(context).api.questions(widget.listingId));
   }
 
   void _reload() => setState(() {
-        _data = SessionScope.of(context).api.questions(widget.listingId);
+        _data = shown(SessionScope.of(context).api.questions(widget.listingId));
       });
 
   Future<void> _answer(Question q) async {

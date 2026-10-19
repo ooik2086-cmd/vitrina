@@ -32,16 +32,16 @@ class _ChatsScreenState extends State<ChatsScreen> {
     final session = SessionScope.of(context);
     if (_loadedFor != session.signedIn) {
       _loadedFor = session.signedIn;
-      _items = session.signedIn ? session.api.conversations() : null;
+      _items = session.signedIn ? shown(session.api.conversations()) : null;
     }
   }
 
   Future<void> _reload() async {
     final f = SessionScope.of(context).api.conversations();
     setState(() {
-      _items = f;
+      _items = shown(f);
     });
-    await f;
+    await settled(f);
   }
 
   @override

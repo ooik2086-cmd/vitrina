@@ -53,7 +53,7 @@ class _CatalogScreenState extends State<CatalogScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _results ??= _load();
+    _results ??= shown(_load());
     final session = SessionScope.of(context);
     if (_countedFor != session.signedIn) {
       _countedFor = session.signedIn;
@@ -89,7 +89,7 @@ class _CatalogScreenState extends State<CatalogScreen> {
       _more.clear();
       _hasMore = true;
       _moreError = null;
-      _results = _load();
+      _results = shown(_load());
     });
   }
 
@@ -247,7 +247,7 @@ class _CatalogScreenState extends State<CatalogScreen> {
         onRefresh: () async {
           _countUnread();
           _search();
-          await _results;
+          await settled(_results!);
         },
         child: CustomScrollView(slivers: [
           SliverToBoxAdapter(
@@ -548,7 +548,8 @@ class _SizeSheet extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return SafeArea(
-      child: Padding(
+      // Scrolls: fourteen sizes at a finger's 48 are taller than the sheet may be on a usual phone.
+      child: SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(tr('Ұлтарақ ұзындығы'), style: theme.textTheme.titleLarge),

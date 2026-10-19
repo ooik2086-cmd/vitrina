@@ -43,15 +43,15 @@ class _MyListingsScreenState extends State<MyListingsScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _items ??= SessionScope.of(context).api.myListings();
+    _items ??= shown(SessionScope.of(context).api.myListings());
   }
 
   Future<void> _reload() async {
     final f = SessionScope.of(context).api.myListings();
     setState(() {
-      _items = f;
+      _items = shown(f);
     });
-    await f;
+    await settled(f);
   }
 
   Future<void> _create() async {

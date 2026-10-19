@@ -23,7 +23,7 @@ class _ImageSearchScreenState extends State<ImageSearchScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _results ??= SessionScope.of(context).api.searchByImage(widget.bytes, widget.filename);
+    _results ??= shown(SessionScope.of(context).api.searchByImage(widget.bytes, widget.filename));
   }
 
   @override
@@ -60,7 +60,7 @@ class _ImageSearchScreenState extends State<ImageSearchScreen> {
                 child: ErrorRetry(
                   error: snap.error,
                   onRetry: () => setState(() {
-                    _results = SessionScope.of(context).api.searchByImage(widget.bytes, widget.filename);
+                    _results = shown(SessionScope.of(context).api.searchByImage(widget.bytes, widget.filename));
                   }),
                 ),
               );

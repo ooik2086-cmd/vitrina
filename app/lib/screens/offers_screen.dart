@@ -252,7 +252,7 @@ class _OffersScreenState extends State<OffersScreen> {
   }
 
   void _load() {
-    _items = SessionScope.of(context).api.offers(role: _seller ? 'seller' : 'buyer');
+    _items = shown(SessionScope.of(context).api.offers(role: _seller ? 'seller' : 'buyer'));
   }
 
   Future<void> _run(Future<Offer> Function(Api api) action, String done) async {
@@ -322,7 +322,7 @@ class _OffersScreenState extends State<OffersScreen> {
               return RefreshIndicator(
                 onRefresh: () async {
                   setState(_load);
-                  await _items;
+                  await settled(_items);
                 },
                 child: ListView.separated(
                   padding: contentPadding(context, const EdgeInsets.fromLTRB(20, 4, 20, 24)),

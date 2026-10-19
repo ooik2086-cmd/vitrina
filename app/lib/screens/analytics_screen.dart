@@ -25,12 +25,12 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _data ??= SessionScope.of(context).api.analytics(days: _days);
+    _data ??= shown(SessionScope.of(context).api.analytics(days: _days));
   }
 
   void _period(int days) => setState(() {
         _days = days;
-        _data = SessionScope.of(context).api.analytics(days: days);
+        _data = shown(SessionScope.of(context).api.analytics(days: days));
       });
 
   @override
@@ -106,7 +106,13 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () async {
                   final api = SessionScope.of(context).api;
-                  final l = await api.listing(t.id);
+                  final Listing l;
+                  try {
+                    l = await api.listing(t.id);
+                  } catch (e) {
+                    if (context.mounted) showError(context, e);
+                    return;
+                  }
                   if (!context.mounted) return;
                   Navigator.of(context).push(MaterialPageRoute(builder: (_) => ManageListingScreen(listing: l)));
                 },

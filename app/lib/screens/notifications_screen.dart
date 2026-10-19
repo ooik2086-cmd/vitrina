@@ -34,7 +34,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _items ??= _load();
+    _items ??= shown(_load());
   }
 
   Future<List<AppNotification>> _load() async {
@@ -47,7 +47,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 
   void _retry() {
     setState(() {
-      _items = _load();
+      _items = shown(_load());
     });
   }
 

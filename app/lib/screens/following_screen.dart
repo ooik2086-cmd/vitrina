@@ -22,12 +22,12 @@ class _FollowingScreenState extends State<FollowingScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _items ??= SessionScope.of(context).api.following();
+    _items ??= shown(SessionScope.of(context).api.following());
   }
 
   void _retry() {
     setState(() {
-      _items = SessionScope.of(context).api.following();
+      _items = shown(SessionScope.of(context).api.following());
     });
   }
 
@@ -36,7 +36,7 @@ class _FollowingScreenState extends State<FollowingScreen> {
     if (!mounted) return;
     // A block, not an arrow: setState must not be handed the Future. They may have unfollowed.
     setState(() {
-      _items = SessionScope.of(context).api.following();
+      _items = shown(SessionScope.of(context).api.following());
     });
   }
 

@@ -34,7 +34,7 @@ class _ShopScreenState extends State<ShopScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _data ??= _load();
+    _data ??= shown(_load());
   }
 
   Future<(Shop, List<Listing>)> _load() async {
@@ -45,7 +45,7 @@ class _ShopScreenState extends State<ShopScreen> {
 
   void _retry() {
     setState(() {
-      _data = _load();
+      _data = shown(_load());
     });
   }
 
