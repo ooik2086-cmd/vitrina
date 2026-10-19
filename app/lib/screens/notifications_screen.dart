@@ -53,7 +53,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 
   void _open(AppNotification n) {
     if ((n.kind == 'sold_out' || n.kind == 'listing_tip') && n.listingId != null) {
-      _openOwnListing(n.listingId!);
+      _openOwnListing(n);
       return;
     }
     final route = n.kind == 'offer'
@@ -71,11 +71,14 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   }
 
   /// A sold-out size is fixed where the stock is edited, so the seller lands on the listing's own page.
-  Future<void> _openOwnListing(int id) async {
+  Future<void> _openOwnListing(AppNotification n) async {
     try {
-      final listing = await SessionScope.of(context).api.listing(id);
+      final listing = await SessionScope.of(context).api.listing(n.listingId!);
       if (!mounted) return;
-      await Navigator.of(context).push(MaterialPageRoute(builder: (_) => ManageListingScreen(listing: listing)));
+      // A tip about a photo the model found no shoe in leads to the photos, where that photo is marked.
+      final photos = n.kind == 'listing_tip' && listing.media.any((m) => m.noShoe);
+      await Navigator.of(context)
+          .push(MaterialPageRoute(builder: (_) => ManageListingScreen(listing: listing, showPhotos: photos)));
     } catch (e) {
       if (mounted) showError(context, e);
     }

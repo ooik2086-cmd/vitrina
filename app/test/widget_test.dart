@@ -35,6 +35,7 @@ import 'package:vitrina/screens/manage_listing_screen.dart';
 import 'package:vitrina/widgets/listing_contents.dart';
 import 'package:vitrina/screens/my_listings_screen.dart';
 import 'package:vitrina/screens/notification_settings_screen.dart';
+import 'package:vitrina/screens/notifications_screen.dart';
 import 'package:vitrina/screens/onboarding_screen.dart';
 import 'package:vitrina/screens/offers_screen.dart';
 import 'package:vitrina/screens/order_screen.dart';
@@ -2760,6 +2761,80 @@ void main() {
             child: Scaffold(body: ListingGrid(items: items)))));
     await tester.pump();
     expect(tester.takeException(), isNull); // no RenderFlex overflow
+  });
+
+  group('a note about a listing opens its page', () {
+    Future<void> tapNote(WidgetTester tester, String kind, {bool noShoe = true, String status = 'published'}) async {
+      final listing = {
+        ...listingJson(media: [
+          {'original_url': 'https://cdn/a.jpg', 'processed_url': null, 'angle': 'front', 'no_shoe': noShoe},
+          {'original_url': 'https://cdn/b.jpg', 'processed_url': null, 'angle': 'outer'},
+        ]),
+        'status': status,
+      };
+      final api = Api(
+          base: 'http://x/api/v1',
+          client: MockClient((req) async {
+            return switch (req.url.path) {
+              '/api/v1/notifications' => jsonResponse({
+                  'unread': 1,
+                  'items': [
+                    {
+                      'id': 1,
+                      'kind': kind,
+                      'text': 'Хабарлама',
+                      'listing_id': 7,
+                      'read': false,
+                      'created_at': '2026-10-19T10:00:00Z'
+                    }
+                  ]
+                }),
+              '/api/v1/notifications/read-all' => jsonResponse({}),
+              '/api/v1/listings/7/proofs' => jsonResponse({'authenticity': 'unverified', 'note': null, 'proofs': []}),
+              _ => jsonResponse(listing),
+            };
+          }));
+      tester.view.physicalSize = const Size(400, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester
+          .pumpWidget(SessionScope(session: Session(api), child: const MaterialApp(home: NotificationsScreen())));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Хабарлама'));
+      await tester.pumpAndSettle();
+      expect(find.byType(ManageListingScreen), findsOneWidget);
+    }
+
+    double offset(WidgetTester tester) => tester.widget<ListView>(find.byType(ListView).first).controller!.offset;
+
+    bool onScreen(WidgetTester tester, Finder f) {
+      if (f.evaluate().isEmpty) return false;
+      final y = tester.getTopLeft(f).dy;
+      return y >= 0 && y < 800;
+    }
+
+    testWidgets('a tip about a photo with no shoe found opens the page on the photos', (tester) async {
+      await tapNote(tester, 'listing_tip');
+      expect(offset(tester), greaterThan(0));
+      expect(tester.getTopLeft(find.byType(ListingContentsCard)).dy, lessThan(200)); // as high as the page goes
+      expect(onScreen(tester, find.byKey(const Key('photos-no-shoe'))), isTrue);
+      expect(onScreen(tester, find.byKey(const Key('price'))), isFalse);
+    });
+
+    testWidgets('a tip about something else opens the page from the top', (tester) async {
+      await tapNote(tester, 'listing_tip', noShoe: false);
+      expect(offset(tester), 0);
+    });
+
+    testWidgets('a hidden listing has no photos section, so its page opens from the top', (tester) async {
+      await tapNote(tester, 'listing_tip', status: 'hidden');
+      expect(offset(tester), 0);
+    });
+
+    testWidgets('a sold-out note opens the page from the top, where the stock is', (tester) async {
+      await tapNote(tester, 'sold_out');
+      expect(offset(tester), 0);
+    });
   });
 
   group('editing what a listing shows', () {

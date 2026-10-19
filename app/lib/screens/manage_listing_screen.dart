@@ -30,8 +30,11 @@ const listingStatuses = {
 /// Seller's own listing: change price, stock, name, photos and sizes, pause or put back on sale.
 /// Once on sale the shoe itself (brand, model, category, photos buyers saw) is fixed, so buyers get what they chose.
 class ManageListingScreen extends StatefulWidget {
-  const ManageListingScreen({super.key, required this.listing});
+  const ManageListingScreen({super.key, required this.listing, this.showPhotos = false});
   final Listing listing;
+
+  /// Opens on the photos section, as a note about a photo to retake does, instead of the name fields.
+  final bool showPhotos;
 
   @override
   State<ManageListingScreen> createState() => _ManageListingScreenState();
@@ -53,9 +56,33 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
   late final Map<int, int> _stock = {for (final s in _l.sizes) s.id: s.quantity ?? (s.available ? 1 : 0)};
   bool _busy = false;
   bool _changed = false;
+  final _photos = GlobalKey();
+  final _scroll = ScrollController();
+  int _tries = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.showPhotos && widget.listing.status != 'hidden') {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _bringPhotos());
+    }
+  }
+
+  void _bringPhotos() {
+    if (!mounted) return;
+    final at = _photos.currentContext;
+    if (at != null) {
+      Scrollable.ensureVisible(at);
+    } else if (_scroll.hasClients && _tries++ < 20) {
+      // The list builds only what is near the screen: go down until the photos are built.
+      _scroll.jumpTo(_scroll.position.maxScrollExtent);
+      WidgetsBinding.instance.addPostFrameCallback((_) => _bringPhotos());
+    }
+  }
 
   @override
   void dispose() {
+    _scroll.dispose();
     for (final c in [_price, _delivery, _description, _defects, _title, _brand, _model, _color]) {
       c.dispose();
     }
@@ -159,170 +186,174 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
         ]),
         body: Form(
           key: _form,
-          child: ListView(padding: contentPadding(context, const EdgeInsets.fromLTRB(20, 8, 20, 120)), children: [
-            Row(children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(16),
-                child: Container(
-                  width: 72,
-                  height: 72,
-                  color: Brand.studio,
-                  child: _l.coverUrl == null
-                      ? const Icon(Icons.image_outlined)
-                      : Image.network(_l.coverUrl!,
-                          fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Icon(Icons.image_outlined)),
-                ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(_l.title, style: theme.textTheme.titleMedium),
-                  const SizedBox(height: 6),
-                  _StatusPill(status: _l.status),
-                ]),
-              ),
-            ]),
-            if (locked) ...[
-              const SizedBox(height: 16),
-              Card(
-                color: theme.colorScheme.errorContainer,
-                child: Padding(
-                  padding: EdgeInsets.all(16),
-                  child: Text(tr('Тауарды модератор жасырды. Өзгерту үшін қолдау қызметіне жазыңыз.')),
-                ),
-              ),
-            ],
-            if (_l.status == 'moderation' || _l.status == 'rejected') ...[
-              const SizedBox(height: 16),
-              ModerationCard(listing: _l),
-            ],
-            if (_l.stats != null) ...[
-              const SizedBox(height: 20),
-              _StatsRow(stats: _l.stats!),
-            ],
-            if (!locked) ...[
-              const SizedBox(height: 16),
-              QualityCard(quality: listingQuality(_l)),
-            ],
-            if (_l.status == 'published' || _l.status == 'sold') ...[
-              const SizedBox(height: 12),
-              ListTile(
-                key: const Key('listing-questions'),
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.forum_outlined),
-                title: Text(tr('Сұрақ-жауап')),
-                subtitle: Text(tr('Сатып алушылардың сұрақтарына жауап беру')),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => Navigator.of(context)
-                    .push(MaterialPageRoute(builder: (_) => QuestionsScreen(listingId: _l.id, seller: true))),
-              ),
-            ],
-            if (!locked) ...[
-              const SizedBox(height: 16),
-              AuthenticityCard(listingId: _l.id, onChanged: () => _changed = true),
-            ],
-            if (!locked) ...[
-              const SizedBox(height: 16),
-              PromoCard(
-                listing: _l,
-                onChanged: (l) => setState(() {
-                  _l = l;
-                  _changed = true;
-                }),
-              ),
-            ],
-            const SizedBox(height: 24),
-            Text(tr('Баға'), style: theme.textTheme.titleMedium),
-            const SizedBox(height: 8),
-            Row(children: [
-              Expanded(
-                child: TextFormField(
-                  key: const Key('price'),
-                  controller: _price,
-                  enabled: !locked,
-                  keyboardType: TextInputType.number,
-                  decoration: InputDecoration(labelText: tr('Бағасы'), suffixText: '₸'),
-                  validator: (v) => (_tiyn(v ?? '') ?? 0) <= 0 ? tr('Бағаны енгізіңіз') : null,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: TextFormField(
-                  controller: _delivery,
-                  enabled: !locked,
-                  keyboardType: TextInputType.number,
-                  decoration: InputDecoration(labelText: tr('Жеткізу'), suffixText: '₸'),
-                ),
-              ),
-            ]),
-            const SizedBox(height: 24),
-            Text(tr('Қалдық'), style: theme.textTheme.titleMedium),
-            const SizedBox(height: 4),
-            for (final s in _l.sizes)
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                title: Text(s.label),
-                subtitle: Text(trf('{0} см', [s.insoleCm])),
-                trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-                  IconButton.outlined(
-                    tooltip: tr('Азайту'),
-                    icon: const Icon(Icons.remove),
-                    onPressed: locked || (_stock[s.id] ?? 0) == 0
-                        ? null
-                        : () => setState(() => _stock[s.id] = _stock[s.id]! - 1),
+          child: ListView(
+              controller: _scroll,
+              padding: contentPadding(context, const EdgeInsets.fromLTRB(20, 8, 20, 120)),
+              children: [
+                Row(children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(16),
+                    child: Container(
+                      width: 72,
+                      height: 72,
+                      color: Brand.studio,
+                      child: _l.coverUrl == null
+                          ? const Icon(Icons.image_outlined)
+                          : Image.network(_l.coverUrl!,
+                              fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Icon(Icons.image_outlined)),
+                    ),
                   ),
-                  SizedBox(
-                    width: 40,
-                    child: Text('${_stock[s.id]}',
-                        textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.w700)),
-                  ),
-                  IconButton.outlined(
-                    tooltip: tr('Көбейту'),
-                    icon: const Icon(Icons.add),
-                    onPressed: locked ? null : () => setState(() => _stock[s.id] = (_stock[s.id] ?? 0) + 1),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(_l.title, style: theme.textTheme.titleMedium),
+                      const SizedBox(height: 6),
+                      _StatusPill(status: _l.status),
+                    ]),
                   ),
                 ]),
-              ),
-            const SizedBox(height: 16),
-            TextFormField(
-              controller: _description,
-              enabled: !locked,
-              maxLines: 4,
-              decoration: InputDecoration(labelText: tr('Сипаттамасы')),
-            ),
-            const SizedBox(height: 12),
-            TextFormField(
-              controller: _defects,
-              enabled: !locked,
-              maxLines: 3,
-              decoration: InputDecoration(labelText: tr('Ақаулары')),
-            ),
-            if (!locked) ...[
-              const SizedBox(height: 24),
-              ListingNameFields(
-                listing: _l,
-                title: _title,
-                brand: _brand,
-                model: _model,
-                color: _color,
-                category: _category,
-                condition: _condition,
-                onCategory: (v) => setState(() => _category = v),
-                onCondition: (v) => setState(() => _condition = v),
-              ),
-              const SizedBox(height: 24),
-              ListingContentsCard(
-                listing: _l,
-                onChanged: (l) => setState(() {
-                  _l = l;
-                  for (final s in l.sizes) {
-                    _stock.putIfAbsent(s.id, () => s.quantity ?? (s.available ? 1 : 0));
-                  }
-                  _changed = true;
-                }),
-              ),
-            ],
-          ]),
+                if (locked) ...[
+                  const SizedBox(height: 16),
+                  Card(
+                    color: theme.colorScheme.errorContainer,
+                    child: Padding(
+                      padding: EdgeInsets.all(16),
+                      child: Text(tr('Тауарды модератор жасырды. Өзгерту үшін қолдау қызметіне жазыңыз.')),
+                    ),
+                  ),
+                ],
+                if (_l.status == 'moderation' || _l.status == 'rejected') ...[
+                  const SizedBox(height: 16),
+                  ModerationCard(listing: _l),
+                ],
+                if (_l.stats != null) ...[
+                  const SizedBox(height: 20),
+                  _StatsRow(stats: _l.stats!),
+                ],
+                if (!locked) ...[
+                  const SizedBox(height: 16),
+                  QualityCard(quality: listingQuality(_l)),
+                ],
+                if (_l.status == 'published' || _l.status == 'sold') ...[
+                  const SizedBox(height: 12),
+                  ListTile(
+                    key: const Key('listing-questions'),
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.forum_outlined),
+                    title: Text(tr('Сұрақ-жауап')),
+                    subtitle: Text(tr('Сатып алушылардың сұрақтарына жауап беру')),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => Navigator.of(context)
+                        .push(MaterialPageRoute(builder: (_) => QuestionsScreen(listingId: _l.id, seller: true))),
+                  ),
+                ],
+                if (!locked) ...[
+                  const SizedBox(height: 16),
+                  AuthenticityCard(listingId: _l.id, onChanged: () => _changed = true),
+                ],
+                if (!locked) ...[
+                  const SizedBox(height: 16),
+                  PromoCard(
+                    listing: _l,
+                    onChanged: (l) => setState(() {
+                      _l = l;
+                      _changed = true;
+                    }),
+                  ),
+                ],
+                const SizedBox(height: 24),
+                Text(tr('Баға'), style: theme.textTheme.titleMedium),
+                const SizedBox(height: 8),
+                Row(children: [
+                  Expanded(
+                    child: TextFormField(
+                      key: const Key('price'),
+                      controller: _price,
+                      enabled: !locked,
+                      keyboardType: TextInputType.number,
+                      decoration: InputDecoration(labelText: tr('Бағасы'), suffixText: '₸'),
+                      validator: (v) => (_tiyn(v ?? '') ?? 0) <= 0 ? tr('Бағаны енгізіңіз') : null,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: TextFormField(
+                      controller: _delivery,
+                      enabled: !locked,
+                      keyboardType: TextInputType.number,
+                      decoration: InputDecoration(labelText: tr('Жеткізу'), suffixText: '₸'),
+                    ),
+                  ),
+                ]),
+                const SizedBox(height: 24),
+                Text(tr('Қалдық'), style: theme.textTheme.titleMedium),
+                const SizedBox(height: 4),
+                for (final s in _l.sizes)
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(s.label),
+                    subtitle: Text(trf('{0} см', [s.insoleCm])),
+                    trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                      IconButton.outlined(
+                        tooltip: tr('Азайту'),
+                        icon: const Icon(Icons.remove),
+                        onPressed: locked || (_stock[s.id] ?? 0) == 0
+                            ? null
+                            : () => setState(() => _stock[s.id] = _stock[s.id]! - 1),
+                      ),
+                      SizedBox(
+                        width: 40,
+                        child: Text('${_stock[s.id]}',
+                            textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.w700)),
+                      ),
+                      IconButton.outlined(
+                        tooltip: tr('Көбейту'),
+                        icon: const Icon(Icons.add),
+                        onPressed: locked ? null : () => setState(() => _stock[s.id] = (_stock[s.id] ?? 0) + 1),
+                      ),
+                    ]),
+                  ),
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: _description,
+                  enabled: !locked,
+                  maxLines: 4,
+                  decoration: InputDecoration(labelText: tr('Сипаттамасы')),
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _defects,
+                  enabled: !locked,
+                  maxLines: 3,
+                  decoration: InputDecoration(labelText: tr('Ақаулары')),
+                ),
+                if (!locked) ...[
+                  const SizedBox(height: 24),
+                  ListingNameFields(
+                    listing: _l,
+                    title: _title,
+                    brand: _brand,
+                    model: _model,
+                    color: _color,
+                    category: _category,
+                    condition: _condition,
+                    onCategory: (v) => setState(() => _category = v),
+                    onCondition: (v) => setState(() => _condition = v),
+                  ),
+                  const SizedBox(height: 24),
+                  ListingContentsCard(
+                    key: _photos,
+                    listing: _l,
+                    onChanged: (l) => setState(() {
+                      _l = l;
+                      for (final s in l.sizes) {
+                        _stock.putIfAbsent(s.id, () => s.quantity ?? (s.available ? 1 : 0));
+                      }
+                      _changed = true;
+                    }),
+                  ),
+                ],
+              ]),
         ),
         bottomNavigationBar: locked
             ? null
