@@ -2,7 +2,9 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/rendering.dart';
@@ -58,6 +60,7 @@ import 'package:vitrina/widgets/size_guide.dart';
 import 'package:vitrina/widgets/card_turn.dart';
 import 'package:vitrina/widgets/filter_sheet.dart';
 import 'package:vitrina/widgets/spin_viewer.dart';
+import 'package:vitrina/widgets/studio.dart';
 
 Map<String, dynamic> listingJson({List<Map<String, dynamic>>? media}) => {
       'id': 7,
@@ -3011,24 +3014,38 @@ void main() {
   });
 
   group('the catalog card turns the shoe', () {
-    Map<String, dynamic> frame(int i, {bool cut = true}) => {
+    Map<String, dynamic> frame(int i, {bool cut = true, bool thumb = true}) => {
           'original_url': 'https://cdn/f$i.jpg',
           'processed_url': cut ? 'https://cdn/f$i.webp' : null,
-          'thumb_url': 'https://cdn/t$i.webp',
+          'thumb_url': thumb ? 'https://cdn/t$i.webp' : null,
           'angle': 'frame',
         };
-    Listing listing(List<Map<String, dynamic>> frames) => Listing.fromJson(listingJson(media: [
-          {'original_url': 'https://cdn/side.jpg', 'processed_url': 'https://cdn/side.webp', 'angle': 'side'},
-          ...frames,
-        ]));
+    Listing listing(List<Map<String, dynamic>> frames, {int id = 7}) => Listing.fromJson({
+          ...listingJson(media: [
+            {'original_url': 'https://cdn/side.jpg', 'processed_url': 'https://cdn/side.webp', 'angle': 'side'},
+            ...frames,
+          ]),
+          'id': id,
+        });
+    final failing = <String>{};
+    ui.Image? picture;
+    setUp(() => CardTurn.network = (url) => _TestFrame(url, picture!, failing));
+    tearDown(() {
+      CardTurn.network = NetworkImage.new;
+      failing.clear();
+    });
+
+    /// The frame on the card, or null when the cover shows.
     String? shown(WidgetTester tester) {
       final found = find.byKey(const Key('card-turn-frame'));
       if (found.evaluate().isEmpty) return null;
+      expect(find.byType(CoverPhoto), findsNothing); // never the cover and a frame together
       final image = tester.widget<Image>(found).image as ResizeImage;
-      return (image.imageProvider as NetworkImage).url;
+      return (image.imageProvider as _TestFrame).url;
     }
 
     Future<void> pumpTile(WidgetTester tester, Listing l, {bool turns = true}) async {
+      picture ??= await tester.runAsync(() => createTestImage(width: 4, height: 3));
       await tester.pumpWidget(MaterialApp(
           home: Scaffold(
               body: ListView(children: [
@@ -3037,52 +3054,139 @@ void main() {
       ]))));
     }
 
-    test('through at most 36 frames of one turn, and only with enough frames to turn', () {
+    Future<TestGesture> hold(WidgetTester tester, double frames, {int of = 12}) async {
+      final g = await tester.startGesture(tester.getCenter(find.byKey(const Key('card-turn'))));
+      for (var i = 0; i < 10; i++) {
+        await g.moveBy(Offset(-200 * 1.5 / of * frames / 10, 0));
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      return g;
+    }
+
+    test('through at most 24 frames of one turn, from the cover, and only when it turns as the listing page does', () {
       expect(CardTurn.framesOf(listing([for (var i = 0; i < 7; i++) frame(i)])), isEmpty);
       final many = CardTurn.framesOf(listing([for (var i = 0; i < 100; i++) frame(i)]));
       expect(many.length, CardTurn.maxFrames);
       expect(many.first.originalUrl, 'https://cdn/f0.jpg');
-      expect(many.last.originalUrl, 'https://cdn/f97.jpg'); // spread over the whole turn
+      expect(many.last.originalUrl, 'https://cdn/f95.jpg'); // spread over the whole turn
       // A turn ends where its first frame comes round again.
-      final round = CardTurn.framesOf(listing([for (var i = 0; i < 10; i++) frame(i), frame(0), frame(11)]));
-      expect(round.length, 10);
+      expect(CardTurn.framesOf(listing([for (var i = 0; i < 10; i++) frame(i), frame(0), frame(11)])).length, 10);
+      // When the cover is a frame of the turn, the turn starts there.
+      final fromCover = Listing.fromJson(listingJson(media: [
+        {'original_url': 'https://cdn/f4.jpg', 'processed_url': 'https://cdn/f4.webp', 'angle': 'side'},
+        for (var i = 0; i < 12; i++) frame(i),
+      ]));
+      expect([for (final m in CardTurn.framesOf(fromCover).take(2)) m.originalUrl],
+          ['https://cdn/f4.jpg', 'https://cdn/f5.jpg']);
+      // No small copy of a frame, or cut-outs for only some frames: the card does not turn.
+      expect(CardTurn.framesOf(listing([for (var i = 0; i < 11; i++) frame(i), frame(11, thumb: false)])), isEmpty);
+      expect(CardTurn.framesOf(listing([for (var i = 0; i < 11; i++) frame(i), frame(11, cut: false)])), isEmpty);
+      expect(CardTurn.framesOf(listing([for (var i = 0; i < 12; i++) frame(i, cut: false)])).length, 12);
     });
 
-    testWidgets('a sideways drag turns it, the cover shows until then, and a scroll does not turn it', (tester) async {
+    testWidgets('a sideways drag turns it, and on release it turns back to the cover', (tester) async {
       await pumpTile(tester, listing([for (var i = 0; i < 12; i++) frame(i)]));
-      expect(shown(tester), isNull); // the cover
-      await tester.drag(find.byKey(const Key('card-turn')), const Offset(0, -60));
+      expect(shown(tester), isNull);
+      expect(find.byType(CoverPhoto), findsOneWidget);
+      final g = await hold(tester, 3.5);
+      expect(shown(tester), 'https://cdn/t3.webp');
+      await g.up();
+      await tester.pump(const Duration(milliseconds: 60));
+      expect(shown(tester), isNotNull); // turning back
       await tester.pumpAndSettle();
       expect(shown(tester), isNull);
-      await tester.timedDrag(
-          find.byKey(const Key('card-turn')), const Offset(-200 * 1.5 / 12 * 3.5, 0), const Duration(seconds: 2));
-      await tester.pumpAndSettle();
-      expect(shown(tester), 'https://cdn/t3.webp'); // three and a half frames on, at card size
-      await tester.timedDrag(
-          find.byKey(const Key('card-turn')), const Offset(200 * 1.5 / 12 * 5, 0), const Duration(seconds: 2));
-      await tester.pumpAndSettle();
-      expect(shown(tester), 'https://cdn/t10.webp'); // back past the first frame, round to the end of the turn
+      expect(find.byType(CoverPhoto), findsOneWidget);
     });
 
-    testWidgets('a flick coasts on and comes to rest', (tester) async {
-      await pumpTile(tester, listing([for (var i = 0; i < 36; i++) frame(i)]));
-      await tester.fling(find.byKey(const Key('card-turn')), const Offset(-60, 0), 1500);
+    testWidgets('dragging the other way goes round past the start to the end of the turn', (tester) async {
+      await pumpTile(tester, listing([for (var i = 0; i < 12; i++) frame(i)]));
+      final g = await hold(tester, -1.5);
+      expect(shown(tester), 'https://cdn/t10.webp');
+      await g.up();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('a scroll does not turn it', (tester) async {
+      await pumpTile(tester, listing([for (var i = 0; i < 12; i++) frame(i)]));
+      final g = await tester.startGesture(tester.getCenter(find.byKey(const Key('card-turn'))));
+      await g.moveBy(const Offset(0, -60));
       await tester.pump();
-      final first = shown(tester);
-      await tester.pump(const Duration(milliseconds: 300));
-      expect(shown(tester), isNot(first)); // still turning after the finger left
-      await tester.pumpAndSettle();
-      final rest = shown(tester);
-      await tester.pump(const Duration(seconds: 1));
-      expect(shown(tester), rest);
+      expect(shown(tester), isNull);
+      await g.up();
     });
 
-    testWidgets('frames without a cut-out for each one turn as the photos themselves', (tester) async {
-      await pumpTile(tester, listing([for (var i = 0; i < 11; i++) frame(i), frame(11, cut: false)]));
-      await tester.timedDrag(
-          find.byKey(const Key('card-turn')), const Offset(-200 * 1.5 / 12 * 1.5, 0), const Duration(seconds: 1));
+    testWidgets('a frame that fails to load keeps the last good one', (tester) async {
+      failing.add('https://cdn/t2.webp');
+      await pumpTile(tester, listing([for (var i = 0; i < 12; i++) frame(i)]));
+      final g = await hold(tester, 1.5);
+      expect(shown(tester), 'https://cdn/t1.webp');
+      await g.moveBy(const Offset(-25, 0));
+      await tester.pump();
+      await tester.pump();
+      expect(find.byType(CoverPhoto), findsNothing); // not the cover in the middle of the turn
+      // The shoe last decoded is still drawn.
+      expect(tester.widgetList<RawImage>(find.byType(RawImage)).where((r) => r.image != null), isNotEmpty);
+      await g.up();
       await tester.pumpAndSettle();
-      expect(shown(tester), 'https://cdn/f1.jpg');
+    });
+
+    testWidgets('a card that becomes another shoe or gets new photos starts again from its cover', (tester) async {
+      await pumpTile(tester, listing([for (var i = 0; i < 12; i++) frame(i)]));
+      final g = await hold(tester, 2.5);
+      expect(shown(tester), 'https://cdn/t2.webp');
+      // The same listing with reshot frames, while the finger is still down.
+      await pumpTile(
+          tester,
+          listing([
+            for (var i = 0; i < 12; i++) {...frame(i), 'thumb_url': 'https://cdn/new$i.webp'}
+          ]));
+      expect(shown(tester), isNull);
+      await g.moveBy(const Offset(-30, 0)); // no crash: the drag belonged to the old photos
+      await tester.pump();
+      await g.up();
+      await tester.pumpAndSettle();
+      final again = await hold(tester, 1.5);
+      expect(shown(tester), 'https://cdn/new1.webp');
+      await again.up();
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('with reduced motion it shows the cover as soon as the finger lifts', (tester) async {
+      picture ??= await tester.runAsync(() => createTestImage(width: 4, height: 3));
+      await tester.pumpWidget(MaterialApp(
+          home: MediaQuery(
+              data: const MediaQueryData(disableAnimations: true),
+              child: Scaffold(
+                  body: Center(
+                      child: SizedBox(
+                          width: 200,
+                          child: ListingTile(listing: listing([for (var i = 0; i < 12; i++) frame(i)]))))))));
+      final g = await hold(tester, 3.5);
+      expect(shown(tester), isNotNull);
+      await g.up();
+      await tester.pump();
+      expect(shown(tester), isNull);
+    });
+
+    testWidgets('screen readers get a plain card, not a scrollable', (tester) async {
+      final semantics = tester.ensureSemantics();
+      await pumpTile(tester, listing([for (var i = 0; i < 12; i++) frame(i)]));
+      final actions = <SemanticsAction>{};
+      void visit(SemanticsNode n) {
+        final data = n.getSemanticsData();
+        for (final a in [SemanticsAction.scrollLeft, SemanticsAction.scrollRight]) {
+          if (data.hasAction(a)) actions.add(a);
+        }
+        n.visitChildren((c) {
+          visit(c);
+          return true;
+        });
+      }
+
+      visit(tester.getSemantics(find.byType(ListingTile)));
+      expect(actions, isEmpty);
+      semantics.dispose();
     });
 
     testWidgets('in a sideways list the drag scrolls the list instead', (tester) async {
@@ -3090,4 +3194,27 @@ void main() {
       expect(find.byKey(const Key('card-turn')), findsNothing);
     });
   });
+}
+
+/// A frame that is decoded at once, or fails, without the network.
+class _TestFrame extends ImageProvider<_TestFrame> {
+  const _TestFrame(this.url, this.picture, this.failing);
+  final String url;
+  final ui.Image picture;
+  final Set<String> failing;
+
+  @override
+  Future<_TestFrame> obtainKey(ImageConfiguration configuration) => SynchronousFuture(this);
+
+  @override
+  ImageStreamCompleter loadImage(_TestFrame key, ImageDecoderCallback decode) =>
+      OneFrameImageStreamCompleter(failing.contains(url)
+          ? Future.error(StateError('no $url'))
+          : SynchronousFuture(ImageInfo(image: picture.clone())));
+
+  @override
+  bool operator ==(Object other) => other is _TestFrame && other.url == url;
+
+  @override
+  int get hashCode => url.hashCode;
 }

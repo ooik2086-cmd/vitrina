@@ -197,8 +197,11 @@ class ListingTile extends StatelessWidget {
                   final cover => CardTurn(listing: listing, cover: _cover(cover)),
                 },
               ),
-              if (listing.frames.isNotEmpty) const Positioned(left: 10, top: 10, child: Badge360()),
-              if (listing.wasPriceTiyn != null) Positioned(right: 10, top: 10, child: SaleBadge(listing: listing)),
+              // The badges let a drag that starts on them turn the shoe underneath.
+              if (listing.frames.isNotEmpty)
+                const Positioned(left: 10, top: 10, child: IgnorePointer(child: Badge360())),
+              if (listing.wasPriceTiyn != null)
+                Positioned(right: 10, top: 10, child: IgnorePointer(child: SaleBadge(listing: listing))),
             ]),
           ),
         ),
