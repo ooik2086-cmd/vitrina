@@ -203,7 +203,9 @@ class ShowcasePlan {
   /// How many widths of the shoe's picture a sideways drag goes to turn it once round, here and on the cards.
   static const turnWidths = 1.5;
 
-  ShowcasePlan(this.steps, {this.scan = false}) : total = steps.fold(0.0, (sum, s) => sum + s.weight);
+  ShowcasePlan(this.steps, {this.scan = false, int? turn})
+      : total = steps.fold(0.0, (sum, s) => sum + s.weight),
+        turn = turn ?? turnOf(steps.first.media);
 
   /// The frames in order, then the top and sole photos and the close-up (stitching, logo), each only when the
   /// seller took it.
@@ -234,14 +236,16 @@ class ShowcasePlan {
           part(stops[i].kind, at[i], i + 1 < at.length ? at[i + 1] : frames.length),
       ], scan: true);
     }
-    // The turn starts at the frame that shows the shoe as the cover does, so the cover flies into the same view.
-    final start = math.max(0, frames.indexWhere((f) => f.originalUrl == l.coverFrame));
-    final turn = [...frames.skip(start), ...frames.take(start)];
+    // The turn starts at the frame that shows the shoe as the cover does, so the cover flies into the same view. It is
+    // found in the order taken, as the server finds it (one_turn): frames taken after it keep their place.
+    final k = turnOf(frames);
+    final start = math.max(0, frames.take(k).toList().indexWhere((f) => f.originalUrl == l.coverFrame));
+    final turn = [...frames.sublist(start, k), ...frames.take(start), ...frames.skip(k)];
     // Twice as much scrolling for the whole turn as for each stop: see ScrollShowcase.travelFor.
     return ShowcasePlan([
       ShowcaseStep('spin', turn, 2),
       for (final s in stops) ShowcaseStep(s.kind, [s.photo], 1),
-    ]);
+    ], turn: k);
   }
 
   /// Made from one continuous scan: its frames carry their own margin and floor shadow.
@@ -250,15 +254,17 @@ class ShowcasePlan {
   /// The frames of one full turn, in the order the page shows them.
   List<MediaItem> get turnFrames => steps.first.media.take(turn).toList();
 
-  /// Frames in one full turn: up to where the first frame comes round again (a scan carries on past it to the
-  /// stops), or all of the turn's frames.
-  late final int turn = () {
-    final f = steps.first.media;
+  /// Frames in one full turn, at the start of the first step.
+  final int turn;
+
+  /// Frames in one full turn of frames as taken: up to where the first comes round again (a scan carries on past it
+  /// to the stops), or all of them.
+  static int turnOf(List<MediaItem> f) {
     for (var k = 1; k < f.length; k++) {
       if (f[k].originalUrl == f.first.originalUrl) return k;
     }
     return f.length;
-  }();
+  }
 
   double _upTo(int step, int frame) =>
       steps.take(step).fold(0.0, (sum, s) => sum + s.weight) + steps[step].weight * frame / steps[step].media.length;

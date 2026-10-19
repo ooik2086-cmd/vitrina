@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -104,11 +105,13 @@ void main() {
           'cover_frame': c['cover_frame'] == null ? null : 'https://cdn/${c['cover_frame']}.jpg',
         }));
         final want = [for (final p in (c['parts'] as List).cast<List>()) p.cast<String>()];
-        final got = [for (final p in parts(plan)) p.map(name).toList()];
-        // A plain turn starts at the cover's frame here; the server keeps the order taken.
-        List<String> sorted(List<String> l) => [...l]..sort();
-        expect(plan.scan ? got : got.map(sorted).toList(), plan.scan ? want : want.map(sorted).toList(),
-            reason: c['name'] as String);
+        // A plain turn starts here at the cover's frame, within the turn; the server keeps the order taken.
+        if (!plan.scan && want.isNotEmpty) {
+          final (w, k) = (want.first, c['turn'] as int);
+          final s = math.max(0, w.take(k).toList().indexOf((c['cover_frame'] as String?) ?? ''));
+          want.first = [...w.sublist(s, k), ...w.take(s), ...w.skip(k)];
+        }
+        expect([for (final p in parts(plan)) p.map(name).toList()], want, reason: c['name'] as String);
         expect(plan.turn, c['turn'], reason: c['name'] as String);
       }
     });

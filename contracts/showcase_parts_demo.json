@@ -1,5 +1,5 @@
 {
- "about": "How the demo listings split into showcase parts (see showcase_parts.json): each part's size and first frame, and the frames in one turn. Rewrite when app/demo/api.json is re-recorded.",
+ "about": "How the demo listings split into showcase parts (see showcase_parts.json): each part's size and first frame, and the frames in one turn. Written by backend/scripts/showcase_contract.py.",
  "listings": {
   "GET /listings/6": {"sizes": [36], "starts": ["https://raw.githubusercontent.com/ooik2086-cmd/vitrina/claude/initial-code/app/demo/media/1/7c3dc278fe88bd527c6e36f86e404de1.jpg"], "turn": 36},
   "GET /listings/4": {"sizes": [36], "starts": ["https://raw.githubusercontent.com/ooik2086-cmd/vitrina/claude/initial-code/app/demo/media/1/6385c80b296cf31a8711fe50fae15fb3.jpg"], "turn": 36},
