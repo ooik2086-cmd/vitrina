@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import io
 import json
+from dataclasses import dataclass
 from datetime import timedelta
 from typing import Literal
 
@@ -130,17 +131,25 @@ PROMO_ANGLES = ("outer", "front", "inner", "back", "top")
 TURN_ANGLES = {"front", "outer", "inner", "back"}
 
 
-def match_turn_frames(db: Session, storage: Storage, listing: Listing, made: dict[str, bytes] | None = None) -> None:
+@dataclass
+class TurnMatches:
+    """What a comparison found, by address, as the photos were when it ran."""
+    cover: tuple[str, str] | None  # (frame, cover photo)
+    sides: dict[str, tuple[str, str]]  # side: (frame, side photo)
+    tried: bool  # some side photo was compared, found or not
+
+
+def match_turn_frames(storage: Storage, listing: Listing, made: dict[str, bytes] | None = None) -> TurnMatches | None:
     """Finds the 360° frame that shows the shoe as the cover does, and the frame of one turn that shows each side
     photographed, unless they are set for these photos and frames already (the seller's own cover frame stays).
     Compares the small copies of the cut-outs, which are cheap to read and show the shoe's outline whatever the
-    room; made holds the copies this run has just made."""
+    room; made holds the copies this run has just made. Writes nothing: see put_turn_matches."""
     frames = [m for m in listing.media if m.angle == "frame"]
 
     def cut(m) -> bool:  # not cut out (yet): a backdrop compared with a backdrop says nothing about the angle
         return bool(m.processed_url and m.thumb_url and storage.owns(m.thumb_url))
     if not frames or not all(cut(m) for m in frames):
-        return
+        return None
     cover = cover_photo(listing)
     if cover is None or cover.angle not in TURN_ANGLES or cover_frame(listing) is not None or not cut(cover):
         cover = None
@@ -149,7 +158,7 @@ def match_turn_frames(db: Session, storage: Storage, listing: Listing, made: dic
              if side not in known and (m := side_photo(listing, side)) is not None and cut(m)}
     turn, _ = one_turn(listing.media)
     if cover is None and (not sides or len(turn) < 8):
-        return
+        return None
     made = made or {}
 
     def read(url: str) -> bytes:
@@ -163,30 +172,46 @@ def match_turn_frames(db: Session, storage: Storage, listing: Listing, made: dic
     best = cutout.closest_frame(read(cover.thumb_url), [seen[m.thumb_url] for m in frames]) if cover else None
     found = (cutout.side_frames({side: read(m.thumb_url) for side, m in sides.items()},
                                 [seen[m.thumb_url] for m in turn]) if sides and len(turn) >= 8 else {})
-    # What was compared, by address: the photos may be gone by now.
-    best_url = frames[best].original_url if best is not None else None
-    cover_url = cover.original_url if cover else None
-    found = {side: (turn[k].original_url, sides[side].original_url) for side, k in found.items()}
-    tried = bool(sides)
-    # The seller, or a job for newer photos, may have changed the listing while this compared: read it again,
-    # and keep it locked (on Postgres) until the caller commits, so neither overwrites the other. Only what
-    # still holds for the photos as they are now is written.
-    db.flush()
-    db.expire_all()
-    db.refresh(listing, with_for_update=True)
+    return TurnMatches(
+        cover=(frames[best].original_url, cover.original_url) if best is not None else None,
+        sides={side: (turn[k].original_url, sides[side].original_url) for side, k in found.items()},
+        tried=bool(sides))
+
+
+def put_turn_matches(listing: Listing, found: TurnMatches) -> None:
+    """Writes what match_turn_frames found where it still holds for the listing as it is now (see lock_fresh):
+    the frame and the photo still the listing's, and no choice of the seller's in the way."""
     now = {m.original_url for m in listing.media if m.angle == "frame"}
     current = cover_photo(listing)
-    if (best_url in now and cover_frame(listing) is None and current is not None
-            and current.original_url == cover_url):
-        listing.cover_frame, listing.cover_frame_of = best_url, cover_url
+    if (found.cover is not None and found.cover[0] in now and cover_frame(listing) is None
+            and current is not None and current.original_url == found.cover[1]):
+        listing.cover_frame, listing.cover_frame_of = found.cover
     marks = {side: {"frame": frame, "of": side_photo(listing, side).original_url}
              for side, frame in angle_frames(listing).items()}
-    for side, (frame, of) in found.items():
+    for side, (frame, of) in found.sides.items():
         if side not in marks and frame in now and of == getattr(side_photo(listing, side), "original_url", None):
             marks[side] = {"frame": frame, "of": of}
     # Tried and not found is kept as {}, so the backfill does not pick the listing again.
-    if marks or found or tried:
+    if marks or found.sides or found.tried:
         listing.angle_frames = json.dumps(marks, sort_keys=True)
+
+
+def lock_fresh(db: Session, listing: Listing) -> None:
+    """Reads the listing again before writing what was worked out from it: the seller, or a job for newer photos,
+    may have changed it meanwhile. On Postgres its row stays locked until the commit, so neither overwrites the
+    other. The lock comes before this session's own writes go out, as every writer takes them (the listing, then
+    its photos), so two writers never wait on each other."""
+    with db.no_autoflush:
+        db.execute(select(Listing.id).where(Listing.id == listing.id).with_for_update())
+    db.flush()
+    db.expire_all()
+    db.refresh(listing)
+
+
+def _first_shown(storage: Storage, listing: Listing):
+    """The cut-out the showcase opens on, whose backdrop the listing takes."""
+    shown = sorted(listing.media, key=lambda m: (m.angle != "frame", m.angle != "front", m.position))
+    return next((m for m in shown if m.processed_url and storage.owns(m.processed_url)), None)
 
 
 def thumb_listing(state, listing_id: int) -> int:
@@ -209,14 +234,21 @@ def thumb_listing(state, listing_id: int) -> int:
                 done += 1
             except Exception:
                 log.exception("thumbnail failed for %s", source)
-        shown = sorted(listing.media, key=lambda m: (m.angle != "frame", m.angle != "front", m.position))
-        first = next((m for m in shown if m.processed_url and storage.owns(m.processed_url)), None)
+        first = _first_shown(storage, listing)
+        source = first.processed_url if first else None
+        backdrop, chosen = None, True
         try:
-            listing.backdrop = cutout.backdrop_for(storage.read(first.processed_url)) if first else None
+            backdrop = cutout.backdrop_for(storage.read(source)) if source else None
         except Exception:
             log.exception("backdrop failed for listing %s", listing_id)
-        # Last, as it locks the listing until the commit.
-        match_turn_frames(db, storage, listing, made)
+            chosen = False
+        found = match_turn_frames(storage, listing, made)
+        lock_fresh(db, listing)
+        # Only what still holds for the photos as they are now: a job for newer photos may have written already.
+        if chosen and source == getattr(_first_shown(storage, listing), "processed_url", None):
+            listing.backdrop = backdrop
+        if found is not None:
+            put_turn_matches(listing, found)
         db.commit()
         return done
 

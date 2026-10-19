@@ -1,6 +1,6 @@
-import json
 """Background removal may only change transparency, never the product's colours or outline."""
 import io
+import json
 import os
 import unittest
 
@@ -303,6 +303,47 @@ class CutoutApiTests(MediaTests):
         self.assertEqual(r.status_code, 200, r.text)
         self.assertEqual(self.mine(lid)["angle_frames"], {"outer": frames[4]["url"], "front": frames[6]["url"]})
 
+    def test_a_cover_frame_found_on_old_photos_gives_way_to_what_changed_meanwhile(self):
+        from vitrina_api import cutout
+        from vitrina_api.models import Listing
+        shades = [(20 + 25 * i,) * 3 for i in range(8)]
+        frames = self.frames(shades)
+        side = self.upload(self.seller, solid(shades[5])).json()["url"]
+        lid = self.post("/listings", self.seller, {**LISTING, "photos": [{"url": side, "angle": "outer"}] + frames}
+                        ).json()["id"]
+        real = cutout.closest_frame
+
+        def run(change):  # a new cover is compared while something else changes the listing
+            def meanwhile(*args):
+                out = real(*args)
+                with self.app.state.sessions() as db:
+                    change(db.get(Listing, lid))
+                    db.commit()
+                return out
+            cover = self.upload(self.seller, solid(shades[4])).json()["url"]
+            cutout.closest_frame = meanwhile
+            try:
+                r = self.c.patch(f"/api/v1/listings/{lid}", headers=self.h(self.seller),
+                                 json={"photos": [{"url": cover, "angle": "outer"}] + frames})
+            finally:
+                cutout.closest_frame = real
+            self.assertEqual(r.status_code, 200, r.text)
+            with self.app.state.sessions() as db:
+                row = db.get(Listing, lid)
+                return row.cover_frame, row.cover_frame_of, next(m for m in row.media if m.angle == "outer")
+
+        def seller_picks(row):
+            row.cover_frame = frames[1]["url"]
+            row.cover_frame_of = next(m for m in row.media if m.angle == "outer").original_url
+        frame, of, cover = run(seller_picks)
+        self.assertEqual((frame, of), (frames[1]["url"], cover.original_url))  # the seller's choice wins
+
+        def replaced(row):
+            row.cover_frame = row.cover_frame_of = None
+            next(m for m in row.media if m.angle == "outer").original_url = "http://test/media/elsewhere.jpg"
+        frame, of, cover = run(replaced)
+        self.assertEqual((frame, of), (None, None))  # nothing is written for a photo that is gone
+
     def test_a_side_is_snapped_to_where_the_shoe_is_square_on(self):
         from vitrina_api import cutout
 
@@ -381,6 +422,56 @@ class ShowcaseUnitTests(unittest.TestCase):
         self.assertEqual(thumb.size, (480, 360))
         r, g, b = thumb.convert("RGB").getpixel((240, 180))
         self.assertTrue(abs(r - 200) < 8 and abs(g - 30) < 8 and abs(b - 30) < 8, (r, g, b))
+
+
+@unittest.skipUnless(os.environ.get("VITRINA_TEST_POSTGRES"), "set VITRINA_TEST_POSTGRES to a Postgres URL")
+class TurnMatchLockTests(unittest.TestCase):
+    """The row lock only exists on Postgres, which production runs on."""
+
+    def test_a_job_waits_for_a_seller_save_instead_of_deadlocking(self):
+        import threading
+        import time
+        from sqlalchemy import update
+        from vitrina_api.listing_routes import lock_fresh
+        from vitrina_api.models import Listing, Media, User, make_session_factory
+        sessions = make_session_factory(os.environ["VITRINA_TEST_POSTGRES"])
+        with sessions() as db:
+            user = User(phone=f"+7{time.time_ns() % 10**10:010d}")
+            db.add(user)
+            db.flush()
+            listing = Listing(seller_id=user.id, title="t", category="sneakers", color="black", condition="new",
+                              price_tiyn=1)
+            listing.media.append(Media(original_url="a", angle="frame", position=0))
+            db.add(listing)
+            db.commit()
+            lid, mid = listing.id, listing.media[0].id
+        saving = threading.Event()
+        failed = []
+
+        def seller():  # a save writes the listing first, then its photos
+            try:
+                with sessions() as db:
+                    db.execute(update(Listing).where(Listing.id == lid).values(title="new"))
+                    saving.set()
+                    time.sleep(1.5)  # longer than Postgres waits before it looks for a deadlock
+                    db.execute(update(Media).where(Media.id == mid).values(position=1))
+                    db.commit()
+            except Exception as e:
+                failed.append(e)
+                saving.set()
+        t = threading.Thread(target=seller)
+        t.start()
+        saving.wait(5)
+        with sessions() as db:  # meanwhile the job made a small copy, and reads the listing again to write
+            listing = db.get(Listing, lid)
+            listing.media[0].thumb_url = "small"
+            lock_fresh(db, listing)
+            db.commit()
+        t.join(10)
+        self.assertEqual(failed, [])
+        with sessions() as db:
+            row = db.get(Listing, lid)
+            self.assertEqual((row.title, row.media[0].thumb_url, row.media[0].position), ("new", "small", 1))
 
 
 @unittest.skipUnless(os.environ.get("VITRINA_CUTOUT_MODEL"), "set VITRINA_CUTOUT_MODEL to test the real model")
