@@ -37,8 +37,16 @@ class ListingScreen extends StatefulWidget {
       this.cover,
       this.coverIsCutout = false,
       this.sizeLabel,
-      this.atDetails = false});
+      this.atDetails = false,
+      this.listing,
+      this.turnAt});
   final int listingId;
+
+  /// The listing, already fetched: the page shows it at once.
+  final Listing? listing;
+
+  /// Where in the 360° turn to open (ShowcasePlan.turnAt): another colour picked mid-turn stays at the same angle.
+  final double? turnAt;
 
   /// The size the buyer had picked on another colour of this model: picked here too when it is in stock.
   final String? sizeLabel;
@@ -58,6 +66,7 @@ class ListingScreen extends StatefulWidget {
 
 class _ListingScreenState extends State<ListingScreen> {
   late Future<Listing> _listing;
+  late Listing? _ready = widget.listing;
   Future<List<Listing>>? _similar;
   int? _sizeId;
   bool _fitChecked = false;
@@ -105,7 +114,9 @@ class _ListingScreenState extends State<ListingScreen> {
   }
 
   void _loadListing() {
-    _listing = SessionScope.of(context).api.listing(widget.listingId);
+    final ready = _ready;
+    _ready = null; // a reload fetches again
+    _listing = ready != null ? Future.value(ready) : SessionScope.of(context).api.listing(widget.listingId);
     _listing.then((l) {
       if (l.status == 'published') rememberViewed(l);
     }, onError: (_) {});
@@ -284,6 +295,7 @@ class _ListingScreenState extends State<ListingScreen> {
       ),
       body: FutureBuilder<Listing>(
         future: _listing,
+        initialData: widget.listing,
         builder: (context, snap) {
           if (snap.hasError && snap.connectionState == ConnectionState.done) {
             return SafeArea(child: ErrorRetry(error: snap.error, onRetry: () => setState(_loadListing)));
@@ -328,18 +340,44 @@ class _ListingScreenState extends State<ListingScreen> {
 
   /// Another colour of this model, in place of this one: back still leads where the buyer came from. The size they
   /// picked comes along, and from the details they land at the details again.
-  void _openColor(Listing l, Colorway c, {required bool atDetails}) {
+  bool _switching = false;
+
+  Future<void> _openColor(Listing l, Colorway c, {required bool atDetails}) async {
+    if (_switching) return;
     final thumb = c.thumbUrl;
     final size = l.sizes.where((s) => s.id == _sizeId).firstOrNull?.label;
+    final turnAt = atDetails ? null : _showcase.currentState?.turnAt;
+    Listing? next;
+    if (turnAt != null) {
+      // Mid-turn: fetch the other colour and its frame at this angle first, so it fades in standing as this one
+      // stands. A slow network does not hold the tap up: the page then opens from the cover and turns there.
+      _switching = true;
+      final api = SessionScope.of(context).api;
+      final ready = () async {
+        final other = await api.listing(c.id);
+        final image = ScrollShowcase.firstImageAt(other, turnAt);
+        if (image != null && mounted) await precacheImage(image, context, onError: (_, __) {});
+        return other;
+      }();
+      try {
+        next = await ready.timeout(const Duration(milliseconds: 1200));
+      } catch (_) {
+        // too slow or failed: the page fetches it itself
+      }
+      _switching = false;
+      if (!mounted) return;
+    }
     Navigator.of(context).pushReplacement(PageRouteBuilder(
       transitionDuration: const Duration(milliseconds: 200),
       reverseTransitionDuration: const Duration(milliseconds: 200),
       pageBuilder: (_, __, ___) => ListingScreen(
           listingId: c.id,
+          listing: next,
           cover: thumb,
           coverIsCutout: c.cutout && thumb != null,
           sizeLabel: size,
-          atDetails: atDetails),
+          atDetails: atDetails,
+          turnAt: turnAt),
       // The same shoe in another colour: a quick fade, not a new page sliding in.
       transitionsBuilder: (_, animation, __, child) => FadeTransition(opacity: animation, child: child),
     ));
@@ -391,6 +429,13 @@ class _ListingScreenState extends State<ListingScreen> {
         // The showcase sets its height while building: go past it once the page is laid out.
         WidgetsBinding.instance.addPostFrameCallback((_) {
           final at = mounted ? _detailsAt(l) : null;
+          if (at != null && _scroll.hasClients) _scroll.jumpTo(min(_scroll.position.maxScrollExtent, at));
+        });
+      } else if (widget.turnAt case final turnAt?) {
+        // The same, to the angle the other colour stood at.
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          final stage = _stage;
+          final at = mounted && stage != null ? ScrollShowcase.offsetFor(l, stage, turnAt) : null;
           if (at != null && _scroll.hasClients) _scroll.jumpTo(min(_scroll.position.maxScrollExtent, at));
         });
       }

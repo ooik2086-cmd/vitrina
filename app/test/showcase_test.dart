@@ -97,6 +97,23 @@ void main() {
       expect(plan.steps.last.media.single.angle, 'detail'); // the stitching close-up, not the size label
     });
 
+    test('a place in the turn is the same angle on a turn with more or fewer frames, and on no stop or scan', () {
+      final plan = ShowcasePlan.of(Listing.fromJson(listing()));
+      final fewer = ShowcasePlan.of(Listing.fromJson({
+        ...listing(details: false),
+        'media': [media('outer', 'outer'), for (var i = 0; i < 12; i++) media('frame', 'f$i')],
+      }));
+      for (final (frame, other) in [(0, 0), (6, 3), (13, 6), (23, 11)]) {
+        final at = plan.turnAt(plan.centreOf(0, frame))!;
+        expect(at, (frame + 0.5) / 24);
+        expect(plan.at(plan.progressAt(at)!).frame, frame); // back again on the same turn
+        expect(fewer.at(fewer.progressAt(at)!), (step: 0, frame: other));
+      }
+      expect(plan.turnAt(plan.centreOf(2, 0)), isNull); // on the sole
+      final scanned = ShowcasePlan.of(Listing.fromJson(scan()));
+      expect((scanned.turnAt(0.01), scanned.progressAt(0.5)), (null, null));
+    });
+
     test('skips stops the seller did not photograph', () {
       final plan = ShowcasePlan.of(Listing.fromJson(listing(details: false)));
       expect([for (final s in plan.steps) s.kind], ['spin']);
@@ -652,10 +669,14 @@ void main() {
   final colours = [colorway(9, 'ақ', inStock: false), colorway(8, 'көк'), colorway(7, 'қара', current: true)];
 
   /// The listing opened from another page, so leaving it shows where the buyer came from.
-  Future<void> pumpOpened(WidgetTester tester, Map<String, dynamic> body) async {
+  Future<void> pumpOpened(WidgetTester tester, Map<String, dynamic> body,
+      {Duration otherColour = Duration.zero}) async {
     final api = Api(
         base: 'http://x/api/v1',
-        client: MockClient((req) async => jsonResponse(req.url.path.endsWith('/similar') ? {'items': []} : body)));
+        client: MockClient((req) async {
+          if (req.url.path.endsWith('/listings/8')) await Future<void>.delayed(otherColour);
+          return jsonResponse(req.url.path.endsWith('/similar') ? {'items': []} : body);
+        }));
     tester.view.physicalSize = const Size(400, 800);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -699,6 +720,49 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(ListingScreen), findsNothing);
     expect(find.text('catalog'), findsOneWidget);
+  });
+
+  showcaseTest('a colour picked mid-turn opens standing at the same angle, fetched before it fades in', (tester) async {
+    await pumpOpened(tester, {...listing(), 'colors': colours});
+    final stage = tester.getSize(find.byType(Scrollable).first).height;
+    final plan = ShowcasePlan.of(Listing.fromJson(listing()));
+    page(tester).jumpTo(plan.centreOf(0, 9) * ScrollShowcase.travelFor(stage, plan.steps.length));
+    await tester.pumpAndSettle();
+    expect(base(tester), 'https://cdn/f9-s.webp');
+    await tester
+        .tap(find.descendant(of: find.byKey(const Key('showcase')), matching: find.byKey(const Key('color-8'))));
+    await tester.pumpAndSettle();
+    final opened = tester.widget<ListingScreen>(find.byType(ListingScreen));
+    expect((opened.listingId, opened.turnAt, opened.listing?.id), (8, 9.5 / 24, 7)); // the mock answers listing 7
+    expect(base(tester), 'https://cdn/f9-s.webp'); // the same frame of the other colour's turn
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+  });
+
+  showcaseTest('a colour picked before turning opens at its cover, as before', (tester) async {
+    await pumpOpened(tester, {...listing(), 'colors': colours});
+    await tester
+        .tap(find.descendant(of: find.byKey(const Key('showcase')), matching: find.byKey(const Key('color-8'))));
+    await tester.pumpAndSettle();
+    final opened = tester.widget<ListingScreen>(find.byType(ListingScreen));
+    expect((opened.listingId, opened.turnAt, opened.listing), (8, null, null)); // at the cover, as before
+    expect(page(tester).pixels, 0);
+  });
+
+  showcaseTest('on a slow network the colour opens at once and turns to the angle when it arrives', (tester) async {
+    await pumpOpened(tester, {...listing(), 'colors': colours}, otherColour: const Duration(seconds: 3));
+    final stage = tester.getSize(find.byType(Scrollable).first).height;
+    final plan = ShowcasePlan.of(Listing.fromJson(listing()));
+    page(tester).jumpTo(plan.centreOf(0, 15) * ScrollShowcase.travelFor(stage, plan.steps.length));
+    await tester.pumpAndSettle();
+    await tester
+        .tap(find.descendant(of: find.byKey(const Key('showcase')), matching: find.byKey(const Key('color-8'))));
+    await tester.pump(const Duration(milliseconds: 1300)); // the tap is not held up longer than this
+    await tester.pump(const Duration(milliseconds: 300));
+    final opened = tester.widget<ListingScreen>(find.byType(ListingScreen));
+    expect((opened.listingId, opened.turnAt, opened.listing), (8, 15.5 / 24, null));
+    await tester.pump(const Duration(seconds: 3)); // it arrives, and turns to where the other colour stood
+    await tester.pumpAndSettle();
+    expect(base(tester), 'https://cdn/f15-s.webp');
   });
 
   showcaseTest('a colour picked under the title opens at the title, with the size the buyer picked', (tester) async {

@@ -179,6 +179,18 @@ class ShowcasePlan {
     return (step: 0, frame: 0);
   }
 
+  /// Where in the turn [progress] is: 0 to 1 from the turn's first frame, the middle of the frame shown. Both turns
+  /// of a model's colours start at the frame matching the cover, so the same place is the same angle on each. Null
+  /// past the turn, and for a scan, whose turn starts wherever the camera did.
+  double? turnAt(double progress) {
+    if (scan) return null;
+    final shown = at(progress);
+    return shown.step == 0 ? (shown.frame + 0.5) / steps.first.media.length : null;
+  }
+
+  /// The scroll progress that shows [turnAt] of the turn; null for a scan.
+  double? progressAt(double turnAt) => scan ? null : steps.first.weight * turnAt.clamp(0.0, 1.0) / total;
+
   /// Scroll progress at which [step] begins.
   double startOf(int step) => steps.take(step).fold(0.0, (sum, s) => sum + s.weight) / total;
 
@@ -239,6 +251,25 @@ class ScrollShowcase extends StatefulWidget {
   /// swipe turns the shoe once round (a full screen per turn felt slow and heavy under the finger), and 0.3 per stop.
   static double travelFor(double stageHeight, int steps) => stageHeight * (0.6 + 0.3 * (steps - 1));
 
+  /// The scroll offset at which [listing]'s page, on a stage this high, shows [turnAt] of its turn
+  /// (ShowcasePlan.turnAt); null for a scan.
+  static double? offsetFor(Listing listing, double stageHeight, double turnAt) {
+    final plan = ShowcasePlan.of(listing);
+    final progress = plan.progressAt(turnAt);
+    return progress == null ? null : progress * travelFor(stageHeight, plan.steps.length);
+  }
+
+  /// The small copy the stage draws first for the frame at [turnAt], the same provider, so fetching it ahead fills
+  /// the cache the stage reads; null for a scan, or when the turn has no small copies.
+  static ImageProvider? firstImageAt(Listing listing, double turnAt) {
+    final plan = ShowcasePlan.of(listing);
+    if (plan.scan) return null;
+    final step = plan.steps.first;
+    final m = step.media[plan.at(plan.progressAt(turnAt)!).frame];
+    if (m.thumbUrl == null || !(step.cut || m.processedUrl == null)) return null;
+    return ResizeImage.resizeIfNeeded(ScrollShowcaseState.thumbSide, null, NetworkImage(m.thumbUrl!));
+  }
+
   @override
   State<ScrollShowcase> createState() => ScrollShowcaseState();
 }
@@ -271,6 +302,9 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
   Offset? _tapAt;
 
   double get _travel => ScrollShowcase.travelFor(widget.stageHeight, _plan.steps.length);
+
+  /// Where in the turn the shoe stands now (ShowcasePlan.turnAt); null before the page was scrolled.
+  double? get turnAt => _progress > 0 ? _plan.turnAt(_progress) : null;
 
   double get _progress {
     final s = widget.scroll;
