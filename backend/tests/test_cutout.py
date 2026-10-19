@@ -187,6 +187,32 @@ class CutoutApiTests(MediaTests):
         self.assertIn(f"listing {lid}: failed in cutout_listing", out)
         self.assertTrue(all(m["thumb_url"] for m in self.mine(lid)["media"]))
 
+    def test_a_turn_with_a_frame_that_cannot_be_cut_out_is_kept_as_taken_with_small_copies_to_match(self):
+        shades = [(20 + 25 * i,) * 3 for i in range(8)]
+
+        def segment(img):  # the fourth frame cannot be cut out (a real model may find no shoe in it)
+            if img.convert("RGB").getpixel((0, 0)) == shades[3]:
+                raise RuntimeError("no shoe found")
+            return center_segmenter(img)
+        self.app.state.segmenter = segment
+        with self.assertLogs("vitrina", level="INFO") as logs:
+            lid = self.post("/listings", self.seller, {**LISTING, "photos": self.four((200, 40, 40))
+                                                       + self.frames(shades)}).json()["id"]
+        self.assertIn("1 of 8 frames not cut out", "\n".join(logs.output))
+        media = self.mine(lid)["media"]
+        frames = [m for m in media if m["angle"] == "frame"]
+        # The turn is shown as taken (as the app and the shared page would anyway), now with small copies of those
+        # photos to turn through; the side photos keep their cut-outs.
+        self.assertTrue(all(m["processed_url"] is None and m["thumb_url"] for m in frames), frames)
+        from vitrina_api.models import Listing
+        from vitrina_api.share import turn_shots
+        with self.app.state.sessions() as db:
+            row = db.get(Listing, lid)
+            shots, cut = turn_shots(row, row.media)
+        self.assertFalse(cut)
+        self.assertTrue(all(small != full for small, full in shots))  # light: small copies, not full photos
+        self.assertTrue(all(m["processed_url"] for m in media if m["angle"] in ("front", "outer", "inner", "back")))
+
     def test_without_a_model_photos_stay_original(self):
         self.app.state.segmenter = None
         url = self.upload(self.seller, jpeg()).json()["url"]

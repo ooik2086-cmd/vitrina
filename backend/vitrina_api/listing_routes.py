@@ -81,7 +81,23 @@ def cutout_listing(state, listing_id: int) -> int:
             db.execute(update(Media).where(Media.id == m.id, Media.original_url == m.original_url)
                        .values(processed_url=storage.put(data, owner_id=seller, ext="webp"), thumb_url=None))
             db.commit()
-        return cutout.process_listing_media(media, storage.read, save, segment)
+        done = cutout.process_listing_media(media, storage.read, save, segment)
+        # The 360° turn shows its cut-outs only when every frame has one (ShowcasePlan in the app, turn_shots on the
+        # shared page); otherwise the photos as taken, whose small copies must be of those photos. So when some
+        # frames could not be cut out, the others' cut-outs are dropped and their small copies made again from the
+        # photos as taken: else the app fetched each of those frames at full size. The next run (the backfill)
+        # tries the whole turn again.
+        frames = db.execute(select(Media.id, Media.processed_url)
+                            .where(Media.listing_id == listing_id, Media.angle == "frame")).all()
+        if any(url for _, url in frames) and not all(url for _, url in frames):
+            for mid, url in frames:
+                if url:  # only onto the cut-out as read: a newer one landing meanwhile is not touched
+                    db.execute(update(Media).where(Media.id == mid, Media.processed_url == url)
+                               .values(processed_url=None, thumb_url=None))
+            db.commit()
+            log.info("listing %s: %d of %d frames not cut out; its turn shows the photos as taken", listing_id,
+                     sum(not url for _, url in frames), len(frames))
+        return done
 
 
 def embed_listing(state, listing_id: int) -> bool:
