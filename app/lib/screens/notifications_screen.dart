@@ -121,6 +121,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                 'question' || 'question_answered' => Icons.help_outline_rounded,
                 'moderation' => Icons.fact_check_outlined,
                 'listing_hidden' || 'report_closed' => Icons.flag_outlined,
+                'listing_tip' => Icons.tips_and_updates_outlined,
                 _ => Icons.local_shipping_outlined,
               };
               return ListTile(

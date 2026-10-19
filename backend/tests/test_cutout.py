@@ -230,11 +230,17 @@ class CutoutApiTests(MediaTests):
         for who in ({}, self.h(self.buyer)):
             public = self.c.get(f"/api/v1/listings/{lid}", headers=who).json()["media"]
             self.assertTrue(all("no_shoe" not in m for m in public))
+        # The seller hears it once, and the note opens the listing's own page.
+        notes = [n for n in self.c.get("/api/v1/notifications", headers=self.h(self.seller)).json()["items"]
+                 if n["kind"] == "listing_tip"]
+        self.assertEqual([(n["listing_id"], n["text"].split(":")[0]) for n in notes], [(lid, f"«{LISTING['title']}»")])
         # Later runs (the backfill) know the turn cannot be cut out: no model time, no files thrown away.
         calls.clear()
         files = self.stored()
         self.assertEqual((cutout_listing(self.app.state, lid), thumb_listing(self.app.state, lid)), (0, 0))
         self.assertEqual((calls, self.stored()), ([], files))
+        notes = self.c.get("/api/v1/notifications", headers=self.h(self.seller)).json()["items"]
+        self.assertEqual(sum(n["kind"] == "listing_tip" for n in notes), 1)
 
     def test_a_scan_keeps_the_cut_outs_of_the_parts_whose_frames_were_all_cut_out(self):
         from vitrina_api.models import Listing
@@ -251,6 +257,9 @@ class CutoutApiTests(MediaTests):
         with self.app.state.sessions() as db:
             row = db.get(Listing, lid)
             self.assertTrue(turn_shots(row, row.media)[1])
+        # The sole is a frame and a stop photo: one picture, one note to the seller.
+        notes = self.c.get("/api/v1/notifications", headers=self.h(self.seller)).json()["items"]
+        self.assertEqual(sum(n["kind"] == "listing_tip" for n in notes), 1)
 
     def test_a_turn_that_failed_for_a_while_is_cut_out_on_the_next_run(self):
         from vitrina_api.listing_routes import cutout_listing

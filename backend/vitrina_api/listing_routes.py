@@ -144,6 +144,17 @@ def _settle_cutouts(db: Session, storage: Storage, listing_id: int, part: list, 
     vector_of = embedded_photo(storage, listing) if part[0].angle != "frame" else None
     for m in now:
         if m.id == no_shoe:
+            if not any(x.no_cutout for x in listing.media):
+                # Told once, on the first photo with no shoe found; the listing's page names it and the others.
+                t = listing.title
+                services.notify(
+                    db, listing.seller_id, "listing_tip",
+                    f"«{t}»: бір фотода аяқкиім табылмады, сондықтан оның фоны алынбайды. "
+                    f"Қай фото екенін тауар бетінен көріңіз.",
+                    f"«{t}»: на одном фото не найдена обувь, поэтому фон на нём не удаляется. "
+                    f"Посмотрите на странице товара, на каком.",
+                    f"“{t}”: no shoe was found in one photo, so its background is not removed. "
+                    f"The listing's page shows which one.", listing_id=listing_id)
             m.no_cutout = model
         if m.id in cuts and not m.processed_url:
             m.processed_url, m.thumb_url, m.no_cutout = cuts[m.id], None, None
