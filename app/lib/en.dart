@@ -950,7 +950,7 @@ const en = <String, String>{
   '360° айналымнан кейін сатып алушы үстін, табанын және жақын көріністі көреді. Бір-бір фото қосыңыз:':
       'After the 360° turn buyers see the top, the sole and a close-up. Add one photo of each:',
   'Жақыннан (тігіс, логотип)': 'Close-up (stitching, logo)',
-  '{0}, ашылуда': '{0}, opening',
+  '{0}: ашылуда': '{0}: opening',
   '{0}, өлшемдері таусылған': '{0}, sold out',
   'Басқа түстер': 'Other colours',
   'қара': 'black',

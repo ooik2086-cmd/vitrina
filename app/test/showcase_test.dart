@@ -9,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:vitrina/api.dart';
+import 'package:vitrina/colors.dart';
 import 'package:vitrina/screens/listing_screen.dart';
 import 'package:vitrina/session.dart';
 import 'package:vitrina/widgets/color_choice.dart';
@@ -836,13 +837,17 @@ void main() {
     final asked = await pumpOpened(tester, anchored, other: {...anchored, 'id': 8});
     await turnTo(tester, 0, 9);
     expect(base(tester), 'https://cdn/f9-s.webp');
+    SemanticsNode heard() => tester.getSemantics(find.ancestor(of: swatch(8), matching: find.byType(Semantics)).first);
+    final before = heard();
+    expect((before.label, before.flagsCollection.isLiveRegion),
+        (ColorSwatches.describe(Colorway.fromJson(colours[1])), false));
     await tester.tap(swatch(8));
     await tester.pump();
     expect(find.byKey(const Key('color-coming-8')), findsOneWidget); // the tap shows at once
-    // and is heard at once: the wait is not silent to a screen reader.
-    final heard = tester.getSemantics(find.ancestor(of: swatch(8), matching: find.byType(Semantics)).first);
-    expect(heard.label, endsWith(', ашылуда'));
-    expect(heard.flagsCollection.isLiveRegion, isTrue);
+    // and is heard at once, on the same node the reader is on: the wait is not silent to a screen reader.
+    final coming = heard();
+    expect((coming.id, coming.label, coming.flagsCollection.isLiveRegion),
+        (before.id, '${colorName(Colorway.fromJson(colours[1]).color)}: ашылуда', true));
     expect((tester.widget<Container>(find.byKey(const Key('color-ring-8'))).decoration as BoxDecoration).border,
         Border.all(color: ShowcaseScene.light.fg, width: 2));
     for (var i = 0; i < 5 && screen(8).evaluate().isEmpty; i++) {
@@ -946,6 +951,13 @@ void main() {
     await tester.tap(swatch(8));
     await tester.pump(const Duration(milliseconds: 100));
     await tester.tap(swatch(9));
+    await tester.pump();
+    // Only the colour now on its way is heard as opening.
+    bool live(int id) => tester
+        .getSemantics(find.ancestor(of: swatch(id), matching: find.byType(Semantics)).first)
+        .flagsCollection
+        .isLiveRegion;
+    expect((live(8), live(9)), (false, true));
     await tester.pumpAndSettle();
     expect(screen(8), findsNothing);
     expect(screen(9), findsOneWidget);
