@@ -283,20 +283,18 @@ class ShowcasePlan {
     return (step: 0, frame: 0);
   }
 
-  /// What the stage shows at [progress], so another colour of the model can show the same: on the turn, the angle
-  /// of the frame shown (0 to 1 from the turn's first frame, which on every colour is the frame matching its cover),
-  /// else the stop (top, sole, close). Null for a scan, whose turn starts wherever the camera did.
+  /// What the stage shows at [progress], so another colour of the model can show the same: on the turn, where in
+  /// it the frame shown is (0 to 1 from the turn's first frame; ScrollShowcase.carry finds the same side on the
+  /// other colour), else the stop (top, sole, close; on a scan, the move from it to the next).
   ShowcaseView? viewAt(double progress) {
-    if (scan) return null;
     final shown = at(progress);
     final step = steps[shown.step];
     return (kind: step.kind, at: shown.step == 0 ? shown.frame / step.media.length : 0.0);
   }
 
-  /// The scroll progress that shows [view] here: the middle of the turn's frame nearest that angle, or of the same
-  /// stop. Null for a scan, or without a turn or that stop.
+  /// The scroll progress that shows [view] here: the middle of the turn's frame nearest that place, or of the same
+  /// stop (on a scan, the stop's own frame). Null without a turn or that stop.
   double? progressFor(ShowcaseView view) {
-    if (scan) return null;
     for (var i = 0; i < steps.length; i++) {
       final n = steps[i].media.length;
       if (steps[i].kind != view.kind || n == 0) continue;
@@ -390,8 +388,8 @@ class ScrollShowcase extends StatefulWidget {
   }
 
   /// [view] of [from] as [to] shows it: the same side of the turn when both turns' sides are known, else the
-  /// same frame when both turns start at the same side; the same stop. Null when [to] cannot show it. A scan
-  /// never shows a view (see ShowcasePlan.viewAt), so it opens at its cover.
+  /// same frame when both turns start at the same side; the same stop. Null when [to] cannot show it. A scan's
+  /// turn starts wherever the camera did, so on a scan the turn carries only through known sides.
   static ShowcaseView? carry(ShowcaseView view, Listing from, Listing to) {
     if (view.kind != 'spin') return view;
     final p = ShowcasePlan.of(from), q = ShowcasePlan.of(to);
@@ -399,7 +397,9 @@ class ScrollShowcase extends StatefulWidget {
     final n = q.steps.first.media.length;
     // view.at counts all the turn step's frames; the maps count one turn.
     final share = view.at * p.steps.first.media.length / p.turn;
-    if (p.scan || q.scan || share >= 1 || !a.sided || !b.sided || n == 0) return turnsAlike(from, to) ? view : null;
+    if (share >= 1 || !a.sided || !b.sided || n == 0) {
+      return !p.scan && !q.scan && turnsAlike(from, to) ? view : null;
+    }
     final at = b.place(a.angle(share)) * q.turn / n;
     // Within a frame or so of the same place, the same place: the side matched on the other colour can sit a
     // frame before its first, which would otherwise send the page to the far end of the turn.

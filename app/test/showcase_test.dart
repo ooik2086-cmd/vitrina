@@ -138,7 +138,22 @@ void main() {
       expect(plan.at(plan.progressFor(sole)!), (step: 2, frame: 0));
       expect(fewer.progressFor(sole), isNull); // no sole photo: the page opens at its cover
       final scanned = ShowcasePlan.of(Listing.fromJson(scan()));
-      expect((scanned.viewAt(0.01), scanned.progressFor((kind: 'spin', at: 0.5))), (null, null));
+      // A scan tells where it is too; its stops open at their own frames.
+      expect(scanned.viewAt(scanned.centreOf(0, 3))!.kind, 'spin');
+      final top = scanned.steps.indexWhere((s) => s.kind != 'spin');
+      final stop = scanned.viewAt(scanned.centreOf(top, 2))!;
+      expect(scanned.at(scanned.progressFor(stop)!), (step: top, frame: 0));
+      // Its turn starts wherever the camera did: without known sides it carries nowhere, even to itself.
+      final scanListing = Listing.fromJson(scan());
+      expect(ScrollShowcase.carry((kind: 'spin', at: 0.25), scanListing, scanListing), isNull);
+      // With its sides known, a scan carries the side: here frame 3 of its turn (of 8, the move goes on to 12) is
+      // a frame past the toe, which on the other scan is frame 7.
+      Listing sidedScan(int outer, int front) => Listing.fromJson({
+            ...scan(),
+            'angle_frames': {'outer': 'https://cdn/f$outer.jpg', 'front': 'https://cdn/f$front.jpg'},
+          });
+      expect(ScrollShowcase.carry((kind: 'spin', at: 3 / 12), sidedScan(0, 2), sidedScan(4, 6)),
+          (kind: 'spin', at: 7 / 12));
       // Turns compare only when both start at the frame matched to a cover of the same side.
       final a = Listing.fromJson({...listing(), 'cover_frame': 'https://cdn/f0.jpg'});
       expect(ScrollShowcase.turnsAlike(a, a), isTrue);
