@@ -748,7 +748,37 @@ class CutoutApiTests(MediaTests):
             db.query(Media).filter(Media.listing_id == uncut[1], Media.angle == "front").update({"thumb_url": None})
             db.commit()
         code, out = self.backfill()
-        self.assertIn(f"listing {uncut[1]}: 0 photos cut out, 1 small copies, search vector skipped", out)
+        self.assertIn(f"listing {uncut[1]}: 1 small copies\n", out)
+
+    def test_the_backfill_makes_small_copies_for_a_part_of_the_turn_it_leaves_as_taken(self):
+        from sqlalchemy import select
+        from vitrina_api.models import Media
+        shades = [(20 + 25 * i,) * 3 for i in range(8)]
+        lid = self.post("/listings", self.seller, {**LISTING, "photos": self.frames(shades)}).json()["id"]
+        with self.app.state.sessions() as db:  # one frame the model finds no shoe in, next to cut-out ones
+            row = db.scalars(select(Media).where(Media.listing_id == lid).order_by(Media.position)).first()
+            row.processed_url, row.no_cutout = None, "segmenter"
+            db.commit()
+        self.with_segmenter()
+        code, out = self.backfill("--without-models")
+        self.assertEqual(code, 0, out)
+        self.assertIn(f"listing {lid}: 0 photos cut out, 7 small copies", out)
+        self.assertTrue(all(m["processed_url"] is None and m["thumb_url"] for m in self.mine(lid)["media"]))
+
+    def test_a_cut_out_made_later_drops_the_search_vector_of_the_photo_as_taken(self):
+        from vitrina_api import visual
+        from vitrina_api.models import ListingEmbedding
+        self.app.state.segmenter = None
+        lid = self.post("/listings", self.seller, {**LISTING, "photos": self.four((120, 90, 60))}).json()["id"]
+        with self.app.state.sessions() as db:
+            db.add(ListingEmbedding(listing_id=lid, model=visual.MODEL_NAME, vector=b"as taken"))
+            db.commit()
+        self.app.state.segmenter = center_segmenter
+        self.with_segmenter()
+        code, out = self.backfill("--without-models")  # no search model this time: the vector is made later
+        self.assertIn(f"listing {lid}: 4 photos cut out, 4 small copies\n", out)
+        with self.app.state.sessions() as db:
+            self.assertIsNone(db.get(ListingEmbedding, lid))
 
     def test_the_backfill_stops_when_everything_fails_and_wants_its_models(self):
         from scripts import cutout_backfill
@@ -767,6 +797,13 @@ class CutoutApiTests(MediaTests):
         self.assertEqual(code, 1)
         self.assertIn(f"0 of {len(ids)} listings done", out)
         self.assertEqual(out.count(": failed in "), cutout_backfill.STOP_AFTER)
+        # Errors logged on one photo each are those listings' own: the run goes on past them.
+        def gone(state, lid):
+            logging.getLogger("vitrina_api.listing_routes").error("thumbnail failed for one photo")
+        with self.assertLogs(level="ERROR"):
+            code, out = self.backfill("--without-models", thumbs=gone)
+        self.assertNotIn("stopped", out)
+        self.assertEqual(out.count(": failed, see"), len(ids))
         # Without the models (none in the tests) nothing runs unless asked.
         code, out = self.backfill()
         self.assertEqual((code, out), (2, ""))

@@ -118,13 +118,13 @@ def cutout_listing(state, listing_id: int) -> int:
                 break
             cuts[m.id] = storage.put(result, owner_id=seller, ext="webp")
         with state.sessions() as db:
-            done += _settle_cutouts(db, listing_id, part, {} if failed else cuts,
+            done += _settle_cutouts(db, storage, listing_id, part, {} if failed else cuts,
                                     failed.id if isinstance(failed, SimpleNamespace) else None, model)
     return done
 
 
-def _settle_cutouts(db: Session, listing_id: int, part: list, cuts: dict[int, str], no_shoe: int | None,
-                    model: str) -> int:
+def _settle_cutouts(db: Session, storage: Storage, listing_id: int, part: list, cuts: dict[int, str],
+                    no_shoe: int | None, model: str) -> int:
     """Writes one part's cut-outs once the listing is locked (see lock_fresh), only onto its photos as they are
     now: when the seller changed a part of the turn meanwhile, the job for the new photos decides it. Leaves no
     part of the turn with some frames cut out and some not. Returns how many cut-outs were kept."""
@@ -141,12 +141,17 @@ def _settle_cutouts(db: Session, listing_id: int, part: list, cuts: dict[int, st
         db.rollback()
         return 0
     kept = 0
+    vector_of = embedded_photo(storage, listing) if part[0].angle != "frame" else None
     for m in now:
         if m.id == no_shoe:
             m.no_cutout = model
         if m.id in cuts and not m.processed_url:
             m.processed_url, m.thumb_url, m.no_cutout = cuts[m.id], None, None
             kept += 1
+    if kept and vector_of is not None and vector_of.id in cuts:
+        # The search vector was made from the photo as taken: gone until the next one is made from the cut-out,
+        # so that the backfill sees it missing should that fail.
+        db.execute(delete(ListingEmbedding).where(ListingEmbedding.listing_id == listing_id))
     if part[0].angle == "frame" and any(m.processed_url for m in now) and not all(m.processed_url for m in now):
         # Cut out on an earlier run, or by another job, while another frame is not: the photos as taken, with new
         # small copies of them to match. Dropped cut-outs go with the orphans sweep.
@@ -160,6 +165,15 @@ def _settle_cutouts(db: Session, listing_id: int, part: list, cuts: dict[int, st
     return kept
 
 
+def embedded_photo(storage: Storage, listing: Listing):
+    """The photo the search-by-photo vector is made from: the first side photo in our storage, cut out or not."""
+    photos = sorted((m for m in listing.media if m.angle in SIDE_ORDER), key=lambda m: SIDE_ORDER.index(m.angle))
+    return next((m for m in photos if storage.owns(m.processed_url or m.original_url)), None)
+
+
+SIDE_ORDER = ("front", "outer", "inner", "back")
+
+
 def embed_listing(state, listing_id: int) -> bool:
     """Background job: store the search-by-photo vector of a listing's main photo."""
     embed, storage = state.embedder, state.storage
@@ -169,9 +183,7 @@ def embed_listing(state, listing_id: int) -> bool:
         listing = db.get(Listing, listing_id)
         if listing is None:
             return False
-        photos = sorted((m for m in listing.media if m.angle in ("front", "outer", "inner", "back")),
-                        key=lambda m: ("front", "outer", "inner", "back").index(m.angle))
-        photo = next((m for m in photos if storage.owns(m.processed_url or m.original_url)), None)
+        photo = embedded_photo(storage, listing)
         if photo is None:
             return False
         vector = embed(storage.read(photo.processed_url or photo.original_url))
@@ -303,7 +315,7 @@ def put_turn_matches(listing: Listing, found: TurnMatches) -> None:
     for side, (frame, of) in found.sides.items():
         if side not in marks and frame in now and of == getattr(side_photo(listing, side), "original_url", None):
             marks[side] = {"frame": frame, "of": of}
-    # Tried and not found is kept as {}, so the backfill does not pick the listing again.
+    # Tried and not found is kept as {}, so the backfill does not pick the listing again for its sides.
     if marks or found.sides or found.tried:
         listing.angle_frames = json.dumps(marks, sort_keys=True)
 
