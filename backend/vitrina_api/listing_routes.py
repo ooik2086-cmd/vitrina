@@ -5,6 +5,7 @@ import io
 import json
 from dataclasses import dataclass
 from datetime import timedelta
+from types import SimpleNamespace
 from typing import Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Request, UploadFile
@@ -13,6 +14,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import set_committed_value
 
 from vitrina_core.catalog import Authenticity, Condition, normalize_query
 from vitrina_core.colors import canonical_color
@@ -58,17 +60,6 @@ def upload_photo(file: UploadFile = File(...), detail: bool = False, user: User 
 CUTOUT_ANGLES = {"front", "outer", "inner", "back", "top", "sole", "frame"}
 
 
-def forget_gone(db: Session, media: list) -> None:
-    """Drops what this session changed on photos the seller has deleted meanwhile, so writing the rest does not fail
-    on rows that are no longer there; a job for the new photos does their work."""
-    ids = {m.id for m in media if m.id is not None}
-    with db.no_autoflush:
-        alive = set(db.scalars(select(Media.id).where(Media.id.in_(ids)))) if ids else set()
-    for m in media:
-        if m.id is not None and m.id not in alive:
-            db.expunge(m)
-
-
 def cutout_listing(state, listing_id: int) -> int:
     """Background job: add a transparent-background version of each showcase photo of one listing."""
     segment, storage = state.segmenter, state.storage
@@ -78,12 +69,19 @@ def cutout_listing(state, listing_id: int) -> int:
         listing = db.get(Listing, listing_id)
         if listing is None:
             return 0
-        media = [m for m in listing.media if m.angle in CUTOUT_ANGLES and storage.owns(m.original_url)]
-        done = cutout.process_listing_media(
-            media, storage.read, lambda data: storage.put(data, owner_id=listing.seller_id, ext="webp"), segment)
-        forget_gone(db, media)
-        db.commit()
-        return done
+        # The photos as they were read: the seller may change them while the shoes are cut out, which takes a while.
+        media = [SimpleNamespace(id=m.id, original_url=m.original_url, processed_url=m.processed_url)
+                 for m in listing.media if m.angle in CUTOUT_ANGLES and storage.owns(m.original_url)]
+        seller = listing.seller_id
+        db.rollback()
+
+        def save(m, data: bytes) -> None:
+            # One photo at a time, kept at once. A photo deleted meanwhile matches no row; its small copy is made
+            # again from the cut-out, even one another job has just made from the photo as taken.
+            db.execute(update(Media).where(Media.id == m.id, Media.original_url == m.original_url)
+                       .values(processed_url=storage.put(data, owner_id=seller, ext="webp"), thumb_url=None))
+            db.commit()
+        return cutout.process_listing_media(media, storage.read, save, segment)
 
 
 def embed_listing(state, listing_id: int) -> bool:
@@ -208,14 +206,15 @@ def put_turn_matches(listing: Listing, found: TurnMatches) -> None:
         listing.angle_frames = json.dumps(marks, sort_keys=True)
 
 
-def lock_fresh(db: Session, listing: Listing) -> None:
+def lock_fresh(db: Session, listing: Listing, writes: list = ()) -> None:
     """Reads the listing again before writing what was worked out from it: the seller, or a job for newer photos,
     may have changed it meanwhile. On Postgres its row stays locked until the commit, so neither overwrites the
-    other. The lock comes before this session's own writes go out, as every writer takes them (the listing, then
-    its photos), so two writers never wait on each other."""
+    other. The lock comes before writes (statements on its photos), as every writer takes them (the listing, then
+    its photos; see own_listing), so two writers never wait on each other."""
     with db.no_autoflush:
         db.execute(select(Listing.id).where(Listing.id == listing.id).with_for_update())
-    forget_gone(db, list(listing.media))
+    for write in writes:
+        db.execute(write)
     db.flush()
     db.expire_all()
     db.refresh(listing)
@@ -236,17 +235,25 @@ def thumb_listing(state, listing_id: int) -> int:
         listing = db.get(Listing, listing_id)
         if listing is None:
             return 0
+        writes = []
         for m in listing.media:
             source = m.processed_url or m.original_url
             if m.thumb_url or not storage.owns(source):
                 continue
             try:
                 small = cutout.make_thumb(storage.read(source))
-                m.thumb_url = storage.put(small, owner_id=listing.seller_id, ext="webp")
-                made[m.thumb_url] = small
-                done += 1
+                url = storage.put(small, owner_id=listing.seller_id, ext="webp")
             except Exception:
                 log.exception("thumbnail failed for %s", source)
+                continue
+            # Written as a statement once the listing is locked, and only onto the photo as it was copied: a photo
+            # deleted meanwhile matches no row, and a cut-out landing meanwhile wants a small copy of its own.
+            writes.append(update(Media).where(Media.id == m.id, Media.thumb_url.is_(None),
+                                              Media.processed_url.is_not_distinct_from(m.processed_url))
+                          .values(thumb_url=url))
+            set_committed_value(m, "thumb_url", url)  # for the 360° match below, not to be written again
+            made[url] = small
+            done += 1
         first = _first_shown(storage, listing)
         source = first.processed_url if first else None
         backdrop, chosen = None, True
@@ -256,7 +263,7 @@ def thumb_listing(state, listing_id: int) -> int:
             log.exception("backdrop failed for listing %s", listing_id)
             chosen = False
         found = match_turn_frames(storage, listing, made)
-        lock_fresh(db, listing)
+        lock_fresh(db, listing, writes)
         # Only what still holds for the photos as they are now: a job for newer photos may have written already.
         if chosen and source == getattr(_first_shown(storage, listing), "processed_url", None):
             listing.backdrop = backdrop
@@ -302,8 +309,10 @@ def create_listing(body: ListingIn, request: Request, background: BackgroundTask
     return listing_out(db, listing, owner=True)
 
 
-def own_listing(db: Session, listing_id: int, user: User) -> Listing:
-    listing = db.get(Listing, listing_id)
+def own_listing(db: Session, listing_id: int, user: User, lock: bool = False) -> Listing:
+    """The seller's listing; lock holds its row (on Postgres) until the commit, which a change of its photos does
+    first, so it never waits on a media job that waits on it (see lock_fresh)."""
+    listing = db.get(Listing, listing_id, with_for_update=lock)
     if listing is None or listing.seller_id != user.id:
         raise ApiError(404, "not_found")
     return listing
@@ -350,7 +359,7 @@ def route_after_checks(db: Session, storage: Storage, listing: Listing) -> None:
 def edit_listing(listing_id: int, body: ListingPatch, request: Request, background: BackgroundTasks,
                  user: User = Depends(current_user), db: Session = Depends(get_db),
                  cfg: Settings = Depends(get_settings), storage: Storage = Depends(get_storage)):
-    listing = own_listing(db, listing_id, user)
+    listing = own_listing(db, listing_id, user, lock=True)
     if listing.status == "hidden":
         raise ApiError(409, "invalid_status")
     changed = edit_contents(db, cfg, storage, listing, body, user)

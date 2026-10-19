@@ -371,6 +371,12 @@ class CutoutApiTests(MediaTests):
                             db.commit()
                     return out
                 new = self.upload(self.seller, solid(shades[3])).json()["url"]
+                with self.app.state.sessions() as db:  # so this job has every photo's small copy to make
+                    row = db.get(Listing, lid)
+                    for m in row.media:
+                        m.thumb_url = None
+                    row.backdrop = None
+                    db.commit()
                 setattr(cutout, job, meanwhile)
                 try:
                     r = self.c.patch(f"/api/v1/listings/{lid}", headers=self.h(self.seller),
@@ -381,8 +387,35 @@ class CutoutApiTests(MediaTests):
                 self.assertEqual(r.status_code, 200, r.text)
                 media = self.mine(lid)["media"]
                 self.assertNotIn(deleted[0], [m["original_url"] for m in media])
-                # The photos left got their cut-outs and small copies all the same.
+                # The photos left got their cut-outs, small copies and backdrop from this job all the same.
                 self.assertTrue(all(m["thumb_url"] for m in media), media)
+                self.assertIsNotNone(self.mine(lid)["backdrop"])
+
+    def test_a_photo_added_while_an_older_job_runs_gets_a_small_copy_of_its_cut_out(self):
+        from vitrina_api import cutout
+        from vitrina_api.listing_routes import cutout_listing, thumb_listing
+        from vitrina_api.models import Listing, Media
+        lid = self.post("/listings", self.seller, {**LISTING, "photos": self.four((120, 90, 60))}).json()["id"]
+        new = self.upload(self.seller, solid((30, 140, 200))).json()["url"]
+        with self.app.state.sessions() as db:  # the seller's new photo, not cut out yet
+            row = db.get(Listing, lid)
+            row.media.append(Media(original_url=new, angle="top", position=9))
+            db.commit()
+        real = cutout.process_photo
+
+        def meanwhile(*args):  # while this job cuts the new photo out, the older job makes its small copies
+            cutout.process_photo = real
+            thumb_listing(self.app.state, lid)
+            return real(*args)
+        cutout.process_photo = meanwhile
+        try:
+            self.assertEqual(cutout_listing(self.app.state, lid), 1)
+        finally:
+            cutout.process_photo = real
+        thumb_listing(self.app.state, lid)
+        top = next(m for m in self.mine(lid)["media"] if m["original_url"] == new)
+        img = Image.open(io.BytesIO(self.c.get(top["thumb_url"].replace("http://test", "")).content))
+        self.assertEqual(img.mode, "RGBA")  # made from the cut-out, not from the photo as taken
 
     def test_a_side_is_snapped_to_where_the_shoe_is_square_on(self):
         from vitrina_api import cutout
@@ -586,7 +619,8 @@ class RealPhotoSideTests(unittest.TestCase):
                     self.assertTrue(all(steps) and sum(steps) in (n, 3 * n), steps)
 
 
-@unittest.skipUnless(os.environ.get("VITRINA_TEST_POSTGRES"), "set VITRINA_TEST_POSTGRES to a Postgres URL")
+@unittest.skipUnless(os.environ.get("VITRINA_TEST_DATABASE_URL", "").startswith("postgresql"),
+                     "set VITRINA_TEST_DATABASE_URL to a Postgres URL (CI does)")
 class TurnMatchLockTests(unittest.TestCase):
     """The row lock only exists on Postgres, which production runs on."""
 
@@ -596,7 +630,7 @@ class TurnMatchLockTests(unittest.TestCase):
         from sqlalchemy import update
         from vitrina_api.listing_routes import lock_fresh
         from vitrina_api.models import Listing, Media, User, make_session_factory
-        sessions = make_session_factory(os.environ["VITRINA_TEST_POSTGRES"])
+        sessions = make_session_factory(os.environ["VITRINA_TEST_DATABASE_URL"])
         with sessions() as db:
             user = User(phone=f"+7{time.time_ns() % 10**10:010d}")
             db.add(user)
@@ -634,6 +668,54 @@ class TurnMatchLockTests(unittest.TestCase):
         with sessions() as db:
             row = db.get(Listing, lid)
             self.assertEqual((row.title, row.media[0].thumb_url, row.media[0].position), ("new", "small", 1))
+
+
+    def test_a_small_copy_for_a_photo_the_seller_is_deleting_waits_and_then_writes_nothing(self):
+        import threading
+        import time
+        from vitrina_api.listing_routes import lock_fresh
+        from vitrina_api.models import Listing, Media, User, make_session_factory
+        from sqlalchemy import select, update
+        sessions = make_session_factory(os.environ["VITRINA_TEST_DATABASE_URL"])
+        with sessions() as db:
+            user = User(phone=f"+7{time.time_ns() % 10**10:010d}")
+            db.add(user)
+            db.flush()
+            listing = Listing(seller_id=user.id, title="t", category="sneakers", color="black", condition="new",
+                              price_tiyn=1)
+            listing.media += [Media(original_url="a", angle="frame", position=0),
+                              Media(original_url="b", angle="frame", position=1)]
+            db.add(listing)
+            db.commit()
+            lid, (keep, drop) = listing.id, [m.id for m in listing.media]
+        saving = threading.Event()
+        failed = []
+
+        def seller():  # a save that drops a photo, the listing locked first, held open a while
+            try:
+                with sessions() as db:
+                    row = db.get(Listing, lid, with_for_update=True)
+                    row.media[:] = [m for m in row.media if m.id == keep]
+                    db.flush()
+                    saving.set()
+                    time.sleep(1.5)
+                    db.commit()
+            except Exception as e:
+                failed.append(e)
+                saving.set()
+        t = threading.Thread(target=seller)
+        t.start()
+        saving.wait(5)
+        with sessions() as db:  # the job made small copies of both photos before the save
+            listing = db.get(Listing, lid)
+            lock_fresh(db, listing, [update(Media).where(Media.id == i, Media.thumb_url.is_(None))
+                                     .values(thumb_url=f"small-{i}") for i in (keep, drop)])
+            db.commit()
+        t.join(10)
+        self.assertEqual(failed, [])
+        with sessions() as db:
+            self.assertEqual(db.execute(select(Media.id, Media.thumb_url).where(Media.listing_id == lid)).all(),
+                             [(keep, f"small-{keep}")])
 
 
 @unittest.skipUnless(os.environ.get("VITRINA_CUTOUT_MODEL"), "set VITRINA_CUTOUT_MODEL to test the real model")

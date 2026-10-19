@@ -249,9 +249,10 @@ def backdrop_for(cutout_bytes: bytes) -> str | None:
     return None
 
 
-def process_listing_media(media: list, read: Callable[[str], bytes], write: Callable[[bytes], str],
+def process_listing_media(media: list, read: Callable[[str], bytes], save: Callable[[object, bytes], None],
                           segment: Segmenter) -> int:
-    """Fill processed_url for each photo that has none. Returns how many were cut out."""
+    """Cut out each photo that has no cut-out yet; save(photo, cut_out) keeps each one as soon as it is made.
+    Returns how many were cut out."""
     done = 0
     for m in media:
         if m.processed_url:
@@ -262,7 +263,6 @@ def process_listing_media(media: list, read: Callable[[str], bytes], write: Call
             log.exception("cutout failed for %s", m.original_url)
             continue
         if result is not None:
-            m.processed_url = write(result)
-            m.thumb_url = None  # the small copy follows the new cut-out
+            save(m, result)
             done += 1
     return done
