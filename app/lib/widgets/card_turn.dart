@@ -12,9 +12,12 @@ import 'studio.dart';
 /// always shows the photos the sellers chose and opening a listing flies from the cover as before. Vertical drags
 /// still scroll the catalog.
 class CardTurn extends StatefulWidget {
-  const CardTurn({super.key, required this.listing, required this.cover});
+  const CardTurn({super.key, required this.listing, required this.cover, this.together});
   final Listing listing;
   final Widget cover;
+
+  /// Shoes that turn as one: a drag on any of them turns them all to the same point of their turns.
+  final TurnTogether? together;
 
   /// A card shows at most this many frames of the turn, evenly spread: 15° a step is smooth at card size, and a
   /// scan's hundred frames would cost a hundred decoded pictures per card.
@@ -37,27 +40,77 @@ class CardTurn extends StatefulWidget {
   /// - some frames cut out and others not: the listing page then shows the photos as taken, whose small copies
   ///   are not kept.
   static List<MediaItem> framesOf(Listing l) {
+    final turn = _turnOf(l);
+    if (turn.length <= maxFrames) return turn;
+    return [for (var i = 0; i < maxFrames; i++) turn[i * turn.length ~/ maxFrames]];
+  }
+
+  /// The whole turn the card shows, before it is thinned to [maxFrames].
+  static List<MediaItem> _turnOf(Listing l) {
     if (l.frames.isEmpty) return const [];
     final plan = ShowcasePlan.of(l);
     final spin = plan.steps.first;
-    var turn = spin.media.take(plan.turn).toList();
+    final turn = spin.media.take(plan.turn).toList();
     if (turn.length < 8) return const [];
     if (!spin.media.every((m) => m.thumbUrl != null && (spin.cut || m.processedUrl == null))) return const [];
     // From the frame matching the cover: the one the seller or the server marked, else the cover itself. A scan,
     // like its listing page, keeps to where the camera started unless its cover is one of its frames.
     var start = plan.scan ? -1 : turn.indexWhere((m) => m.originalUrl == l.coverFrame);
     if (start < 0) start = math.max(0, turn.indexWhere((m) => m.url == l.coverUrl));
-    turn = [...turn.skip(start), ...turn.take(start)];
-    if (turn.length <= maxFrames) return turn;
-    return [for (var i = 0; i < maxFrames; i++) turn[i * turn.length ~/ maxFrames]];
+    return [...turn.skip(start), ...turn.take(start)];
+  }
+
+  /// How far into the card's turn the toe faces the camera, as a share of the turn (0 to 1); null when the
+  /// server has not found the frame, or it is where the turn starts.
+  static double? frontOf(Listing l) {
+    final turn = _turnOf(l);
+    final i = turn.indexWhere((m) => m.originalUrl == l.frontFrame);
+    return i > 0 ? i / turn.length : null;
   }
 
   @override
   State<CardTurn> createState() => _CardTurnState();
 }
 
+/// Where shoes compared side by side are in their turns, so they show the same side at once; null shows their
+/// covers. Turns start at the frame matching the cover, but sellers turn the shoe either way and not always evenly,
+/// so the shared angle is one where a quarter (0.25) is the front: each shoe maps it onto its own turn through
+/// the frame the server matched to its front photo, the way round its front comes. A shoe without that frame
+/// turns evenly, the way its frames go.
+class TurnTogether extends ChangeNotifier {
+  double? _at;
+  double? get at => _at;
+
+  /// Where in a turn whose front is at [front] (a share, see [CardTurn.frontOf]) the shared angle [at] falls.
+  static double place(double at, double? front) {
+    if (front == null || front == 0.5) return at % 1;
+    if (front > 0.5) return (1 - place(at, 1 - front)) % 1; // the front comes round the other way
+    final a = at % 1;
+    return a <= 0.25 ? a / 0.25 * front : front + (a - 0.25) / 0.75 * (1 - front);
+  }
+
+  /// The shared angle at [share] of a turn whose front is at [front]: the inverse of [place].
+  static double angle(double share, double? front) {
+    if (front == null || front == 0.5) return share % 1;
+    if (front > 0.5) return angle(1 - share, 1 - front);
+    final s = share % 1;
+    return s <= front ? s / front * 0.25 : 0.25 + (s - front) / (1 - front) * 0.75;
+  }
+
+  /// The card the finger is on, or that is turning back; the others only follow.
+  Object? _lead;
+
+  void _set(Object lead, double? at) {
+    _lead = lead;
+    if (_at == at) return;
+    _at = at;
+    notifyListeners();
+  }
+}
+
 class _CardTurnState extends State<CardTurn> with SingleTickerProviderStateMixin {
   late List<MediaItem> _frames;
+  late double? _front;
   late bool _shadow;
   late String _signature;
 
@@ -76,18 +129,24 @@ class _CardTurnState extends State<CardTurn> with SingleTickerProviderStateMixin
   void initState() {
     super.initState();
     _plan();
+    widget.together?.addListener(_follow);
   }
 
   static String _signatureOf(Listing l) => [
         l.id,
         l.coverUrl,
         l.coverFrame,
+        l.frontFrame,
         for (final m in l.frames) '${m.originalUrl}|${m.processedUrl}|${m.thumbUrl}'
       ].join(',');
 
   @override
   void didUpdateWidget(CardTurn old) {
     super.didUpdateWidget(old);
+    if (old.together != widget.together) {
+      old.together?.removeListener(_follow);
+      widget.together?.addListener(_follow);
+    }
     // A reused card can be another shoe, or this shoe with new photos (a reshoot, a cut-out finished): start again
     // from its cover.
     if (_signatureOf(widget.listing) != _signature) {
@@ -102,6 +161,7 @@ class _CardTurnState extends State<CardTurn> with SingleTickerProviderStateMixin
   void _plan() {
     _signature = _signatureOf(widget.listing);
     _frames = CardTurn.framesOf(widget.listing);
+    _front = CardTurn.frontOf(widget.listing);
     final plan = ShowcasePlan.of(widget.listing);
     // As on the listing page: a shadow under cut-outs, except a scan's, which carry their own.
     _shadow = _frames.isNotEmpty && plan.steps.first.cut && !plan.scan;
@@ -109,6 +169,7 @@ class _CardTurnState extends State<CardTurn> with SingleTickerProviderStateMixin
 
   @override
   void dispose() {
+    widget.together?.removeListener(_follow);
     _back.dispose();
     super.dispose();
   }
@@ -135,8 +196,46 @@ class _CardTurnState extends State<CardTurn> with SingleTickerProviderStateMixin
 
   void _start(DragStartDetails _) {
     _back.stop();
-    _at ??= 0;
+    _put(_at ?? 0);
     _fetchMore();
+  }
+
+  /// Moves this shoe, and with it every shoe turning together.
+  void _put(double? at) {
+    final together = widget.together;
+    if (together != null && _frames.isNotEmpty) {
+      together._set(this, at == null ? null : TurnTogether.angle(at / _frames.length, _front));
+    } else {
+      _show(at);
+    }
+  }
+
+  /// The frame to show at [at]: the one the finger has reached, as on the listing page; a shoe that only follows
+  /// shows the nearest, so one that turns the other way keeps step with the lead.
+  int _nearest(double at) {
+    final together = widget.together;
+    final i = together == null || together._lead == this ? at.floor() : at.round();
+    return i % _frames.length;
+  }
+
+  /// Shows [at], redrawing only when that is another frame or the cover.
+  void _show(double? at) {
+    final was = _at;
+    if (at != null && was != null && _nearest(at) == _nearest(was)) {
+      _at = at; // the same frame: nothing to redraw
+    } else {
+      setState(() => _at = at);
+    }
+  }
+
+  /// Another shoe turned: this one goes to the same point of its own turn.
+  void _follow() {
+    final together = widget.together!;
+    if (!mounted || _frames.isEmpty) return;
+    if (together._lead != this && _back.isAnimating) _back.stop();
+    final at = together.at;
+    if (at != null && _at == null) _fetchMore();
+    _show(at == null ? null : (TurnTogether.place(at, _front) * _frames.length) % _frames.length);
   }
 
   /// The same feel as the listing page: one and a half card widths turn the shoe once round.
@@ -145,12 +244,7 @@ class _CardTurnState extends State<CardTurn> with SingleTickerProviderStateMixin
   void _move(DragUpdateDetails d, double width) {
     final at = _at;
     if (at == null) return; // the card became another shoe under the finger
-    final next = (at - d.delta.dx * _framesPerPixel(width)) % _frames.length;
-    if (next.floor() == at.floor()) {
-      _at = next; // the same frame: nothing to redraw
-    } else {
-      setState(() => _at = next);
-    }
+    _put((at - d.delta.dx * _framesPerPixel(width)) % _frames.length);
   }
 
   /// Turns back the short way round to the start, then shows the cover.
@@ -161,24 +255,17 @@ class _CardTurnState extends State<CardTurn> with SingleTickerProviderStateMixin
     final target = at > n / 2 ? n.toDouble() : 0.0;
     final distance = (target - at).abs();
     if (MediaQuery.disableAnimationsOf(context) || distance < 0.5) {
-      setState(() => _at = null);
+      _put(null);
       return;
     }
     _backPath = Tween(begin: at, end: target).chain(CurveTween(curve: Curves.easeOutCubic)).animate(_back);
     _back.duration = Duration(milliseconds: (120 + 600 * distance / n).round());
     _back.forward(from: 0).whenCompleteOrCancel(() {
-      if (mounted && !_back.isAnimating && _at != null && _back.value == 1) setState(() => _at = null);
+      if (mounted && !_back.isAnimating && _at != null && _back.value == 1) _put(null);
     });
   }
 
-  void _followBack() {
-    final at = _backPath!.value % _frames.length;
-    if (_at == null || at.floor() != _at!.floor()) {
-      setState(() => _at = at);
-    } else {
-      _at = at;
-    }
-  }
+  void _followBack() => _put(_backPath!.value % _frames.length);
 
   @override
   Widget build(BuildContext context) {
@@ -191,7 +278,7 @@ class _CardTurnState extends State<CardTurn> with SingleTickerProviderStateMixin
         onPointerDown: (_) {
           if (_back.isAnimating) {
             _back.stop();
-            setState(() => _at = null);
+            _put(null);
           }
         },
         child: GestureDetector(
@@ -204,7 +291,7 @@ class _CardTurnState extends State<CardTurn> with SingleTickerProviderStateMixin
           onHorizontalDragUpdate: (d) => _move(d, width),
           onHorizontalDragEnd: _end,
           onHorizontalDragCancel: _end,
-          child: at == null ? widget.cover : _frame(_frames[math.min(at.floor(), _frames.length - 1)]),
+          child: at == null ? widget.cover : _frame(_frames[_nearest(at)]),
         ),
       );
     });

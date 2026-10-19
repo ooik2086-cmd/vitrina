@@ -84,6 +84,7 @@ def listing_out(db: Session, listing: Listing, *, owner: bool = False) -> dict:
         "segment": segment_for(db, listing), "condition": listing.condition, "authenticity": listing.authenticity,
         "defects": listing.defects, "description": listing.description, "showcase_style": listing.showcase_style,
         "backdrop": listing.backdrop, "cover_frame": cover_frame(listing),
+        "front_frame": front_frame(listing),
         "sizes": [{"id": s.id, "label": s.label, "insole_cm": mm_to_cm(s.insole_mm), "available": s.quantity > 0,
                    **({"quantity": s.quantity} if owner else {})} for s in listing.sizes],
         "media": [{"original_url": m.original_url, "processed_url": m.processed_url, "thumb_url": m.thumb_url,
@@ -181,6 +182,15 @@ def cover_frame(listing: Listing) -> str | None:
             or not any(m.angle == "frame" and m.original_url == listing.cover_frame for m in listing.media)):
         return None
     return listing.cover_frame
+
+
+def front_frame(listing: Listing) -> str | None:
+    """The frame matching the front photo, while both are still the listing's."""
+    front = next((m for m in listing.media if m.angle == "front"), None)
+    if (front is None or listing.front_frame is None or listing.front_frame_of != front.original_url
+            or not any(m.angle == "frame" and m.original_url == listing.front_frame for m in listing.media)):
+        return None
+    return listing.front_frame
 
 
 def listing_cover(listing: Listing) -> str | None:

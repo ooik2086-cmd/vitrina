@@ -245,6 +245,28 @@ class CutoutApiTests(MediaTests):
         self.assertEqual(r.status_code, 200, r.text)
         self.assertEqual(self.mine(lid)["cover_frame"], frames[1]["url"])
 
+    def test_the_front_photo_is_matched_too_and_a_new_front_voids_it(self):
+        shades = [(20 + 25 * i,) * 3 for i in range(8)]
+        frames = self.frames(shades)
+        side, front = (self.upload(self.seller, solid(shades[k])).json()["url"] for k in (5, 2))
+        photos = [{"url": side, "angle": "outer"}, {"url": front, "angle": "front"}]
+        r = self.post("/listings", self.seller, {**LISTING, "photos": photos + frames})
+        lid = r.json()["id"]
+        mine = self.mine(lid)
+        self.assertEqual((mine["cover_frame"], mine["front_frame"]), (frames[5]["url"], frames[2]["url"]))
+        # A seller's cover frame does not move the front; a new front photo is matched again.
+        self.c.patch(f"/api/v1/listings/{lid}", headers=self.h(self.seller), json={"cover_frame": frames[4]["url"]})
+        self.assertEqual(self.mine(lid)["front_frame"], frames[2]["url"])
+        new_front = self.upload(self.seller, solid(shades[6])).json()["url"]
+        r = self.c.patch(f"/api/v1/listings/{lid}", headers=self.h(self.seller),
+                         json={"photos": [photos[0], {"url": new_front, "angle": "front"}] + frames})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(self.mine(lid)["front_frame"], frames[6]["url"])
+        # Without the front photo there is no front frame, even if one was stored.
+        r = self.c.patch(f"/api/v1/listings/{lid}", headers=self.h(self.seller), json={"photos": photos[:1] + frames})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertIsNone(self.mine(lid)["front_frame"])
+
     def test_without_frames_there_is_no_cover_frame(self):
         r = self.post("/listings", self.seller, {**LISTING, "photos": self.four((120, 90, 60))})
         self.assertIsNone(self.mine(r.json()["id"])["cover_frame"])
@@ -266,7 +288,8 @@ class CutoutApiTests(MediaTests):
         r = self.post("/listings", self.seller, {**LISTING, "photos": self.four(shades[3]) + frames})
         from vitrina_api.models import Listing
         with self.app.state.sessions() as db:
-            db.get(Listing, r.json()["id"]).cover_frame = None
+            row = db.get(Listing, r.json()["id"])
+            row.cover_frame = row.front_frame = None
             db.commit()
         real = cutout_backfill.Settings, cutout_backfill.make_storage
         cutout_backfill.Settings, cutout_backfill.make_storage = (lambda: self.cfg), (lambda cfg: self.app.state.storage)
@@ -275,6 +298,7 @@ class CutoutApiTests(MediaTests):
         finally:
             cutout_backfill.Settings, cutout_backfill.make_storage = real
         self.assertEqual(self.mine(r.json()["id"])["cover_frame"], frames[3]["url"])
+        self.assertEqual(self.mine(r.json()["id"])["front_frame"], frames[3]["url"])
 
     def test_images_with_too_many_pixels_are_refused_before_decoding(self):
         out = io.BytesIO()

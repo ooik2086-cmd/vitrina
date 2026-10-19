@@ -86,6 +86,10 @@ class Listing(Base):
     # voids it.
     cover_frame: Mapped[str | None] = mapped_column(String(500))
     cover_frame_of: Mapped[str | None] = mapped_column(String(500))
+    # The same for the front photo: the frame where the toe faces the camera. It tells which way the turn goes and
+    # where a quarter of it is, so shoes compared side by side turn alike. Matched by the media job only.
+    front_frame: Mapped[str | None] = mapped_column(String(500))
+    front_frame_of: Mapped[str | None] = mapped_column(String(500))
     search_text: Mapped[str] = mapped_column(Text, default="")
     views: Mapped[int] = mapped_column(Integer, default=0, server_default="0")  # product page opens by others
     promo_state: Mapped[str | None] = mapped_column(String(12))  # rendering | ready | failed; None = never made

@@ -27,8 +27,8 @@ from .models import (PriceChange, StockAlert, ListingDailyViews, ListingEmbeddin
 from .storage import DETAIL_SIDE_PX, MAX_SIDE_PX, MAX_UPLOAD_BYTES, Storage, normalize_image
 from .api_common import ALMATY, DEFECT_REQUIRED, MAX_LISTING_MEDIA, MAX_LISTING_SIZES, MIN_SPIN_FRAMES, log
 from .schemas import ListingIn, ListingPatch, PhotoIn, ReportIn
-from .serializers import (cm_to_mm, cover_frame, cover_photo, listing_out, mark_price_change, photo_snapshot,
-                          was_price)
+from .serializers import (cm_to_mm, cover_frame, cover_photo, front_frame, listing_out, mark_price_change,
+                          photo_snapshot, was_price)
 from .saved_search_routes import announce
 
 
@@ -129,16 +129,23 @@ PROMO_ANGLES = ("outer", "front", "inner", "back", "top")
 TURN_ANGLES = {"front", "outer", "inner", "back"}
 
 
-def match_cover_frame(db: Session, storage: Storage, listing: Listing, made: dict[str, bytes] | None = None) -> None:
-    """Finds the 360° frame that shows the shoe as the cover does, unless one is set for this cover and these
-    frames already (the seller's own choice stays). Compares the small copies of the cut-outs, which are cheap to
-    read and show the shoe's outline whatever the room; made holds the copies this run has just made."""
-    cover = cover_photo(listing)
+def match_turn_frames(db: Session, storage: Storage, listing: Listing, made: dict[str, bytes] | None = None) -> None:
+    """Finds the 360° frames that show the shoe as the cover and the front photo do, unless they are set for
+    these photos and frames already (the seller's own cover frame stays). Compares the small copies of the
+    cut-outs, which are cheap to read and show the shoe's outline whatever the room; made holds the copies this
+    run has just made."""
     frames = [m for m in listing.media if m.angle == "frame"]
-    if cover is None or cover.angle not in TURN_ANGLES or not frames or cover_frame(listing) is not None:
+
+    def cut(m) -> bool:  # not cut out (yet): a backdrop compared with a backdrop says nothing about the angle
+        return bool(m.processed_url and m.thumb_url and storage.owns(m.thumb_url))
+    if not frames or not all(cut(m) for m in frames):
         return
-    if not all(m.processed_url and m.thumb_url and storage.owns(m.thumb_url) for m in [cover, *frames]):
-        return  # not cut out (yet): a backdrop compared with a backdrop says nothing about the angle
+    cover = cover_photo(listing)
+    front = next((m for m in listing.media if m.angle == "front"), None)
+    pairs = (("cover", cover, cover_frame(listing)), ("front", front, front_frame(listing)))
+    wanted = {name: m for name, m, done in pairs if m is not None and m.angle in TURN_ANGLES and done is None and cut(m)}
+    if not wanted:
+        return
     made = made or {}
 
     def read(url: str) -> bytes:
@@ -148,13 +155,14 @@ def match_cover_frame(db: Session, storage: Storage, listing: Listing, made: dic
             log.exception("small copy %s could not be read", url)
             return b""  # skipped by the comparison
 
-    best = cutout.closest_frame(read(cover.thumb_url), [read(m.thumb_url) for m in frames])
-    if best is None:
-        return
+    seen = [read(m.thumb_url) for m in frames]
+    best = {name: cutout.closest_frame(read(m.thumb_url), seen) for name, m in wanted.items()}
     # The seller may have chosen while this ran: their choice wins.
-    db.refresh(listing, ["cover_frame", "cover_frame_of"])
-    if cover_frame(listing) is None:
-        listing.cover_frame, listing.cover_frame_of = frames[best].original_url, cover.original_url
+    db.refresh(listing, ["cover_frame", "cover_frame_of", "front_frame", "front_frame_of"])
+    if best.get("cover") is not None and cover_frame(listing) is None:
+        listing.cover_frame, listing.cover_frame_of = frames[best["cover"]].original_url, cover.original_url
+    if best.get("front") is not None and front_frame(listing) is None:
+        listing.front_frame, listing.front_frame_of = frames[best["front"]].original_url, front.original_url
 
 
 def thumb_listing(state, listing_id: int) -> int:
@@ -177,7 +185,7 @@ def thumb_listing(state, listing_id: int) -> int:
                 done += 1
             except Exception:
                 log.exception("thumbnail failed for %s", source)
-        match_cover_frame(db, storage, listing, made)
+        match_turn_frames(db, storage, listing, made)
         shown = sorted(listing.media, key=lambda m: (m.angle != "frame", m.angle != "front", m.position))
         first = next((m for m in shown if m.processed_url and storage.owns(m.processed_url)), None)
         try:

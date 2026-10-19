@@ -6,6 +6,7 @@ import '../i18n.dart';
 import '../labels.dart';
 import '../my_size.dart';
 import '../theme.dart';
+import '../widgets/card_turn.dart';
 import '../widgets/common.dart';
 import '../widgets/studio.dart';
 import 'listing_screen.dart';
@@ -39,6 +40,15 @@ class CompareScreen extends StatefulWidget {
 class _CompareScreenState extends State<CompareScreen> {
   late final List<int> _picked = [for (final l in widget.items.take(2)) l.id];
 
+  /// The compared shoes turn as one, so their shapes can be compared from every side.
+  final _together = TurnTogether();
+
+  @override
+  void dispose() {
+    _together.dispose();
+    super.dispose();
+  }
+
   void _toggle(Listing l) {
     setState(() {
       if (_picked.contains(l.id)) {
@@ -56,7 +66,7 @@ class _CompareScreenState extends State<CompareScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final shown = [
-      for (final id in _picked) widget.items.firstWhere((l) => l.id == id),
+      for (final id in _picked) ...widget.items.where((l) => l.id == id),
     ];
     return Scaffold(
       appBar: AppBar(title: Text(tr('Салыстыру'))),
@@ -85,7 +95,7 @@ class _CompareScreenState extends State<CompareScreen> {
                 textAlign: TextAlign.center, style: theme.textTheme.bodyLarge),
           )
         else
-          _Table(items: shown),
+          _Table(items: shown, together: _together),
       ]),
     );
   }
@@ -130,8 +140,9 @@ class _Pick extends StatelessWidget {
 }
 
 class _Table extends StatelessWidget {
-  const _Table({required this.items});
+  const _Table({required this.items, required this.together});
   final List<Listing> items;
+  final TurnTogether together;
 
   @override
   Widget build(BuildContext context) {
@@ -141,7 +152,11 @@ class _Table extends StatelessWidget {
     return ValueListenableBuilder<String?>(
       valueListenable: mySize,
       builder: (context, size, _) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        _Row(items: items, cell: (l) => _Head(listing: l)),
+        _Row(items: items, cell: (l) => _Head(listing: l, together: together)),
+        if (items.where((l) => CardTurn.framesOf(l).isNotEmpty).length > 1)
+          Text(tr('Бір аяқкиімді көлденең сүйресеңіз, бәрі бірге айналады'),
+              key: const Key('compare-turn-hint'),
+              style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
         _Row(
           label: tr('Барлығы, жеткізумен'),
           items: items,
@@ -216,8 +231,9 @@ class _Table extends StatelessWidget {
 }
 
 class _Head extends StatelessWidget {
-  const _Head({required this.listing});
+  const _Head({required this.listing, required this.together});
   final Listing listing;
+  final TurnTogether together;
 
   @override
   Widget build(BuildContext context) {
@@ -233,11 +249,15 @@ class _Head extends StatelessWidget {
             decoration: studioBackdrop(radius: BorderRadius.circular(14)),
             child: cover == null
                 ? const Icon(Icons.image_outlined, color: Colors.black26)
-                : CoverPhoto(
-                    image: coverImage(cover),
-                    cutout: listing.coverIsCutout,
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => const Icon(Icons.broken_image_outlined, color: Colors.black26)),
+                : CardTurn(
+                    listing: listing,
+                    together: together,
+                    cover: CoverPhoto(
+                        image: coverImage(cover),
+                        cutout: listing.coverIsCutout,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => const Icon(Icons.broken_image_outlined, color: Colors.black26)),
+                  ),
           ),
         ),
         const SizedBox(height: 6),

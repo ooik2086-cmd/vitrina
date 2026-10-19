@@ -607,6 +607,7 @@ const en = <String, String>{
   'Барлығы, жеткізумен': 'Total with delivery',
   'Бренд': 'Brand',
   'Бір уақытта ең көбі {0} тауарды салыстыруға болады.': 'You can compare up to {0} items at once.',
+  'Бір аяқкиімді көлденең сүйресеңіз, бәрі бірге айналады': 'Drag one shoe sideways and they all turn together',
   'Ең тиімді': 'Best value',
   'Салыстыру': 'Compare',
   'Салыстыру үшін кемінде екі тауар таңдаңыз.': 'Choose at least two items to compare.',
