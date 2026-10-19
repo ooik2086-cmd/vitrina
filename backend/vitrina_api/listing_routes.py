@@ -58,6 +58,17 @@ def upload_photo(file: UploadFile = File(...), detail: bool = False, user: User 
 CUTOUT_ANGLES = {"front", "outer", "inner", "back", "top", "sole", "frame"}
 
 
+def forget_gone(db: Session, media: list) -> None:
+    """Drops what this session changed on photos the seller has deleted meanwhile, so writing the rest does not fail
+    on rows that are no longer there; a job for the new photos does their work."""
+    ids = {m.id for m in media if m.id is not None}
+    with db.no_autoflush:
+        alive = set(db.scalars(select(Media.id).where(Media.id.in_(ids)))) if ids else set()
+    for m in media:
+        if m.id is not None and m.id not in alive:
+            db.expunge(m)
+
+
 def cutout_listing(state, listing_id: int) -> int:
     """Background job: add a transparent-background version of each showcase photo of one listing."""
     segment, storage = state.segmenter, state.storage
@@ -70,6 +81,7 @@ def cutout_listing(state, listing_id: int) -> int:
         media = [m for m in listing.media if m.angle in CUTOUT_ANGLES and storage.owns(m.original_url)]
         done = cutout.process_listing_media(
             media, storage.read, lambda data: storage.put(data, owner_id=listing.seller_id, ext="webp"), segment)
+        forget_gone(db, media)
         db.commit()
         return done
 
@@ -203,6 +215,7 @@ def lock_fresh(db: Session, listing: Listing) -> None:
     its photos), so two writers never wait on each other."""
     with db.no_autoflush:
         db.execute(select(Listing.id).where(Listing.id == listing.id).with_for_update())
+    forget_gone(db, list(listing.media))
     db.flush()
     db.expire_all()
     db.refresh(listing)

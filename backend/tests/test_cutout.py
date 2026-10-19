@@ -347,6 +347,43 @@ class CutoutApiTests(MediaTests):
         frame, of, cover = run(replaced)
         self.assertEqual((frame, of), (None, None))  # nothing is written for a photo that is gone
 
+    def test_a_photo_deleted_while_the_media_jobs_run_does_not_stop_them(self):
+        from vitrina_api import cutout
+        from vitrina_api.models import Listing
+        shades = [(20 + 25 * i,) * 3 for i in range(8)]
+        frames = self.frames(shades)
+        side = self.upload(self.seller, solid(shades[5])).json()["url"]
+        lid = self.post("/listings", self.seller, {**LISTING, "photos": [{"url": side, "angle": "outer"}] + frames}
+                        ).json()["id"]
+        for job in ("process_photo", "make_thumb"):
+            with self.subTest(job=job):
+                real = getattr(cutout, job)
+                deleted = []
+
+                def meanwhile(*args, real=real, deleted=deleted):  # the seller drops the new photo mid-job
+                    out = real(*args)
+                    if not deleted:
+                        with self.app.state.sessions() as db:
+                            row = db.get(Listing, lid)
+                            gone = next(m for m in row.media if m.angle == "inner")
+                            deleted.append(gone.original_url)
+                            row.media.remove(gone)
+                            db.commit()
+                    return out
+                new = self.upload(self.seller, solid(shades[3])).json()["url"]
+                setattr(cutout, job, meanwhile)
+                try:
+                    r = self.c.patch(f"/api/v1/listings/{lid}", headers=self.h(self.seller),
+                                     json={"photos": [{"url": side, "angle": "outer"}, {"url": new, "angle": "inner"}]
+                                           + frames})
+                finally:
+                    setattr(cutout, job, real)
+                self.assertEqual(r.status_code, 200, r.text)
+                media = self.mine(lid)["media"]
+                self.assertNotIn(deleted[0], [m["original_url"] for m in media])
+                # The photos left got their cut-outs and small copies all the same.
+                self.assertTrue(all(m["thumb_url"] for m in media), media)
+
     def test_a_side_is_snapped_to_where_the_shoe_is_square_on(self):
         from vitrina_api import cutout
 
