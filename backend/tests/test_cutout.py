@@ -1,6 +1,8 @@
 """Background removal may only change transparency, never the product's colours or outline."""
+import contextlib
 import io
 import json
+import logging
 import os
 import unittest
 
@@ -216,7 +218,7 @@ class CutoutApiTests(MediaTests):
                 for m in db.query(Media).all():
                     m.thumb_url = None
                 db.commit()
-            cutout_backfill.main()
+            cutout_backfill.main(["--without-models"])
         finally:
             cutout_backfill.Settings, cutout_backfill.make_storage = real
         self.assertEqual(used, [self.cfg])
@@ -386,38 +388,71 @@ class CutoutApiTests(MediaTests):
         real = cutout_backfill.Settings, cutout_backfill.make_storage
         cutout_backfill.Settings, cutout_backfill.make_storage = (lambda: self.cfg), (lambda cfg: self.app.state.storage)
         try:
-            cutout_backfill.main()
+            cutout_backfill.main(["--without-models"])
         finally:
             cutout_backfill.Settings, cutout_backfill.make_storage = real
         self.assertEqual(self.mine(r.json()["id"])["cover_frame"], frames[3]["url"])
         self.assertEqual(self.mine(r.json()["id"])["angle_frames"]["front"], frames[3]["url"])
 
-    def test_the_backfill_carries_on_past_a_listing_that_fails_and_says_so(self):
+    def backfill(self, *args, thumbs=None):
+        """Runs the backfill script on the test database and storage; thumbs stands in for its thumb job."""
         from scripts import cutout_backfill
+        real = cutout_backfill.Settings, cutout_backfill.make_storage, cutout_backfill.thumb_listing
+        cutout_backfill.Settings, cutout_backfill.make_storage = (lambda: self.cfg), (lambda cfg: self.app.state.storage)
+        cutout_backfill.thumb_listing = thumbs or real[2]
+        out = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(out), self.assertRaises(SystemExit) as stop:
+                cutout_backfill.main(list(args))
+                raise SystemExit(0)
+        finally:
+            cutout_backfill.Settings, cutout_backfill.make_storage, cutout_backfill.thumb_listing = real
+        return stop.exception.code, out.getvalue()
+
+    def test_the_backfill_carries_on_past_a_listing_that_fails_and_says_so(self):
+        from vitrina_api.listing_routes import thumb_listing
+        from vitrina_api.models import Listing
         shades = [(20 + 25 * i,) * 3 for i in range(8)]
         ids = [self.post("/listings", self.seller, {**LISTING, "photos": self.four(shades[3]) + self.frames(shades)}
-                         ).json()["id"] for _ in range(2)]
-        from vitrina_api.models import Listing
+                         ).json()["id"] for _ in range(3)]
         with self.app.state.sessions() as db:
             for lid in ids:
                 db.get(Listing, lid).cover_frame = None
             db.commit()
-        real = cutout_backfill.Settings, cutout_backfill.make_storage, cutout_backfill.thumb_listing
 
         def thumbs(state, lid):
             if lid == ids[0]:
                 raise RuntimeError("storage went away")
-            return real[2](state, lid)
-        cutout_backfill.Settings, cutout_backfill.make_storage = (lambda: self.cfg), (lambda cfg: self.app.state.storage)
-        cutout_backfill.thumb_listing = thumbs
-        try:
-            with self.assertLogs(level="ERROR"), self.assertRaises(SystemExit) as stop:
-                cutout_backfill.main()
-        finally:
-            cutout_backfill.Settings, cutout_backfill.make_storage, cutout_backfill.thumb_listing = real
-        self.assertEqual(stop.exception.code, 1)
+            if lid == ids[1]:  # one photo's error is logged and the job carries on: still a failure here
+                logging.getLogger("vitrina_api.listing_routes").error("thumbnail failed for one photo")
+            return thumb_listing(state, lid)
+        with self.assertLogs(level="ERROR"):
+            code, out = self.backfill("--without-models", thumbs=thumbs)
+        self.assertEqual(code, 1)
+        self.assertIn(f"1 of 3 listings done; failed: {ids[0]}, {ids[1]}", out)
         self.assertIsNone(self.mine(ids[0])["cover_frame"])
-        self.assertIsNotNone(self.mine(ids[1])["cover_frame"])  # the next listing was still done
+        self.assertIsNotNone(self.mine(ids[2])["cover_frame"])  # the next listing was still done
+
+    def test_the_backfill_stops_when_everything_fails_and_wants_its_models(self):
+        from scripts import cutout_backfill
+        from vitrina_api.models import Media
+        ids = [self.post("/listings", self.seller, {**LISTING, "photos": self.four((120, 90, 60))}).json()["id"]
+               for _ in range(cutout_backfill.STOP_AFTER + 2)]
+        with self.app.state.sessions() as db:
+            for m in db.query(Media).all():
+                m.thumb_url = None
+            db.commit()
+
+        def down(state, lid):
+            raise ConnectionError("storage is down")
+        with self.assertLogs(level="ERROR"):
+            code, out = self.backfill("--without-models", thumbs=down)
+        self.assertEqual(code, 1)
+        self.assertIn(f"0 of {len(ids)} listings done", out)
+        self.assertEqual(out.count("failed, see"), cutout_backfill.STOP_AFTER)
+        # Without the models (none in the tests) nothing runs unless asked.
+        code, out = self.backfill()
+        self.assertEqual((code, out), (2, ""))
 
     def test_images_with_too_many_pixels_are_refused_before_decoding(self):
         out = io.BytesIO()
