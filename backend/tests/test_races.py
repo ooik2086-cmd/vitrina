@@ -6,7 +6,7 @@ import os
 import threading
 import unittest
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 
 from tests.test_api import ADDRESS, ApiTestCase, with_check_digit
 from vitrina_api.models import (Conversation, LedgerTx, Listing, ListingSize, Offer, Order, OrderEvent, Payout,
@@ -51,6 +51,13 @@ class RaceTests(ApiTestCase):
 
     def codes(self, responses):
         return sorted(r.status_code for r in responses)
+
+    def test_a_connection_never_waits_for_ever(self):
+        # A stuck query or lock wait is stopped, so a few of them cannot take every connection the server has.
+        with self.db() as db:
+            self.assertEqual([db.scalar(text(f"show {name}")) for name in
+                              ("statement_timeout", "lock_timeout", "idle_in_transaction_session_timeout")],
+                             ["30s", "10s", "5min"])
 
     # Stock and orders
 

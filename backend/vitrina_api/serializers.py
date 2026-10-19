@@ -74,7 +74,9 @@ def listing_stats(db: Session, listing: Listing) -> dict:
 
 def listing_out(db: Session, listing: Listing, *, owner: bool = False) -> dict:
     """owner=True adds stock counts and statistics, which only the seller sees."""
-    seller = db.get(User, listing.seller_id)
+    # Held for the request: the session keeps only objects someone holds, so a page of one shop's listings would
+    # otherwise read the seller again for every one.
+    seller = per_request(db, "seller", listing.seller_id, lambda: db.get(User, listing.seller_id))
     return {
         "id": listing.id, "status": listing.status, "title": listing.title, "category": listing.category,
         "brand": listing.brand, "model_name": listing.model_name, "color": listing.color,

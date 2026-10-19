@@ -492,12 +492,18 @@ class Notification(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
 
 
+# No request keeps a connection for ever, so a few stuck ones cannot take the whole pool: a query or a wait for a lock
+# that runs this long is stopped (the app gets its usual "try again"), and so is a transaction left open with nothing
+# running in it. Jobs end their transaction before slow work (cutting out photos, rendering video).
+PG_LIMITS = "-c statement_timeout=30s -c lock_timeout=10s -c idle_in_transaction_session_timeout=5min"
+
+
 def make_session_factory(database_url: str, *, create_schema: bool = True):
     # A server database: test connections before use (a restarted or failed-over Postgres leaves dead ones in the
     # pool), recycle them before the server's idle timeout, and size the pool for the request threadpool.
     kwargs = ({"connect_args": {"check_same_thread": False}} if database_url.startswith("sqlite")
               else {"pool_pre_ping": True, "pool_recycle": 1800, "pool_size": 10, "max_overflow": 20,
-                    "pool_timeout": 10})
+                    "pool_timeout": 10, "connect_args": {"options": PG_LIMITS}})
     engine = create_engine(database_url, **kwargs)
     if create_schema:
         Base.metadata.create_all(engine)

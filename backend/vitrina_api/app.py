@@ -11,6 +11,7 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from . import authenticity, coupons, cutout, delivery_eta, jobs, offers, payouts, private_media, qa, slip, visual
@@ -53,6 +54,20 @@ MAX_REQUEST_BYTES = MAX_UPLOAD_BYTES + 64 * 1024
 # The console loads only its own files; share pages may also show photos from the media host.
 ADMIN_CSP = "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' https: data:; media-src 'self' https:; frame-ancestors 'none'"
 SHARE_CSP = "default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'unsafe-inline'; img-src 'self' https: data:; media-src 'self' https:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+
+
+class CompressText:
+    """gzip for JSON and pages. A page of the catalog is ~200 KB of JSON and ~35 KB compressed: on a phone's mobile
+    data that is most of the wait; the app (dart:io) asks for gzip and unpacks it by itself. Photos, videos and PDFs
+    are compressed already, and a video is fetched in ranges that gzip would break."""
+
+    def __init__(self, app):
+        self.app, self.gzip = app, GZipMiddleware(app, minimum_size=1000, compresslevel=5)
+
+    async def __call__(self, scope, receive, send):
+        path = scope.get("path", "") if scope["type"] == "http" else ""
+        text = path and not path.startswith(("/media/", "/api/v1/private-media/")) and not path.endswith(".pdf")
+        await (self.gzip if text else self.app)(scope, receive, send)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -135,6 +150,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.mount("/media", StaticFiles(directory=settings.media_dir), name="media")
     # Support console: a static page that talks to the same staff-only API; the page itself holds no data.
     app.mount("/admin", StaticFiles(directory=Path(__file__).parent / "admin", html=True), name="admin")
+    app.add_middleware(CompressText)
     if settings.cors_origins:
         app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_methods=["*"],
                            allow_headers=["Authorization", "Content-Type", "Idempotency-Key"])

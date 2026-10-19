@@ -9,7 +9,7 @@ from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.migration import MigrationContext
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, make_url, text
 
 from vitrina_api.models import Base
 
@@ -95,3 +95,33 @@ class MigrationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(os.environ.get("VITRINA_TEST_DATABASE_URL"), "needs PostgreSQL")
+class PostgresMigrationTests(unittest.TestCase):
+    """The server runs PostgreSQL: the migrations must build the same schema there, column types included, and go
+    back down. Uses a database of its own next to the test one."""
+
+    def test_migrations_build_exactly_the_model_schema_on_postgres(self):
+        base = make_url(os.environ["VITRINA_TEST_DATABASE_URL"])
+        name = f"{base.database}_migrations"
+        admin = create_engine(base, isolation_level="AUTOCOMMIT")
+        with admin.connect() as conn:
+            conn.execute(text(f'DROP DATABASE IF EXISTS "{name}"'))
+            conn.execute(text(f'CREATE DATABASE "{name}"'))
+        url = base.set(database=name).render_as_string(hide_password=False)
+        try:
+            cfg = Config(str(ROOT / "alembic.ini"))
+            cfg.set_main_option("sqlalchemy.url", url.replace("%", "%%"))
+            command.upgrade(cfg, "head")
+            engine = create_engine(url)
+            with engine.connect() as conn:
+                diff = compare_metadata(MigrationContext.configure(conn, opts={"compare_type": True}), Base.metadata)
+            engine.dispose()
+            self.assertEqual(diff, [], "models and migrations differ on PostgreSQL")
+            command.downgrade(cfg, "base")
+            command.upgrade(cfg, "head")  # and up again from nothing
+        finally:
+            with admin.connect() as conn:
+                conn.execute(text(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)'))
+            admin.dispose()

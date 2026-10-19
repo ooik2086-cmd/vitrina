@@ -232,6 +232,45 @@ class ListingTests(ApiTestCase):
         self.assertEqual(self.c.get(f"/api/v1/listings/{lid}", headers=self.h(self.seller)).status_code, 200)
 
 
+class WeightTests(ApiTestCase):
+    """What a page of the catalog costs the phone and the server."""
+
+    def test_a_catalog_page_comes_compressed(self):
+        for i in range(3):
+            self.publish(title=f"Аяқкиім {i}")
+        r = self.c.get("/api/v1/listings", headers={"Accept-Encoding": "gzip"})
+        self.assertEqual(r.headers.get("content-encoding"), "gzip")
+        self.assertEqual(len(r.json()["items"]), 3)  # the client unpacks it
+        r = self.c.get("/api/v1/listings", headers={"Accept-Encoding": "identity"})
+        self.assertIsNone(r.headers.get("content-encoding"))  # a client that cannot unpack gets it as is
+
+    def test_photos_videos_and_pdfs_are_sent_as_they_are(self):
+        from starlette.responses import Response
+        from vitrina_api.app import CompressText
+
+        async def file(scope, receive, send):
+            await Response(b"x" * 5000, media_type="application/octet-stream")(scope, receive, send)
+        c = TestClient(CompressText(file))
+        for path in ("/media/1/a.jpg", "/api/v1/private-media/1/b.mp4", "/api/v1/orders/1/slip.pdf"):
+            self.assertIsNone(c.get(path, headers={"Accept-Encoding": "gzip"}).headers.get("content-encoding"), path)
+        self.assertEqual(c.get("/api/v1/me/sales.csv", headers={"Accept-Encoding": "gzip"})
+                         .headers.get("content-encoding"), "gzip")
+
+    def test_a_page_of_one_shop_reads_its_seller_once(self):
+        from sqlalchemy import event
+        for i in range(5):
+            self.publish(title=f"Аяқкиім {i}")
+        engine = self.app.state.sessions.kw["bind"]
+        asked = []
+        listen = lambda *a: asked.append(a[2])  # noqa: E731
+        event.listen(engine, "before_cursor_execute", listen)
+        try:
+            self.c.get("/api/v1/listings")
+        finally:
+            event.remove(engine, "before_cursor_execute", listen)
+        self.assertEqual(sum(re.search(r"\bFROM users\b", q) is not None for q in asked), 1, asked)
+
+
 class EarningsTests(ApiTestCase):
     def test_seller_sees_held_then_payable_minus_commission(self):
         self.assertEqual(self.c.get("/api/v1/me/earnings", headers=self.h(self.buyer)).status_code, 403)
