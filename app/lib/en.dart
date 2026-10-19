@@ -1001,4 +1001,6 @@ const en = <String, String>{
   '{0}: аяқкиім табылмады, фоны алынбайды': '{0}: no shoe found, background not removed',
   'Бір кадрында аяқкиім табылмады, сондықтан айналымның фоны алынбайды. Қайта түсіру үшін 360° өшіріп, жаңасын қосыңыз.':
       'No shoe was found in one of the frames, so the view keeps its background. To retake it, delete the 360° view and add a new one.',
+  'Белгіленген фотода аяқкиім табылмады, сондықтан фоны алынбайды. Сол жағынан жаңа фото қосып, ескісін өшіріңіз.':
+      'No shoe was found in the marked photo, so its background is not removed. Add a new photo of that side, then delete the old one.',
 };

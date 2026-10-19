@@ -2878,6 +2878,7 @@ void main() {
       expect(find.byKey(const Key('no-shoe-1')), findsNothing);
       expect(find.bySemanticsLabel('Алдынан: аяқкиім табылмады, фоны алынбайды'), findsOneWidget);
       expect(find.byKey(const Key('spin-no-shoe')), findsOneWidget);
+      expect(find.byKey(const Key('photos-no-shoe')), findsOneWidget);
       handle.dispose();
     });
 
@@ -2885,6 +2886,7 @@ void main() {
       await show(tester, listingJson(media: [...photos, ...spinFrames]));
       expect(find.byKey(const Key('no-shoe-0')), findsNothing);
       expect(find.byKey(const Key('spin-no-shoe')), findsNothing);
+      expect(find.byKey(const Key('photos-no-shoe')), findsNothing);
     });
 
     testWidgets('one Save sends only the name fields the seller changed', (tester) async {

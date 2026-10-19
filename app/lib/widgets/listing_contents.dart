@@ -333,7 +333,10 @@ class _ListingContentsCardState extends State<ListingContentsCard> {
                     Positioned(
                       left: 4,
                       bottom: 4,
-                      child: ExcludeSemantics(
+                      child: Tooltip(
+                        message: trf(
+                            '{0}: аяқкиім табылмады, фоны алынбайды', [tr(photoAngles[_l.media[i].angle] ?? 'Фото')]),
+                        excludeFromSemantics: true, // the photo's own label says it
                         child: CircleAvatar(
                           key: Key('no-shoe-$i'),
                           radius: 11,
@@ -363,6 +366,21 @@ class _ListingContentsCardState extends State<ListingContentsCard> {
             ),
         ]),
       ),
+      // The badge alone says nothing to a sighted seller; the completeness card may not list it among its top tips.
+      if (photos.any((i) => _l.media[i].noShoe))
+        Padding(
+          key: const Key('photos-no-shoe'),
+          padding: const EdgeInsets.only(top: 8),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Icon(Icons.hide_image_outlined, size: 18, color: theme.colorScheme.error),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                  tr('Белгіленген фотода аяқкиім табылмады, сондықтан фоны алынбайды. Сол жағынан жаңа фото қосып, ескісін өшіріңіз.'),
+                  style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.error)),
+            ),
+          ]),
+        ),
       const SizedBox(height: 8),
       Wrap(spacing: 8, runSpacing: 8, children: [
         OutlinedButton.icon(
