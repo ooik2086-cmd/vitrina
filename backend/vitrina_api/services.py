@@ -196,12 +196,14 @@ def settle(db: Session, order: Order, *, refund_tiyn: int, rule: CommissionRule,
 
 
 def restock(db: Session, order: Order) -> None:
+    # The listing first, as every stock writer takes it (see create_order), so its status is decided on counts no
+    # other order is changing.
+    listing = db.get(Listing, order.listing_id, with_for_update={"key_share": True}, populate_existing=True)
     # One atomic increment: a read-modify-write here could overwrite an order placed at the same moment.
     db.execute(update(ListingSize).where(ListingSize.id == order.size_id)
                .values(quantity=ListingSize.quantity + 1).execution_options(synchronize_session=False))
     size = db.get(ListingSize, order.size_id)
     db.refresh(size, ["quantity"])
-    listing = db.get(Listing, order.listing_id)
     if listing.status == "sold":
         listing.status = "published"
     tell_back_in_stock(db, listing)

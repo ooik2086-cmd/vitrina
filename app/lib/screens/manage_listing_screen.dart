@@ -53,7 +53,7 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
   late final _color = TextEditingController(text: _l.color);
   late String _category = _l.category;
   late String _condition = _l.condition;
-  late final Map<int, int> _stock = {for (final s in _l.sizes) s.id: s.quantity ?? (s.available ? 1 : 0)};
+  late final Map<int, int> _stock = {for (final s in _l.sizes) s.id: _count(s)};
   bool _busy = false;
   bool _changed = false;
   final _photos = GlobalKey();
@@ -99,18 +99,21 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
     return v == null ? null : v * 100;
   }
 
-  Future<void> _run(Future<Listing> Function(Api api) action, String done) async {
+  /// Returns the error, or null once done.
+  Future<Object?> _run(Future<Listing> Function(Api api) action, String done) async {
     setState(() => _busy = true);
     try {
       final l = await action(SessionScope.of(context).api);
-      if (!mounted) return;
+      if (!mounted) return null;
       setState(() {
         _l = l;
         _changed = true;
       });
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(done)));
+      return null;
     } catch (e) {
       if (mounted) showError(context, e);
+      return e;
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -122,16 +125,27 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
     return v == (was ?? '') ? null : v;
   }
 
-  void _save() {
+  static int _count(ShoeSize s) => s.quantity ?? (s.available ? 1 : 0);
+
+  /// Only the sizes the seller changed, each with the count it was changed from: a pair bought while the screen was
+  /// open is not put back by a Save, and a count changed by a sale meanwhile is shown again before it is saved.
+  Map<int, int> get _was => {
+        for (final s in _l.sizes)
+          if (_stock[s.id] != null && _stock[s.id] != _count(s)) s.id: _count(s)
+      };
+
+  Future<void> _save() async {
     if (!_form.currentState!.validate()) return;
     final fresh = !_l.everOnSale;
-    _run(
+    final was = _was;
+    final saved = await _run(
       (api) => api.editListing(_l.id,
           priceTiyn: _tiyn(_price.text),
           deliveryPriceTiyn: _tiyn(_delivery.text) ?? 0,
           description: _description.text,
           defects: _defects.text,
-          stock: _stock,
+          stock: was.isEmpty ? null : {for (final id in was.keys) id: _stock[id]!},
+          stockWas: was,
           title: _edited(_title, _l.title),
           brand: fresh ? _edited(_brand, _l.brand) : null,
           modelName: fresh ? _edited(_model, _l.modelName) : null,
@@ -140,6 +154,21 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
           condition: _condition != _l.condition ? _condition : null),
       tr('Сақталды'),
     );
+    final soldMeanwhile = saved is ApiException && saved.code == 'stock_changed';
+    if (!mounted || saved != null && !soldMeanwhile) return;
+    if (soldMeanwhile) {
+      try {
+        final l = await SessionScope.of(context).api.listing(_l.id);
+        if (!mounted) return;
+        _l = l;
+      } catch (_) {
+        return; // the counts stay as the seller set them, and Save tries again
+      }
+    }
+    // The counts as the server keeps them now, sales included.
+    setState(() => _stock
+      ..clear()
+      ..addAll({for (final s in _l.sizes) s.id: _count(s)}));
   }
 
   Future<void> _publish() async {

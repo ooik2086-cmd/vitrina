@@ -715,6 +715,18 @@ class SellerEditTests(ApiTestCase):
         self.assertEqual(self.patch(lid, {"sizes": [{"id": size_id, "quantity": 2}]}).json()["status"], "paused")
         self.assertEqual(self.patch(lid, {"sizes": [{"id": 9999, "quantity": 2}]}).status_code, 422)
 
+    def test_a_save_on_a_count_a_buyer_changed_meanwhile_is_refused(self):
+        listing, order = self.ordered()  # the seller's screen still shows the one pair the buyer just took
+        lid, size_id = listing["id"], listing["sizes"][0]["id"]
+        r = self.patch(lid, {"sizes": [{"id": size_id, "quantity": 2, "was": 1}]})
+        self.assertEqual((r.status_code, r.json()["code"]), (409, "stock_changed"), r.text)
+        with self.db() as db:
+            self.assertEqual(db.get(ListingSize, size_id).quantity, 0)
+        r = self.patch(lid, {"price_tiyn": 4_000_000})  # a save that leaves stock alone is not stopped by it
+        self.assertEqual(r.status_code, 200, r.text)
+        r = self.patch(lid, {"sizes": [{"id": size_id, "quantity": 2, "was": 0}]})
+        self.assertEqual(r.json()["sizes"][0]["quantity"], 2)
+
     def test_seller_cannot_lift_moderation_hide(self):
         lid = self.publish()["id"]
         staff = self.make_staff()
@@ -742,7 +754,8 @@ class OrderFlowTests(ApiTestCase):
         self.assertEqual(again.json()["id"], order["id"])
         other = self.post("/orders", self.buyer, {"listing_id": listing["id"], "size_id": listing["sizes"][0]["id"]},
                           **{"Idempotency-Key": "new-key"})
-        self.assertEqual(other.status_code, 404)  # listing sold out -> no longer published
+        # Sold out: said so, not "not found", to a buyer who saw it on sale a moment ago.
+        self.assertEqual((other.status_code, other.json()["code"]), (409, "out_of_stock"))
 
     def test_order_lists_are_per_party(self):
         _, order = self.ordered()

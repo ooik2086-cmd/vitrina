@@ -63,6 +63,8 @@ class ListingIn(BaseModel):
 class StockIn(BaseModel):
     id: int
     quantity: int = Field(ge=0, le=999)
+    # The count the seller's screen showed: if a buyer took a pair since, the seller sees the new count first.
+    was: int | None = Field(default=None, ge=0, le=999)
 
 
 class ListingPatch(BaseModel):

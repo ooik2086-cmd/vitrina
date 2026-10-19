@@ -89,7 +89,8 @@ def make_offer(listing_id: int, body: OfferIn, user: User = Depends(current_user
     if (recent or 0) >= OFFERS_PER_DAY:
         raise ApiError(429, "offer_limit")
     for old in db.scalars(select(Offer).where(Offer.listing_id == listing.id, Offer.buyer_id == user.id,
-                                              Offer.status.in_(OPEN))).all():
+                                              Offer.status.in_(OPEN))
+                              .with_for_update().execution_options(populate_existing=True)).all():
         old.status = "withdrawn"  # one live offer per buyer per listing: the newest one counts
     offer = Offer(listing_id=listing.id, size_id=size.id, buyer_id=user.id, seller_id=listing.seller_id,
                   amount_tiyn=body.amount_tiyn, status="pending", created_at=now, expires_at=now + ANSWER_WITHIN)

@@ -64,16 +64,23 @@ def create_order(body: OrderIn, user: User = Depends(current_user), db: Session 
                  cfg: Settings = Depends(get_settings), idempotency_key: str | None = Header(default=None)):
     if not idempotency_key:
         raise ApiError(400, "idempotency_key_required")
+    # Everything that changes a listing's stock (orders, the seller's edits, cancels) queues on its row first, then
+    # takes the rest in one order: offer, size, promo code. So two never wait on each other, and the sizes read
+    # below are as they are now. FOR NO KEY UPDATE: rows that only point at the listing (a new offer, a favourite)
+    # are still added meanwhile, so a request that holds one of those never waits on this one.
+    listing = db.get(Listing, body.listing_id, with_for_update={"key_share": True}, populate_existing=True)
+    # Looked up under the lock: the same tap's first request, if it was here first, has committed by now.
     seen = db.scalar(select(IdempotencyRecord).where(IdempotencyRecord.user_id == user.id,
                                                      IdempotencyRecord.scope == "create_order",
                                                      IdempotencyRecord.key == idempotency_key))
     if seen:
         return order_out(db.get(Order, seen.order_id))
-    listing = db.get(Listing, body.listing_id)
-    if listing is None or listing.status != "published":
+    if listing is None or listing.status not in ("published", "sold"):
         raise ApiError(404, "not_found")
     if listing.seller_id == user.id:
         raise ApiError(409, "own_listing")
+    if listing.status == "sold":
+        raise ApiError(409, "out_of_stock")  # the last pair went a moment ago, to the buyer queued ahead
     if body.photos_version is not None and body.photos_version != photos_version(listing):
         raise ApiError(409, "photos_changed")  # the buyer looks again at the new photos before paying
     if away_until(db.get(User, listing.seller_id)):

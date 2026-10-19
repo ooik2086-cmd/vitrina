@@ -80,6 +80,12 @@ MESSAGES: dict[str, tuple[str, str, str]] = {  # code: (Kazakh, Russian, English
     "out_of_stock": ("Бұл өлшем қалмады.",
                      "Этого размера нет в наличии.",
                      "This size is out of stock."),
+    "stock_changed": ("Осы уақытта қалдық өзгерді: біреу сатып алған болуы мүмкін. "
+                      "Жаңа сандарды тексеріп, қайта сақтаңыз.",
+                      "Пока вы редактировали, остаток изменился: возможно, кто-то купил. "
+                      "Проверьте новые числа и сохраните снова.",
+                      "The stock changed meanwhile: someone may have bought a pair. "
+                      "Check the new numbers and save again."),
     "own_listing": ("Өз тауарыңызды сатып ала алмайсыз.",
                     "Нельзя купить свой товар.",
                     "You can't buy your own listing."),

@@ -1554,7 +1554,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(sent!['price_tiyn'], 4000000);
     expect(sent!['sizes'], [
-      {'id': 1, 'quantity': 3}
+      {'id': 1, 'quantity': 3, 'was': 2}
     ]);
     expect(sent!.containsKey('title'), isFalse); // name fields left alone are not sent
     expect(find.text('Сақталды'), findsOneWidget);

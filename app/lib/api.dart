@@ -1087,6 +1087,7 @@ class Api {
           String? description,
           String? defects,
           Map<int, int>? stock,
+          Map<int, int>? stockWas,
           String? title,
           String? brand,
           String? modelName,
@@ -1104,7 +1105,8 @@ class Api {
         if (defects != null) 'defects': defects,
         if (stock != null)
           'sizes': [
-            for (final e in stock.entries) {'id': e.key, 'quantity': e.value}
+            for (final e in stock.entries)
+              {'id': e.key, 'quantity': e.value, if (stockWas?[e.key] != null) 'was': stockWas![e.key]}
           ],
         if (title != null) 'title': title,
         if (brand != null) 'brand': brand,

@@ -267,7 +267,9 @@ class _OffersScreenState extends State<OffersScreen> {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(done)));
       setState(_load);
     } catch (e) {
-      if (mounted) showError(context, e);
+      if (!mounted) return;
+      showError(context, e);
+      setState(_load); // answered meanwhile, on another phone: show where it stands now
     }
   }
 

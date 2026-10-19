@@ -271,8 +271,14 @@ class _ListingScreenState extends State<ListingScreen> {
       await Navigator.of(context).push(MaterialPageRoute(builder: (_) => OrderScreen(orderId: order.id)));
     } catch (e) {
       if (mounted) showError(context, e);
-      // The seller changed the photos meanwhile: show the new ones, nothing was ordered.
-      if (e is ApiException && e.code == 'photos_changed' && mounted) setState(_loadListing);
+      // The seller changed the photos meanwhile, or another buyer took the last pair: show the listing as it is now,
+      // nothing was ordered. A size that is gone is picked again.
+      if (e is ApiException && (e.code == 'photos_changed' || e.code == 'out_of_stock') && mounted) {
+        setState(() {
+          if (e.code == 'out_of_stock') _sizeId = null;
+          _loadListing();
+        });
+      }
     } finally {
       if (mounted) setState(() => _ordering = false);
     }

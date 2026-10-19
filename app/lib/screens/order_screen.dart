@@ -1154,6 +1154,8 @@ class _ReviewFormState extends State<_ReviewForm> {
       widget.onDone();
     } catch (e) {
       if (mounted) showError(context, e);
+      // Sent twice and the first one was kept: show the review that is there.
+      if (e is ApiException && e.code == 'already_reviewed') widget.onDone();
     } finally {
       if (mounted) setState(() => _busy = false);
     }

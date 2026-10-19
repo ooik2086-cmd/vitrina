@@ -21,6 +21,7 @@ jobs:
 
   backend-postgres:
     runs-on: ubuntu-latest
+    timeout-minutes: 20  # a request stuck on a lock fails here, not after six hours
     services:
       postgres:
         image: postgres:16

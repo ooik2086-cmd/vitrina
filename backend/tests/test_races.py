@@ -9,7 +9,8 @@ import unittest
 from sqlalchemy import func, select
 
 from tests.test_api import ADDRESS, ApiTestCase, with_check_digit
-from vitrina_api.models import Conversation, LedgerTx, ListingSize, Order, Payout, Review
+from vitrina_api.models import (Conversation, LedgerTx, Listing, ListingSize, Offer, Order, OrderEvent, Payout,
+                                Review)
 
 N = 8
 
@@ -18,7 +19,7 @@ N = 8
 class RaceTests(ApiTestCase):
     def race(self, *calls):
         """Runs every call at the same moment, each on its own thread; returns the responses in the calls' order."""
-        barrier, out = threading.Barrier(len(calls)), [None] * len(calls)
+        barrier, out = threading.Barrier(len(calls), timeout=30), [None] * len(calls)
 
         def run(i):
             barrier.wait()
@@ -30,7 +31,8 @@ class RaceTests(ApiTestCase):
         for t in threads:
             t.start()
         for t in threads:
-            t.join()
+            t.join(timeout=60)
+            self.assertFalse(t.is_alive(), "a request is still waiting: two locks taken in opposite orders?")
         for r in out:
             self.assertNotIsInstance(r, Exception, repr(r)[:300])
             self.assertLess(r.status_code, 500, r.text)
@@ -59,9 +61,62 @@ class RaceTests(ApiTestCase):
         rs = self.race(*[lambda t=t: self.post("/orders", t, {"listing_id": listing["id"], "size_id": size},
                                                **{"Idempotency-Key": f"k-{t[-6:]}"}) for t in buyers])
         self.assertEqual([r.status_code for r in rs].count(201), 1, self.codes(rs))
+        self.assertEqual({r.json()["code"] for r in rs if r.status_code != 201}, {"out_of_stock"})
         self.assertEqual(self.count(Order), 1)
         with self.db() as db:
             self.assertEqual(db.get(ListingSize, size).quantity, 0)
+
+    def test_the_last_pairs_of_two_sizes_bought_at_once_leave_the_listing_sold(self):
+        listing = self.publish(sizes=[{"label": "EU 42", "insole_cm": "26,5", "quantity": 1},
+                                      {"label": "EU 43", "insole_cm": "27,0", "quantity": 1}])
+        a, b = self.login("+77010000301"), self.login("+77010000302")
+        rs = self.race(*[lambda t=t, s=s: self.post("/orders", t, {"listing_id": listing["id"], "size_id": s["id"]},
+                                                     **{"Idempotency-Key": "two"})
+                         for t, s in zip((a, b), listing["sizes"])])
+        self.assertEqual(self.codes(rs), [201, 201])
+        with self.db() as db:
+            self.assertEqual(db.get(Listing, listing["id"]).status, "sold")
+
+    def test_a_cancel_while_another_size_sells_out_leaves_the_listing_on_sale(self):
+        listing = self.publish(sizes=[{"label": "EU 42", "insole_cm": "26,5", "quantity": 1},
+                                      {"label": "EU 43", "insole_cm": "27,0", "quantity": 1}])
+        x, y = (s["id"] for s in listing["sizes"])
+        first = self.post("/orders", self.buyer, {"listing_id": listing["id"], "size_id": y}, **{"Idempotency-Key": "y"})
+        other = self.login("+77010000303")
+        self.race(lambda: self.post(f"/orders/{first.json()['id']}/cancel", self.buyer),
+                  lambda: self.post("/orders", other, {"listing_id": listing["id"], "size_id": x},
+                                    **{"Idempotency-Key": "x"}))
+        with self.db() as db:
+            self.assertEqual(db.get(Listing, listing["id"]).status, "published")  # EU 43 is back on sale
+
+    def test_the_same_key_for_the_last_pair_answers_every_tap_with_its_order(self):
+        listing = self.publish()  # one pair: a lost answer must not turn into "sold out" for its own buyer
+        body = {"listing_id": listing["id"], "size_id": listing["sizes"][0]["id"]}
+        rs = self.same(lambda: self.post("/orders", self.buyer, body, **{"Idempotency-Key": "last"}))
+        self.assertEqual(self.codes(rs), [201] * N, [r.text[:120] for r in rs])
+        self.assertEqual(len({r.json()["id"] for r in rs}), 1)
+
+    def test_the_same_key_under_an_agreed_price_answers_every_tap_with_its_order(self):
+        listing = self.publish(sizes=[{"label": "EU 42", "insole_cm": "26,5", "quantity": 5}])
+        size = listing["sizes"][0]["id"]
+        offer = self.post(f"/listings/{listing['id']}/offers", self.buyer, {"size_id": size, "amount_tiyn": 4_000_000})
+        self.post(f"/offers/{offer.json()['id']}/accept", self.seller)
+        body = {"listing_id": listing["id"], "size_id": size, "offer_id": offer.json()["id"]}
+        rs = self.same(lambda: self.post("/orders", self.buyer, body, **{"Idempotency-Key": "agreed"}))
+        self.assertEqual(self.codes(rs), [201] * N, [r.text[:120] for r in rs])
+        self.assertEqual(len({r.json()["id"] for r in rs}), 1)
+
+    def test_the_seller_saving_stock_while_buyers_order_waits_its_turn(self):
+        listing = self.publish(sizes=[{"label": "EU 42", "insole_cm": "26,5", "quantity": 5}])
+        size = listing["sizes"][0]["id"]
+        buyers = [self.login(f"+7701000040{i}") for i in range(N // 2)]
+        edits = [lambda i=i: self.c.patch(f"/api/v1/listings/{listing['id']}", headers=self.h(self.seller),
+                                          json={"price_tiyn": 4_500_000 + i * 10_000,
+                                                "sizes": [{"id": size, "quantity": 5}]}) for i in range(N // 2)]
+        orders = [lambda t=t: self.post("/orders", t, {"listing_id": listing["id"], "size_id": size},
+                                        **{"Idempotency-Key": "e"}) for t in buyers]
+        rs = self.race(*[c for pair in zip(edits, orders) for c in pair])
+        self.assertTrue(all(r.status_code in (200, 201) for r in rs), self.codes(rs))
 
     def test_one_order_however_often_the_same_key_arrives(self):
         listing = self.publish(sizes=[{"label": "EU 42", "insole_cm": "26,5", "quantity": 5}])
@@ -135,6 +190,24 @@ class RaceTests(ApiTestCase):
         if status == "REFUND_PENDING":  # cancelled first: the payment that landed after is owed back in full
             self.assertEqual(owed, order["total_tiyn"])
 
+    def test_an_agreed_price_ordered_while_a_new_offer_is_sent_stays_ordered(self):
+        calls, offers = [], []
+        for i in range(N // 2):  # several listings at once, so the two requests meet in every order
+            listing = self.publish(title=f"Аяқкиім {i}", sizes=[{"label": "EU 42", "insole_cm": "26,5", "quantity": 5}])
+            size = listing["sizes"][0]["id"]
+            offer = self.post(f"/listings/{listing['id']}/offers", self.buyer,
+                              {"size_id": size, "amount_tiyn": 4_000_000}).json()
+            self.post(f"/offers/{offer['id']}/accept", self.seller)
+            offers.append(offer["id"])
+            calls += [lambda l=listing, s=size, o=offer: self.post("/orders", self.buyer, {
+                          "listing_id": l["id"], "size_id": s, "offer_id": o["id"]}, **{"Idempotency-Key": f"a{o['id']}"}),
+                      lambda l=listing, s=size: self.post(f"/listings/{l['id']}/offers", self.buyer,
+                                                          {"size_id": s, "amount_tiyn": 4_100_000})]
+        rs = self.race(*calls)
+        with self.db() as db:
+            for offer_id, order in zip(offers, rs[::2]):
+                self.assertEqual(db.get(Offer, offer_id).status, "ordered" if order.status_code == 201 else "withdrawn")
+
     # Order steps
 
     def test_seller_steps_pressed_many_times_happen_once(self):
@@ -142,11 +215,14 @@ class RaceTests(ApiTestCase):
         self.post(f"/orders/{order['id']}/pay", self.buyer)
         self.pay(order)
         rs = self.same(lambda: self.post(f"/orders/{order['id']}/accept", self.seller))
-        self.assertIn(200, [r.status_code for r in rs])
+        self.assertEqual([r.status_code for r in rs].count(200), 1, self.codes(rs))
         rs = self.same(lambda: self.post(f"/orders/{order['id']}/ship", self.seller, {"tracking_number": "KZ1"}))
-        self.assertIn(200, [r.status_code for r in rs])
+        self.assertEqual([r.status_code for r in rs].count(200), 1, self.codes(rs))
         self.assertEqual(self.c.get(f"/api/v1/orders/{order['id']}", headers=self.h(self.buyer)).json()["status"],
                          "SHIPPED")
+        for step in ("SELLER_ACCEPTED", "SHIPPED"):  # one step, one event, one message to the buyer
+            self.assertEqual(self.count(OrderEvent, OrderEvent.order_id == order["id"], OrderEvent.to_status == step),
+                             1, step)
 
     def test_one_review_however_often_it_is_sent(self):
         _, order = self.delivered()
