@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:flutter/services.dart';
 import 'package:flutter/rendering.dart';
 import 'package:vitrina/widgets/common.dart';
@@ -111,18 +112,40 @@ final sheets = <String, Widget Function()>{
   'shop sale': () => ShopSaleSheet(listings: [listing1, listing4]),
 };
 
+/// The demo server behind a connection that can drop: while [down], every request but the account's fails as a lost
+/// connection does.
+class Line extends http.BaseClient {
+  Line(this._inner);
+  final http.Client _inner;
+  bool down = false;
+
+  /// The requests that failed, each as method and path.
+  final dropped = <String>[];
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    if (down && !request.url.path.endsWith('/me')) {
+      dropped.add('${request.method} ${request.url.path.replaceFirst(RegExp(r'^.*/api/v1'), '')}');
+      throw http.ClientException('offline', request.url);
+    }
+    return _inner.send(request);
+  }
+}
+
 /// Opens [screen] on the demo data in [lang] at [size] with text [scale], goes through all of it, and returns the
 /// layout errors Flutter reported. [look] adds its own findings once the screen has loaded and again at its end.
 Future<List<String>> visit(WidgetTester tester, String lang, Size size, double scale, Widget Function() screen,
     {Widget? sheet,
     Future<void> Function(WidgetTester tester)? check,
     Brightness brightness = Brightness.light,
-    Future<void> Function(WidgetTester tester, List<String> errors)? look}) async {
+    Future<void> Function(WidgetTester tester, List<String> errors)? look,
+    bool offline = false}) async {
   SharedPreferences.setMockInitialValues({});
   await loadFonts(tester);
   appLanguage.value = lang;
   final client = await tester.runAsync(() => DemoClient.load());
-  final session = Session(Api(base: 'http://demo/api/v1', client: client!))..api.token = demoToken;
+  final line = Line(client!)..down = offline;
+  final session = Session(Api(base: 'http://demo/api/v1', client: line))..api.token = demoToken;
   session.update((await tester.runAsync(() => session.api.me()))!); // signed in, as the demo app is
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
@@ -161,6 +184,34 @@ Future<List<String>> visit(WidgetTester tester, String lang, Size size, double s
       await tester.pump(const Duration(milliseconds: 300));
     }
   }
+  if (offline) {
+    // With the connection down a screen says so and offers to try again; it neither waits for ever nor shows nothing.
+    if (find.byType(CircularProgressIndicator).evaluate().isNotEmpty) errors.add('offline: still loading');
+    bool told() => [ErrorRetry, RetryLine, SnackBar].any((t) => find.byType(t).evaluate().isNotEmpty);
+    // With large text the message can sit below a tall header, as the goods would: it counts once scrolled to.
+    final page =
+        find.byWidgetPredicate((w) => w is Scrollable && axisDirectionToAxis(w.axisDirection) == Axis.vertical);
+    for (var i = 0; i < 6 && !told() && page.evaluate().isNotEmpty; i++) {
+      await tester.drag(page.first, const Offset(0, -300), warnIfMissed: false);
+      await tester.pump(const Duration(milliseconds: 300));
+    }
+    if (line.dropped.isNotEmpty && !told()) {
+      errors.add('offline: nothing says the connection is down (${line.dropped.toSet().join(', ')})');
+    }
+    await look?.call(tester, errors);
+    // Back online, «Try again» brings the screen.
+    line.down = false;
+    for (var i = 0; i < 4 && find.byKey(const Key('retry')).evaluate().isNotEmpty; i++) {
+      final retry = find.byKey(const Key('retry')).first;
+      await tester.ensureVisible(retry); // a part lower down the page is scrolled to
+      await tester.pump();
+      if (retry.hitTestable().evaluate().isEmpty) break; // a tab out of sight
+      await tester.tap(retry);
+      for (var j = 0; j < 6; j++) {
+        await tester.pump(const Duration(milliseconds: 300));
+      }
+    }
+  }
   await look?.call(tester, errors);
   try {
     await check?.call(tester);
@@ -169,7 +220,11 @@ Future<List<String>> visit(WidgetTester tester, String lang, Size size, double s
   }
   // The screen has loaded its demo data: not still waiting, and not showing a failed load.
   if (find.byType(CircularProgressIndicator).evaluate().isNotEmpty) errors.add('still loading');
-  if (find.byType(ErrorRetry).evaluate().isNotEmpty) errors.add('failed to load');
+  // After a lost connection only what is on screen was tried again; a tab out of sight keeps its «Try again».
+  Finder shown(Finder f) => offline ? f.hitTestable() : f;
+  if (shown(find.byType(ErrorRetry)).evaluate().isNotEmpty || shown(find.byType(RetryLine)).evaluate().isNotEmpty) {
+    errors.add('failed to load');
+  }
   // Pages side by side (the introduction) are each laid out.
   final pages = find.byType(PageView);
   for (var i = 0; pages.evaluate().isNotEmpty && i < 6; i++) {

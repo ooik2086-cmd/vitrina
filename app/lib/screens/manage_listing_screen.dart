@@ -411,6 +411,7 @@ class AuthenticityCard extends StatefulWidget {
 
 class _AuthenticityCardState extends State<AuthenticityCard> with WidgetsBindingObserver {
   Proofs? _p;
+  Object? _error;
   DateTime? _loadedAt;
   bool _busy = false;
 
@@ -443,6 +444,7 @@ class _AuthenticityCardState extends State<AuthenticityCard> with WidgetsBinding
   }
 
   Future<void> _load() async {
+    if (_error != null) setState(() => _error = null);
     try {
       final p = await SessionScope.of(context).api.proofs(widget.listingId);
       if (mounted) {
@@ -451,8 +453,9 @@ class _AuthenticityCardState extends State<AuthenticityCard> with WidgetsBinding
           _loadedAt = clock.now();
         });
       }
-    } catch (_) {
-      // The card simply stays hidden; the rest of the page works without it.
+    } catch (e) {
+      // The rest of the page works without the card; a line says it did not load, so the seller can try again.
+      if (mounted && _p == null && e is ApiException && e.passing) setState(() => _error = e);
     }
   }
 
@@ -484,7 +487,11 @@ class _AuthenticityCardState extends State<AuthenticityCard> with WidgetsBinding
   @override
   Widget build(BuildContext context) {
     final p = _p;
-    if (p == null) return const SizedBox.shrink();
+    if (p == null) {
+      return _error == null
+          ? const SizedBox.shrink()
+          : Card(child: RetryLine(error: _error, onRetry: _load, margin: const EdgeInsets.fromLTRB(16, 4, 8, 4)));
+    }
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final done = p.authenticity == 'documented' || p.authenticity == 'verified';

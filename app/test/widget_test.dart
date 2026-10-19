@@ -1522,6 +1522,8 @@ void main() {
     final api = Api(
         base: 'http://x/api/v1',
         client: MockClient((req) async {
+          // The proofs card is not part of this test: its listing has none to show.
+          if (req.method == 'GET') return http.Response('{}', 404);
           expect(req.method, 'PATCH');
           expect(req.url.path, '/api/v1/listings/7');
           sent = jsonDecode(req.body) as Map<String, dynamic>;

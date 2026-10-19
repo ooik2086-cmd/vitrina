@@ -88,6 +88,31 @@ class ErrorRetry extends StatelessWidget {
   }
 }
 
+/// A part of a screen that failed to load, as one line with a retry, where the rest of the screen did load. Without
+/// it the part would just be missing and nobody would know to try again.
+class RetryLine extends StatelessWidget {
+  const RetryLine({super.key, required this.error, required this.onRetry, this.margin = EdgeInsets.zero});
+  final Object? error;
+  final VoidCallback onRetry;
+  final EdgeInsetsGeometry margin;
+
+  @override
+  Widget build(BuildContext context) {
+    final e = error;
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: margin,
+      child: Row(children: [
+        Icon(e is ApiException && !e.offline ? Icons.error_outline_rounded : Icons.wifi_off_rounded,
+            size: 20, color: scheme.onSurfaceVariant),
+        const SizedBox(width: 12),
+        Expanded(child: Text(errorText(e), style: TextStyle(color: scheme.onSurfaceVariant))),
+        TextButton(key: const Key('retry'), onPressed: onRetry, child: Text(tr('Қайта көру'))),
+      ]),
+    );
+  }
+}
+
 /// Shown on tabs that need an account.
 class SignInPrompt extends StatelessWidget {
   const SignInPrompt({super.key, required this.text});

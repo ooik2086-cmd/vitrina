@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 
+import '../api.dart';
 import '../i18n.dart';
 import '../screens/my_listings_screen.dart';
 import '../screens/offers_screen.dart';
 import '../screens/orders_screen.dart';
 import '../session.dart';
 import '../theme.dart';
+import 'common.dart';
 
 /// One line of the to-do card: the server's count key, what it says, and where a tap goes.
 typedef TodoLine = ({String key, IconData icon, String label, Widget Function() open});
@@ -62,6 +64,7 @@ class TodoCard extends StatefulWidget {
 
 class _TodoCardState extends State<TodoCard> {
   Map<String, int>? _counts;
+  Object? _error;
 
   @override
   void didChangeDependencies() {
@@ -70,17 +73,23 @@ class _TodoCardState extends State<TodoCard> {
   }
 
   Future<void> _load() async {
+    if (_error != null) setState(() => _error = null);
     try {
       final counts = await SessionScope.of(context).api.todo();
       if (mounted) setState(() => _counts = counts);
-    } catch (_) {
-      // The card is a shortcut; the profile works without it.
+    } catch (e) {
+      // The profile works without the card, but the seller is told it did not load: the tab stays open for the
+      // whole visit, so it would not come back by itself.
+      if (mounted && e is ApiException && e.passing) setState(() => _error = e);
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    if (_error != null) {
+      return RetryLine(error: _error, onRetry: _load, margin: const EdgeInsets.fromLTRB(16, 4, 8, 8));
+    }
     final counts = _counts ?? const <String, int>{};
     final lines = [
       for (final l in todoLines)
