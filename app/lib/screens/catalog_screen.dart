@@ -42,6 +42,9 @@ class _CatalogScreenState extends State<CatalogScreen> {
   bool _hasMore = true;
   bool _loadingMore = false;
 
+  /// Why the next page did not load. Until «Try again» no further page is asked for, or it would be asked every frame.
+  Object? _moreError;
+
   int _unread = 0;
   bool? _countedFor;
   String? _savedKey; // the current search, once the buyer asked to be told about it
@@ -85,6 +88,7 @@ class _CatalogScreenState extends State<CatalogScreen> {
       _suggestions = const [];
       _more.clear();
       _hasMore = true;
+      _moreError = null;
       _results = _load();
     });
   }
@@ -141,7 +145,7 @@ class _CatalogScreenState extends State<CatalogScreen> {
 
   /// Next page when the user nears the end; the first page stays in the FutureBuilder.
   Future<void> _loadMore(int loaded) async {
-    if (_loadingMore || !_hasMore) return;
+    if (_loadingMore || !_hasMore || _moreError != null) return;
     final current = _results;
     setState(() => _loadingMore = true);
     try {
@@ -151,8 +155,8 @@ class _CatalogScreenState extends State<CatalogScreen> {
         _more.addAll(page);
         _hasMore = page.length == _page;
       });
-    } catch (_) {
-      // Pulling to refresh or scrolling again retries.
+    } catch (e) {
+      if (mounted && current == _results) setState(() => _moreError = e);
     } finally {
       if (mounted) setState(() => _loadingMore = false);
     }
@@ -424,7 +428,12 @@ class _CatalogScreenState extends State<CatalogScreen> {
               if (snap.hasError) {
                 return SliverFillRemaining(
                   hasScrollBody: false,
-                  child: ErrorRetry(error: snap.error, onRetry: _search),
+                  child: ErrorRetry(
+                      error: snap.error,
+                      onRetry: () {
+                        _search();
+                        _countUnread(); // the bell's count failed with the list
+                      }),
                 );
               }
               final items = [...snap.data!, ..._more];
@@ -478,9 +487,21 @@ class _CatalogScreenState extends State<CatalogScreen> {
               );
             },
           ),
-          if (_loadingMore)
+          if (_loadingMore && _moreError == null)
             const SliverToBoxAdapter(
               child: Padding(padding: EdgeInsets.only(bottom: 32), child: Center(child: CircularProgressIndicator())),
+            ),
+          if (_moreError != null)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 32),
+                child: RetryLine(
+                    key: const Key('more-retry'),
+                    what: tr('Тағы тауарлар'),
+                    error: _moreError,
+                    busy: _loadingMore,
+                    onRetry: () => setState(() => _moreError = null)), // the grid's end asks for the page again
+              ),
             ),
         ]),
       ),

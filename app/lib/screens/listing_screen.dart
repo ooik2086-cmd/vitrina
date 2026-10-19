@@ -77,6 +77,10 @@ class _ListingScreenState extends State<ListingScreen> {
   late Listing? _ready = widget.listing;
   late Future<Listing>? _pending = widget.pending;
   Future<List<Listing>>? _similar;
+
+  /// Why the buyer's own offer did not load, while that may pass; buying waits until it is known.
+  Object? _offerError;
+  bool _offerRetrying = false;
   int? _sizeId;
   bool _fitChecked = false;
   bool _favorite = false;
@@ -112,7 +116,7 @@ class _ListingScreenState extends State<ListingScreen> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     _loadListing();
-    _similar ??= SessionScope.of(context).api.similar(widget.listingId).catchError((_) => <Listing>[]);
+    if (_similar == null) _loadSimilar();
     _loadOffer();
   }
 
@@ -133,17 +137,38 @@ class _ListingScreenState extends State<ListingScreen> {
     }, onError: (_) {});
   }
 
+  /// Similar goods are a suggestion: when they do not load the row is left out.
+  void _loadSimilar() =>
+      _similar = SessionScope.of(context).api.similar(widget.listingId).catchError((_) => <Listing>[]);
+
+  /// After a failed load, «Try again» fetches every part of the page, not only the listing.
+  void _reload() {
+    setState(() {
+      _loadListing();
+      _loadSimilar();
+    });
+    if (_offer == null) _loadOffer();
+  }
+
   Future<void> _loadOffer() async {
     final session = SessionScope.of(context);
     if (!session.signedIn) return;
+    if (_offerError != null) setState(() => _offerRetrying = true);
     try {
       final mine = await session.api.offers(listingId: widget.listingId);
-      if (!mounted || mine.isEmpty) return;
+      if (!mounted) return;
       setState(() {
+        _offerError = null;
+        if (mine.isEmpty) return;
         _offer = mine.first;
         if (_offerLive) _sizeId = _offer!.sizeId; // the deal is for that size
       });
-    } catch (_) {}
+    } catch (e) {
+      // An agreed price that did not load must not be lost without a word: the buyer would pay the full price.
+      if (mounted && _offer == null) setState(() => _offerError = e is ApiException && e.passing ? e : null);
+    } finally {
+      if (mounted && _offerRetrying) setState(() => _offerRetrying = false);
+    }
   }
 
   /// An offer the buyer can still act on, or order under.
@@ -208,6 +233,12 @@ class _ListingScreenState extends State<ListingScreen> {
 
   Future<void> _order(Listing listing) async {
     if (!await _ensureSignedIn() || !mounted) return;
+    // Whether the buyer has an agreed price is known first.
+    if (_offerError != null) {
+      await _loadOffer();
+      if (!mounted) return;
+      if (_offerError != null) return showError(context, _offerError!);
+    }
     final offer = _offer?.status == 'accepted' && _offer!.sizeId == _sizeId ? _offer : null;
     final checkout = await showModalBottomSheet<Checkout>(
       context: context,
@@ -309,7 +340,7 @@ class _ListingScreenState extends State<ListingScreen> {
         initialData: widget.listing,
         builder: (context, snap) {
           if (snap.hasError && snap.connectionState == ConnectionState.done) {
-            return SafeArea(child: ErrorRetry(error: snap.error, onRetry: () => setState(_loadListing)));
+            return SafeArea(child: ErrorRetry(error: snap.error, onRetry: _reload));
           }
           if (!snap.hasData) {
             final cover = widget.cover;
@@ -708,6 +739,18 @@ class _ListingScreenState extends State<ListingScreen> {
                         if (_offer != null && _offer!.status != 'ordered' && _offer!.status != 'withdrawn') ...[
                           const SizedBox(height: 16),
                           OfferStatusCard(offer: _offer!, onChanged: (o) => setState(() => _offer = o)),
+                        ],
+                        if (_offer == null && _offerError != null) ...[
+                          const SizedBox(height: 16),
+                          Card(
+                            margin: EdgeInsets.zero,
+                            child: RetryLine(
+                                key: const Key('offer-retry'),
+                                what: tr('Сіздің ұсыныстарыңыз'),
+                                error: _offerError,
+                                busy: _offerRetrying,
+                                onRetry: _loadOffer),
+                          ),
                         ],
                         if (canOffer) ...[
                           const SizedBox(height: 16),

@@ -119,27 +119,32 @@ class Line extends http.BaseClient {
   final http.Client _inner;
   bool down = false;
 
-  /// The requests that failed, each as method and path.
-  final dropped = <String>[];
+  /// The requests that failed, and those answered, each as method and path.
+  final dropped = <String>[], served = <String>{};
 
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    final what = '${request.method} ${request.url.path.replaceFirst(RegExp(r'^.*/api/v1'), '')}';
     if (down && !request.url.path.endsWith('/me')) {
-      dropped.add('${request.method} ${request.url.path.replaceFirst(RegExp(r'^.*/api/v1'), '')}');
+      dropped.add(what);
       throw http.ClientException('offline', request.url);
     }
+    served.add(what);
     return _inner.send(request);
   }
 }
 
 /// Opens [screen] on the demo data in [lang] at [size] with text [scale], goes through all of it, and returns the
 /// layout errors Flutter reported. [look] adds its own findings once the screen has loaded and again at its end.
+/// With [offline] the screen opens with the connection down, which it must say and recover from; [keepsMissing] is
+/// for a screen whose parts out of sight (other tabs) are tried again only once shown.
 Future<List<String>> visit(WidgetTester tester, String lang, Size size, double scale, Widget Function() screen,
     {Widget? sheet,
     Future<void> Function(WidgetTester tester)? check,
     Brightness brightness = Brightness.light,
     Future<void> Function(WidgetTester tester, List<String> errors)? look,
-    bool offline = false}) async {
+    bool offline = false,
+    bool keepsMissing = false}) async {
   SharedPreferences.setMockInitialValues({});
   await loadFonts(tester);
   appLanguage.value = lang;
@@ -187,7 +192,8 @@ Future<List<String>> visit(WidgetTester tester, String lang, Size size, double s
   if (offline) {
     // With the connection down a screen says so and offers to try again; it neither waits for ever nor shows nothing.
     if (find.byType(CircularProgressIndicator).evaluate().isNotEmpty) errors.add('offline: still loading');
-    bool told() => [ErrorRetry, RetryLine, SnackBar].any((t) => find.byType(t).evaluate().isNotEmpty);
+    // Saying so is not enough: there is a «Try again» (ErrorRetry and RetryLine both have one).
+    bool told() => find.byKey(const Key('retry')).evaluate().isNotEmpty;
     // With large text the message can sit below a tall header, as the goods would: it counts once scrolled to.
     final page =
         find.byWidgetPredicate((w) => w is Scrollable && axisDirectionToAxis(w.axisDirection) == Axis.vertical);
@@ -199,18 +205,26 @@ Future<List<String>> visit(WidgetTester tester, String lang, Size size, double s
       errors.add('offline: nothing says the connection is down (${line.dropped.toSet().join(', ')})');
     }
     await look?.call(tester, errors);
-    // Back online, «Try again» brings the screen.
+    // Back online, each «Try again» a person can reach is pressed: a part lower down the page is scrolled to, a tab
+    // out of sight is not.
     line.down = false;
-    for (var i = 0; i < 4 && find.byKey(const Key('retry')).evaluate().isNotEmpty; i++) {
-      final retry = find.byKey(const Key('retry')).first;
-      await tester.ensureVisible(retry); // a part lower down the page is scrolled to
+    final tried = <Element>{};
+    for (var i = 0; i < 8; i++) {
+      final next = find.byKey(const Key('retry')).evaluate().where((e) => !tried.contains(e)).firstOrNull;
+      if (next == null) break;
+      tried.add(next);
+      final retry = find.byElementPredicate((e) => e == next);
+      await tester.ensureVisible(retry);
       await tester.pump();
-      if (retry.hitTestable().evaluate().isEmpty) break; // a tab out of sight
+      if (retry.hitTestable().evaluate().isEmpty) continue;
       await tester.tap(retry);
       for (var j = 0; j < 6; j++) {
         await tester.pump(const Duration(milliseconds: 300));
       }
     }
+    // Every part that failed was asked for again and came: nothing is left missing without a word.
+    final missing = line.dropped.toSet().difference(line.served);
+    if (missing.isNotEmpty && !keepsMissing) errors.add('offline: never fetched again: ${missing.join(', ')}');
   }
   await look?.call(tester, errors);
   try {

@@ -40,9 +40,9 @@ class ApiException implements Exception {
   /// No answer at all: no network, the server is down, or it did not answer in time.
   bool get offline => code == 'network' || code == 'timeout';
 
-  /// A failure that may pass if tried again: no answer, or the server's own trouble. A refusal (not found, not
-  /// allowed) stays as it is.
-  bool get passing => offline || status >= 500;
+  /// A failure that may pass if tried again: no answer, an answer that is not the server's (a Wi-Fi login page), too
+  /// many requests, or the server's own trouble. A refusal (not found, not allowed) stays as it is.
+  bool get passing => offline || code == 'unavailable' || status == 429 || status >= 500;
 
   @override
   String toString() => message;

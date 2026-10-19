@@ -1003,4 +1003,5 @@ const en = <String, String>{
       'No shoe was found in one of the frames, so the view keeps its background. To retake it, delete the 360° view and add a new one.',
   'Белгіленген фотода аяқкиім табылмады, сондықтан фоны алынбайды. Сол жағынан жаңа фото қосып, ескісін өшіріңіз.':
       'No shoe was found in the marked photo, so its background is not removed. Add a new photo of that side, then delete the old one.',
+  'Тағы тауарлар': 'More shoes',
 };

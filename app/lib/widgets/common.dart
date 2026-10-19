@@ -89,25 +89,43 @@ class ErrorRetry extends StatelessWidget {
 }
 
 /// A part of a screen that failed to load, as one line with a retry, where the rest of the screen did load. Without
-/// it the part would just be missing and nobody would know to try again.
+/// it the part would just be missing and nobody would know to try again. [what] names the part; while [busy] the
+/// line stays where it is with a small spinner, so the page does not jump and a screen reader keeps its place.
 class RetryLine extends StatelessWidget {
-  const RetryLine({super.key, required this.error, required this.onRetry, this.margin = EdgeInsets.zero});
+  const RetryLine({super.key, required this.what, required this.error, required this.onRetry, this.busy = false});
+  final String what;
   final Object? error;
   final VoidCallback onRetry;
-  final EdgeInsetsGeometry margin;
+  final bool busy;
 
   @override
   Widget build(BuildContext context) {
     final e = error;
-    final scheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     return Padding(
-      padding: margin,
+      padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
       child: Row(children: [
-        Icon(e is ApiException && !e.offline ? Icons.error_outline_rounded : Icons.wifi_off_rounded,
-            size: 20, color: scheme.onSurfaceVariant),
+        SizedBox(
+          width: 20,
+          height: 20,
+          child: busy
+              ? const CircularProgressIndicator(strokeWidth: 2)
+              : Icon(e is ApiException && !e.offline ? Icons.error_outline_rounded : Icons.wifi_off_rounded,
+                  size: 20, color: scheme.onSurfaceVariant),
+        ),
         const SizedBox(width: 12),
-        Expanded(child: Text(errorText(e), style: TextStyle(color: scheme.onSurfaceVariant))),
-        TextButton(key: const Key('retry'), onPressed: onRetry, child: Text(tr('Қайта көру'))),
+        Expanded(
+          // Said again when a retry fails too.
+          child: Semantics(
+            liveRegion: true,
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(what, style: theme.textTheme.titleSmall),
+              Text(errorText(e), style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
+            ]),
+          ),
+        ),
+        TextButton(key: const Key('retry'), onPressed: busy ? null : onRetry, child: Text(tr('Қайта көру'))),
       ]),
     );
   }

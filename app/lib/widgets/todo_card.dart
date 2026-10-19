@@ -65,6 +65,7 @@ class TodoCard extends StatefulWidget {
 class _TodoCardState extends State<TodoCard> {
   Map<String, int>? _counts;
   Object? _error;
+  bool _retrying = false;
 
   @override
   void didChangeDependencies() {
@@ -73,14 +74,21 @@ class _TodoCardState extends State<TodoCard> {
   }
 
   Future<void> _load() async {
-    if (_error != null) setState(() => _error = null);
+    if (_error != null) setState(() => _retrying = true);
     try {
       final counts = await SessionScope.of(context).api.todo();
-      if (mounted) setState(() => _counts = counts);
+      if (mounted) {
+        setState(() {
+          _counts = counts;
+          _error = null;
+        });
+      }
     } catch (e) {
       // The profile works without the card, but the seller is told it did not load: the tab stays open for the
-      // whole visit, so it would not come back by itself.
-      if (mounted && e is ApiException && e.passing) setState(() => _error = e);
+      // whole visit, so it would not come back by itself. Counts already shown stay, a little old.
+      if (mounted && _counts == null) setState(() => _error = e is ApiException && e.passing ? e : null);
+    } finally {
+      if (mounted && _retrying) setState(() => _retrying = false);
     }
   }
 
@@ -88,7 +96,9 @@ class _TodoCardState extends State<TodoCard> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     if (_error != null) {
-      return RetryLine(error: _error, onRetry: _load, margin: const EdgeInsets.fromLTRB(16, 4, 8, 8));
+      return Card(
+          margin: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+          child: RetryLine(what: tr('Сізді күтеді'), error: _error, busy: _retrying, onRetry: _load));
     }
     final counts = _counts ?? const <String, int>{};
     final lines = [
