@@ -60,6 +60,10 @@ def upload_photo(file: UploadFile = File(...), detail: bool = False, user: User 
 CUTOUT_ANGLES = {"front", "outer", "inner", "back", "top", "sole", "frame"}
 
 
+# Listings whose seller can still change the photos and is told about one the model found no shoe in.
+STILL_WORKED_ON = ("draft", "moderation", "published", "paused", "rejected")
+
+
 def cutout_parts(media: list) -> list[list]:
     """The photos cut out together: each part of the 360° turn (see showcase_parts), and each other showcase photo
     on its own."""
@@ -144,17 +148,27 @@ def _settle_cutouts(db: Session, storage: Storage, listing_id: int, part: list, 
     vector_of = embedded_photo(storage, listing) if part[0].angle != "frame" else None
     for m in now:
         if m.id == no_shoe:
-            if not any(x.no_cutout for x in listing.media):
-                # Told once, on the first photo with no shoe found; the listing's page names it and the others.
+            seller = db.get(User, listing.seller_id)
+            if (not any(x.no_cutout for x in listing.media) and listing.status in STILL_WORKED_ON
+                    and seller is not None and seller.deleted_at is None):
+                # Told once, on the first photo with no shoe found, while the seller can still do something about
+                # it (not for a sold listing the backfill reaches); the listing's page names the photos.
                 t = listing.title
-                services.notify(
-                    db, listing.seller_id, "listing_tip",
-                    f"«{t}»: бір фотода аяқкиім табылмады, сондықтан оның фоны алынбайды. "
-                    f"Қай фото екенін тауар бетінен көріңіз.",
-                    f"«{t}»: на одном фото не найдена обувь, поэтому фон на нём не удаляется. "
-                    f"Посмотрите на странице товара, на каком.",
-                    f"“{t}”: no shoe was found in one photo, so its background is not removed. "
-                    f"The listing's page shows which one.", listing_id=listing_id)
+                if part[0].angle == "frame":
+                    texts = (f"«{t}»: 360° айналымның бір кадрында аяқкиім табылмады, сондықтан айналымның фоны "
+                             f"алынбайды. Айналымды тауар бетінде қайта түсіріңіз.",
+                             f"«{t}»: на одном из кадров обзора 360° не найдена обувь, поэтому фон обзора не "
+                             f"удаляется. Переснимите обзор на странице товара.",
+                             f"“{t}”: no shoe was found in a frame of the 360° view, so the view keeps its "
+                             f"background. Retake the view on the listing's page.")
+                else:
+                    texts = (f"«{t}»: фотода аяқкиім табылмады, сондықтан оның фоны алынбайды. Қай фото екенін "
+                             f"тауар бетінің фото бөлімінен көріңіз.",
+                             f"«{t}»: на фото не найдена обувь, поэтому фон на нём не удаляется. Какое это фото, "
+                             f"видно в разделе фото на странице товара.",
+                             f"“{t}”: no shoe was found in a photo, so its background is not removed. The photos "
+                             f"section of the listing's page shows which one.")
+                services.notify(db, listing.seller_id, "listing_tip", *texts, listing_id=listing_id)
             m.no_cutout = model
         if m.id in cuts and not m.processed_url:
             m.processed_url, m.thumb_url, m.no_cutout = cuts[m.id], None, None

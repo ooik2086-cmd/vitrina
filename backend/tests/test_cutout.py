@@ -234,6 +234,7 @@ class CutoutApiTests(MediaTests):
         notes = [n for n in self.c.get("/api/v1/notifications", headers=self.h(self.seller)).json()["items"]
                  if n["kind"] == "listing_tip"]
         self.assertEqual([(n["listing_id"], n["text"].split(":")[0]) for n in notes], [(lid, f"«{LISTING['title']}»")])
+        self.assertIn("360°", notes[0]["text"])  # a frame: the turn is taken again, not one photo
         # Later runs (the backfill) know the turn cannot be cut out: no model time, no files thrown away.
         calls.clear()
         files = self.stored()
@@ -241,6 +242,31 @@ class CutoutApiTests(MediaTests):
         self.assertEqual((calls, self.stored()), ([], files))
         notes = self.c.get("/api/v1/notifications", headers=self.h(self.seller)).json()["items"]
         self.assertEqual(sum(n["kind"] == "listing_tip" for n in notes), 1)
+
+    def test_no_note_about_a_photo_on_a_listing_the_seller_is_done_with(self):
+        from vitrina_api.listing_routes import cutout_listing
+        from vitrina_api.models import Listing, User
+        shades = [(20 + 25 * i,) * 3 for i in range(8)]
+        self.app.state.segmenter = None  # a listing from before the model, as the backfill finds it
+        sold = self.post("/listings", self.seller, {**LISTING, "photos": self.frames(shades)}).json()["id"]
+        gone = self.post("/listings", self.seller, {**LISTING, "photos": self.frames(shades)}).json()["id"]
+        with self.app.state.sessions() as db:
+            db.get(Listing, sold).status = "sold"
+            db.commit()
+        self.no_shoe_in(shades[3])
+        cutout_listing(self.app.state, sold)
+        notes = lambda: [n for n in self.c.get("/api/v1/notifications", headers=self.h(self.seller)).json()["items"]
+                         if n["kind"] == "listing_tip"]  # noqa: E731
+        self.assertEqual(notes(), [])
+        self.assertTrue(any(m["no_shoe"] for m in self.mine(sold)["media"]))  # still marked for the page
+        with self.app.state.sessions() as db:  # the seller deleted the account: nobody to tell
+            user = db.get(User, db.get(Listing, gone).seller_id)
+            user.deleted_at = user.created_at
+            db.commit()
+        cutout_listing(self.app.state, gone)
+        with self.app.state.sessions() as db:
+            from vitrina_api.models import Notification
+            self.assertEqual(db.query(Notification).filter(Notification.kind == "listing_tip").count(), 0)
 
     def test_a_scan_keeps_the_cut_outs_of_the_parts_whose_frames_were_all_cut_out(self):
         from vitrina_api.models import Listing
