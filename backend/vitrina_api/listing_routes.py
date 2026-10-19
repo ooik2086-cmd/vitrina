@@ -163,17 +163,30 @@ def match_turn_frames(db: Session, storage: Storage, listing: Listing, made: dic
     best = cutout.closest_frame(read(cover.thumb_url), [seen[m.thumb_url] for m in frames]) if cover else None
     found = (cutout.side_frames({side: read(m.thumb_url) for side, m in sides.items()},
                                 [seen[m.thumb_url] for m in turn]) if sides and len(turn) >= 8 else {})
-    # The seller may have chosen while this ran: their choice wins.
-    db.refresh(listing, ["cover_frame", "cover_frame_of", "angle_frames"])
-    if best is not None and cover_frame(listing) is None:
-        listing.cover_frame, listing.cover_frame_of = frames[best].original_url, cover.original_url
+    # What was compared, by address: the photos may be gone by now.
+    best_url = frames[best].original_url if best is not None else None
+    cover_url = cover.original_url if cover else None
+    found = {side: (turn[k].original_url, sides[side].original_url) for side, k in found.items()}
+    tried = bool(sides)
+    # The seller, or a job for newer photos, may have changed the listing while this compared: read it again,
+    # and keep it locked (on Postgres) until the caller commits, so neither overwrites the other. Only what
+    # still holds for the photos as they are now is written.
+    db.flush()
+    db.expire_all()
+    db.refresh(listing, with_for_update=True)
+    now = {m.original_url for m in listing.media if m.angle == "frame"}
+    current = cover_photo(listing)
+    if (best_url in now and cover_frame(listing) is None and current is not None
+            and current.original_url == cover_url):
+        listing.cover_frame, listing.cover_frame_of = best_url, cover_url
     marks = {side: {"frame": frame, "of": side_photo(listing, side).original_url}
              for side, frame in angle_frames(listing).items()}
-    for side, k in found.items():
-        if side not in marks and sides[side].original_url == getattr(side_photo(listing, side), "original_url", None):
-            marks[side] = {"frame": turn[k].original_url, "of": sides[side].original_url}
+    for side, (frame, of) in found.items():
+        if side not in marks and frame in now and of == getattr(side_photo(listing, side), "original_url", None):
+            marks[side] = {"frame": frame, "of": of}
     # Tried and not found is kept as {}, so the backfill does not pick the listing again.
-    listing.angle_frames = json.dumps(marks, sort_keys=True) if marks or found or sides else listing.angle_frames
+    if marks or found or tried:
+        listing.angle_frames = json.dumps(marks, sort_keys=True)
 
 
 def thumb_listing(state, listing_id: int) -> int:
@@ -196,13 +209,14 @@ def thumb_listing(state, listing_id: int) -> int:
                 done += 1
             except Exception:
                 log.exception("thumbnail failed for %s", source)
-        match_turn_frames(db, storage, listing, made)
         shown = sorted(listing.media, key=lambda m: (m.angle != "frame", m.angle != "front", m.position))
         first = next((m for m in shown if m.processed_url and storage.owns(m.processed_url)), None)
         try:
             listing.backdrop = cutout.backdrop_for(storage.read(first.processed_url)) if first else None
         except Exception:
             log.exception("backdrop failed for listing %s", listing_id)
+        # Last, as it locks the listing until the commit.
+        match_turn_frames(db, storage, listing, made)
         db.commit()
         return done
 

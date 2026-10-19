@@ -1,3 +1,4 @@
+import json
 """Background removal may only change transparency, never the product's colours or outline."""
 import io
 import os
@@ -267,6 +268,40 @@ class CutoutApiTests(MediaTests):
         r = self.c.patch(f"/api/v1/listings/{lid}", headers=self.h(self.seller), json={"photos": photos[:1] + frames})
         self.assertEqual(r.status_code, 200, r.text)
         self.assertEqual(self.mine(lid)["angle_frames"], {"outer": frames[5]["url"]})
+
+    def test_a_match_that_ran_on_old_photos_keeps_what_changed_meanwhile(self):
+        from vitrina_api import cutout
+        from vitrina_api.models import Listing, Media
+        shades = [(20 + 25 * i,) * 3 for i in range(8)]
+        frames = self.frames(shades)
+        side, front = (self.upload(self.seller, solid(shades[k])).json()["url"] for k in (5, 2))
+        photos = [{"url": side, "angle": "outer"}, {"url": front, "angle": "front"}]
+        lid = self.post("/listings", self.seller, {**LISTING, "photos": photos + frames}).json()["id"]
+        new_outer, new_front = (self.upload(self.seller, solid(shades[k])).json()["url"] for k in (4, 6))
+        real = cutout.side_frames
+
+        def meanwhile(*args):  # while the outer side is compared, the front is replaced and matched by another job
+            out = real(*args)
+            with self.app.state.sessions() as db:
+                row = db.get(Listing, lid)
+                old = next(m for m in row.media if m.angle == "front")
+                fresh = Media(original_url=new_front, processed_url=old.processed_url, thumb_url=old.thumb_url,
+                              angle="front", position=old.position)
+                row.media.remove(old)
+                row.media.append(fresh)
+                marks = json.loads(row.angle_frames)
+                marks["front"] = {"frame": frames[6]["url"], "of": new_front}
+                row.angle_frames = json.dumps(marks)
+                db.commit()
+            return out
+        cutout.side_frames = meanwhile
+        try:
+            r = self.c.patch(f"/api/v1/listings/{lid}", headers=self.h(self.seller),
+                             json={"photos": [{"url": new_outer, "angle": "outer"}, photos[1]] + frames})
+        finally:
+            cutout.side_frames = real
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(self.mine(lid)["angle_frames"], {"outer": frames[4]["url"], "front": frames[6]["url"]})
 
     def test_a_side_is_snapped_to_where_the_shoe_is_square_on(self):
         from vitrina_api import cutout
