@@ -89,7 +89,9 @@ class _OfferSheetState extends State<OfferSheet> {
     final theme = Theme.of(context);
     return Padding(
       padding: EdgeInsets.fromLTRB(20, 8, 20, 20 + MediaQuery.of(context).viewInsets.bottom),
-      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+      // Scrolls when large text makes it taller than the sheet may be, so Send is never out of reach.
+      child: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(tr('Баға ұсыну'), style: weight(theme.textTheme.titleLarge!, 800)),
         const SizedBox(height: 4),
         Text(trf('{0} · өлшем {1} · бағасы {2}', [widget.listing.title, widget.size.label, formatTenge(_price)]),
@@ -128,7 +130,7 @@ class _OfferSheetState extends State<OfferSheet> {
             child: Text(tr('Ұсыныс жіберу')),
           ),
         ),
-      ]),
+      ])),
     );
   }
 }

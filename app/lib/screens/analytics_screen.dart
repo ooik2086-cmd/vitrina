@@ -58,26 +58,28 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
               onSelectionChanged: (s) => _period(s.first),
             ),
             const SizedBox(height: 16),
-            GridView(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              // As tall as the two lines at the current text size: a fixed shape cut them off with large text.
-              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 2,
-                mainAxisSpacing: 12,
-                crossAxisSpacing: 12,
-                mainAxisExtent: _Tile.height(context),
+            LayoutBuilder(
+              builder: (context, box) => GridView(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                // As tall as the two lines at the current text size: a fixed shape cut them off with large text.
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 2,
+                  mainAxisSpacing: 12,
+                  crossAxisSpacing: 12,
+                  mainAxisExtent: _Tile.height(context, (box.maxWidth - 12) / 2),
+                ),
+                children: [
+                  _Tile(label: tr('Қаралым'), value: '${a.views}'),
+                  _Tile(label: tr('Тапсырыс'), value: '${a.orders}'),
+                  _Tile(
+                      label: tr('Конверсия'),
+                      value: a.conversion == null
+                          ? '—'
+                          : '${(a.conversion! * 100).toStringAsFixed(1).replaceAll('.', ',')}%'),
+                  _Tile(label: tr('Сатылды'), value: formatTenge(a.soldTiyn)),
+                ],
               ),
-              children: [
-                _Tile(label: tr('Қаралым'), value: '${a.views}'),
-                _Tile(label: tr('Тапсырыс'), value: '${a.orders}'),
-                _Tile(
-                    label: tr('Конверсия'),
-                    value: a.conversion == null
-                        ? '—'
-                        : '${(a.conversion! * 100).toStringAsFixed(1).replaceAll('.', ',')}%'),
-                _Tile(label: tr('Сатылды'), value: formatTenge(a.soldTiyn)),
-              ],
             ),
             const SizedBox(height: 24),
             Text(tr('Күн сайынғы қаралым'), style: theme.textTheme.titleMedium),
@@ -121,19 +123,24 @@ class _Tile extends StatelessWidget {
   final String label;
   final String value;
 
-  /// The label and the number with their gap and padding, at the current text size, and no less than before.
-  static double height(BuildContext context) {
+  static const _padding = EdgeInsets.fromLTRB(14, 12, 14, 12);
+  static const _gap = 4.0;
+
+  /// The tile's old shape for its [width], or taller when the label and the number need more at the current text
+  /// size (with the padding, the gap and the 1 px border).
+  static double height(BuildContext context, double width) {
     final t = Theme.of(context).textTheme;
     final scaler = MediaQuery.textScalerOf(context);
     double line(TextStyle s) => scaler.scale(s.fontSize!) * (s.height ?? 1.2);
-    return max(84, (12 + line(t.labelMedium!) + 4 + line(t.headlineSmall!) + 12 + 2).ceilToDouble() + 1);
+    final text = _padding.vertical + line(t.labelMedium!) + _gap + line(t.headlineSmall!) + 2;
+    return max(width / 1.9, text.ceilToDouble() + 1);
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Container(
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      padding: _padding,
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
         borderRadius: BorderRadius.circular(Brand.radius),
@@ -145,7 +152,7 @@ class _Tile extends StatelessWidget {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: theme.textTheme.labelMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
-        const SizedBox(height: 4),
+        const SizedBox(height: _gap),
         FittedBox(
           fit: BoxFit.scaleDown,
           alignment: Alignment.centerLeft,

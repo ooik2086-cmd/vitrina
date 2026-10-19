@@ -1130,7 +1130,7 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
               Center(child: _stops(scene, now)),
               // How to use it, until the shoe starts turning; not on a short stage (a short screen, or large text making
               // the bar under it tall), where the shoe needs the room.
-              if (h >= 480)
+              if (h + MediaQuery.paddingOf(context).bottom >= 480)
                 AnimatedOpacity(
                   opacity: index == 0 ? 1 : 0,
                   duration: _reduceMotion ? Duration.zero : const Duration(milliseconds: 300),

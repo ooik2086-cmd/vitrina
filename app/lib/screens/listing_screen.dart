@@ -816,13 +816,27 @@ class _ListingScreenState extends State<ListingScreen> {
           child: Container(
             padding: contentPadding(context, const EdgeInsets.fromLTRB(20, 12, 20, 12)),
             decoration: BoxDecoration(border: Border(top: BorderSide(color: scheme.outlineVariant))),
-            child: Builder(builder: (context) {
-              // With large text the button goes under the total, so its words are not broken over lines.
-              final big = MediaQuery.textScalerOf(context).scale(16) > 24;
+            child: LayoutBuilder(builder: (context, box) {
+              final text = own
+                  ? tr('Бұл сіздің тауарыңыз')
+                  : l.status == 'sold'
+                      ? tr('Сатылған')
+                      : l.status != 'published'
+                          ? tr('Қазір сатылымда жоқ')
+                          : away != null
+                              ? trf('{0} бастап', [formatDay(away.add(const Duration(days: 1)))])
+                              : selected == null
+                                  ? tr('Өлшемді таңдаңыз')
+                                  : deal != null
+                                      ? tr('Келісілген бағамен алу')
+                                      : tr('Тапсырыс беру');
               final label =
                   Text(tr('Жиыны'), style: theme.textTheme.labelMedium?.copyWith(color: scheme.onSurfaceVariant));
               final price = Text(formatTenge(itemPrice + l.deliveryPriceTiyn),
                   key: const Key('total'), style: weight(theme.textTheme.titleLarge!, 800));
+              // When the button's words do not fit beside the total (large text, a narrow phone, a long label), the
+              // button goes under it, full width, so no word is broken or cut.
+              final big = !_buyFitsBeside(context, text, formatTenge(itemPrice + l.deliveryPriceTiyn), box.maxWidth);
               final total = big
                   // One line for the total, so the shoe keeps more of the screen.
                   ? Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
@@ -852,23 +866,7 @@ class _ListingScreenState extends State<ListingScreen> {
                             ? () => _toSizes(l)
                             : null
                     : null,
-                child: Text(
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    textAlign: TextAlign.center,
-                    own
-                        ? tr('Бұл сіздің тауарыңыз')
-                        : l.status == 'sold'
-                            ? tr('Сатылған')
-                            : l.status != 'published'
-                                ? tr('Қазір сатылымда жоқ')
-                                : away != null
-                                    ? trf('{0} бастап', [formatDay(away.add(const Duration(days: 1)))])
-                                    : selected == null
-                                        ? tr('Өлшемді таңдаңыз')
-                                        : deal != null
-                                            ? tr('Келісілген бағамен алу')
-                                            : tr('Тапсырыс беру')),
+                child: Text(text, key: const Key('buy-text'), textAlign: TextAlign.center),
               );
               return big
                   ? Column(
@@ -880,6 +878,29 @@ class _ListingScreenState extends State<ListingScreen> {
       ),
     ]);
   }
+}
+
+/// Whether the buy button's [text] fits in two lines, no word broken, beside the [price] total in [width]: the total
+/// takes its width (up to 40%), a 16 gap, and the button pads its text 24 on each side (less with large text).
+bool _buyFitsBeside(BuildContext context, String text, String price, double width) {
+  final theme = Theme.of(context).textTheme;
+  final button = Theme.of(context).filledButtonTheme.style?.textStyle?.resolve(const {}) ?? theme.labelLarge;
+  TextPainter measure(String t, TextStyle? style, {int? lines, double room = double.infinity}) => TextPainter(
+      text: TextSpan(text: t, style: style),
+      textScaler: MediaQuery.textScalerOf(context),
+      textDirection: Directionality.of(context),
+      maxLines: lines)
+    ..layout(maxWidth: room);
+  final labels = [measure(tr('Жиыны'), theme.labelMedium), measure(price, weight(theme.titleLarge!, 800))];
+  final total = min(width * 0.4, max(labels[0].width, labels[1].width));
+  final room = width - total - 16 - 48;
+  final words = [for (final w in text.split(' ')) measure(w, button)];
+  final all = measure(text, button, lines: 2, room: max(0, room));
+  final fits = !all.didExceedMaxLines && words.every((w) => w.width <= room);
+  for (final p in [...labels, ...words, all]) {
+    p.dispose();
+  }
+  return fits;
 }
 
 class _RoundButton extends StatelessWidget {
