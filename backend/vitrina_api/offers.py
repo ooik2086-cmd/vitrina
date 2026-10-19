@@ -117,10 +117,17 @@ def list_offers(role: str = "buyer", listing_id: int | None = None, user: User =
 
 
 def own_offer(db: Session, offer_id: int, user: User) -> Offer:
-    offer = db.get(Offer, offer_id)
+    """The offer, locked and read afresh for an answer: two answers at once (accept and decline, a double tap) are
+    taken one after the other, and the second sees the first."""
+    offer = locked(db, offer_id)
     if offer is None or user.id not in (offer.buyer_id, offer.seller_id):
         raise ApiError(404, "not_found")
     return offer
+
+
+def locked(db: Session, offer_id: int) -> Offer | None:
+    return db.scalar(select(Offer).where(Offer.id == offer_id).with_for_update()
+                     .execution_options(populate_existing=True))
 
 
 def answer(offer: Offer, user: User) -> None:
@@ -194,8 +201,9 @@ def withdraw_offer(offer_id: int, user: User = Depends(current_user), db: Sessio
 
 
 def offer_for_order(db: Session, offer_id: int, user: User, listing: Listing, size_id: int) -> Offer:
-    """The accepted offer an order is placed under; anything else about it is a client error."""
-    offer = db.get(Offer, offer_id)
+    """The accepted offer an order is placed under; anything else about it is a client error. Locked, so two orders
+    at once cannot both use it."""
+    offer = locked(db, offer_id)
     if (offer is None or offer.buyer_id != user.id or offer.listing_id != listing.id
             or offer.size_id != size_id):
         raise ApiError(404, "not_found")

@@ -81,8 +81,10 @@ def create_order(body: OrderIn, user: User = Depends(current_user), db: Session 
     services.ensure_not_blocked(db, user.id, listing.seller_id)
     delivery = clean_delivery(body.delivery)
     offer = offers.offer_for_order(db, body.offer_id, user, listing, body.size_id) if body.offer_id else None
-    size = db.scalar(select(ListingSize).where(ListingSize.id == body.size_id,
-                                               ListingSize.listing_id == listing.id).with_for_update())
+    # Locked and read afresh: the session may already hold this size from the checks above, and a lock that keeps
+    # the old count lets every buyer of the last pair at once take it.
+    size = db.scalar(select(ListingSize).where(ListingSize.id == body.size_id, ListingSize.listing_id == listing.id)
+                     .with_for_update().execution_options(populate_existing=True))
     if size is None or size.quantity <= 0:
         raise ApiError(409, "out_of_stock")
     # The listing may have got cheaper than the offer since; the buyer always pays the lower.

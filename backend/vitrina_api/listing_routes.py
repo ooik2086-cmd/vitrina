@@ -457,7 +457,7 @@ def create_listing(body: ListingIn, request: Request, background: BackgroundTask
 def own_listing(db: Session, listing_id: int, user: User, lock: bool = False) -> Listing:
     """The seller's listing; lock holds its row (on Postgres) until the commit, which a change of its photos does
     first, so it never waits on a media job that waits on it (see lock_fresh)."""
-    listing = db.get(Listing, listing_id, with_for_update=lock)
+    listing = db.get(Listing, listing_id, with_for_update=lock, populate_existing=lock)
     if listing is None or listing.seller_id != user.id:
         raise ApiError(404, "not_found")
     return listing

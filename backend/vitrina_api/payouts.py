@@ -168,7 +168,7 @@ def staff_payout_out(db: Session, p: Payout) -> dict:
 
 
 def requested(db: Session, payout_id: int) -> Payout:
-    p = db.get(Payout, payout_id, with_for_update=True)
+    p = db.get(Payout, payout_id, with_for_update=True, populate_existing=True)
     if p is None:
         raise ApiError(404, "not_found")
     if p.status != "requested":

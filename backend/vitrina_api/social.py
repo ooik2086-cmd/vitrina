@@ -10,6 +10,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from vitrina_core.orders import OrderStatus
@@ -105,13 +106,24 @@ def open_conversation(body: ConversationIn, user: User = Depends(current_user), 
     if listing.seller_id == user.id:
         raise ApiError(409, "own_listing")
     services.ensure_not_blocked(db, user.id, listing.seller_id)
-    conv = db.scalar(select(Conversation).where(Conversation.listing_id == listing.id,
-                                                Conversation.buyer_id == user.id))
+    return conversation_out(db, the_conversation(db, listing.id, user.id, listing.seller_id), user)
+
+
+def the_conversation(db: Session, listing_id: int, buyer_id: int, seller_id: int) -> Conversation:
+    """The one chat of this buyer about this listing, made on the first ask. Two asks at once (a double tap) both
+    get it: the one that loses the race to make it reads the other's."""
+    def find() -> Conversation | None:
+        return db.scalar(select(Conversation).where(Conversation.listing_id == listing_id,
+                                                    Conversation.buyer_id == buyer_id))
+    conv = find()
     if conv is None:
-        conv = Conversation(listing_id=listing.id, buyer_id=user.id, seller_id=listing.seller_id)
-        db.add(conv)
-        db.commit()
-    return conversation_out(db, conv, user)
+        db.add(Conversation(listing_id=listing_id, buyer_id=buyer_id, seller_id=seller_id))
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+        conv = find()
+    return conv
 
 
 @router.post("/orders/{order_id}/conversation")
@@ -121,13 +133,7 @@ def order_conversation(order_id: int, user: User = Depends(current_user), db: Se
     if order is None or user.id not in (order.buyer_id, order.seller_id):
         raise ApiError(404, "not_found")
     services.ensure_not_blocked(db, order.buyer_id, order.seller_id)
-    conv = db.scalar(select(Conversation).where(Conversation.listing_id == order.listing_id,
-                                                Conversation.buyer_id == order.buyer_id))
-    if conv is None:
-        conv = Conversation(listing_id=order.listing_id, buyer_id=order.buyer_id, seller_id=order.seller_id)
-        db.add(conv)
-        db.commit()
-    return conversation_out(db, conv, user)
+    return conversation_out(db, the_conversation(db, order.listing_id, order.buyer_id, order.seller_id), user)
 
 
 @router.get("/conversations")
@@ -338,7 +344,11 @@ def create_review(order_id: int, body: ReviewIn, user: User = Depends(current_us
                     f"Новый отзыв: {body.rating}/5, заказ №{order.id}.",
                     f"New review: {body.rating}/5, order No. {order.id}.",
                     order_id=order.id)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()  # the same review sent twice at once, and the other one was kept
+        raise ApiError(409, "already_reviewed") from None
     return review_out(db, review)
 
 
