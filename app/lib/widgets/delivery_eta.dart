@@ -67,6 +67,8 @@ class _DeliveryEtaState extends State<DeliveryEta> {
     _loaded = true;
     try {
       final (e, cities) = await SessionScope.of(context).api.deliveryEstimate(widget.listingId, city: city);
+      // The buyer's pick is kept for the next listing only once it is shown here, so the two never differ.
+      if (asked) pickedDeliveryCity.value = city;
       if (mounted) {
         setState(() {
           _estimate = e;
@@ -91,7 +93,6 @@ class _DeliveryEtaState extends State<DeliveryEta> {
       ),
     );
     if (city == null) return;
-    pickedDeliveryCity.value = city;
     await _load(city, asked: true);
   }
 

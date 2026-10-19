@@ -1004,4 +1004,6 @@ const en = <String, String>{
   'Белгіленген фотода аяқкиім табылмады, сондықтан фоны алынбайды. Сол жағынан жаңа фото қосып, ескісін өшіріңіз.':
       'No shoe was found in the marked photo, so its background is not removed. Add a new photo of that side, then delete the old one.',
   'Тағы тауарлар': 'More shoes',
+  'Сұрақтар жүктелмеді': "Questions didn't load",
+  'Сақталған деректеме': 'Saved bank details',
 };

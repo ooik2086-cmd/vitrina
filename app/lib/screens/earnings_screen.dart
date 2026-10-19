@@ -289,22 +289,37 @@ class _PayoutAccountSheetState extends State<PayoutAccountSheet> {
   final _tax = TextEditingController();
   bool _busy = false;
   String? _error;
+  bool _requested = false;
+  Object? _loadError;
+  bool _loading = false;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (_holder.text.isEmpty && _iban.text.isEmpty) {
-      SessionScope.of(context).api.payoutAccount().then((a) {
-        if (a == null || !mounted) return;
-        setState(() {
+    if (!_requested) _load();
+  }
+
+  /// Fills the fields with the saved account. A failure is said above them, so empty fields are not taken for
+  /// «no account saved»; it stays apart from a save's own error.
+  Future<void> _load() async {
+    _requested = true;
+    if (_loadError != null) setState(() => _loading = true);
+    try {
+      final a = await SessionScope.of(context).api.payoutAccount();
+      if (!mounted) return;
+      setState(() {
+        _loadError = null;
+        // What the seller already typed while it loaded is kept.
+        if (a != null && _holder.text.isEmpty && _iban.text.isEmpty && _tax.text.isEmpty) {
           _holder.text = a.holderName;
           _iban.text = a.iban;
           _tax.text = a.taxId;
-        });
-      }, onError: (Object e) {
-        // Said, so empty fields are not taken for «no account saved».
-        if (mounted) setState(() => _error = errorText(e));
+        }
       });
+    } catch (e) {
+      if (mounted) setState(() => _loadError = e);
+    } finally {
+      if (mounted && _loading) setState(() => _loading = false);
     }
   }
 
@@ -343,6 +358,10 @@ class _PayoutAccountSheetState extends State<PayoutAccountSheet> {
         const SizedBox(height: 4),
         Text(tr('Шот сіздің не ЖК-ңыздың атында болуы керек. Деректемені тек қолдау қызметі көреді.'),
             style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+        if (_loadError != null) ...[
+          const SizedBox(height: 12),
+          Card(child: RetryLine(what: tr('Сақталған деректеме'), error: _loadError, busy: _loading, onRetry: _load)),
+        ],
         const SizedBox(height: 16),
         TextField(
             key: const Key('payout-holder'),

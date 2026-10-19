@@ -22,6 +22,7 @@ class SpinCaptureScreen extends StatefulWidget {
 class _SpinCaptureScreenState extends State<SpinCaptureScreen> with WidgetsBindingObserver {
   CameraController? _controller;
   String? _error;
+  bool _opening = false;
   bool _busy = false;
   final List<XFile> _frames = [];
   Uint8List? _lastBytes;
@@ -42,22 +43,26 @@ class _SpinCaptureScreenState extends State<SpinCaptureScreen> with WidgetsBindi
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    final c = _controller;
-    if (c == null || !c.value.isInitialized) return;
     if (state == AppLifecycleState.inactive) {
+      final c = _controller;
+      if (c == null) return;
+      setState(() => _controller = null);
       c.dispose();
-      _controller = null;
-    } else if (state == AppLifecycleState.resumed) {
+    } else if (state == AppLifecycleState.resumed && _controller == null && !_opening) {
+      // Back from the shade, a call or the settings (where camera access may just have been given): opened again.
       _open();
     }
   }
 
   Future<void> _open() async {
+    _opening = true;
+    if (_error != null) setState(() => _error = null);
+    CameraController? c;
     try {
       final cameras = await availableCameras();
       if (cameras.isEmpty) throw CameraException('none', 'no camera');
       final back = cameras.firstWhere((c) => c.lensDirection == CameraLensDirection.back, orElse: () => cameras.first);
-      final c = CameraController(back, ResolutionPreset.high, enableAudio: false);
+      c = CameraController(back, ResolutionPreset.high, enableAudio: false);
       await c.initialize();
       if (!mounted) {
         await c.dispose();
@@ -65,11 +70,16 @@ class _SpinCaptureScreenState extends State<SpinCaptureScreen> with WidgetsBindi
       }
       setState(() => _controller = c);
     } catch (e) {
+      try {
+        await c?.dispose();
+      } catch (_) {}
       // Any failure is said: a platform error other than the camera's own would otherwise spin forever.
       if (!mounted) return;
       setState(() => _error = e is CameraException && e.code == 'CameraAccessDenied'
           ? tr('Камераға рұқсат берілмеді. Телефон баптауларынан рұқсат беріңіз.')
           : tr('Камераны ашу мүмкін болмады.'));
+    } finally {
+      _opening = false;
     }
   }
 
@@ -150,7 +160,8 @@ class _SpinCaptureScreenState extends State<SpinCaptureScreen> with WidgetsBindi
             ? Center(
                 child: Padding(
                     padding: const EdgeInsets.all(24),
-                    child: Text(_error!, style: const TextStyle(color: Colors.white))))
+                    child:
+                        Semantics(liveRegion: true, child: Text(_error!, style: const TextStyle(color: Colors.white)))))
             : c == null
                 ? const Center(child: CircularProgressIndicator())
                 : Column(children: [

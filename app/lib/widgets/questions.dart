@@ -57,7 +57,7 @@ class _QuestionsSectionState extends State<QuestionsSection> {
       builder: (context, snap) {
         final items = snap.data?.items ?? const <Question>[];
         final unanswered = snap.data?.unanswered ?? 0;
-        final shown = items.where((q) => q.answer != null || q.mine).take(2).toList();
+        final visible = items.where((q) => q.answer != null || q.mine).take(2).toList();
         return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           const SizedBox(height: 24),
           Row(children: [
@@ -71,22 +71,25 @@ class _QuestionsSectionState extends State<QuestionsSection> {
                     : trf('Барлығы ({0})', [items.length])),
               ),
           ]),
-          // Not loaded for want of a connection: said, so «no questions yet» is not believed.
-          if (snap.error case ApiException(passing: true) && final error)
-            Card(
-              child: RetryLine(
-                  what: tr('Сұрақ-жауап'),
-                  error: error,
-                  busy: snap.connectionState == ConnectionState.waiting,
-                  onRetry: _reload),
+          // Not loaded: said, so «no questions yet» is not believed.
+          if (snap.hasError)
+            Padding(
+              padding: const EdgeInsets.only(top: 8, bottom: 12),
+              child: Card(
+                child: RetryLine(
+                    what: tr('Сұрақтар жүктелмеді'),
+                    error: snap.error,
+                    busy: snap.connectionState == ConnectionState.waiting,
+                    onRetry: _reload),
+              ),
             )
-          else if (shown.isEmpty && !seller)
+          else if (visible.isEmpty && !seller)
             Padding(
               padding: const EdgeInsets.only(bottom: 4),
               child: Text(tr('Өлшемі, қорабы не жағдайы туралы сұраңыз: жауапты бәрі көреді.'),
                   style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
             ),
-          for (final q in shown) QuestionTile(question: q),
+          for (final q in visible) QuestionTile(question: q),
           if (!seller)
             Align(
               alignment: Alignment.centerLeft,

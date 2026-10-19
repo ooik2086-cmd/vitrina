@@ -98,6 +98,10 @@ class HomeShell extends StatefulWidget {
 /// Survives the rebuild after a language change, so the person stays on the tab they were on.
 int _lastTab = 0;
 
+/// A fresh home opens on the catalog, as at launch.
+@visibleForTesting
+void forgetLastTab() => _lastTab = 0;
+
 class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   int _tab = _lastTab;
   Map<String, int> _counts = const {};
