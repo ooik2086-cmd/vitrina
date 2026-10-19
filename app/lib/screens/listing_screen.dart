@@ -661,13 +661,15 @@ class _ListingScreenState extends State<ListingScreen> {
                         const SizedBox(height: 24),
                         Row(key: _sizesKey, children: [
                           Expanded(child: Text(tr('Өлшем'), style: theme.textTheme.titleMedium)),
-                          TextButton.icon(
-                            key: const Key('size-guide'),
-                            onPressed: () async {
-                              if (await showSizeGuide(context) != null && mounted) setState(() {});
-                            },
-                            icon: const Icon(Icons.straighten, size: 18),
-                            label: Text(tr('Өлшем кестесі')),
+                          Flexible(
+                            child: TextButton.icon(
+                              key: const Key('size-guide'),
+                              onPressed: () async {
+                                if (await showSizeGuide(context) != null && mounted) setState(() {});
+                              },
+                              icon: const Icon(Icons.straighten, size: 18),
+                              label: Text(tr('Өлшем кестесі')),
+                            ),
                           ),
                         ]),
                         const SizedBox(height: 12),
@@ -814,41 +816,65 @@ class _ListingScreenState extends State<ListingScreen> {
           child: Container(
             padding: contentPadding(context, const EdgeInsets.fromLTRB(20, 12, 20, 12)),
             decoration: BoxDecoration(border: Border(top: BorderSide(color: scheme.outlineVariant))),
-            child: Row(children: [
-              Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(tr('Жиыны'), style: theme.textTheme.labelMedium?.copyWith(color: scheme.onSurfaceVariant)),
-                Text(formatTenge(itemPrice + l.deliveryPriceTiyn),
-                    key: const Key('total'), style: weight(theme.textTheme.titleLarge!, 800)),
-              ]),
-              const SizedBox(width: 16),
-              Expanded(
-                child: FilledButton(
-                  key: const Key('buy'),
-                  style: FilledButton.styleFrom(backgroundColor: Brand.accentStrong, foregroundColor: Colors.white),
-                  onPressed: l.status == 'published' && !own && !_ordering && away == null
-                      ? selected != null
-                          ? () => _order(l)
-                          // No size yet: take the buyer to the sizes, past the showcase, instead of a dead button.
-                          : l.sizes.any((s) => s.available)
-                              ? () => _toSizes(l)
-                              : null
-                      : null,
-                  child: Text(own
-                      ? tr('Бұл сіздің тауарыңыз')
-                      : l.status == 'sold'
-                          ? tr('Сатылған')
-                          : l.status != 'published'
-                              ? tr('Қазір сатылымда жоқ')
-                              : away != null
-                                  ? trf('{0} бастап', [formatDay(away.add(const Duration(days: 1)))])
-                                  : selected == null
-                                      ? tr('Өлшемді таңдаңыз')
-                                      : deal != null
-                                          ? tr('Келісілген бағамен алу')
-                                          : tr('Тапсырыс беру')),
-                ),
-              ),
-            ]),
+            child: Builder(builder: (context) {
+              // With large text the button goes under the total, so its words are not broken over lines.
+              final big = MediaQuery.textScalerOf(context).scale(16) > 24;
+              final label =
+                  Text(tr('Жиыны'), style: theme.textTheme.labelMedium?.copyWith(color: scheme.onSurfaceVariant));
+              final price = Text(formatTenge(itemPrice + l.deliveryPriceTiyn),
+                  key: const Key('total'), style: weight(theme.textTheme.titleLarge!, 800));
+              final total = big
+                  // One line for the total, so the shoe keeps more of the screen.
+                  ? Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
+                      label,
+                      const SizedBox(width: 12),
+                      Expanded(child: FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerRight, child: price)),
+                    ])
+                  : ConstrainedBox(
+                      constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.4),
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [label, price]),
+                      ),
+                    );
+              final buy = FilledButton(
+                key: const Key('buy'),
+                style: FilledButton.styleFrom(backgroundColor: Brand.accentStrong, foregroundColor: Colors.white),
+                onPressed: l.status == 'published' && !own && !_ordering && away == null
+                    ? selected != null
+                        ? () => _order(l)
+                        // No size yet: take the buyer to the sizes, past the showcase, instead of a dead button.
+                        : l.sizes.any((s) => s.available)
+                            ? () => _toSizes(l)
+                            : null
+                    : null,
+                child: Text(
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    own
+                        ? tr('Бұл сіздің тауарыңыз')
+                        : l.status == 'sold'
+                            ? tr('Сатылған')
+                            : l.status != 'published'
+                                ? tr('Қазір сатылымда жоқ')
+                                : away != null
+                                    ? trf('{0} бастап', [formatDay(away.add(const Duration(days: 1)))])
+                                    : selected == null
+                                        ? tr('Өлшемді таңдаңыз')
+                                        : deal != null
+                                            ? tr('Келісілген бағамен алу')
+                                            : tr('Тапсырыс беру')),
+              );
+              return big
+                  ? Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch, children: [total, const SizedBox(height: 8), buy])
+                  : Row(children: [total, const SizedBox(width: 16), Expanded(child: buy)]);
+            }),
           ),
         ),
       ),

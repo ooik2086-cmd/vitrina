@@ -180,29 +180,37 @@ class _ShopScreenState extends State<ShopScreen> {
                         ),
                       ],
                       const SizedBox(height: 16),
-                      Row(children: [
-                        Icon(Icons.people_outline, size: 18, color: theme.colorScheme.onSurfaceVariant),
-                        const SizedBox(width: 6),
-                        Expanded(
-                          child: Text(trf('{0} жазылушы', [_follow?.$2 ?? shop.followers]),
-                              key: const Key('followers'),
-                              style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
-                        ),
-                        if (me?.id != shop.id)
-                          (_follow?.$1 ?? shop.following)
-                              ? OutlinedButton.icon(
-                                  key: const Key('unfollow'),
-                                  onPressed: _busy ? null : () => _toggleFollow(shop),
-                                  icon: const Icon(Icons.check_rounded, size: 18),
-                                  label: Text(tr('Жазылдыңыз')),
-                                )
-                              : FilledButton.icon(
-                                  key: const Key('follow'),
-                                  onPressed: _busy ? null : () => _toggleFollow(shop),
-                                  icon: const Icon(Icons.add_rounded, size: 18),
-                                  label: Text(tr('Жазылу')),
-                                ),
-                      ]),
+                      // The button moves under the count when large text leaves no room beside it.
+                      Wrap(
+                          alignment: WrapAlignment.spaceBetween,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          runSpacing: 8,
+                          children: [
+                            Row(mainAxisSize: MainAxisSize.min, children: [
+                              Icon(Icons.people_outline, size: 18, color: theme.colorScheme.onSurfaceVariant),
+                              const SizedBox(width: 6),
+                              Flexible(
+                                child: Text(trf('{0} жазылушы', [_follow?.$2 ?? shop.followers]),
+                                    key: const Key('followers'),
+                                    style: theme.textTheme.bodyMedium
+                                        ?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+                              ),
+                            ]),
+                            if (me?.id != shop.id)
+                              (_follow?.$1 ?? shop.following)
+                                  ? OutlinedButton.icon(
+                                      key: const Key('unfollow'),
+                                      onPressed: _busy ? null : () => _toggleFollow(shop),
+                                      icon: const Icon(Icons.check_rounded, size: 18),
+                                      label: Text(tr('Жазылдыңыз')),
+                                    )
+                                  : FilledButton.icon(
+                                      key: const Key('follow'),
+                                      onPressed: _busy ? null : () => _toggleFollow(shop),
+                                      icon: const Icon(Icons.add_rounded, size: 18),
+                                      label: Text(tr('Жазылу')),
+                                    ),
+                          ]),
                       const SizedBox(height: 16),
                       Row(children: [
                         _Fact(
@@ -268,7 +276,12 @@ class _Fact extends StatelessWidget {
               Row(children: [
                 Icon(icon, size: 18, color: icon == Icons.star_rounded ? const Color(0xFFFFB020) : null),
                 const SizedBox(width: 6),
-                Text(value, style: weight(theme.textTheme.titleMedium!, 700)),
+                Flexible(
+                  child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(value, style: weight(theme.textTheme.titleMedium!, 700))),
+                ),
               ]),
               const SizedBox(height: 2),
               Text(label, style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),

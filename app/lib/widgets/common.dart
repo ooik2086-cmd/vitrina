@@ -246,8 +246,12 @@ class PriceLine extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final was = listing.wasPriceTiyn;
+    // A price is never broken over lines: with large text in a narrow tile it shrinks to fit instead.
     return Wrap(crossAxisAlignment: WrapCrossAlignment.end, spacing: 8, children: [
-      Text(formatTenge(listing.priceTiyn), style: was == null ? style : style.copyWith(color: accentText(context))),
+      FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(formatTenge(listing.priceTiyn),
+              style: was == null ? style : style.copyWith(color: accentText(context)))),
       if (was != null)
         Padding(
           padding: const EdgeInsets.only(bottom: 2),

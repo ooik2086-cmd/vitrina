@@ -1,3 +1,5 @@
+import 'dart:math' show max;
+
 import 'package:flutter/material.dart';
 
 import '../api.dart';
@@ -56,13 +58,16 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
               onSelectionChanged: (s) => _period(s.first),
             ),
             const SizedBox(height: 16),
-            GridView.count(
-              crossAxisCount: 2,
+            GridView(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
-              mainAxisSpacing: 12,
-              crossAxisSpacing: 12,
-              childAspectRatio: 1.9,
+              // As tall as the two lines at the current text size: a fixed shape cut them off with large text.
+              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 2,
+                mainAxisSpacing: 12,
+                crossAxisSpacing: 12,
+                mainAxisExtent: _Tile.height(context),
+              ),
               children: [
                 _Tile(label: tr('Қаралым'), value: '${a.views}'),
                 _Tile(label: tr('Тапсырыс'), value: '${a.orders}'),
@@ -115,6 +120,14 @@ class _Tile extends StatelessWidget {
   const _Tile({required this.label, required this.value});
   final String label;
   final String value;
+
+  /// The label and the number with their gap and padding, at the current text size, and no less than before.
+  static double height(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final scaler = MediaQuery.textScalerOf(context);
+    double line(TextStyle s) => scaler.scale(s.fontSize!) * (s.height ?? 1.2);
+    return max(84, (12 + line(t.labelMedium!) + 4 + line(t.headlineSmall!) + 12 + 2).ceilToDouble() + 1);
+  }
 
   @override
   Widget build(BuildContext context) {

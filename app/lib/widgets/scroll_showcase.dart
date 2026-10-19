@@ -1128,8 +1128,9 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
               // shoe). Each stop is a 48 dp button that jumps straight to its view; its name is read out and shown on
               // long press.
               Center(child: _stops(scene, now)),
-              // How to use it, until the shoe starts turning; not on a short screen, where the shoe needs the room.
-              if (MediaQuery.sizeOf(context).height >= 560)
+              // How to use it, until the shoe starts turning; not on a short stage (a short screen, or large text making
+              // the bar under it tall), where the shoe needs the room.
+              if (h >= 480)
                 AnimatedOpacity(
                   opacity: index == 0 ? 1 : 0,
                   duration: _reduceMotion ? Duration.zero : const Duration(milliseconds: 300),

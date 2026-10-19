@@ -419,6 +419,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
             DropdownButtonFormField<String>(
               key: ValueKey('category-$_category'), // a suggestion can change it from outside
               initialValue: _category,
+              isExpanded: true, // long names in large text are cut short instead of running off the screen
               decoration: InputDecoration(labelText: tr('Санаты')),
               items: [for (final e in categories.entries) DropdownMenuItem(value: e.key, child: Text(tr(e.value)))],
               onChanged: (v) => setState(() => _category = v!),
@@ -427,6 +428,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
             ColorField(controller: _color),
             DropdownButtonFormField<String>(
               initialValue: _condition,
+              isExpanded: true,
               decoration: InputDecoration(labelText: tr('Жағдайы')),
               items: [for (final e in conditions.entries) DropdownMenuItem(value: e.key, child: Text(tr(e.value)))],
               onChanged: (v) => setState(() => _condition = v!),
