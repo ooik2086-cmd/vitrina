@@ -22,6 +22,19 @@ void showError(BuildContext context, Object error) {
 /// even when it fails before the builder listens (a phone in flight mode fails at once).
 Future<T> shown<T>(Future<T> load) => load..ignore();
 
+final _running = <Object>{};
+
+/// Runs [action] unless the one started under the same [key] still runs: a second tap while a slow connection keeps
+/// the first waiting would otherwise send it twice, or open its page twice. The second tap is simply let go.
+Future<void> once(Object key, Future<void> Function() action) async {
+  if (!_running.add(key)) return;
+  try {
+    await action();
+  } finally {
+    _running.remove(key);
+  }
+}
+
 /// Waits for [load] for a pull to refresh. A failure is shown on the screen, not thrown here as well.
 Future<void> settled(Future<Object?> load) => load.then((_) {}, onError: (_) {});
 

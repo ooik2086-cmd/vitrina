@@ -42,15 +42,34 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
     _load();
   }
 
+  /// What the person last asked for each switch whose save is still on its way.
+  final _wanted = <String, bool>{};
+
+  /// The switch moves at once; it moves back if saving fails. A switch flipped again while its save is on the way is
+  /// saved once that one is answered, so a slow connection can neither answer them out of order nor lose the last.
   Future<void> _set(String kind, bool on) async {
-    final before = _on!;
-    setState(() => _on = {...before, kind: on}); // the switch moves at once; it moves back if saving fails
+    final saving = _wanted.containsKey(kind);
+    _wanted[kind] = on;
+    setState(() => _on = {..._on!, kind: on});
+    if (saving) return;
+    var confirmed = !on;
     try {
-      final saved = await SessionScope.of(context).api.setNotificationSetting(kind, on);
-      if (mounted) setState(() => _on = saved);
+      while (true) {
+        final wish = _wanted[kind]!;
+        final saved = await SessionScope.of(context).api.setNotificationSetting(kind, wish);
+        confirmed = saved[kind] ?? wish;
+        if (!mounted) return;
+        if (_wanted[kind] == wish) {
+          _wanted.remove(kind);
+          // Other switches still saving keep what was asked of them.
+          setState(() => _on = {...saved, ..._wanted});
+          return;
+        }
+      }
     } catch (e) {
+      _wanted.remove(kind);
       if (!mounted) return;
-      setState(() => _on = before);
+      setState(() => _on = {..._on!, kind: confirmed});
       showError(context, e);
     }
   }

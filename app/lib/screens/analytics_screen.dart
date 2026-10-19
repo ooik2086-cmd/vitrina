@@ -104,7 +104,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                 subtitle: Text(trf('{0} қаралым · {1} тапсырыс · {2}',
                     [t.views, t.orders, tr(listingStatuses[t.status] ?? t.status)])),
                 trailing: const Icon(Icons.chevron_right),
-                onTap: () async {
+                onTap: () => once((this, #open), () async {
                   final api = SessionScope.of(context).api;
                   final Listing l;
                   try {
@@ -114,8 +114,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                     return;
                   }
                   if (!context.mounted) return;
-                  Navigator.of(context).push(MaterialPageRoute(builder: (_) => ManageListingScreen(listing: l)));
-                },
+                  await Navigator.of(context).push(MaterialPageRoute(builder: (_) => ManageListingScreen(listing: l)));
+                }),
               ),
           ]);
         },

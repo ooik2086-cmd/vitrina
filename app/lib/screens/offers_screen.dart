@@ -141,13 +141,13 @@ class OfferStatusCard extends StatelessWidget {
   final Offer offer;
   final ValueChanged<Offer> onChanged;
 
-  Future<void> _act(BuildContext context, String action) async {
-    try {
-      onChanged(await SessionScope.of(context).api.answerOffer(offer.id, action));
-    } catch (e) {
-      if (context.mounted) showError(context, e);
-    }
-  }
+  Future<void> _act(BuildContext context, String action) => once(('offer', offer.id), () async {
+        try {
+          onChanged(await SessionScope.of(context).api.answerOffer(offer.id, action));
+        } catch (e) {
+          if (context.mounted) showError(context, e);
+        }
+      });
 
   @override
   Widget build(BuildContext context) {
@@ -255,7 +255,11 @@ class _OffersScreenState extends State<OffersScreen> {
     _items = shown(SessionScope.of(context).api.offers(role: _seller ? 'seller' : 'buyer'));
   }
 
-  Future<void> _run(Future<Offer> Function(Api api) action, String done) async {
+  /// One answer at a time: the offers move once it is given.
+  Future<void> _run(Future<Offer> Function(Api api) action, String done) =>
+      once((this, #answer), () => _runNow(action, done));
+
+  Future<void> _runNow(Future<Offer> Function(Api api) action, String done) async {
     try {
       await action(SessionScope.of(context).api);
       if (!mounted) return;

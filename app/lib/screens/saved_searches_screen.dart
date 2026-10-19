@@ -49,7 +49,9 @@ class _SavedSearchesScreenState extends State<SavedSearchesScreen> {
     });
   }
 
-  Future<void> _delete(SavedSearch s) async {
+  Future<void> _delete(SavedSearch s) => once((this, s.id), () => _deleteNow(s));
+
+  Future<void> _deleteNow(SavedSearch s) async {
     try {
       await SessionScope.of(context).api.deleteSavedSearch(s.id);
       if (!mounted) return;

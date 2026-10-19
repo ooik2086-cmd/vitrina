@@ -287,15 +287,15 @@ class _OrderScreenState extends State<OrderScreen> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _chat() async {
-    try {
-      final c = await _api.orderConversation(widget.orderId);
-      if (!mounted) return;
-      await Navigator.of(context).push(MaterialPageRoute(builder: (_) => ChatScreen(conversationId: c.id)));
-    } catch (e) {
-      if (mounted) showError(context, e);
-    }
-  }
+  Future<void> _chat() => once((this, #chat), () async {
+        try {
+          final c = await _api.orderConversation(widget.orderId);
+          if (!mounted) return;
+          await Navigator.of(context).push(MaterialPageRoute(builder: (_) => ChatScreen(conversationId: c.id)));
+        } catch (e) {
+          if (mounted) showError(context, e);
+        }
+      });
 
   @override
   Widget build(BuildContext context) {

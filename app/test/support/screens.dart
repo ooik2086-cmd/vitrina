@@ -48,8 +48,15 @@ import 'package:vitrina/screens/shop_screen.dart';
 
 /// The app's own font, so text is as wide and tall as on a phone (the test font's square letters are not). Icons
 /// keep their size whatever font draws them.
-Future<void> loadFonts(WidgetTester tester) =>
-    tester.runAsync(() => (FontLoader('Inter')..addFont(rootBundle.load('assets/fonts/Inter.ttf'))).load());
+var _fontsLoaded = false;
+
+/// Loads the app's font once a test run: the engine keeps every font loaded, so loading it per screen opened grows
+/// the run by megabytes each time, gigabytes over the press tests.
+Future<void> loadFonts(WidgetTester tester) async {
+  if (_fontsLoaded) return;
+  await tester.runAsync(() => (FontLoader('Inter')..addFont(rootBundle.load('assets/fonts/Inter.ttf'))).load());
+  _fontsLoaded = true;
+}
 
 final _demo = jsonDecode(File('demo/api.json').readAsStringSync()) as Map;
 final listing1 = Listing.fromJson(_demo['GET /listings/1'] as Map<String, dynamic>);
@@ -119,17 +126,25 @@ class Line extends http.BaseClient {
   final http.Client _inner;
   bool down = false;
 
+  /// While set, answers wait for it: a slow connection.
+  Future<void>? slow;
+
   /// The requests that failed, and those answered, each as method and path.
   final dropped = <String>[], served = <String>{};
+
+  /// Every request asked, in order, with the key that makes asking again safe, if it has one.
+  final asked = <(String, String?)>[];
 
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
     final what = '${request.method} ${request.url.path.replaceFirst(RegExp(r'^.*/api/v1'), '')}';
+    asked.add((what, request.headers['Idempotency-Key']));
     if (down && !request.url.path.endsWith('/me')) {
       dropped.add(what);
       throw http.ClientException('offline', request.url);
     }
     served.add(what);
+    if (slow case final wait?) await wait;
     return _inner.send(request);
   }
 }

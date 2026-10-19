@@ -221,16 +221,16 @@ class _ListingScreenState extends State<ListingScreen> {
     ));
   }
 
-  Future<void> _toggleFavorite() async {
-    if (!await _ensureSignedIn() || !mounted) return;
-    final on = !_favorite;
-    try {
-      await SessionScope.of(context).api.setFavorite(widget.listingId, on);
-      setState(() => _favorite = on);
-    } catch (e) {
-      if (mounted) showError(context, e);
-    }
-  }
+  Future<void> _toggleFavorite() => once((this, #favorite), () async {
+        if (!await _ensureSignedIn() || !mounted) return;
+        final on = !_favorite;
+        try {
+          await SessionScope.of(context).api.setFavorite(widget.listingId, on);
+          if (mounted) setState(() => _favorite = on);
+        } catch (e) {
+          if (mounted) showError(context, e);
+        }
+      });
 
   Future<void> _order(Listing listing) async {
     if (!await _ensureSignedIn() || !mounted) return;
@@ -275,16 +275,16 @@ class _ListingScreenState extends State<ListingScreen> {
     }
   }
 
-  Future<void> _chat(Listing listing) async {
-    if (!await _ensureSignedIn() || !mounted) return;
-    try {
-      final conv = await SessionScope.of(context).api.openConversation(listing.id);
-      if (!mounted) return;
-      await Navigator.of(context).push(MaterialPageRoute(builder: (_) => ChatScreen(conversationId: conv.id)));
-    } catch (e) {
-      if (mounted) showError(context, e);
-    }
-  }
+  Future<void> _chat(Listing listing) => once((this, #chat), () async {
+        if (!await _ensureSignedIn() || !mounted) return;
+        try {
+          final conv = await SessionScope.of(context).api.openConversation(listing.id);
+          if (!mounted) return;
+          await Navigator.of(context).push(MaterialPageRoute(builder: (_) => ChatScreen(conversationId: conv.id)));
+        } catch (e) {
+          if (mounted) showError(context, e);
+        }
+      });
 
   Future<void> _report(Listing listing) async {
     if (!await _ensureSignedIn() || !mounted) return;
