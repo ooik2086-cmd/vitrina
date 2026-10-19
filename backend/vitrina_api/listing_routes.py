@@ -11,7 +11,7 @@ from typing import Literal
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Request, UploadFile
 from PIL import Image
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import set_committed_value
@@ -276,13 +276,14 @@ def thumb_listing(state, listing_id: int) -> int:
 def prepare_listing_media(state, listing_id: int) -> None:
     # Cut-outs first, so the search vector and the small copies are made from the shoe without its backdrop. Each
     # job on its own: one that fails (the storage or the database away for a moment) must not leave a new listing
-    # without small copies to turn through, or out of search by photo, until the backfill runs. It is logged, and
-    # the backfill finds what is missing.
+    # without small copies to turn through, or out of search by photo. Nothing here tries again: what failed stays
+    # missing (no cut-out, small copy or vector), which the backfill finds when it is next run (models/README.md).
     for job in (cutout_listing, thumb_listing, embed_listing):
         try:
             job(state, listing_id)
         except Exception:
-            log.exception("%s failed for listing %s", job.__name__, listing_id)
+            log.exception("%s failed for listing %s; scripts/cutout_backfill.py makes what is missing", job.__name__,
+                          listing_id)
 
 
 @router.post("/listings", status_code=201)
@@ -400,6 +401,11 @@ def edit_listing(listing_id: int, body: ListingPatch, request: Request, backgrou
         recheck(db, storage, listing, changed)
         services.audit(db, user.id, "edit_listing", f"listing:{listing.id}", ",".join(sorted(changed)))
     services.tell_back_in_stock(db, listing)
+    if "photos" in changed:
+        # The search-by-photo vector was made from the old photos. Dropped with them, so that until the job makes a
+        # new one the listing is not found by a photo it no longer has, and if the job fails the backfill sees the
+        # vector missing and makes it.
+        db.execute(delete(ListingEmbedding).where(ListingEmbedding.listing_id == listing.id))
     db.commit()
     if "photos" in changed:
         background.add_task(prepare_listing_media, request.app.state, listing.id)

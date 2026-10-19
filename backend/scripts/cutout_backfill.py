@@ -22,6 +22,7 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from sqlalchemy import select  # noqa: E402
+from sqlalchemy.exc import DBAPIError  # noqa: E402
 
 from vitrina_api import cutout, visual  # noqa: E402
 from vitrina_api.listing_routes import cutout_listing, embed_listing, thumb_listing  # noqa: E402
@@ -77,23 +78,27 @@ def main(argv: list[str] | None = None) -> None:
             logged = errors.count
             # Each job on its own, as after an upload: small copies and the search vector are still made when the
             # cut-outs fail, and the other way round. Any failure counts the listing as failed.
-            results = []
+            results, broke = [], []
             for job in (cutout_listing, thumb_listing, embed_listing):
                 try:
                     results.append(job(state, lid))
-                except Exception:
+                except Exception as e:
                     logging.getLogger(__name__).exception("listing %s: %s failed", lid, job.__name__)
                     results.append(None)
-            cut, thumbs, embedded = results
-            if None in results or errors.count > logged:
+                    broke.append(job.__name__)
+                    if isinstance(e, DBAPIError):  # the database is away: the other jobs need it too
+                        break
+            if broke or errors.count > logged:
                 failed.append(lid)
                 in_a_row += 1
-                print(f"listing {lid}: failed, see the error above", flush=True)
+                print(f"listing {lid}: failed{' in ' + ', '.join(broke) if broke else ''}, see the error above",
+                      flush=True)
                 if in_a_row >= STOP_AFTER:
                     print(f"stopped: {STOP_AFTER} listings in a row failed; is the database or the storage down?",
                           flush=True)
                     break
                 continue
+            cut, thumbs, embedded = results
             done += 1
             in_a_row = 0
             print(f"listing {lid}: {cut} photos cut out, {thumbs} small copies, "

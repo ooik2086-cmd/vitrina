@@ -138,6 +138,55 @@ class CutoutApiTests(MediaTests):
         finally:
             listing_routes.cutout_listing, listing_routes.thumb_listing, listing_routes.embed_listing = real
 
+    def test_changed_photos_drop_the_old_search_vector(self):
+        from vitrina_api import listing_routes
+        from vitrina_api.models import ListingEmbedding
+        lid = self.post("/listings", self.seller, {**LISTING, "photos": self.four((120, 90, 60))}).json()["id"]
+        with self.app.state.sessions() as db:
+            db.add(ListingEmbedding(listing_id=lid, model="m", vector=b"old"))
+            db.commit()
+        real = listing_routes.embed_listing
+
+        def broken(state, listing_id):
+            raise RuntimeError("storage went away")
+        listing_routes.embed_listing = broken
+        self.addCleanup(setattr, listing_routes, "embed_listing", real)
+        with self.assertLogs("vitrina", level="ERROR"):
+            r = self.c.patch(f"/api/v1/listings/{lid}", json={"photos": self.four((30, 90, 160))},
+                             headers=self.h(self.seller))
+        self.assertEqual(r.status_code, 200, r.text)
+        # Not found by the photo it no longer has; the backfill sees the vector missing.
+        with self.app.state.sessions() as db:
+            self.assertIsNone(db.get(ListingEmbedding, lid))
+        # A change that leaves the photos keeps it.
+        with self.app.state.sessions() as db:
+            db.add(ListingEmbedding(listing_id=lid, model="m", vector=b"new"))
+            db.commit()
+        self.c.patch(f"/api/v1/listings/{lid}", json={"price_tiyn": 4_000_000}, headers=self.h(self.seller))
+        with self.app.state.sessions() as db:
+            self.assertIsNotNone(db.get(ListingEmbedding, lid))
+
+    def test_the_backfill_makes_small_copies_when_the_cut_outs_fail(self):
+        from scripts import cutout_backfill
+        from vitrina_api.models import Media
+        lid = self.post("/listings", self.seller, {**LISTING, "photos": self.four((120, 90, 60))}).json()["id"]
+        with self.app.state.sessions() as db:
+            for m in db.query(Media).filter(Media.listing_id == lid):
+                m.thumb_url = None
+            db.commit()
+        real = cutout_backfill.cutout_listing
+
+        def broken(state, listing_id):
+            raise RuntimeError("storage went away")
+        broken.__name__ = "cutout_listing"
+        cutout_backfill.cutout_listing = broken
+        self.addCleanup(setattr, cutout_backfill, "cutout_listing", real)
+        with self.assertLogs(level="ERROR"):
+            code, out = self.backfill("--without-models")
+        self.assertEqual(code, 1)
+        self.assertIn(f"listing {lid}: failed in cutout_listing", out)
+        self.assertTrue(all(m["thumb_url"] for m in self.mine(lid)["media"]))
+
     def test_without_a_model_photos_stay_original(self):
         self.app.state.segmenter = None
         url = self.upload(self.seller, jpeg()).json()["url"]
@@ -556,7 +605,7 @@ class CutoutApiTests(MediaTests):
             code, out = self.backfill("--without-models", thumbs=down)
         self.assertEqual(code, 1)
         self.assertIn(f"0 of {len(ids)} listings done", out)
-        self.assertEqual(out.count("failed, see"), cutout_backfill.STOP_AFTER)
+        self.assertEqual(out.count(": failed in "), cutout_backfill.STOP_AFTER)
         # Without the models (none in the tests) nothing runs unless asked.
         code, out = self.backfill()
         self.assertEqual((code, out), (2, ""))
