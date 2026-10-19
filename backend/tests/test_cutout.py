@@ -224,6 +224,11 @@ class CutoutApiTests(MediaTests):
         self.assertFalse(cut)
         self.assertTrue(all(small != full for small, full in shots))  # light: small copies, not full photos
         self.assertTrue(all(m["processed_url"] for m in media if m["angle"] in ("front", "outer", "inner", "back")))
+        # The seller is told which frame to take again; a buyer is not.
+        self.assertEqual([m["no_shoe"] for m in frames], [i == 3 for i in range(8)])
+        self.assertEqual(self.post(f"/listings/{lid}/publish", self.seller).status_code, 200)
+        public = self.c.get(f"/api/v1/listings/{lid}").json()["media"]
+        self.assertTrue(all("no_shoe" not in m for m in public))
         # Later runs (the backfill) know the turn cannot be cut out: no model time, no files thrown away.
         calls.clear()
         files = self.stored()

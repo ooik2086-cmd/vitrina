@@ -850,6 +850,29 @@ void main() {
     expect(full.verdict, 'Өте жақсы');
   });
 
+  test('the seller is told which photos the model found no shoe in, the turn first', () {
+    Map<String, dynamic> m(String angle, {bool noShoe = false}) =>
+        {'original_url': 'https://x/$angle.jpg', 'processed_url': null, 'angle': angle, 'no_shoe': noShoe};
+    final q = listingQuality(Listing.fromJson({
+      ...listingJson(media: [
+        for (var i = 0; i < 12; i++) m('frame', noShoe: i == 4 || i == 9),
+        m('front', noShoe: true),
+        for (final a in ['outer', 'inner', 'back', 'sole', 'top', 'detail', 'label']) m(a),
+      ]),
+      'description':
+          'Түпнұсқа, бір маусым киілді. Материалы былғары, өлшемі дәл келеді. Кішірейіп қалғандықтан сатамын.',
+      'authenticity': 'documented',
+    }));
+    expect(q.score, 100 - 10 - 5);
+    expect(q.tips.map((t) => t.text), [
+      startsWith('360° айналымның 2 кадрында аяқкиім табылмады'),
+      startsWith('1 фотода аяқкиім табылмады'),
+    ]);
+    // A buyer's copy of the page carries no such flag.
+    expect(listingQuality(Listing.fromJson(listingJson(media: [m('frame')]..first.remove('no_shoe')))).tips,
+        isNot(contains(predicate((QualityTip t) => t.text.contains('табылмады')))));
+  });
+
   test('order deadline speaks to whoever can still act on it', () {
     OrderInfo order(String status, String? deadline) => OrderInfo.fromJson({
           'id': 7,

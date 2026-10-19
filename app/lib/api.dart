@@ -423,9 +423,13 @@ class MediaItem {
       : originalUrl = j['original_url'] as String,
         processedUrl = j['processed_url'] as String?,
         thumbUrl = j['thumb_url'] as String?,
-        angle = j['angle'] as String;
+        angle = j['angle'] as String,
+        noShoe = j['no_shoe'] as bool? ?? false;
   final String originalUrl;
   final String? processedUrl;
+
+  /// The background-removal model found no shoe in it, so it is shown as taken; only the seller is told.
+  final bool noShoe;
 
   /// A 480 px copy of [url] for showing while the showcase scrolls; null until the server has made it.
   final String? thumbUrl;

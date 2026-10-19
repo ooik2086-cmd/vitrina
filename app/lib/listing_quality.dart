@@ -35,6 +35,21 @@ ListingQuality listingQuality(Listing l) {
   if (l.frames.length < min360Frames) {
     tips.add(QualityTip(25, tr('360° витрина қосыңыз: сатып алушы аяқкиімді жан-жағынан айналдырып көреді.')));
   }
+  // One such frame keeps the whole 360° turn (or its part of a scan) as taken, on its own background.
+  final noShoeFrames = l.frames.where((m) => m.noShoe).length;
+  if (noShoeFrames > 0) {
+    tips.add(QualityTip(
+        10,
+        trf('360° айналымның {0} кадрында аяқкиім табылмады, сондықтан айналым фоны алынбай, түсірілген күйінде көрсетіледі. Ол кадрларды жарық, біркелкі фонда, аяқкиімді толық сыйғызып қайта түсіріңіз.',
+            ['$noShoeFrames'])));
+  }
+  final noShoePhotos = l.photos.where((m) => m.noShoe).length;
+  if (noShoePhotos > 0) {
+    tips.add(QualityTip(
+        5,
+        trf('{0} фотода аяқкиім табылмады, сондықтан олардың фоны алынбайды. Оларды жарық, біркелкі фонда, аяқкиімді толық сыйғызып қайта түсіріңіз.',
+            ['$noShoePhotos'])));
+  }
   final angles = {for (final m in l.photos) m.angle};
   final extra = ['sole', 'top', 'detail', 'label'].where((a) => !angles.contains(a)).length;
   if (extra > 0) {

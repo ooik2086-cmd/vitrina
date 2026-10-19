@@ -994,4 +994,8 @@ const en = <String, String>{
   'Сырғытпаны жылжытып, мұқабадағыдай көрінетін кадрды табыңыз.':
       'Move the slider to find the frame that looks like the cover.',
   'Түсті алып тастау': 'Remove colour',
+  '360° айналымның {0} кадрында аяқкиім табылмады, сондықтан айналым фоны алынбай, түсірілген күйінде көрсетіледі. Ол кадрларды жарық, біркелкі фонда, аяқкиімді толық сыйғызып қайта түсіріңіз.':
+      'No shoe was found in {0} frames of the 360° view, so the view is shown as taken, without removing the background. Retake those frames on a light, plain background with the whole shoe in the frame.',
+  '{0} фотода аяқкиім табылмады, сондықтан олардың фоны алынбайды. Оларды жарық, біркелкі фонда, аяқкиімді толық сыйғызып қайта түсіріңіз.':
+      'No shoe was found in {0} photos, so their background is not removed. Retake them on a light, plain background with the whole shoe in the frame.',
 };

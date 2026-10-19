@@ -88,7 +88,9 @@ def listing_out(db: Session, listing: Listing, *, owner: bool = False) -> dict:
         "sizes": [{"id": s.id, "label": s.label, "insole_cm": mm_to_cm(s.insole_mm), "available": s.quantity > 0,
                    **({"quantity": s.quantity} if owner else {})} for s in listing.sizes],
         "media": [{"original_url": m.original_url, "processed_url": m.processed_url, "thumb_url": m.thumb_url,
-                   "angle": m.angle}
+                   "angle": m.angle,
+                   # The seller is told so that they can take it again; a buyer only sees the photo as taken.
+                   **({"no_shoe": m.no_cutout is not None} if owner else {})}
                   for m in listing.media],
         "photos_version": photos_version(listing),
         "seller": {"id": seller.id, "shop_name": seller.shop_name, "city": seller.city,  # never the phone
