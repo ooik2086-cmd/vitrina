@@ -3495,6 +3495,29 @@ void main() {
         }
       });
 
+      testWidgets('three narrow shoes on a small phone need a longer drag to turn once round', (tester) async {
+        tester.view.physicalSize = const Size(960, 2400); // 320 by 800
+        addTearDown(tester.view.reset);
+        await pumpCompare(tester, [
+          listing([for (var i = 0; i < 12; i++) frame(i)]),
+          listing([for (var i = 0; i < 12; i++) frame(i)], id: 8),
+          listing([for (var i = 0; i < 12; i++) frame(i)], id: 9),
+        ]);
+        await tester.tap(find.byKey(const Key('compare-pick-9')));
+        await tester.pump();
+        await tester.pump();
+        final head =
+            find.descendant(of: find.byKey(const Key('compare-open-7')), matching: find.byKey(const Key('card-turn')));
+        expect(tester.getSize(head).width * 1.5, lessThan(CardTurn.minTurnDrag));
+        final g = await tester.startGesture(tester.getCenter(head));
+        for (var i = 0; i < 10; i++) {
+          await g.moveBy(Offset(-CardTurn.minTurnDrag * 3.2 / 12 / 10, 0));
+          await tester.pump(const Duration(milliseconds: 16));
+        }
+        expect(shownIn(tester, 7), 'https://cdn/t3.webp'); // a quarter of the shortest turn: a quarter round
+        await g.up();
+      });
+
       testWidgets('no hint when only one of the shoes can turn', (tester) async {
         await pumpCompare(tester, [
           listing([for (var i = 0; i < 12; i++) frame(i)]),

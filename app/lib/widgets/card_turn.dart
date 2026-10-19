@@ -29,6 +29,9 @@ class CardTurn extends StatefulWidget {
   /// How many frames are fetched at once, nearest the shoe's angle first.
   static const fetchAtOnce = 4;
 
+  /// The shortest drag, in logical pixels, that turns a shoe once round.
+  static const minTurnDrag = 240.0;
+
   /// Where frames are fetched from; tests replace it.
   @visibleForTesting
   static ImageProvider Function(String url) network = NetworkImage.new;
@@ -253,8 +256,9 @@ class _CardTurnState extends State<CardTurn> with SingleTickerProviderStateMixin
     _show(place);
   }
 
-  /// The same feel as the listing page: one and a half card widths turn the shoe once round.
-  double _framesPerPixel(double width) => _frames.length / (width * 1.5);
+  /// The same feel as the listing page: one and a half card widths turn the shoe once round, but never less than
+  /// [minTurnDrag], so three narrow shoes side by side on a small phone do not spin at a touch.
+  double _framesPerPixel(double width) => _frames.length / math.max(width * 1.5, CardTurn.minTurnDrag);
 
   void _move(DragUpdateDetails d, double width) {
     final at = _at;
