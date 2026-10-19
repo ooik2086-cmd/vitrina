@@ -534,27 +534,51 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
   /// Precaching asks for exactly this provider, so the cache is hit.
   static const thumbSide = 400;
 
+  /// Where a photo is fetched at screen size when it has no small copy to scroll with; tests replace it.
+  @visibleForTesting
+  static ImageProvider Function(String url) screenSize = NetworkImage.new;
+
+  /// How many frames either side of the one shown are fetched ahead when they have no small copy. Fetching every
+  /// one of them at screen size on arrival cost megabytes of mobile data, and the decoded photos, a few megabytes
+  /// each, did not fit the image cache anyway: most were dropped again before they were shown.
+  static const fullAhead = 3;
+
   ImageProvider _base(MediaItem m, ShowcaseStep step) {
-    final thumbFits = m.thumbUrl != null && (step.cut || m.processedUrl == null);
     // 400 px, as the demo page's scrolling copies: a scan's hundred or so frames then fit the image cache.
-    if (thumbFits) return ResizeImage.resizeIfNeeded(thumbSide, null, NetworkImage(m.thumbUrl!));
+    if (_small(m, step)) return ResizeImage.resizeIfNeeded(thumbSide, null, NetworkImage(m.thumbUrl!));
     final width = (MediaQuery.sizeOf(context).width * MediaQuery.devicePixelRatioOf(context)).round();
-    return ResizeImage.resizeIfNeeded(math.min(2000, width), null, NetworkImage(step.cut ? m.url : m.originalUrl));
+    return ResizeImage.resizeIfNeeded(math.min(2000, width), null, screenSize(step.cut ? m.url : m.originalUrl));
+  }
+
+  /// Whether the stage scrolls through [m]'s small copy rather than the photo itself.
+  static bool _small(MediaItem m, ShowcaseStep step) => m.thumbUrl != null && (step.cut || m.processedUrl == null);
+
+  void _fetch(MediaItem m, ShowcaseStep s) {
+    precacheImage(_base(m, s), context, onError: (_, __) {});
+    // The shadows too, so the first turn does not make one per frame while the finger moves.
+    if (_shadowed(s)) ContactShadow.prepare(_base(m, s), createLocalImageConfiguration(context));
   }
 
   void _precache() {
     if (_precached) return;
     _precached = true;
-    // The copies scrolling shows are fetched first, in showing order.
+    // The small copies scrolling shows are fetched first, in showing order; photos without one only near the shoe.
     for (final s in _plan.steps) {
       for (final m in s.media) {
-        precacheImage(_base(m, s), context, onError: (_, __) {});
-        // The shadows too, so the first turn does not make one per frame while the finger moves.
-        if (_shadowed(s)) ContactShadow.prepare(_base(m, s), createLocalImageConfiguration(context));
+        if (_small(m, s)) _fetch(m, s);
       }
     }
+    _fetchNear(_shown);
     final first = _plan.steps.first;
     if (!first.cut && first.media.isNotEmpty) _sampleEdge(_base(first.media.first, first));
+  }
+
+  /// The photos without a small copy within [fullAhead] frames of [at], either way, as the shoe may turn back.
+  void _fetchNear(({int step, int frame}) at) {
+    final s = _plan.steps[at.step];
+    for (var i = math.max(0, at.frame - fullAhead); i <= math.min(s.media.length - 1, at.frame + fullAhead); i++) {
+      if (!_small(s.media[i], s)) _fetch(s.media[i], s);
+    }
   }
 
   /// The colour around the edge of the first photo as taken, for the stage behind such photos: on the studio
@@ -632,6 +656,7 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
         }
       }
       _shown = now;
+      _fetchNear(now);
       // Small copies while turning; the full photo once the shoe has stopped on one frame for a moment.
       _settled = false;
       _settleSoon();

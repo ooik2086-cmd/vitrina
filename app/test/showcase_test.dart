@@ -330,6 +330,37 @@ void main() {
     expect(tester.widget<Hero>(find.byType(Hero)).tag, 'listing-7');
   });
 
+  showcaseTest('photos without small copies are fetched only near the shoe, not all on arrival', (tester) async {
+    final asked = <String>{};
+    ScrollShowcaseState.screenSize = (url) {
+      asked.add(url);
+      return NetworkImage(url);
+    };
+    addTearDown(() => ScrollShowcaseState.screenSize = NetworkImage.new);
+    final body = listing(cutFrames: false);
+    for (final m in body['media'] as List) {
+      (m as Map)['thumb_url'] = null;
+      if (m['angle'] == 'frame') m['processed_url'] = null;
+    }
+    await pump(tester, body);
+    Set<int> frames() => {
+          for (final u in asked)
+            if (RegExp(r'/f(\d+)\.jpg$').firstMatch(u) case final m?) int.parse(m.group(1)!)
+        };
+    // Of the 24 frames, the first few: those within three of the shoe as the first-show hint turns it a little and
+    // back. None of the stops further down the page either.
+    expect(frames(), containsAll([0, 1, 2, 3]));
+    expect(frames().where((i) => i > 6), isEmpty);
+    expect(asked.where((u) => RegExp(r'/(top|sole|detail)\.').hasMatch(u)), isEmpty);
+    // Turned on to about the middle, the frames around it come; still not the far ones.
+    page(tester).jumpTo(page(tester).maxScrollExtent * 0.1);
+    await tester.pump();
+    final at = int.parse(RegExp(r'/f(\d+)\.jpg$').firstMatch(base(tester))!.group(1)!);
+    expect(at, greaterThan(6));
+    expect(frames(), containsAll([for (var i = at - 3; i <= at + 3; i++) i]));
+    expect(frames().where((i) => i > at + 3), isEmpty);
+  });
+
   showcaseTest('a screen reader\'s focus boxes move with the stage between frames', (tester) async {
     final semantics = tester.ensureSemantics();
     await pump(tester, listing());
@@ -438,6 +469,37 @@ void main() {
     // from memory with it once the shoe moves on.
     expect(full(tester), isEmpty);
     expect(base(tester), 'https://cdn/f0.jpg');
+  });
+
+  showcaseTest('photos without small copies are fetched only near the shoe, not all on arrival', (tester) async {
+    final asked = <String>{};
+    ScrollShowcaseState.screenSize = (url) {
+      asked.add(url);
+      return NetworkImage(url);
+    };
+    addTearDown(() => ScrollShowcaseState.screenSize = NetworkImage.new);
+    final body = listing(cutFrames: false);
+    for (final m in body['media'] as List) {
+      (m as Map)['thumb_url'] = null;
+      if (m['angle'] == 'frame') m['processed_url'] = null;
+    }
+    await pump(tester, body);
+    Set<int> frames() => {
+          for (final u in asked)
+            if (RegExp(r'/f(\d+)\.jpg$').firstMatch(u) case final m?) int.parse(m.group(1)!)
+        };
+    // Of the 24 frames, the first few: those within three of the shoe as the first-show hint turns it a little and
+    // back. None of the stops further down the page either.
+    expect(frames(), containsAll([0, 1, 2, 3]));
+    expect(frames().where((i) => i > 6), isEmpty);
+    expect(asked.where((u) => RegExp(r'/(top|sole|detail)\.').hasMatch(u)), isEmpty);
+    // Turned on to about the middle, the frames around it come; still not the far ones.
+    page(tester).jumpTo(page(tester).maxScrollExtent * 0.1);
+    await tester.pump();
+    final at = int.parse(RegExp(r'/f(\d+)\.jpg$').firstMatch(base(tester))!.group(1)!);
+    expect(at, greaterThan(6));
+    expect(frames(), containsAll([for (var i = at - 3; i <= at + 3; i++) i]));
+    expect(frames().where((i) => i > at + 3), isEmpty);
   });
 
   showcaseTest('a screen reader\'s focus boxes move with the stage between frames', (tester) async {
