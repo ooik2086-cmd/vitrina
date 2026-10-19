@@ -369,7 +369,8 @@ class _ListingScreenState extends State<ListingScreen> {
       final fetch = api.listing(c.id);
       try {
         next = await fetch.timeout(ListingScreen.switchBudget);
-        final image = ScrollShowcase.firstImageAt(next, view);
+        final carried = ScrollShowcase.carry(view, l, next);
+        final image = carried == null ? null : ScrollShowcase.firstImageAt(next, carried);
         final left = ListingScreen.switchBudget - watch.elapsed;
         if (image != null && mounted && left > Duration.zero) {
           await precacheImage(image, context, onError: (_, __) {}).timeout(left, onTimeout: () {});
@@ -387,9 +388,9 @@ class _ListingScreenState extends State<ListingScreen> {
         return;
       }
       view = _showcase.currentState?.view ?? view; // the buyer may have scrolled on while it came
-      // A slow colour opens at its cover rather than jumping there later; a turn starts at a different angle on
-      // the other colour unless both are anchored to the same side.
-      if (next == null || (view.kind == 'spin' && !ScrollShowcase.turnsAlike(l, next))) view = null;
+      // A slow colour opens at its cover rather than jumping there later; the other colour's turn shows the same
+      // side, when it can tell which of its frames that is.
+      view = next == null ? null : ScrollShowcase.carry(view, l, next);
     }
     final size = l.sizes.where((s) => s.id == _sizeId).firstOrNull?.label;
     Navigator.of(context).pushReplacement(PageRouteBuilder(

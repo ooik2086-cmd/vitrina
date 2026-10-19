@@ -825,6 +825,32 @@ void main() {
     expect(page(tester).pixels, 0);
   });
 
+  showcaseTest('with its sides matched, a turn shot another way or from another side opens at the same side',
+      (tester) async {
+    // This colour turns from its toe towards its outer side; the other starts at its heel and turns the same way
+    // round the shoe, so the angle shown here (between heel and outer side) is near the end of its turn.
+    final here = {
+      ...anchored,
+      'angle_frames': {'front': 'https://cdn/f0.jpg', 'outer': 'https://cdn/f6.jpg'},
+    };
+    final other = {
+      ...here,
+      'id': 8,
+      'media': [
+        media('back', 'back'),
+        for (final m in anchored['media'] as List)
+          if (m['angle'] != 'back') m
+      ],
+      'angle_frames': {'front': 'https://cdn/f12.jpg', 'outer': 'https://cdn/f18.jpg'},
+    };
+    await pumpOpened(tester, here, other: other);
+    await turnTo(tester, 0, 9);
+    await tester.tap(swatch(8));
+    await tester.pumpAndSettle();
+    expect(tester.widget<ListingScreen>(screen(8)).view, (kind: 'spin', at: 21 / 24));
+    expect(shownOn(tester, 8), 'https://cdn/f21-s.webp');
+  });
+
   showcaseTest('a colour picked before turning opens at its cover, as before', (tester) async {
     await pumpOpened(tester, anchored);
     await tester.tap(swatch(8));

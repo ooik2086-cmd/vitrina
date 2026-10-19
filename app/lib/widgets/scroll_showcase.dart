@@ -100,6 +100,103 @@ class ShowcaseStep {
 /// What the showcase shows, as ShowcasePlan.viewAt describes it.
 typedef ShowcaseView = ({String kind, double at});
 
+/// How a shared angle, where 0 is the outer side, 0.25 the toe, 0.5 the inner side and 0.75 the heel, falls on
+/// one shoe's turn (as a share of it, from its first frame). Sellers turn the shoe either way and not always
+/// evenly, so the turn is laid through the frames known to show a side square on ([marks]: angle to share), the
+/// way round they come; between them it is spread evenly. Without marks, the turn is taken to start at the outer
+/// side and go the usual way.
+class TurnMap {
+  factory TurnMap(Map<double, double> marks) {
+    final angles = marks.keys.toList()..sort();
+    if (angles.length < 2) {
+      final a = angles.firstOrNull ?? 0;
+      return TurnMap._([a], [marks[a] ?? 0], 1, sided: false);
+    }
+    final shares = [for (final a in angles) marks[a]!];
+    // The way round in which the marks come in the order of their sides; when both fit (two marks), the one
+    // whose spacing is nearer the sides' own.
+    double? bestCost;
+    var way = 0;
+    for (final w in [1, -1]) {
+      var total = 0.0, cost = 0.0;
+      for (var k = 0; k < angles.length; k++) {
+        final n = (k + 1) % angles.length;
+        final gap = (w * (shares[n] - shares[k])) % 1;
+        total += gap;
+        cost += (gap - (angles[n] - angles[k]) % 1).abs();
+      }
+      if ((total - 1).abs() < 1e-9 && (bestCost == null || cost < bestCost)) {
+        bestCost = cost;
+        way = w;
+      }
+    }
+    // Marks that contradict each other (a front matched to the heel): only the first is kept.
+    if (way == 0) return TurnMap._([angles.first], [shares.first], 1, sided: false);
+    return TurnMap._(angles, shares, way, sided: true);
+  }
+
+  /// The marks of [listing] on [turn] (its frames from the first shown): the frames the server matched to its side
+  /// photos, else the cover where the turn starts [atCover].
+  factory TurnMap.over(Listing listing, List<MediaItem> turn, {required bool atCover}) {
+    final marks = <double, double>{};
+    for (final MapEntry(key: side, value: url) in listing.angleFrames.entries) {
+      final angle = sides[side];
+      final i = turn.indexWhere((m) => m.originalUrl == url);
+      if (angle != null && i >= 0) marks[angle] = i / turn.length;
+    }
+    final cover = sides[listing.media.where((m) => m.angle != 'frame').firstOrNull?.angle];
+    if (atCover && cover != null) marks.putIfAbsent(cover, () => 0);
+    return TurnMap(marks);
+  }
+
+  /// The marks of [listing] on the turn its listing page shows.
+  factory TurnMap.of(Listing listing) {
+    final plan = ShowcasePlan.of(listing);
+    final turn = plan.steps.isEmpty || plan.steps.first.kind != 'spin'
+        ? const <MediaItem>[]
+        : plan.steps.first.media.take(plan.turn).toList();
+    final first = turn.firstOrNull;
+    final atCover =
+        !plan.scan && first != null && (first.originalUrl == listing.coverFrame || first.url == listing.coverUrl);
+    return TurnMap.over(listing, turn, atCover: atCover);
+  }
+
+  const TurnMap._(this._angles, this._shares, this._way, {required this.sided});
+  final List<double> _angles;
+  final List<double> _shares;
+  final int _way;
+
+  /// Whether at least two sides are known, so which way and how evenly the turn goes is known, not assumed.
+  final bool sided;
+
+  static const sides = {'outer': 0.0, 'front': 0.25, 'inner': 0.5, 'back': 0.75};
+
+  double _angleGap(int k) => _angles.length == 1 ? 1 : (_angles[(k + 1) % _angles.length] - _angles[k]) % 1;
+  double _shareGap(int k) => _angles.length == 1 ? 1 : (_way * (_shares[(k + 1) % _shares.length] - _shares[k])) % 1;
+
+  /// Where in the turn (a share from its first frame) the shared [angle] falls.
+  double place(double angle) {
+    for (var k = 0; k < _angles.length; k++) {
+      final d = (angle - _angles[k]) % 1;
+      if (d < _angleGap(k) || k == _angles.length - 1) {
+        return (_shares[k] + _way * d / _angleGap(k) * _shareGap(k)) % 1;
+      }
+    }
+    return angle % 1;
+  }
+
+  /// The shared angle at [share] of the turn: the inverse of [place].
+  double angle(double share) {
+    for (var k = 0; k < _angles.length; k++) {
+      final d = (_way * (share - _shares[k])) % 1;
+      if (d < _shareGap(k) || k == _angles.length - 1) {
+        return (_angles[k] + d / _shareGap(k) * _angleGap(k)) % 1;
+      }
+    }
+    return share % 1;
+  }
+}
+
 /// Which photo shows at a given scroll position. Only real photos are shown: nothing is generated or blended.
 class ShowcasePlan {
   ShowcasePlan(this.steps, {this.scan = false}) : total = steps.fold(0.0, (sum, s) => sum + s.weight);
@@ -290,6 +387,15 @@ class ScrollShowcase extends StatefulWidget {
 
   /// Whether the same place in two colours' turns is the same angle: both turns start at the frame the server or
   /// the seller matched to the cover, and both covers show the same side of the shoe.
+  /// [view] of [from] as [to] shows it: the same side of the turn when the server matched both shoes' sides,
+  /// else the same frame when both turns start at the same side; the same stop. Null when [to] cannot show it.
+  static ShowcaseView? carry(ShowcaseView view, Listing from, Listing to) {
+    if (view.kind != 'spin') return view;
+    final a = TurnMap.of(from), b = TurnMap.of(to);
+    if (a.sided && b.sided) return (kind: 'spin', at: b.place(a.angle(view.at)));
+    return turnsAlike(from, to) ? view : null;
+  }
+
   static bool turnsAlike(Listing a, Listing b) {
     bool anchored(Listing l) => l.coverFrame != null && l.frames.any((f) => f.originalUrl == l.coverFrame);
     final side = a.photos.firstOrNull?.angle;

@@ -4,7 +4,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../api.dart';
-import 'scroll_showcase.dart' show ShowcasePlan;
+import 'scroll_showcase.dart' show ShowcasePlan, TurnMap;
 import 'studio.dart';
 
 /// A catalog card's shoe that turns under a sideways drag, through the same real 360° frames as the listing page.
@@ -61,91 +61,14 @@ class CardTurn extends StatefulWidget {
     return (turn: [...turn.skip(math.max(0, start)), ...turn.take(math.max(0, start))], atCover: start >= 0);
   }
 
-  /// How the shared angle of shoes turning together falls on this card's turn: through the frames the server
-  /// matched to its side photos, else the cover where the turn starts.
+  /// How the shared angle of shoes turning together falls on this card's turn.
   static TurnMap mapOf(Listing l) {
     final (:turn, :atCover) = _turnOf(l);
-    final marks = <double, double>{};
-    for (final MapEntry(key: side, value: url) in l.angleFrames.entries) {
-      final angle = TurnMap.sides[side];
-      final i = turn.indexWhere((m) => m.originalUrl == url);
-      if (angle != null && i >= 0) marks[angle] = i / turn.length;
-    }
-    final cover = TurnMap.sides[l.media.where((m) => m.angle != 'frame').firstOrNull?.angle];
-    if (atCover && cover != null) marks.putIfAbsent(cover, () => 0);
-    return TurnMap(marks);
+    return TurnMap.over(l, turn, atCover: atCover);
   }
 
   @override
   State<CardTurn> createState() => _CardTurnState();
-}
-
-/// How a shared angle, where 0 is the outer side, 0.25 the toe, 0.5 the inner side and 0.75 the heel, falls on
-/// one shoe's turn (as a share of it, from its first frame). Sellers turn the shoe either way and not always
-/// evenly, so the turn is laid through the frames known to show a side square on ([marks]: angle to share), the
-/// way round they come; between them it is spread evenly. Without marks, the turn is taken to start at the outer
-/// side and go the usual way.
-class TurnMap {
-  factory TurnMap(Map<double, double> marks) {
-    final angles = marks.keys.toList()..sort();
-    if (angles.length < 2) {
-      final a = angles.firstOrNull ?? 0;
-      return TurnMap._([a], [marks[a] ?? 0], 1);
-    }
-    final shares = [for (final a in angles) marks[a]!];
-    // The way round in which the marks come in the order of their sides; when both fit (two marks), the one
-    // whose spacing is nearer the sides' own.
-    double? bestCost;
-    var way = 0;
-    for (final w in [1, -1]) {
-      var total = 0.0, cost = 0.0;
-      for (var k = 0; k < angles.length; k++) {
-        final n = (k + 1) % angles.length;
-        final gap = (w * (shares[n] - shares[k])) % 1;
-        total += gap;
-        cost += (gap - (angles[n] - angles[k]) % 1).abs();
-      }
-      if ((total - 1).abs() < 1e-9 && (bestCost == null || cost < bestCost)) {
-        bestCost = cost;
-        way = w;
-      }
-    }
-    // Marks that contradict each other (a front matched to the heel): only the first is kept.
-    if (way == 0) return TurnMap._([angles.first], [shares.first], 1);
-    return TurnMap._(angles, shares, way);
-  }
-
-  const TurnMap._(this._angles, this._shares, this._way);
-  final List<double> _angles;
-  final List<double> _shares;
-  final int _way;
-
-  static const sides = {'outer': 0.0, 'front': 0.25, 'inner': 0.5, 'back': 0.75};
-
-  double _angleGap(int k) => _angles.length == 1 ? 1 : (_angles[(k + 1) % _angles.length] - _angles[k]) % 1;
-  double _shareGap(int k) => _angles.length == 1 ? 1 : (_way * (_shares[(k + 1) % _shares.length] - _shares[k])) % 1;
-
-  /// Where in the turn (a share from its first frame) the shared [angle] falls.
-  double place(double angle) {
-    for (var k = 0; k < _angles.length; k++) {
-      final d = (angle - _angles[k]) % 1;
-      if (d < _angleGap(k) || k == _angles.length - 1) {
-        return (_shares[k] + _way * d / _angleGap(k) * _shareGap(k)) % 1;
-      }
-    }
-    return angle % 1;
-  }
-
-  /// The shared angle at [share] of the turn: the inverse of [place].
-  double angle(double share) {
-    for (var k = 0; k < _angles.length; k++) {
-      final d = (_way * (share - _shares[k])) % 1;
-      if (d < _shareGap(k) || k == _angles.length - 1) {
-        return (_angles[k] + d / _shareGap(k) * _angleGap(k)) % 1;
-      }
-    }
-    return share % 1;
-  }
 }
 
 /// Where shoes compared side by side are in their turns, as a shared angle (see [TurnMap]), so they show the
