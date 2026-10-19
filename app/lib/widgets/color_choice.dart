@@ -45,7 +45,9 @@ class ColorSwatches extends StatelessWidget {
               Semantics(
                 button: !c.current,
                 selected: c.current,
-                label: describe(c),
+                // While it comes, a screen reader says so at once rather than leaving the wait silent.
+                liveRegion: coming,
+                label: coming ? trf('{0}, ашылуда', [describe(c)]) : describe(c),
                 onTap: c.current ? null : () => onPick(c),
                 excludeSemantics: true,
                 child: Tooltip(

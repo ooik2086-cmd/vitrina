@@ -839,6 +839,10 @@ void main() {
     await tester.tap(swatch(8));
     await tester.pump();
     expect(find.byKey(const Key('color-coming-8')), findsOneWidget); // the tap shows at once
+    // and is heard at once: the wait is not silent to a screen reader.
+    final heard = tester.getSemantics(find.ancestor(of: swatch(8), matching: find.byType(Semantics)).first);
+    expect(heard.label, endsWith(', ашылуда'));
+    expect(heard.flagsCollection.isLiveRegion, isTrue);
     expect((tester.widget<Container>(find.byKey(const Key('color-ring-8'))).decoration as BoxDecoration).border,
         Border.all(color: ShowcaseScene.light.fg, width: 2));
     for (var i = 0; i < 5 && screen(8).evaluate().isEmpty; i++) {
