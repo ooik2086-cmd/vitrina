@@ -999,7 +999,7 @@ class _SimilarRow extends StatelessWidget {
               clipBehavior: Clip.none,
               itemCount: list.length,
               separatorBuilder: (_, __) => const SizedBox(width: 12),
-              itemBuilder: (_, i) => SizedBox(width: 160, child: ListingTile(listing: list[i])),
+              itemBuilder: (_, i) => SizedBox(width: 160, child: ListingTile(listing: list[i], turns: false)),
             ),
           ),
         ]);

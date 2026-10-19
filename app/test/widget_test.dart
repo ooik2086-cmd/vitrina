@@ -55,6 +55,7 @@ import 'package:vitrina/widgets/common.dart';
 import 'package:vitrina/widgets/delivery_sheet.dart';
 import 'package:vitrina/widgets/questions.dart';
 import 'package:vitrina/widgets/size_guide.dart';
+import 'package:vitrina/widgets/card_turn.dart';
 import 'package:vitrina/widgets/filter_sheet.dart';
 import 'package:vitrina/widgets/spin_viewer.dart';
 
@@ -3007,5 +3008,86 @@ void main() {
     expect(find.text('Жаңа код: 25 мин кейін'), findsOneWidget);
     expect(tester.widget<FilledButton>(find.byType(FilledButton)).onPressed, isNull);
     await tester.pumpWidget(const SizedBox()); // stops the timer
+  });
+
+  group('the catalog card turns the shoe', () {
+    Map<String, dynamic> frame(int i, {bool cut = true}) => {
+          'original_url': 'https://cdn/f$i.jpg',
+          'processed_url': cut ? 'https://cdn/f$i.webp' : null,
+          'thumb_url': 'https://cdn/t$i.webp',
+          'angle': 'frame',
+        };
+    Listing listing(List<Map<String, dynamic>> frames) => Listing.fromJson(listingJson(media: [
+          {'original_url': 'https://cdn/side.jpg', 'processed_url': 'https://cdn/side.webp', 'angle': 'side'},
+          ...frames,
+        ]));
+    String? shown(WidgetTester tester) {
+      final found = find.byKey(const Key('card-turn-frame'));
+      if (found.evaluate().isEmpty) return null;
+      final image = tester.widget<Image>(found).image as ResizeImage;
+      return (image.imageProvider as NetworkImage).url;
+    }
+
+    Future<void> pumpTile(WidgetTester tester, Listing l, {bool turns = true}) async {
+      await tester.pumpWidget(MaterialApp(
+          home: Scaffold(
+              body: ListView(children: [
+        Center(child: SizedBox(width: 200, child: ListingTile(listing: l, turns: turns))),
+        const SizedBox(height: 2000),
+      ]))));
+    }
+
+    test('through at most 36 frames of one turn, and only with enough frames to turn', () {
+      expect(CardTurn.framesOf(listing([for (var i = 0; i < 7; i++) frame(i)])), isEmpty);
+      final many = CardTurn.framesOf(listing([for (var i = 0; i < 100; i++) frame(i)]));
+      expect(many.length, CardTurn.maxFrames);
+      expect(many.first.originalUrl, 'https://cdn/f0.jpg');
+      expect(many.last.originalUrl, 'https://cdn/f97.jpg'); // spread over the whole turn
+      // A turn ends where its first frame comes round again.
+      final round = CardTurn.framesOf(listing([for (var i = 0; i < 10; i++) frame(i), frame(0), frame(11)]));
+      expect(round.length, 10);
+    });
+
+    testWidgets('a sideways drag turns it, the cover shows until then, and a scroll does not turn it', (tester) async {
+      await pumpTile(tester, listing([for (var i = 0; i < 12; i++) frame(i)]));
+      expect(shown(tester), isNull); // the cover
+      await tester.drag(find.byKey(const Key('card-turn')), const Offset(0, -60));
+      await tester.pumpAndSettle();
+      expect(shown(tester), isNull);
+      await tester.timedDrag(
+          find.byKey(const Key('card-turn')), const Offset(-200 * 1.5 / 12 * 3.5, 0), const Duration(seconds: 2));
+      await tester.pumpAndSettle();
+      expect(shown(tester), 'https://cdn/t3.webp'); // three and a half frames on, at card size
+      await tester.timedDrag(
+          find.byKey(const Key('card-turn')), const Offset(200 * 1.5 / 12 * 5, 0), const Duration(seconds: 2));
+      await tester.pumpAndSettle();
+      expect(shown(tester), 'https://cdn/t10.webp'); // back past the first frame, round to the end of the turn
+    });
+
+    testWidgets('a flick coasts on and comes to rest', (tester) async {
+      await pumpTile(tester, listing([for (var i = 0; i < 36; i++) frame(i)]));
+      await tester.fling(find.byKey(const Key('card-turn')), const Offset(-60, 0), 1500);
+      await tester.pump();
+      final first = shown(tester);
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(shown(tester), isNot(first)); // still turning after the finger left
+      await tester.pumpAndSettle();
+      final rest = shown(tester);
+      await tester.pump(const Duration(seconds: 1));
+      expect(shown(tester), rest);
+    });
+
+    testWidgets('frames without a cut-out for each one turn as the photos themselves', (tester) async {
+      await pumpTile(tester, listing([for (var i = 0; i < 11; i++) frame(i), frame(11, cut: false)]));
+      await tester.timedDrag(
+          find.byKey(const Key('card-turn')), const Offset(-200 * 1.5 / 12 * 1.5, 0), const Duration(seconds: 1));
+      await tester.pumpAndSettle();
+      expect(shown(tester), 'https://cdn/f1.jpg');
+    });
+
+    testWidgets('in a sideways list the drag scrolls the list instead', (tester) async {
+      await pumpTile(tester, listing([for (var i = 0; i < 12; i++) frame(i)]), turns: false);
+      expect(find.byKey(const Key('card-turn')), findsNothing);
+    });
   });
 }

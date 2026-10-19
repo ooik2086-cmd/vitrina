@@ -10,6 +10,7 @@ import '../screens/listing_screen.dart';
 import '../screens/login_screen.dart';
 import '../theme.dart';
 import '../i18n.dart';
+import 'card_turn.dart';
 import 'studio.dart';
 
 void showError(BuildContext context, Object error) {
@@ -161,8 +162,17 @@ class LanguageSwitch extends StatelessWidget {
 ImageProvider coverImage(String url) => ResizeImage.resizeIfNeeded(720, null, NetworkImage(url));
 
 class ListingTile extends StatelessWidget {
-  const ListingTile({super.key, required this.listing});
+  const ListingTile({super.key, required this.listing, this.turns = true});
   final Listing listing;
+
+  /// A sideways drag turns the shoe; off in a sideways list, where that drag scrolls the list.
+  final bool turns;
+
+  Widget _cover(String url) => CoverPhoto(
+      image: coverImage(url),
+      cutout: listing.coverIsCutout,
+      fit: BoxFit.cover,
+      errorBuilder: (_, __, ___) => const Icon(Icons.broken_image_outlined, color: Colors.black26));
 
   @override
   Widget build(BuildContext context) {
@@ -181,13 +191,11 @@ class ListingTile extends StatelessWidget {
             child: Stack(fit: StackFit.expand, children: [
               Hero(
                 tag: 'listing-${listing.id}',
-                child: cover == null
-                    ? const Icon(Icons.image_outlined, color: Colors.black26)
-                    : CoverPhoto(
-                        image: coverImage(cover),
-                        cutout: listing.coverIsCutout,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => const Icon(Icons.broken_image_outlined, color: Colors.black26)),
+                child: switch (cover) {
+                  null => const Icon(Icons.image_outlined, color: Colors.black26),
+                  final cover when !turns => _cover(cover),
+                  final cover => CardTurn(listing: listing, cover: _cover(cover)),
+                },
               ),
               if (listing.frames.isNotEmpty) const Positioned(left: 10, top: 10, child: Badge360()),
               if (listing.wasPriceTiyn != null) Positioned(right: 10, top: 10, child: SaleBadge(listing: listing)),
