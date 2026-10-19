@@ -200,6 +200,9 @@ class TurnMap {
 
 /// Which photo shows at a given scroll position. Only real photos are shown: nothing is generated or blended.
 class ShowcasePlan {
+  /// How many widths of the shoe's picture a sideways drag goes to turn it once round, here and on the cards.
+  static const turnWidths = 1.5;
+
   ShowcasePlan(this.steps, {this.scan = false}) : total = steps.fold(0.0, (sum, s) => sum + s.weight);
 
   /// The frames in order, then the top and sole photos and the close-up (stitching, logo), each only when the
@@ -783,7 +786,7 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
     if (_zoomed || _shown.step != 0 || !widget.scroll.hasClients) return;
     final turn = _plan.turn;
     if (_shown.frame >= turn || _dragFrame.floor() % turn != _shown.frame) _dragFrame = _shown.frame % turn * 1.0;
-    _dragFrame = (_dragFrame - d.delta.dx / (width * 1.5) * turn) % turn;
+    _dragFrame = (_dragFrame - d.delta.dx / (width * ShowcasePlan.turnWidths) * turn) % turn;
     // A tiny negative remainder rounds up to the turn itself, which is a frame past it.
     widget.scroll.jumpTo(_plan.centreOf(0, _dragFrame.floor() % turn) * _travel);
   }

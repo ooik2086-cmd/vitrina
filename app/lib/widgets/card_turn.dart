@@ -29,8 +29,14 @@ class CardTurn extends StatefulWidget {
   /// How many frames are fetched at once, nearest the shoe's angle first.
   static const fetchAtOnce = 4;
 
-  /// The shortest drag, in logical pixels, that turns a shoe once round.
+  /// The shortest drag, in logical pixels, that turns a shoe once round: one and a half widths of a 160 wide card,
+  /// a quarter turn for a 60 px move of the thumb. Set on its own, not from the grid's widest tile.
   static const minTurnDrag = 240.0;
+
+  /// The drag that turns a card [width] wide once round: as on the listing page ([ShowcasePlan.turnWidths] widths),
+  /// but never less than [minTurnDrag]. Narrower cards, such as three shoes side by side or a two-column feed on a
+  /// phone under 375 wide, would otherwise spin at a touch.
+  static double turnDrag(double width) => math.max(width * ShowcasePlan.turnWidths, minTurnDrag);
 
   /// Where frames are fetched from; tests replace it.
   @visibleForTesting
@@ -256,9 +262,7 @@ class _CardTurnState extends State<CardTurn> with SingleTickerProviderStateMixin
     _show(place);
   }
 
-  /// The same feel as the listing page: one and a half card widths turn the shoe once round, but never less than
-  /// [minTurnDrag], so three narrow shoes side by side on a small phone do not spin at a touch.
-  double _framesPerPixel(double width) => _frames.length / math.max(width * 1.5, CardTurn.minTurnDrag);
+  double _framesPerPixel(double width) => _frames.length / CardTurn.turnDrag(width);
 
   void _move(DragUpdateDetails d, double width) {
     final at = _at;

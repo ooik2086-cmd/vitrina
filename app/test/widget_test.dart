@@ -3130,11 +3130,30 @@ void main() {
     Future<TestGesture> hold(WidgetTester tester, double frames, {int of = 12}) async {
       final g = await tester.startGesture(tester.getCenter(find.byKey(const Key('card-turn'))));
       for (var i = 0; i < 10; i++) {
-        await g.moveBy(Offset(-200 * 1.5 / of * frames / 10, 0));
+        await g.moveBy(Offset(-CardTurn.turnDrag(200) / of * frames / 10, 0));
         await tester.pump(const Duration(milliseconds: 16));
       }
       return g;
     }
+
+    testWidgets('a narrow feed card on a small phone turns no faster than the shortest turn', (tester) async {
+      picture ??= await tester.runAsync(() => createTestImage(width: 4, height: 3));
+      await tester.pumpWidget(MaterialApp(
+          home: Scaffold(
+              body: ListView(children: [
+        Center(
+            child: SizedBox(width: 130, child: ListingTile(listing: listing([for (var i = 0; i < 12; i++) frame(i)])))),
+        const SizedBox(height: 2000),
+      ]))));
+      expect(130 * ShowcasePlan.turnWidths, lessThan(CardTurn.minTurnDrag));
+      final g = await tester.startGesture(tester.getCenter(find.byKey(const Key('card-turn'))));
+      for (var i = 0; i < 10; i++) {
+        await g.moveBy(Offset(-CardTurn.minTurnDrag * 3.5 / 12 / 10, 0));
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      expect(shown(tester), 'https://cdn/t3.webp'); // under a third of the shortest turn: a quarter round
+      await g.up();
+    });
 
     test('the listing page and the card start the turn at the frame matching the cover', () {
       final l = Listing.fromJson({
@@ -3306,10 +3325,10 @@ void main() {
       Future<TestGesture> turn(WidgetTester tester, int id, double share) async {
         final head =
             find.descendant(of: find.byKey(Key('compare-open-$id')), matching: find.byKey(const Key('card-turn')));
-        final width = tester.getSize(head).width;
+        final drag = CardTurn.turnDrag(tester.getSize(head).width);
         final g = await tester.startGesture(tester.getCenter(head));
         for (var i = 0; i < 10; i++) {
-          await g.moveBy(Offset(-width * 1.5 * share / 10, 0));
+          await g.moveBy(Offset(-drag * share / 10, 0));
           await tester.pump(const Duration(milliseconds: 16));
         }
         return g;
@@ -3508,7 +3527,7 @@ void main() {
         await tester.pump();
         final head =
             find.descendant(of: find.byKey(const Key('compare-open-7')), matching: find.byKey(const Key('card-turn')));
-        expect(tester.getSize(head).width * 1.5, lessThan(CardTurn.minTurnDrag));
+        expect(tester.getSize(head).width * ShowcasePlan.turnWidths, lessThan(CardTurn.minTurnDrag));
         final g = await tester.startGesture(tester.getCenter(head));
         for (var i = 0; i < 10; i++) {
           await g.moveBy(Offset(-CardTurn.minTurnDrag * 3.2 / 12 / 10, 0));
