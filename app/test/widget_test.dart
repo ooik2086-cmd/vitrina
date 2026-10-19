@@ -3411,8 +3411,10 @@ void main() {
         await tester.pump();
         bool on(String side) => tester.widget<ChoiceChip>(find.byKey(Key('compare-side-$side'))).selected;
         expect(on('cover'), isTrue);
+        tester.takeAnnouncements();
         await tester.tap(find.byKey(const Key('compare-side-front')));
         await tester.pump();
+        expect(tester.takeAnnouncements().map((a) => a.message), ['Алдынан: барлық аяқкиім']);
         expect((shownIn(tester, 7), shownIn(tester, 8)), ('https://cdn/t3.webp', 'https://cdn/t9.webp'));
         expect((on('front'), on('cover')), (true, false));
         await tester.tap(find.byKey(const Key('compare-side-back')));
@@ -3442,8 +3444,12 @@ void main() {
         await tester.pump();
         // Only the chip says 'Алдынан' before it is pressed; the covers carry no side.
         expect(find.semantics.byLabel('Алдынан'), findsOne);
+        expect(find.semantics.byLabel('Барлық аяқкиімді бір жағынан көрсету'), findsOne);
+        tester.takeAnnouncements();
         tester.semantics.tap(find.semantics.byLabel('Алдынан'));
         await tester.pump();
+        // Heard at once, as the pictures that change sit above the chips, out of focus: one shoe cannot show it.
+        expect(tester.takeAnnouncements().map((a) => a.message), ['Бұл жағынан фото жоқ: 1']);
         expect((shownIn(tester, 7), shownIn(tester, 8)), ('https://cdn/t3.webp', 'https://cdn/t9.webp'));
         expect(tester.getSemantics(find.byKey(const Key('compare-side-front'))).flagsCollection.isSelected,
             ui.Tristate.isTrue);
@@ -3451,15 +3457,29 @@ void main() {
         String heard(int id) => tester.getSemantics(find.byKey(Key('compare-shown-$id'))).label;
         for (final id in [7, 8]) {
           expect(heard(id), startsWith('Алдынан\n'));
+          // One stop per shoe: no extra unlabelled image split off the picture.
+          expect(tester.getSemantics(find.byKey(Key('compare-shown-$id'))).childrenCount, 0);
         }
         // The shoe that cannot show it says so once: the visible caption is not read a second time.
         expect(heard(9), startsWith('Бұл жағынан фото жоқ\n'));
         expect('Бұл жағынан фото жоқ'.allMatches(heard(9)), hasLength(1));
+        // A drag claims no side, so no picture says one any more.
+        final g = await turn(tester, 7, 1 / 12);
+        await g.up();
+        await tester.pump();
+        for (final id in [7, 8, 9]) {
+          expect(heard(id), isNot(contains('\n')), reason: 'only the title once the side is dragged away');
+        }
+        tester.semantics.tap(find.semantics.byLabel('Өкшесі'));
+        await tester.pump();
+        expect(heard(7), startsWith('Өкшесі\n'));
         tester.semantics.tap(find.semantics.byLabel('Негізгі фото'));
         await tester.pump();
         for (final id in [7, 8, 9]) {
           expect(heard(id), isNot(contains('\n')), reason: 'only the title once the covers are back');
         }
+        expect(tester.takeAnnouncements().map((a) => a.message), ['Бұл жағынан фото жоқ: 1'],
+            reason: 'the covers are heard on the chip itself');
         semantics.dispose();
       });
 

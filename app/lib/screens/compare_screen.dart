@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 
 import '../api.dart';
 import '../colors.dart';
@@ -177,7 +178,7 @@ class _Table extends StatelessWidget {
                   style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
             ),
           ),
-        if (turn && sided(items).length > 1) _Sides(together: together),
+        if (turn && sided(items).length > 1) _Sides(items: items, together: together),
         _Row(
           label: tr('Барлығы, жеткізумен'),
           items: items,
@@ -253,9 +254,11 @@ class _Table extends StatelessWidget {
 
 /// One tap shows every compared shoe whose sides are known from the same side, for those who would rather not
 /// drag: the main photos, then the sides as the listing editor names them. Unlike the drag, the chips are buttons a
-/// screen reader can press, and each shoe's picture then says which side it shows.
+/// screen reader can press: it then hears how many shoes cannot show that side, and each shoe's picture, read
+/// before the chips, says which side it shows.
 class _Sides extends StatelessWidget {
-  const _Sides({required this.together});
+  const _Sides({required this.items, required this.together});
+  final List<Listing> items;
   final TurnTogether together;
 
   static const _names = {
@@ -272,17 +275,35 @@ class _Sides extends StatelessWidget {
         builder: (context, picked, _) => Padding(
           padding: const EdgeInsets.only(bottom: 8),
           // The chips' tap targets already leave a gap between the rows.
-          child: Wrap(spacing: 8, children: [
-            for (final MapEntry(key: side, value: name) in _names.entries)
-              ChoiceChip(
-                key: Key('compare-side-$side'),
-                label: Text(tr(name)),
-                selected: picked == side,
-                onSelected: (_) => together.showSide(side == TurnTogether.cover ? null : side),
-              ),
-          ]),
+          // Named as a group, as the hint that explains them to the eye describes the drag and is not read.
+          child: Semantics(
+            container: true,
+            explicitChildNodes: true,
+            label: tr('Барлық аяқкиімді бір жағынан көрсету'),
+            child: Wrap(spacing: 8, children: [
+              for (final MapEntry(key: side, value: name) in _names.entries)
+                ChoiceChip(
+                  key: Key('compare-side-$side'),
+                  label: Text(tr(name)),
+                  selected: picked == side,
+                  onSelected: (_) {
+                    together.showSide(side == TurnTogether.cover ? null : side);
+                    if (side != TurnTogether.cover) _announce(context, name);
+                  },
+                ),
+            ]),
+          ),
         ),
       );
+
+  /// The pictures change above the chips, out of a screen reader's focus, so it hears in one line what came of it.
+  void _announce(BuildContext context, String name) {
+    final missing = items.length - _Table.sided(items).length;
+    SemanticsService.sendAnnouncement(
+        View.of(context),
+        missing == 0 ? trf('{0}: барлық аяқкиім', [tr(name)]) : trf('Бұл жағынан фото жоқ: {0}', ['$missing']),
+        Directionality.of(context));
+  }
 }
 
 class _Head extends StatelessWidget {
@@ -297,21 +318,27 @@ class _Head extends StatelessWidget {
       key: Key('compare-open-${listing.id}'),
       onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => ListingScreen(listingId: listing.id))),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        // While a side is picked by name, the picture says which side it shows, or that it has none: a screen
-        // reader pressing a side chip otherwise hears nothing change. The drag stays a picture only.
+        // While a side is picked by name, the picture says which side it shows, or that it has none, for a screen
+        // reader that goes back to the shoes after pressing a side chip. The drag stays a picture only.
         ValueListenableBuilder<String?>(
           valueListenable: together.picked,
           // Always the same wrapper, so picking a side never rebuilds the turning picture under it.
-          builder: (context, _, picture) => Semantics(
-            key: Key('compare-shown-${listing.id}'),
-            label: !together.named
-                ? null
-                : _Table.sided([listing]).isEmpty
-                    ? tr('Бұл жағынан фото жоқ')
-                    : tr(_Sides._names[together.picked.value]!),
-            image: together.named,
-            child: picture,
-          ),
+          builder: (context, _, picture) {
+            final side = _Sides._names[together.picked.value];
+            return Semantics(
+              key: Key('compare-shown-${listing.id}'),
+              // A label only: the picture is an image already, and a second image flag would split it off as a
+              // silent extra stop.
+              label: !together.named
+                  ? null
+                  : _Table.sided([listing]).isEmpty
+                      ? tr('Бұл жағынан фото жоқ')
+                      : side == null
+                          ? null
+                          : tr(side),
+              child: picture,
+            );
+          },
           child: AspectRatio(
             aspectRatio: 1,
             child: Container(
