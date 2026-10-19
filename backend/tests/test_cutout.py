@@ -490,19 +490,35 @@ class ShowcaseUnitTests(unittest.TestCase):
 DEMO = Path(__file__).resolve().parents[2] / "app" / "demo"
 
 
-@unittest.skipUnless((DEMO / "api.json").exists(), "the app is not next to the backend here")
+# CI checks out the whole repository, so there a missing demo is a failure, not a skip.
+@unittest.skipUnless((DEMO / "api.json").exists() or os.environ.get("CI"), "the app is not next to the backend here")
 class RealPhotoSideTests(unittest.TestCase):
-    """The side matching on real photos: the demo's turntable shoes and camera scans, whose sides were checked by
-    eye on the phone (the toe faces the viewer at the front, the heel at the back)."""
+    """The side matching on real photos: the demo's turntable shoe (2, and 4 in another colour) and camera scan (1,
+    and 3 in another colour), whose sides were checked by eye on the phone (the toe faces the viewer at the front,
+    the heel at the back). The demo's side photos are frames of the turn itself, so a seller's own shot is made from
+    a frame a little off the side: smaller, moved, brighter and tilted."""
 
     CHECKED = {  # listing: side: frame of one turn
-        1: {"outer": 36, "front": 14, "inner": 20, "back": 26},  # a scan, the camera going round unevenly
+        1: {"outer": 36, "front": 14, "inner": 20, "back": 26},  # the camera goes round unevenly
         2: {"outer": 0, "front": 9, "inner": 18, "back": 27},
         3: {"outer": 36, "front": 14, "inner": 20, "back": 26},
         4: {"outer": 35, "front": 9, "inner": 18, "back": 27},
     }
 
-    def test_each_side_photo_finds_the_frame_seen_on_the_phone_and_the_sides_go_round_in_order(self):
+    @staticmethod
+    def shot(data: bytes) -> bytes:
+        img = Image.open(io.BytesIO(data)).convert("RGBA")
+        w, h = img.size
+        img = img.rotate(3, resample=Image.BICUBIC).resize((int(w * 0.85), int(h * 0.85)), Image.LANCZOS)
+        rgb = img.convert("RGB").point(lambda v: min(255, int(v * 1.15)))
+        rgb.putalpha(img.getchannel("A"))
+        canvas = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        canvas.paste(rgb, ((w - rgb.width) // 2 + 6, (h - rgb.height) // 2))
+        out = io.BytesIO()
+        canvas.save(out, "WEBP")
+        return out.getvalue()
+
+    def test_a_shot_a_little_off_each_side_finds_the_frame_seen_on_the_phone(self):
         from types import SimpleNamespace
         from vitrina_api.cutout import side_frames
         from vitrina_api.serializers import one_turn
@@ -511,17 +527,26 @@ class RealPhotoSideTests(unittest.TestCase):
         def read(url):
             return (DEMO / "media" / url.split("/demo/media/")[1]).read_bytes()
         for lid, checked in self.CHECKED.items():
-            with self.subTest(listing=lid):
-                media = [SimpleNamespace(**m) for m in answers[f"GET /listings/{lid}"]["media"]]
-                turn, _ = one_turn(media)
-                photos = {side: next(m for m in media if m.angle == side) for side in checked}
-                found = side_frames({side: read(m.thumb_url) for side, m in photos.items()},
-                                    [read(m.thumb_url) for m in turn])
-                self.assertEqual(found, checked)
-                # Outer, front, inner, back: one way round, each a stretch of the turn after the one before.
-                at = [found[side] for side in ("outer", "front", "inner", "back")]
-                steps = [(b - a) % len(turn) for a, b in zip(at, at[1:] + at[:1])]
-                self.assertEqual(sum(steps), len(turn), steps)
+            listing = answers[f"GET /listings/{lid}"]
+            media = [SimpleNamespace(**m) for m in listing["media"]]
+            turn, _ = one_turn(media)
+            n, urls = len(turn), [m.original_url for m in turn]
+            # What the phone shows is what was checked.
+            self.assertEqual({side: urls.index(url) for side, url in listing["angle_frames"].items()}, checked)
+            frames = [read(m.thumb_url) for m in turn]
+            stops = {side: urls.index(next(m for m in media if m.angle == side).original_url) for side in checked}
+            for off in (-2, 2):
+                with self.subTest(listing=lid, off=off):
+                    found = side_frames({side: self.shot(frames[(k + off) % n]) for side, k in stops.items()}, frames)
+                    # The toe and the heel exactly; a side within a couple of frames, where the shoe is about as wide.
+                    self.assertEqual((found["front"], found["back"]), (checked["front"], checked["back"]))
+                    for side in ("outer", "inner"):
+                        gap = (found[side] - checked[side]) % n
+                        self.assertLessEqual(min(gap, n - gap), 2, (side, found))
+                    # Outer, front, inner, back: one way round, each a stretch of the turn after the one before.
+                    at = [found[side] for side in ("outer", "front", "inner", "back")]
+                    steps = [(b - a) % n for a, b in zip(at, at[1:] + at[:1])]
+                    self.assertTrue(all(steps) and sum(steps) in (n, 3 * n), steps)
 
 
 @unittest.skipUnless(os.environ.get("VITRINA_TEST_POSTGRES"), "set VITRINA_TEST_POSTGRES to a Postgres URL")
