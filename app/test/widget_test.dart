@@ -850,27 +850,59 @@ void main() {
     expect(full.verdict, 'Өте жақсы');
   });
 
-  test('the seller is told which photos the model found no shoe in, the turn first', () {
-    Map<String, dynamic> m(String angle, {bool noShoe = false}) =>
-        {'original_url': 'https://x/$angle.jpg', 'processed_url': null, 'angle': angle, 'no_shoe': noShoe};
-    final q = listingQuality(Listing.fromJson({
-      ...listingJson(media: [
-        for (var i = 0; i < 12; i++) m('frame', noShoe: i == 4 || i == 9),
-        m('front', noShoe: true),
-        for (final a in ['outer', 'inner', 'back', 'sole', 'top', 'detail', 'label']) m(a),
-      ]),
+  test('the seller is told to retake the turn and which photos the model found no shoe in', () {
+    Map<String, dynamic> m(String angle, {bool noShoe = false, String? url}) => {
+          'original_url': url ?? 'https://x/$angle.jpg',
+          'processed_url': null,
+          'angle': angle,
+          'no_shoe': noShoe,
+        };
+    final done = {
       'description':
           'Түпнұсқа, бір маусым киілді. Материалы былғары, өлшемі дәл келеді. Кішірейіп қалғандықтан сатамын.',
       'authenticity': 'documented',
+    };
+    final q = listingQuality(Listing.fromJson({
+      ...listingJson(media: [
+        for (var i = 0; i < 12; i++) m('frame', noShoe: i == 4, url: 'https://x/f$i.jpg'),
+        m('front', noShoe: true),
+        m('sole', noShoe: true),
+        for (final a in ['outer', 'inner', 'back', 'top', 'detail', 'label']) m(a),
+      ]),
+      ...done,
     }));
     expect(q.score, 100 - 10 - 5);
     expect(q.tips.map((t) => t.text), [
-      startsWith('360° айналымның 2 кадрында аяқкиім табылмады'),
-      startsWith('1 фотода аяқкиім табылмады'),
+      startsWith('360° айналымды қайта түсіріңіз'),
+      startsWith('Мына фотоларды қайта түсіріңіз: Алдынан, Табаны.'),
     ]);
+    // A scan's sole stop is a frame of the turn: one picture, told about once.
+    final scan = listingQuality(Listing.fromJson({
+      ...listingJson(media: [
+        for (var i = 0; i < 12; i++) m('frame', noShoe: i == 10, url: 'https://x/f$i.jpg'),
+        m('top', url: 'https://x/f8.jpg'),
+        m('sole', noShoe: true, url: 'https://x/f10.jpg'),
+        for (final a in ['front', 'outer', 'inner', 'back', 'detail', 'label']) m(a),
+      ]),
+      ...done,
+    }));
+    expect(scan.tips.map((t) => t.points), [10]);
     // A buyer's copy of the page carries no such flag.
-    expect(listingQuality(Listing.fromJson(listingJson(media: [m('frame')]..first.remove('no_shoe')))).tips,
+    expect(listingQuality(Listing.fromJson(listingJson(media: [m('frame')..remove('no_shoe')]))).tips,
         isNot(contains(predicate((QualityTip t) => t.text.contains('табылмады')))));
+    // Every gap at once still scores 0, not below.
+    final bare = listingJson(media: [m('front', noShoe: true)]);
+    expect(
+        listingQuality(Listing.fromJson({
+          ...bare,
+          'brand': null,
+          'model_name': null,
+          'defects': null,
+          'sizes': [
+            {'id': 1, 'label': '42', 'insole_cm': '27,0', 'available': false}
+          ],
+        })).score,
+        0);
   });
 
   test('order deadline speaks to whoever can still act on it', () {

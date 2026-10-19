@@ -2,8 +2,11 @@
 /// Nothing here is a guess about sales: each tip names a gap a buyer would otherwise ask about in the chat.
 library;
 
+import 'dart:math' as math;
+
 import 'api.dart';
 import 'i18n.dart';
+import 'screens/listing_editor_screen.dart' show optionalAngles, requiredAngles;
 
 /// Below this many frames the 360° viewer has nothing to turn (the server asks for at least 8).
 const min360Frames = 8;
@@ -35,20 +38,24 @@ ListingQuality listingQuality(Listing l) {
   if (l.frames.length < min360Frames) {
     tips.add(QualityTip(25, tr('360° витрина қосыңыз: сатып алушы аяқкиімді жан-жағынан айналдырып көреді.')));
   }
-  // One such frame keeps the whole 360° turn (or its part of a scan) as taken, on its own background.
-  final noShoeFrames = l.frames.where((m) => m.noShoe).length;
-  if (noShoeFrames > 0) {
-    tips.add(QualityTip(
-        10,
-        trf('360° айналымның {0} кадрында аяқкиім табылмады, сондықтан айналым фоны алынбай, түсірілген күйінде көрсетіледі. Ол кадрларды жарық, біркелкі фонда, аяқкиімді толық сыйғызып қайта түсіріңіз.',
-            ['$noShoeFrames'])));
+  // The cut-out job stops a part of the turn at its first frame with no shoe and keeps that part as taken, so the
+  // seller is asked to take the turn again, not told a count of frames; a single frame cannot be retaken anyway.
+  if (l.frames.any((m) => m.noShoe)) {
+    tips.add(QualityTip(10,
+        tr('360° айналымды қайта түсіріңіз: бір кадрында аяқкиім табылмады, сондықтан фоны алынбайды. Аяқкиімнен ерекшеленетін біркелкі фонда, оны әр кадрға толық сыйғызыңыз.')));
   }
-  final noShoePhotos = l.photos.where((m) => m.noShoe).length;
-  if (noShoePhotos > 0) {
+  // A scan's top and sole photos are frames of the turn too: told about once, above.
+  final frameUrls = {for (final f in l.frames) f.originalUrl};
+  final noShoe = [
+    for (final m in l.photos)
+      if (m.noShoe && !frameUrls.contains(m.originalUrl))
+        tr(requiredAngles[m.angle] ?? optionalAngles[m.angle] ?? m.angle)
+  ];
+  if (noShoe.isNotEmpty) {
     tips.add(QualityTip(
         5,
-        trf('{0} фотода аяқкиім табылмады, сондықтан олардың фоны алынбайды. Оларды жарық, біркелкі фонда, аяқкиімді толық сыйғызып қайта түсіріңіз.',
-            ['$noShoePhotos'])));
+        trf('Мына фотоларды қайта түсіріңіз: {0}. Оларда аяқкиім табылмады, сондықтан фоны алынбайды. Аяқкиімнен ерекшеленетін біркелкі фонда түсіріңіз.',
+            [noShoe.join(', ')])));
   }
   final angles = {for (final m in l.photos) m.angle};
   final extra = ['sole', 'top', 'detail', 'label'].where((a) => !angles.contains(a)).length;
@@ -76,5 +83,5 @@ ListingQuality listingQuality(Listing l) {
     tips.add(QualityTip(5, tr('Қалдықты жаңартыңыз: қазір сатылымда бірде-бір өлшем жоқ.')));
   }
   tips.sort((a, b) => b.points.compareTo(a.points));
-  return ListingQuality(100 - tips.fold(0, (sum, t) => sum + t.points), tips);
+  return ListingQuality(math.max(0, 100 - tips.fold(0, (sum, t) => sum + t.points)), tips);
 }
