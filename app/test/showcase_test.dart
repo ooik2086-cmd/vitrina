@@ -97,6 +97,26 @@ void main() {
       expect(plan.steps.last.media.single.angle, 'detail'); // the stitching close-up, not the size label
     });
 
+    test('a turn carries to the same side only when both turns\' ways are known', () {
+      Listing sided(Map<String, String> sides, {String? cover = 'https://cdn/f0.jpg'}) =>
+          Listing.fromJson({...listing(), 'cover_frame': cover, 'angle_frames': sides});
+      final here = sided({'front': 'https://cdn/f0.jpg', 'outer': 'https://cdn/f6.jpg'});
+      // Two opposite sides fit either way round: the way is a guess, not known.
+      expect(TurnMap({0: 0, 0.5: 0.5}).sided, isFalse);
+      expect(TurnMap({0: 0, 0.25: 0.25}).sided, isTrue);
+      const mid = (kind: 'spin', at: 9 / 24);
+      // The other colour's way unknown: as before, the same frame when both start at the same side, else nothing.
+      final opposite = sided({'front': 'https://cdn/f0.jpg', 'back': 'https://cdn/f12.jpg'});
+      expect(ScrollShowcase.carry(mid, here, opposite), mid);
+      expect(ScrollShowcase.carry(mid, here, sided(const {}, cover: null)), isNull);
+      // A side matched a frame before the other turn's first stays at the start, not at the far end of the turn.
+      final early = sided({'front': 'https://cdn/f23.jpg', 'outer': 'https://cdn/f5.jpg'});
+      expect(ScrollShowcase.carry((kind: 'spin', at: 0.0), here, early), (kind: 'spin', at: 0.0));
+      expect(ScrollShowcase.carry(mid, here, early), mid); // a frame apart all round: the same place
+      // The same stop needs no turn at all.
+      expect(ScrollShowcase.carry((kind: 'sole', at: 0.0), here, opposite), (kind: 'sole', at: 0.0));
+    });
+
     test('the same view on another colour: the frame nearest the angle, or the same stop', () {
       final plan = ShowcasePlan.of(Listing.fromJson(listing()));
       final fewer = ShowcasePlan.of(Listing.fromJson({
@@ -825,7 +845,7 @@ void main() {
     expect(page(tester).pixels, 0);
   });
 
-  showcaseTest('with its sides matched, a turn shot another way or from another side opens at the same side',
+  showcaseTest('with its sides matched, a turn started from another side opens at the same side, already loaded',
       (tester) async {
     // This colour turns from its toe towards its outer side; the other starts at its heel and turns the same way
     // round the shoe, so the angle shown here (between heel and outer side) is near the end of its turn.
@@ -846,6 +866,10 @@ void main() {
     await pumpOpened(tester, here, other: other);
     await turnTo(tester, 0, 9);
     await tester.tap(swatch(8));
+    for (var i = 0; i < 5 && screen(8).evaluate().isEmpty; i++) {
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+    expect(shownOn(tester, 8), 'https://cdn/f21-s.webp'); // its very first frame, fetched ahead
     await tester.pumpAndSettle();
     expect(tester.widget<ListingScreen>(screen(8)).view, (kind: 'spin', at: 21 / 24));
     expect(shownOn(tester, 8), 'https://cdn/f21-s.webp');

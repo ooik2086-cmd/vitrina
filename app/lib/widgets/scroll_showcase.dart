@@ -114,9 +114,9 @@ class TurnMap {
     }
     final shares = [for (final a in angles) marks[a]!];
     // The way round in which the marks come in the order of their sides; when both fit (two marks), the one
-    // whose spacing is nearer the sides' own.
+    // whose spacing is nearer the sides' own. Two opposite sides fit both ways equally: the way is then a guess.
     double? bestCost;
-    var way = 0;
+    var way = 0, tied = false;
     for (final w in [1, -1]) {
       var total = 0.0, cost = 0.0;
       for (var k = 0; k < angles.length; k++) {
@@ -125,14 +125,16 @@ class TurnMap {
         total += gap;
         cost += (gap - (angles[n] - angles[k]) % 1).abs();
       }
-      if ((total - 1).abs() < 1e-9 && (bestCost == null || cost < bestCost)) {
-        bestCost = cost;
-        way = w;
+      if ((total - 1).abs() > 1e-9) continue;
+      if (bestCost != null && (cost - bestCost).abs() < 1e-6) {
+        tied = true;
+      } else if (bestCost == null || cost < bestCost) {
+        (bestCost, way, tied) = (cost, w, false);
       }
     }
     // Marks that contradict each other (a front matched to the heel): only the first is kept.
     if (way == 0) return TurnMap._([angles.first], [shares.first], 1, sided: false);
-    return TurnMap._(angles, shares, way, sided: true);
+    return TurnMap._(angles, shares, way, sided: !tied);
   }
 
   /// The marks of [listing] on [turn] (its frames from the first shown): the frames the server matched to its side
@@ -152,9 +154,7 @@ class TurnMap {
   /// The marks of [listing] on the turn its listing page shows.
   factory TurnMap.of(Listing listing) {
     final plan = ShowcasePlan.of(listing);
-    final turn = plan.steps.isEmpty || plan.steps.first.kind != 'spin'
-        ? const <MediaItem>[]
-        : plan.steps.first.media.take(plan.turn).toList();
+    final turn = plan.turnFrames;
     final first = turn.firstOrNull;
     final atCover =
         !plan.scan && first != null && (first.originalUrl == listing.coverFrame || first.url == listing.coverUrl);
@@ -166,7 +166,8 @@ class TurnMap {
   final List<double> _shares;
   final int _way;
 
-  /// Whether at least two sides are known, so which way and how evenly the turn goes is known, not assumed.
+  /// Whether at least two sides are known that settle which way the turn goes (two opposite sides do not), so
+  /// the way and how evenly it goes are known, not assumed. The cover's side counts when the turn starts at it.
   final bool sided;
 
   static const sides = {'outer': 0.0, 'front': 0.25, 'inner': 0.5, 'back': 0.75};
@@ -242,6 +243,9 @@ class ShowcasePlan {
 
   /// Made from one continuous scan: its frames carry their own margin and floor shadow.
   final bool scan;
+
+  /// The frames of one full turn, in the order the page shows them.
+  List<MediaItem> get turnFrames => steps.first.media.take(turn).toList();
 
   /// Frames in one full turn: up to where the first frame comes round again (a scan carries on past it to the
   /// stops), or all of the turn's frames.
@@ -385,17 +389,26 @@ class ScrollShowcase extends StatefulWidget {
     return ResizeImage.resizeIfNeeded(ScrollShowcaseState.thumbSide, null, NetworkImage(m.thumbUrl!));
   }
 
-  /// Whether the same place in two colours' turns is the same angle: both turns start at the frame the server or
-  /// the seller matched to the cover, and both covers show the same side of the shoe.
-  /// [view] of [from] as [to] shows it: the same side of the turn when the server matched both shoes' sides,
-  /// else the same frame when both turns start at the same side; the same stop. Null when [to] cannot show it.
+  /// [view] of [from] as [to] shows it: the same side of the turn when both turns' sides are known, else the
+  /// same frame when both turns start at the same side; the same stop. Null when [to] cannot show it. A scan
+  /// never shows a view (see ShowcasePlan.viewAt), so it opens at its cover.
   static ShowcaseView? carry(ShowcaseView view, Listing from, Listing to) {
     if (view.kind != 'spin') return view;
+    final p = ShowcasePlan.of(from), q = ShowcasePlan.of(to);
     final a = TurnMap.of(from), b = TurnMap.of(to);
-    if (a.sided && b.sided) return (kind: 'spin', at: b.place(a.angle(view.at)));
-    return turnsAlike(from, to) ? view : null;
+    final n = q.steps.first.media.length;
+    // view.at counts all the turn step's frames; the maps count one turn.
+    final share = view.at * p.steps.first.media.length / p.turn;
+    if (p.scan || q.scan || share >= 1 || !a.sided || !b.sided || n == 0) return turnsAlike(from, to) ? view : null;
+    final at = b.place(a.angle(share)) * q.turn / n;
+    // Within a frame or so of the same place, the same place: the side matched on the other colour can sit a
+    // frame before its first, which would otherwise send the page to the far end of the turn.
+    final apart = (at - view.at).abs();
+    return (kind: 'spin', at: math.min(apart, 1 - apart) * n <= 1.5 ? view.at : at);
   }
 
+  /// Whether the same place in two colours' turns is the same angle: both turns start at the frame the server or
+  /// the seller matched to the cover, and both covers show the same side of the shoe.
   static bool turnsAlike(Listing a, Listing b) {
     bool anchored(Listing l) => l.coverFrame != null && l.frames.any((f) => f.originalUrl == l.coverFrame);
     final side = a.photos.firstOrNull?.angle;
