@@ -2865,6 +2865,28 @@ void main() {
       expect(find.byKey(const Key('cover-frame')), findsNothing);
     });
 
+    testWidgets('a photo the model found no shoe in is marked, and the turn says how to take it again', (tester) async {
+      final handle = tester.ensureSemantics();
+      await show(
+          tester,
+          listingJson(media: [
+            {...photos[0], 'no_shoe': true},
+            photos[1],
+            for (final (i, f) in spinFrames.indexed) {...f, 'no_shoe': i == 3},
+          ]));
+      expect(find.byKey(const Key('no-shoe-0')), findsOneWidget);
+      expect(find.byKey(const Key('no-shoe-1')), findsNothing);
+      expect(find.bySemanticsLabel('Алдынан: аяқкиім табылмады, фоны алынбайды'), findsOneWidget);
+      expect(find.byKey(const Key('spin-no-shoe')), findsOneWidget);
+      handle.dispose();
+    });
+
+    testWidgets('a turn and photos the model found a shoe in carry no such mark', (tester) async {
+      await show(tester, listingJson(media: [...photos, ...spinFrames]));
+      expect(find.byKey(const Key('no-shoe-0')), findsNothing);
+      expect(find.byKey(const Key('spin-no-shoe')), findsNothing);
+    });
+
     testWidgets('one Save sends only the name fields the seller changed', (tester) async {
       final sent = await show(
           tester, {...listingJson(media: photos), 'ever_on_sale': true, 'condition': 'used_excellent'},

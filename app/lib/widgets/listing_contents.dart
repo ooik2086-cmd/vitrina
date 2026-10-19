@@ -319,12 +319,29 @@ class _ListingContentsCardState extends State<ListingContentsCard> {
                             height: 80,
                             cacheWidth: 240,
                             fit: BoxFit.cover,
-                            semanticLabel: tr(photoAngles[_l.media[i].angle] ?? ''),
+                            semanticLabel: _l.media[i].noShoe
+                                ? trf('{0}: аяқкиім табылмады, фоны алынбайды',
+                                    [tr(photoAngles[_l.media[i].angle] ?? 'Фото')])
+                                : tr(photoAngles[_l.media[i].angle] ?? ''),
                             errorBuilder: (_, __, ___) => const SizedBox(
                                 width: 80, height: 80, child: Icon(Icons.image_outlined, color: Colors.black54))),
                       ),
                     ),
                   ),
+                  // The model found no shoe in it, so it stays as taken: the one to take again.
+                  if (_l.media[i].noShoe)
+                    Positioned(
+                      left: 4,
+                      bottom: 4,
+                      child: ExcludeSemantics(
+                        child: CircleAvatar(
+                          key: Key('no-shoe-$i'),
+                          radius: 11,
+                          backgroundColor: theme.colorScheme.errorContainer,
+                          child: Icon(Icons.hide_image_outlined, size: 14, color: theme.colorScheme.onErrorContainer),
+                        ),
+                      ),
+                    ),
                   if (removable(i))
                     Positioned(
                       top: 0,
@@ -379,6 +396,20 @@ class _ListingContentsCardState extends State<ListingContentsCard> {
             label: Text(tr('360° өшіру')),
           ),
         ]),
+        if (_l.frames.any((m) => m.noShoe))
+          Padding(
+            key: const Key('spin-no-shoe'),
+            padding: const EdgeInsets.only(bottom: 4),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Icon(Icons.hide_image_outlined, size: 18, color: theme.colorScheme.error),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                    tr('Бір кадрында аяқкиім табылмады, сондықтан айналымның фоны алынбайды. Қайта түсіру үшін 360° өшіріп, жаңасын қосыңыз.'),
+                    style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.error)),
+              ),
+            ]),
+          ),
         // A scan turns from where the camera started; a listing without photos has only frames for a cover.
         if (_l.photos.isNotEmpty && !ShowcasePlan.of(_l).scan)
           ListTile(

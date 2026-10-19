@@ -998,4 +998,7 @@ const en = <String, String>{
       'Retake the 360° view: no shoe was found in one of its frames, so its background is not removed. Shoot on a plain background that contrasts with the shoe, with the whole shoe in every frame.',
   'Мына фотоларды қайта түсіріңіз: {0}. Оларда аяқкиім табылмады, сондықтан фоны алынбайды. Аяқкиімнен ерекшеленетін біркелкі фонда түсіріңіз.':
       'Retake these photos: {0}. No shoe was found in them, so their background is not removed. Shoot on a plain background that contrasts with the shoe.',
+  '{0}: аяқкиім табылмады, фоны алынбайды': '{0}: no shoe found, background not removed',
+  'Бір кадрында аяқкиім табылмады, сондықтан айналымның фоны алынбайды. Қайта түсіру үшін 360° өшіріп, жаңасын қосыңыз.':
+      'No shoe was found in one of the frames, so the view keeps its background. To retake it, delete the 360° view and add a new one.',
 };
