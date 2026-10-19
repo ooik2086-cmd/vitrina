@@ -97,6 +97,9 @@ class ShowcaseStep {
       };
 }
 
+/// What the showcase shows, as ShowcasePlan.viewAt describes it.
+typedef ShowcaseView = ({String kind, double at});
+
 /// Which photo shows at a given scroll position. Only real photos are shown: nothing is generated or blended.
 class ShowcasePlan {
   ShowcasePlan(this.steps, {this.scan = false}) : total = steps.fold(0.0, (sum, s) => sum + s.weight);
@@ -179,17 +182,27 @@ class ShowcasePlan {
     return (step: 0, frame: 0);
   }
 
-  /// Where in the turn [progress] is: 0 to 1 from the turn's first frame, the middle of the frame shown. Both turns
-  /// of a model's colours start at the frame matching the cover, so the same place is the same angle on each. Null
-  /// past the turn, and for a scan, whose turn starts wherever the camera did.
-  double? turnAt(double progress) {
+  /// What the stage shows at [progress], so another colour of the model can show the same: on the turn, the angle
+  /// of the frame shown (0 to 1 from the turn's first frame, which on every colour is the frame matching its cover),
+  /// else the stop (top, sole, close). Null for a scan, whose turn starts wherever the camera did.
+  ShowcaseView? viewAt(double progress) {
     if (scan) return null;
     final shown = at(progress);
-    return shown.step == 0 ? (shown.frame + 0.5) / steps.first.media.length : null;
+    final step = steps[shown.step];
+    return (kind: step.kind, at: shown.step == 0 ? shown.frame / step.media.length : 0.0);
   }
 
-  /// The scroll progress that shows [turnAt] of the turn; null for a scan.
-  double? progressAt(double turnAt) => scan ? null : steps.first.weight * turnAt.clamp(0.0, 1.0) / total;
+  /// The scroll progress that shows [view] here: the middle of the turn's frame nearest that angle, or of the same
+  /// stop. Null for a scan, or without a turn or that stop.
+  double? progressFor(ShowcaseView view) {
+    if (scan) return null;
+    for (var i = 0; i < steps.length; i++) {
+      final n = steps[i].media.length;
+      if (steps[i].kind != view.kind || n == 0) continue;
+      return centreOf(i, i == 0 ? (view.at * n).round() % n : 0);
+    }
+    return null;
+  }
 
   /// Scroll progress at which [step] begins.
   double startOf(int step) => steps.take(step).fold(0.0, (sum, s) => sum + s.weight) / total;
@@ -224,6 +237,7 @@ class ScrollShowcase extends StatefulWidget {
     this.onLock,
     this.onStageTop,
     this.onColor,
+    this.pendingColor,
   });
 
   final Listing listing;
@@ -231,6 +245,9 @@ class ScrollShowcase extends StatefulWidget {
 
   /// Opens another colour of the model; its swatches sit beside the shoe when there is more than one colour.
   final ValueChanged<Colorway>? onColor;
+
+  /// The colour picked and being fetched: its swatch shows that it is on its way.
+  final int? pendingColor;
 
   /// The visible height of the list: the stage fills it while the shoe turns.
   final double stageHeight;
@@ -251,23 +268,32 @@ class ScrollShowcase extends StatefulWidget {
   /// swipe turns the shoe once round (a full screen per turn felt slow and heavy under the finger), and 0.3 per stop.
   static double travelFor(double stageHeight, int steps) => stageHeight * (0.6 + 0.3 * (steps - 1));
 
-  /// The scroll offset at which [listing]'s page, on a stage this high, shows [turnAt] of its turn
-  /// (ShowcasePlan.turnAt); null for a scan.
-  static double? offsetFor(Listing listing, double stageHeight, double turnAt) {
+  /// The scroll offset at which [listing]'s page, on a stage this high, shows [view]; null when it cannot.
+  static double? offsetFor(Listing listing, double stageHeight, ShowcaseView view) {
     final plan = ShowcasePlan.of(listing);
-    final progress = plan.progressAt(turnAt);
+    final progress = plan.progressFor(view);
     return progress == null ? null : progress * travelFor(stageHeight, plan.steps.length);
   }
 
-  /// The small copy the stage draws first for the frame at [turnAt], the same provider, so fetching it ahead fills
-  /// the cache the stage reads; null for a scan, or when the turn has no small copies.
-  static ImageProvider? firstImageAt(Listing listing, double turnAt) {
+  /// The small copy the stage draws first for [view], the same provider, so fetching it ahead fills the cache the
+  /// stage reads; null when [listing] cannot show it or has no small copy for it.
+  static ImageProvider? firstImageAt(Listing listing, ShowcaseView view) {
     final plan = ShowcasePlan.of(listing);
-    if (plan.scan) return null;
-    final step = plan.steps.first;
-    final m = step.media[plan.at(plan.progressAt(turnAt)!).frame];
+    final progress = plan.progressFor(view);
+    if (progress == null) return null;
+    final shown = plan.at(progress);
+    final step = plan.steps[shown.step];
+    final m = step.media[shown.frame];
     if (m.thumbUrl == null || !(step.cut || m.processedUrl == null)) return null;
     return ResizeImage.resizeIfNeeded(ScrollShowcaseState.thumbSide, null, NetworkImage(m.thumbUrl!));
+  }
+
+  /// Whether the same place in two colours' turns is the same angle: both turns start at the frame the server or
+  /// the seller matched to the cover, and both covers show the same side of the shoe.
+  static bool turnsAlike(Listing a, Listing b) {
+    bool anchored(Listing l) => l.coverFrame != null && l.frames.any((f) => f.originalUrl == l.coverFrame);
+    final side = a.photos.firstOrNull?.angle;
+    return anchored(a) && anchored(b) && side != null && side == b.photos.firstOrNull?.angle;
   }
 
   @override
@@ -290,6 +316,7 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
   @visibleForTesting
   int builds = 0;
   static bool _hinted = false; // the short turn that shows scrolling turns the shoe, once per app run
+  bool _hinting = false;
 
   final _viewer = GlobalKey();
   final _pin = GlobalKey();
@@ -303,8 +330,9 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
 
   double get _travel => ScrollShowcase.travelFor(widget.stageHeight, _plan.steps.length);
 
-  /// Where in the turn the shoe stands now (ShowcasePlan.turnAt); null before the page was scrolled.
-  double? get turnAt => _progress > 0 ? _plan.turnAt(_progress) : null;
+  /// What the stage shows now (ShowcasePlan.viewAt); null before the buyer scrolled, and while the first-show hint
+  /// turns the shoe by itself.
+  ShowcaseView? get view => _progress > 0 && !_hinting ? _plan.viewAt(_progress) : null;
 
   double get _progress {
     final s = widget.scroll;
@@ -436,11 +464,15 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
   /// Turns the shoe a few frames and back on first show, so people see that scrolling turns it.
   Future<void> _hint() async {
     if (_hinted || !mounted || _reduceMotion || !widget.scroll.hasClients || widget.scroll.offset > 0) return;
-    _hinted = true;
-    final spin = _plan.steps.length > 1 ? _plan.startOf(1) * _travel : _travel;
-    await widget.scroll.animateTo(spin * 0.12, duration: const Duration(milliseconds: 700), curve: Curves.easeInOut);
-    if (!mounted || !widget.scroll.hasClients) return;
-    await widget.scroll.animateTo(0, duration: const Duration(milliseconds: 700), curve: Curves.easeInOut);
+    _hinted = _hinting = true;
+    try {
+      final spin = _plan.steps.length > 1 ? _plan.startOf(1) * _travel : _travel;
+      await widget.scroll.animateTo(spin * 0.12, duration: const Duration(milliseconds: 700), curve: Curves.easeInOut);
+      if (!mounted || !widget.scroll.hasClients) return;
+      await widget.scroll.animateTo(0, duration: const Duration(milliseconds: 700), curve: Curves.easeInOut);
+    } finally {
+      _hinting = false;
+    }
   }
 
   void _onScroll() {
@@ -844,6 +876,7 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
                                 colors: widget.listing.colors,
                                 ring: scene.fg,
                                 edge: scene.line,
+                                pending: widget.pendingColor,
                                 onPick: widget.onColor!),
                           )
                         : const SizedBox.shrink(),

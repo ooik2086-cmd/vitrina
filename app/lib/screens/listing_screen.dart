@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -39,14 +40,21 @@ class ListingScreen extends StatefulWidget {
       this.sizeLabel,
       this.atDetails = false,
       this.listing,
-      this.turnAt});
+      this.pending,
+      this.view});
   final int listingId;
 
   /// The listing, already fetched: the page shows it at once.
   final Listing? listing;
 
-  /// Where in the 360° turn to open (ShowcasePlan.turnAt): another colour picked mid-turn stays at the same angle.
-  final double? turnAt;
+  /// The listing's request, already sent: the page waits for it instead of sending another.
+  final Future<Listing>? pending;
+
+  /// What the showcase opens showing (ShowcasePlan.viewAt): another colour picked there shows the same.
+  final ShowcaseView? view;
+
+  /// How long a colour picked on the showcase may wait for its listing and photo; slower, it opens at its cover.
+  static const switchBudget = Duration(milliseconds: 700);
 
   /// The size the buyer had picked on another colour of this model: picked here too when it is in stock.
   final String? sizeLabel;
@@ -67,6 +75,7 @@ class ListingScreen extends StatefulWidget {
 class _ListingScreenState extends State<ListingScreen> {
   late Future<Listing> _listing;
   late Listing? _ready = widget.listing;
+  late Future<Listing>? _pending = widget.pending;
   Future<List<Listing>>? _similar;
   int? _sizeId;
   bool _fitChecked = false;
@@ -116,7 +125,9 @@ class _ListingScreenState extends State<ListingScreen> {
   void _loadListing() {
     final ready = _ready;
     _ready = null; // a reload fetches again
-    _listing = ready != null ? Future.value(ready) : SessionScope.of(context).api.listing(widget.listingId);
+    final pending = _pending;
+    _pending = null;
+    _listing = ready != null ? Future.value(ready) : pending ?? SessionScope.of(context).api.listing(widget.listingId);
     _listing.then((l) {
       if (l.status == 'published') rememberViewed(l);
     }, onError: (_) {});
@@ -338,46 +349,61 @@ class _ListingScreenState extends State<ListingScreen> {
           MediaQuery.paddingOf(context).top -
           kToolbarHeight;
 
-  /// Another colour of this model, in place of this one: back still leads where the buyer came from. The size they
-  /// picked comes along, and from the details they land at the details again.
-  bool _switching = false;
+  /// The colour picked and being fetched; a later pick takes its place.
+  int? _pendingColor;
 
+  /// Another colour of this model, in place of this one: back still leads where the buyer came from. The size they
+  /// picked comes along, and from the details they land at the details again. Picked on the showcase, it opens
+  /// showing what this one shows (the same angle of the turn, or the same stop) when it arrives in time.
   Future<void> _openColor(Listing l, Colorway c, {required bool atDetails}) async {
-    if (_switching) return;
+    if (_pendingColor == c.id) return;
+    final route = ModalRoute.of(context);
     final thumb = c.thumbUrl;
-    final size = l.sizes.where((s) => s.id == _sizeId).firstOrNull?.label;
-    final turnAt = atDetails ? null : _showcase.currentState?.turnAt;
+    var view = atDetails ? null : _showcase.currentState?.view;
     Listing? next;
-    if (turnAt != null) {
-      // Mid-turn: fetch the other colour and its frame at this angle first, so it fades in standing as this one
-      // stands. A slow network does not hold the tap up: the page then opens from the cover and turns there.
-      _switching = true;
+    Future<Listing>? pending;
+    if (view != null) {
+      setState(() => _pendingColor = c.id); // the ring moves to it at once
       final api = SessionScope.of(context).api;
-      final ready = () async {
-        final other = await api.listing(c.id);
-        final image = ScrollShowcase.firstImageAt(other, turnAt);
-        if (image != null && mounted) await precacheImage(image, context, onError: (_, __) {});
-        return other;
-      }();
+      final watch = Stopwatch()..start();
+      final fetch = api.listing(c.id);
       try {
-        next = await ready.timeout(const Duration(milliseconds: 1200));
-      } catch (_) {
-        // too slow or failed: the page fetches it itself
+        next = await fetch.timeout(ListingScreen.switchBudget);
+        final image = ScrollShowcase.firstImageAt(next, view);
+        final left = ListingScreen.switchBudget - watch.elapsed;
+        if (image != null && mounted && left > Duration.zero) {
+          await precacheImage(image, context, onError: (_, __) {}).timeout(left, onTimeout: () {});
+        }
+      } on TimeoutException {
+        pending = fetch; // the page waits for the request already made instead of making another
+      } catch (e) {
+        debugPrint('colour ${c.id} could not be fetched ahead: $e');
+        pending = fetch; // the page shows the error and its retry
       }
-      _switching = false;
-      if (!mounted) return;
+      if (!mounted || _pendingColor != c.id) return; // gone, or a later pick took over
+      // Back pressed, or a sheet or the login opened meanwhile: replacing now would replace that instead.
+      if (route?.isCurrent != true) {
+        setState(() => _pendingColor = null);
+        return;
+      }
+      view = _showcase.currentState?.view ?? view; // the buyer may have scrolled on while it came
+      // A slow colour opens at its cover rather than jumping there later; a turn starts at a different angle on
+      // the other colour unless both are anchored to the same side.
+      if (next == null || (view.kind == 'spin' && !ScrollShowcase.turnsAlike(l, next))) view = null;
     }
+    final size = l.sizes.where((s) => s.id == _sizeId).firstOrNull?.label;
     Navigator.of(context).pushReplacement(PageRouteBuilder(
       transitionDuration: const Duration(milliseconds: 200),
       reverseTransitionDuration: const Duration(milliseconds: 200),
       pageBuilder: (_, __, ___) => ListingScreen(
           listingId: c.id,
           listing: next,
+          pending: pending,
           cover: thumb,
           coverIsCutout: c.cutout && thumb != null,
           sizeLabel: size,
           atDetails: atDetails,
-          turnAt: turnAt),
+          view: view),
       // The same shoe in another colour: a quick fade, not a new page sliding in.
       transitionsBuilder: (_, animation, __, child) => FadeTransition(opacity: animation, child: child),
     ));
@@ -431,11 +457,11 @@ class _ListingScreenState extends State<ListingScreen> {
           final at = mounted ? _detailsAt(l) : null;
           if (at != null && _scroll.hasClients) _scroll.jumpTo(min(_scroll.position.maxScrollExtent, at));
         });
-      } else if (widget.turnAt case final turnAt?) {
-        // The same, to the angle the other colour stood at.
+      } else if (widget.view case final view?) {
+        // The same, to what the other colour showed.
         WidgetsBinding.instance.addPostFrameCallback((_) {
           final stage = _stage;
-          final at = mounted && stage != null ? ScrollShowcase.offsetFor(l, stage, turnAt) : null;
+          final at = mounted && stage != null ? ScrollShowcase.offsetFor(l, stage, view) : null;
           if (at != null && _scroll.hasClients) _scroll.jumpTo(min(_scroll.position.maxScrollExtent, at));
         });
       }
@@ -485,6 +511,7 @@ class _ListingScreenState extends State<ListingScreen> {
                             if (mounted) setState(() => _stageTop = top);
                           },
                           onColor: (c) => _openColor(l, c, atDetails: false),
+                          pendingColor: _pendingColor,
                           onDetails: () => _toDetails(l))
                     else
                       // Square on a phone; on a tablet or the web the photo stops growing so the details stay in view.

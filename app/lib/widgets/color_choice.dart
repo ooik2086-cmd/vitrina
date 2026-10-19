@@ -10,8 +10,12 @@ import 'studio.dart';
 /// The same model's colours in this shop as small round photos, this one ringed, always in the same order whichever
 /// colour is open. A sold-out colour is struck through, and still opens: the buyer can look and ask to be told.
 class ColorSwatches extends StatelessWidget {
-  const ColorSwatches({super.key, required this.colors, required this.ring, required this.edge, required this.onPick});
+  const ColorSwatches(
+      {super.key, required this.colors, required this.ring, required this.edge, required this.onPick, this.pending});
   final List<Colorway> colors;
+
+  /// A colour picked and still on its way: the ring moves to it at once, with a small turning arc.
+  final int? pending;
 
   /// The ring around the colour shown, and the thin edge of the others: from the stage or the page they sit on.
   final Color ring;
@@ -37,58 +41,62 @@ class ColorSwatches extends StatelessWidget {
         scrollDirection: Axis.horizontal,
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           for (final c in colors)
-            Semantics(
-              button: !c.current,
-              selected: c.current,
-              label: describe(c),
-              onTap: c.current ? null : () => onPick(c),
-              excludeSemantics: true,
-              child: Tooltip(
-                message: describe(c),
-                excludeFromSemantics: true,
-                child: InkWell(
-                  key: Key('color-${c.id}'),
-                  customBorder: const CircleBorder(),
-                  onTap: c.current ? null : () => onPick(c),
-                  // 48 dp to touch, as the round buttons beside them; the photo inside a ring when it is this one.
-                  child: SizedBox(
-                    width: 48,
-                    height: 48,
-                    child: Center(
-                      child: Container(
-                        key: Key('color-ring-${c.id}'),
-                        width: size,
-                        height: size,
-                        padding: const EdgeInsets.all(3),
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          border: Border.all(color: c.current ? ring : edge, width: c.current ? 2 : 1),
-                        ),
-                        child: ClipOval(
-                          child: Stack(fit: StackFit.expand, children: [
-                            DecoratedBox(
-                              decoration: const BoxDecoration(gradient: studioGradient),
-                              child: c.thumbUrl == null
-                                  ? null
-                                  : Opacity(
-                                      opacity: c.inStock ? 1 : 0.5,
-                                      child: Image(
-                                        image: ResizeImage(NetworkImage(c.thumbUrl!),
-                                            width: side, height: side, policy: ResizeImagePolicy.fit),
-                                        fit: c.cutout ? BoxFit.contain : BoxFit.cover,
-                                        errorBuilder: (_, __, ___) => const SizedBox.expand(),
+            if ((pending == null ? c.current : c.id == pending, c.id == pending) case (final ringed, final coming))
+              Semantics(
+                button: !c.current,
+                selected: c.current,
+                label: describe(c),
+                onTap: c.current ? null : () => onPick(c),
+                excludeSemantics: true,
+                child: Tooltip(
+                  message: describe(c),
+                  excludeFromSemantics: true,
+                  child: InkWell(
+                    key: Key('color-${c.id}'),
+                    customBorder: const CircleBorder(),
+                    onTap: c.current ? null : () => onPick(c),
+                    // 48 dp to touch, as the round buttons beside them; the photo inside a ring when it is this one.
+                    child: SizedBox(
+                      width: 48,
+                      height: 48,
+                      child: Center(
+                        child: Container(
+                          key: Key('color-ring-${c.id}'),
+                          width: size,
+                          height: size,
+                          padding: const EdgeInsets.all(3),
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(color: ringed ? ring : edge, width: ringed ? 2 : 1),
+                          ),
+                          child: ClipOval(
+                            child: Stack(fit: StackFit.expand, children: [
+                              DecoratedBox(
+                                decoration: const BoxDecoration(gradient: studioGradient),
+                                child: c.thumbUrl == null
+                                    ? null
+                                    : Opacity(
+                                        opacity: c.inStock ? 1 : 0.5,
+                                        child: Image(
+                                          image: ResizeImage(NetworkImage(c.thumbUrl!),
+                                              width: side, height: side, policy: ResizeImagePolicy.fit),
+                                          fit: c.cutout ? BoxFit.contain : BoxFit.cover,
+                                          errorBuilder: (_, __, ___) => const SizedBox.expand(),
+                                        ),
                                       ),
-                                    ),
-                            ),
-                            if (!c.inStock) CustomPaint(key: Key('color-sold-out-${c.id}'), painter: _Strike(ring)),
-                          ]),
+                              ),
+                              if (!c.inStock) CustomPaint(key: Key('color-sold-out-${c.id}'), painter: _Strike(ring)),
+                              if (coming)
+                                CircularProgressIndicator(
+                                    key: Key('color-coming-${c.id}'), strokeWidth: 2, color: ring),
+                            ]),
+                          ),
                         ),
                       ),
                     ),
                   ),
                 ),
               ),
-            ),
         ]),
       ),
     );
