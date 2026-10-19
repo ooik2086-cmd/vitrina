@@ -7,6 +7,7 @@ import '../labels.dart';
 import '../my_size.dart';
 import '../theme.dart';
 import '../widgets/card_turn.dart';
+import '../widgets/scroll_showcase.dart' show TurnMap;
 import '../widgets/common.dart';
 import '../widgets/studio.dart';
 import 'listing_screen.dart';
@@ -163,6 +164,7 @@ class _Table extends StatelessWidget {
                   style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
             ),
           ),
+        if (items.where((l) => CardTurn.framesOf(l).isNotEmpty).length > 1) _Sides(together: together),
         _Row(
           label: tr('Барлығы, жеткізумен'),
           items: items,
@@ -234,6 +236,38 @@ class _Table extends StatelessWidget {
       ]),
     );
   }
+}
+
+/// One tap shows every compared shoe from the same side, for those who would rather not drag (and for screen
+/// readers, which cannot): the sides as the listing editor names them, then the covers again.
+class _Sides extends StatelessWidget {
+  const _Sides({required this.together});
+  final TurnTogether together;
+
+  static const _names = {'outer': 'Сырт бүйірі', 'front': 'Алдынан', 'inner': 'Ішкі бүйірі', 'back': 'Өкшесі'};
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+        listenable: together,
+        builder: (context, _) => Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Wrap(spacing: 8, runSpacing: 4, children: [
+            for (final MapEntry(key: side, value: name) in _names.entries)
+              ChoiceChip(
+                key: Key('compare-side-$side'),
+                label: Text(tr(name)),
+                selected: together.at == TurnMap.sides[side],
+                onSelected: (_) => together.showSide(TurnMap.sides[side]),
+              ),
+            ChoiceChip(
+              key: const Key('compare-side-cover'),
+              label: Text(tr('Мұқаба')),
+              selected: together.at == null,
+              onSelected: (_) => together.showSide(null),
+            ),
+          ]),
+        ),
+      );
 }
 
 class _Head extends StatelessWidget {

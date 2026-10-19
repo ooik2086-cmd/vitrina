@@ -77,6 +77,9 @@ class TurnTogether extends ChangeNotifier {
   double? _at;
   double? get at => _at;
 
+  /// Turns every shoe to show [side] (a shared angle; see [TurnMap.sides]), or their covers when null.
+  void showSide(double? side) => _set(side);
+
   void _set(double? at) {
     if (_at == at) return;
     _at = at;

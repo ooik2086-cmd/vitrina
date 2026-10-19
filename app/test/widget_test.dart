@@ -3382,6 +3382,33 @@ void main() {
         await g.up();
       });
 
+      testWidgets('one tap shows every shoe from the same side, without dragging', (tester) async {
+        tester.view.physicalSize = const Size(2400, 3600); // 800 by 1200, room for the sides under the shoes
+        addTearDown(tester.view.reset);
+        await pumpCompare(tester, [
+          marked(7, {'outer': 0, 'front': 3}),
+          marked(8, {'outer': 0, 'front': 9})
+        ]);
+        await tester.pump();
+        bool on(String side) => tester.widget<ChoiceChip>(find.byKey(Key('compare-side-$side'))).selected;
+        expect(on('cover'), isTrue);
+        await tester.tap(find.byKey(const Key('compare-side-front')));
+        await tester.pump();
+        expect((shownIn(tester, 7), shownIn(tester, 8)), ('https://cdn/t3.webp', 'https://cdn/t9.webp'));
+        expect((on('front'), on('cover')), (true, false));
+        await tester.tap(find.byKey(const Key('compare-side-back')));
+        await tester.pump();
+        expect((shownIn(tester, 7), shownIn(tester, 8)), ('https://cdn/t9.webp', 'https://cdn/t3.webp'));
+        // A drag leaves the named sides; the covers come back with one tap.
+        final g = await turn(tester, 7, 1 / 12);
+        await g.up();
+        await tester.pump();
+        expect(['outer', 'front', 'inner', 'back', 'cover'].where(on), isEmpty);
+        await tester.tap(find.byKey(const Key('compare-side-cover')));
+        await tester.pump();
+        expect((shownIn(tester, 7), shownIn(tester, 8)), (null, null));
+      });
+
       test('the shared angle lays each turn through its sides, whichever way and however evenly it goes', () {
         const outer = 0.0, front = 0.25, inner = 0.5, back = 0.75;
         final even = TurnMap({});
