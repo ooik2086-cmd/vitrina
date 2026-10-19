@@ -289,7 +289,7 @@ class ShowcasePlan {
   ShowcaseView? viewAt(double progress) {
     final shown = at(progress);
     final step = steps[shown.step];
-    return (kind: step.kind, at: shown.step == 0 ? shown.frame / step.media.length : 0.0);
+    return (kind: step.kind, at: shown.frame / step.media.length);
   }
 
   /// The scroll progress that shows [view] here: the middle of the turn's frame nearest that place, or of the same
@@ -298,7 +298,8 @@ class ShowcasePlan {
     for (var i = 0; i < steps.length; i++) {
       final n = steps[i].media.length;
       if (steps[i].kind != view.kind || n == 0) continue;
-      return centreOf(i, i == 0 ? (view.at * n).round() % n : 0);
+      // On a stop, how far into its move (a scan's stop carries on towards the next one); one photo has none.
+      return centreOf(i, i == 0 ? (view.at * n).round() % n : math.min(n - 1, (view.at * n).floor()));
     }
     return null;
   }
@@ -393,19 +394,38 @@ class ScrollShowcase extends StatefulWidget {
   static ShowcaseView? carry(ShowcaseView view, Listing from, Listing to) {
     if (view.kind != 'spin') return view;
     final p = ShowcasePlan.of(from), q = ShowcasePlan.of(to);
-    final a = TurnMap.of(from), b = TurnMap.of(to);
     final n = q.steps.first.media.length;
-    // view.at counts all the turn step's frames; the maps count one turn.
-    final share = view.at * p.steps.first.media.length / p.turn;
-    if (share >= 1 || !a.sided || !b.sided || n == 0) {
+    // view.at counts all the turn step's frames; a scan's step carries on past its turn, rising over the top.
+    final m = p.steps.first.media.length;
+    var frame = (view.at * m).round();
+    if (frame > p.turn) {
+      final rise = (frame - p.turn) / (m - p.turn);
+      // Another scan: the same place on its rise. Photos: still the side early on, the top once well up.
+      if (q.scan && n > q.turn) return (kind: 'spin', at: (q.turn + (rise * (n - q.turn)).round()) / n);
+      final next = p.steps.length > 1 ? p.steps[1].kind : null;
+      if (rise >= 0.5) {
+        return next == null || q.progressFor((kind: next, at: 0)) == null ? null : (kind: next, at: 0.0);
+      }
+      frame = 0;
+    }
+    if (!mayCarry(view, from) || !TurnMap.of(to).sided || n == 0) {
       return !p.scan && !q.scan && turnsAlike(from, to) ? view : null;
     }
-    final at = b.place(a.angle(share)) * q.turn / n;
-    // Within a frame or so of the same place, the same place: the side matched on the other colour can sit a
-    // frame before its first, which would otherwise send the page to the far end of the turn.
-    final apart = (at - view.at).abs();
-    return (kind: 'spin', at: math.min(apart, 1 - apart) * n <= 1.5 ? view.at : at);
+    // In the other turn's own frames, kept within its turn (a scan's step goes on past it).
+    final share = (frame % p.turn) / p.turn;
+    int inTurn(double s) => (s * q.turn).round() % q.turn;
+    final at = inTurn(TurnMap.of(to).place(TurnMap.of(from).angle(share)));
+    // Within a frame of the same place, the same place: the side matched on the other colour can sit a frame
+    // before its first, which would otherwise send the page to the far end of the turn.
+    final same = inTurn(share);
+    final apart = (at - same).abs();
+    return (kind: 'spin', at: (math.min(apart, q.turn - apart) <= 1 ? same : at) / n);
   }
+
+  /// Whether a turn [view] of [from] can carry to another colour at all: a scan's turn starts wherever the camera
+  /// did, so only through its known sides. Otherwise the colour opens at its cover without waiting for it.
+  static bool mayCarry(ShowcaseView view, Listing from) =>
+      view.kind != 'spin' || !ShowcasePlan.of(from).scan || TurnMap.of(from).sided;
 
   /// Whether the same place in two colours' turns is the same angle: both turns start at the frame the server or
   /// the seller matched to the cover, and both covers show the same side of the shoe.

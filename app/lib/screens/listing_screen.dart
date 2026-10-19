@@ -360,6 +360,7 @@ class _ListingScreenState extends State<ListingScreen> {
     final route = ModalRoute.of(context);
     final thumb = c.thumbUrl;
     var view = atDetails ? null : _showcase.currentState?.view;
+    if (view != null && !ScrollShowcase.mayCarry(view, l)) view = null;
     Listing? next;
     Future<Listing>? pending;
     if (view != null) {

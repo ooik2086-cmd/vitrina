@@ -138,11 +138,13 @@ void main() {
       expect(plan.at(plan.progressFor(sole)!), (step: 2, frame: 0));
       expect(fewer.progressFor(sole), isNull); // no sole photo: the page opens at its cover
       final scanned = ShowcasePlan.of(Listing.fromJson(scan()));
-      // A scan tells where it is too; its stops open at their own frames.
+      // A scan tells where it is too: on a stop, how far into its move to the next, which another scan shows the
+      // same and a single photo as itself.
       expect(scanned.viewAt(scanned.centreOf(0, 3))!.kind, 'spin');
       final top = scanned.steps.indexWhere((s) => s.kind != 'spin');
       final stop = scanned.viewAt(scanned.centreOf(top, 2))!;
-      expect(scanned.at(scanned.progressFor(stop)!), (step: top, frame: 0));
+      expect(scanned.at(scanned.progressFor(stop)!), (step: top, frame: 2));
+      expect(plan.at(plan.progressFor(stop)!), (step: plan.steps.indexWhere((s) => s.kind == 'top'), frame: 0));
       // Its turn starts wherever the camera did: without known sides it carries nowhere, even to itself.
       final scanListing = Listing.fromJson(scan());
       expect(ScrollShowcase.carry((kind: 'spin', at: 0.25), scanListing, scanListing), isNull);
@@ -154,6 +156,27 @@ void main() {
           });
       expect(ScrollShowcase.carry((kind: 'spin', at: 3 / 12), sidedScan(0, 2), sidedScan(4, 6)),
           (kind: 'spin', at: 7 / 12));
+      // A photo turn near its end carried to a scan stays in the scan's turn, never on its rise over the top.
+      final photos = Listing.fromJson({
+        ...listing(),
+        'cover_frame': 'https://cdn/f0.jpg',
+        'angle_frames': {'outer': 'https://cdn/f22.jpg', 'front': 'https://cdn/f4.jpg'},
+      });
+      final toScan = ScrollShowcase.carry((kind: 'spin', at: 22 / 24), photos, sidedScan(0, 2))!;
+      expect(scanned.at(scanned.progressFor(toScan)!), (step: 0, frame: 7)); // a frame from the outer side, f0
+      // On the rise past its turn a scan is heading for the top: another scan opens at the same place on its rise,
+      // photos at the side early on and at the top once well up. The frame where the turn comes round again is its
+      // start.
+      expect(ScrollShowcase.carry((kind: 'spin', at: 10 / 12), sidedScan(0, 2), sidedScan(4, 6)),
+          (kind: 'spin', at: 10 / 12));
+      expect(ScrollShowcase.carry((kind: 'spin', at: 11 / 12), sidedScan(0, 2), photos), (kind: 'top', at: 0.0));
+      expect(ScrollShowcase.carry((kind: 'spin', at: 9 / 12), sidedScan(0, 2), photos)!.kind, 'spin');
+      expect(
+          ScrollShowcase.carry((kind: 'spin', at: 8 / 12), sidedScan(0, 2), sidedScan(0, 2)), (kind: 'spin', at: 0.0));
+      // A scan without known sides does not even wait for the other colour.
+      expect(ScrollShowcase.mayCarry((kind: 'spin', at: 0.25), scanListing), isFalse);
+      expect(ScrollShowcase.mayCarry((kind: 'spin', at: 0.25), sidedScan(0, 2)), isTrue);
+      expect(ScrollShowcase.mayCarry((kind: 'top', at: 0.0), scanListing), isTrue);
       // Turns compare only when both start at the frame matched to a cover of the same side.
       final a = Listing.fromJson({...listing(), 'cover_frame': 'https://cdn/f0.jpg'});
       expect(ScrollShowcase.turnsAlike(a, a), isTrue);
