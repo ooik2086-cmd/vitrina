@@ -82,7 +82,8 @@ class Listing(Base):
     # light | dark: the backdrop the cut-out shoe stands out on (a dark shoe gets a light one); None without a cut-out
     backdrop: Mapped[str | None] = mapped_column(String(10))
     # The 360° frame (its original_url) that shows the shoe as the cover photo does, and that cover's original_url:
-    # a turn starts there. Chosen by the seller or matched by the media job; a new cover or new frames void it.
+    # a turn starts there. Chosen by the seller or matched by the media job; a new cover, or removing that frame,
+    # voids it.
     cover_frame: Mapped[str | None] = mapped_column(String(500))
     cover_frame_of: Mapped[str | None] = mapped_column(String(500))
     search_text: Mapped[str] = mapped_column(Text, default="")

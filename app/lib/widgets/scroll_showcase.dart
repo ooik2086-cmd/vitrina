@@ -299,7 +299,8 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
     _photoEdge = null;
   }
 
-  static String _signature(Listing l) => [l.backdrop, for (final m in l.media) '${m.url}|${m.thumbUrl}'].join(',');
+  static String _signature(Listing l) =>
+      [l.backdrop, l.coverFrame, for (final m in l.media) '${m.url}|${m.thumbUrl}'].join(',');
 
   @override
   void didUpdateWidget(ScrollShowcase oldWidget) {

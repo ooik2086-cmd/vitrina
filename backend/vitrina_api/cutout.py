@@ -146,7 +146,8 @@ def _match_print(data: bytes) -> Image.Image:
     img = Image.open(io.BytesIO(data))
     img.load()
     img = img.convert("RGBA")
-    box = img.getchannel("A").getbbox()
+    # The box of the solid shoe: the faint haze a segmenter leaves at the edges would otherwise stretch it.
+    box = img.getchannel("A").point(lambda v: 255 if v >= 128 else 0).getbbox()
     if box and box != (0, 0, *img.size):
         img = img.crop(box)  # a cut-out: the shoe without the empty canvas around it
     flat = Image.new("RGBA", img.size, (128, 128, 128, 255))
@@ -156,12 +157,16 @@ def _match_print(data: bytes) -> Image.Image:
 
 def closest_frame(cover: bytes, frames: list[bytes]) -> int | None:
     """Which of the 360° frames shows the shoe as the cover photo does, so a turn can start from the cover's angle.
-    None when no frame can be read."""
-    target = list(_match_print(cover).getdata())
+    None when the cover or no frame can be read."""
+    try:
+        target = _match_print(cover).tobytes()
+    except Exception:
+        log.exception("the cover could not be compared")
+        return None
     best, best_gap = None, None
     for i, data in enumerate(frames):
         try:
-            seen = list(_match_print(data).getdata())
+            seen = _match_print(data).tobytes()
         except Exception:
             log.exception("frame %s could not be compared", i)
             continue

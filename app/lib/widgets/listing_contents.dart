@@ -12,6 +12,7 @@ import '../screens/spin_capture_screen.dart';
 import '../session.dart';
 import '../theme.dart';
 import 'common.dart';
+import 'scroll_showcase.dart' show ShowcasePlan;
 
 /// The server's own minimum (Settings.min_listing_photos) for a listing that is or was on sale.
 const _minPhotosOnSale = 4;
@@ -243,9 +244,22 @@ class _ListingContentsCardState extends State<ListingContentsCard> {
   }
 
   Future<void> _pickCoverFrame() async {
+    // The server matches the cover after the photos are processed: start from its latest choice, not the one this
+    // page loaded with.
+    setState(() => _busy = true);
+    var l = _l;
+    try {
+      l = await SessionScope.of(context).api.listing(_l.id);
+      if (mounted) widget.onChanged(l);
+    } catch (_) {
+      // offline: the picker still works from what this page has
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+    if (!mounted) return;
     final picked = await showModalBottomSheet<String>(
-        context: context, isScrollControlled: true, builder: (_) => CoverFramePicker(listing: _l));
-    if (picked == null || picked == _l.coverFrame || !mounted) return;
+        context: context, isScrollControlled: true, builder: (_) => CoverFramePicker(listing: l));
+    if (picked == null || picked == l.coverFrame || !mounted) return;
     await _run((api) => api.editListing(_l.id, coverFrame: picked), tr('360° айналым осы бұрыштан басталады'));
   }
 
@@ -365,7 +379,8 @@ class _ListingContentsCardState extends State<ListingContentsCard> {
             label: Text(tr('360° өшіру')),
           ),
         ]),
-        if (_l.coverUrl != null)
+        // A scan turns from where the camera started; a listing without photos has only frames for a cover.
+        if (_l.photos.isNotEmpty && !ShowcasePlan.of(_l).scan)
           ListTile(
             key: const Key('cover-frame'),
             contentPadding: EdgeInsets.zero,
@@ -395,60 +410,124 @@ class CoverFramePicker extends StatefulWidget {
 
 class _CoverFramePickerState extends State<CoverFramePicker> {
   late final List<MediaItem> _frames = widget.listing.frames;
-  late int _at = math.max(0, _frames.indexWhere((f) => f.originalUrl == widget.listing.coverFrame));
 
-  Widget _photo(String url, String label) {
+  /// The marked frame, else the frame that is the cover itself, else the first.
+  late int _at = () {
+    final l = widget.listing;
+    final marked = _frames.indexWhere((f) => f.originalUrl == l.coverFrame);
+    return marked >= 0 ? marked : math.max(0, _frames.indexWhere((f) => f.url == l.coverUrl));
+  }();
+
+  /// Frames whose picture has arrived; Save waits for the one shown, so what is saved is what the seller saw.
+  final _ready = <int>{};
+  bool _fetching = false;
+
+  ImageProvider _image(MediaItem m) => ResizeImage.resizeIfNeeded(480, null, NetworkImage(m.thumbUrl ?? m.url));
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_fetching) return;
+    _fetching = true;
+    // Nearest the starting frame first, so the slider shows each frame the moment it gets there.
+    final order = [for (var i = 0; i < _frames.length; i++) i]..sort((a, b) => (a - _at).abs() - (b - _at).abs());
+    () async {
+      for (final i in order) {
+        await precacheImage(_image(_frames[i]), context, onError: (_, __) {});
+        if (!mounted) return;
+        setState(() => _ready.add(i));
+      }
+    }();
+  }
+
+  void _go(int i) => setState(() => _at = i.clamp(0, _frames.length - 1));
+
+  Widget _photo(ImageProvider image, String label, double size, {bool loading = false}) {
     final theme = Theme.of(context);
-    return Expanded(
-      child: Column(children: [
-        AspectRatio(
-          aspectRatio: 1,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(14),
-            child: ColoredBox(
-              color: Brand.studio, // cut-outs are transparent
-              child: Image.network(url,
+    return Column(children: [
+      SizedBox.square(
+        dimension: size,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(14),
+          child: ColoredBox(
+            color: Brand.studio, // cut-outs are transparent
+            child: Stack(fit: StackFit.expand, children: [
+              Image(
+                  image: image,
                   fit: BoxFit.contain,
-                  cacheWidth: 480,
                   gaplessPlayback: true, // the last frame stays while the next loads
-                  semanticLabel: label,
+                  excludeFromSemantics: true, // the caption below says what it is
                   errorBuilder: (_, __, ___) => const Icon(Icons.image_outlined, color: Colors.black54)),
-            ),
+              if (loading)
+                const Center(
+                    child: SizedBox.square(
+                        dimension: 28, child: CircularProgressIndicator(strokeWidth: 3, color: Colors.black54))),
+            ]),
           ),
         ),
-        const SizedBox(height: 6),
-        Text(label, style: theme.textTheme.labelMedium),
-      ]),
-    );
+      ),
+      const SizedBox(height: 6),
+      Text(label, style: theme.textTheme.labelMedium, textAlign: TextAlign.center),
+    ]);
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final cover = widget.listing.coverUrl!;
+    final l = widget.listing;
+    final cover = l.photos.first;
     final frame = _frames[_at];
+    final n = _frames.length;
+    final ready = _ready.contains(_at);
+    final screen = MediaQuery.sizeOf(context);
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Text(tr('Айналым қай бұрыштан басталады'), style: theme.textTheme.titleLarge),
-          const SizedBox(height: 4),
-          Text(tr('Сырғытпаны жылжытып, мұқабадағыдай көрінетін кадрды табыңыз.'), style: theme.textTheme.bodySmall),
-          const SizedBox(height: 16),
-          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            _photo(cover, tr('Мұқаба')),
-            const SizedBox(width: 12),
-            _photo(frame.thumbUrl ?? frame.url, trf('Кадр {0} / {1}', [_at + 1, _frames.length])),
-          ]),
-          const SizedBox(height: 8),
-          Slider(
-            key: const Key('cover-frame-slider'),
-            value: _at.toDouble(),
-            max: (_frames.length - 1).toDouble(),
-            divisions: math.max(1, _frames.length - 1),
-            label: '${_at + 1}',
-            semanticFormatterCallback: (v) => trf('Кадр {0} / {1}', [v.round() + 1, _frames.length]),
-            onChanged: (v) => setState(() => _at = v.round()),
+          // Everything but the buttons scrolls, so a phone on its side or large text still reaches Save.
+          Flexible(
+            child: SingleChildScrollView(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                Text(tr('Айналым қай бұрыштан басталады'), style: theme.textTheme.titleLarge),
+                const SizedBox(height: 4),
+                Text(tr('Сырғытпаны жылжытып, мұқабадағыдай көрінетін кадрды табыңыз.'),
+                    style: theme.textTheme.bodySmall),
+                const SizedBox(height: 16),
+                LayoutBuilder(builder: (context, box) {
+                  // Side by side, as large as fits, but never taller than a third of the screen.
+                  final size = math.min((box.maxWidth - 12) / 2, screen.height * 0.35);
+                  return Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                    _photo(_image(cover), tr('Мұқаба'), size),
+                    const SizedBox(width: 12),
+                    _photo(_image(frame), trf('Кадр {0} / {1}', [_at + 1, n]), size, loading: !ready),
+                  ]);
+                }),
+                const SizedBox(height: 8),
+                Row(children: [
+                  IconButton(
+                    key: const Key('cover-frame-prev'),
+                    tooltip: tr('Алдыңғы кадр'),
+                    onPressed: _at > 0 ? () => _go(_at - 1) : null,
+                    icon: const Icon(Icons.chevron_left),
+                  ),
+                  Expanded(
+                    child: Slider(
+                      key: const Key('cover-frame-slider'),
+                      value: _at.toDouble(),
+                      max: (n - 1).toDouble(),
+                      semanticFormatterCallback: (v) => trf('Кадр {0} / {1}', [v.round() + 1, n]),
+                      onChanged: (v) => _go(v.round()),
+                    ),
+                  ),
+                  IconButton(
+                    key: const Key('cover-frame-next'),
+                    tooltip: tr('Келесі кадр'),
+                    onPressed: _at < n - 1 ? () => _go(_at + 1) : null,
+                    icon: const Icon(Icons.chevron_right),
+                  ),
+                ]),
+              ]),
+            ),
           ),
           const SizedBox(height: 8),
           Row(children: [
@@ -457,7 +536,7 @@ class _CoverFramePickerState extends State<CoverFramePicker> {
             Expanded(
               child: FilledButton(
                   key: const Key('cover-frame-save'),
-                  onPressed: () => Navigator.pop(context, frame.originalUrl),
+                  onPressed: ready ? () => Navigator.pop(context, frame.originalUrl) : null,
                   child: Text(tr('Сақтау'))),
             ),
           ]),

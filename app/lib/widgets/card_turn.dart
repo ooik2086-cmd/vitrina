@@ -43,8 +43,9 @@ class CardTurn extends StatefulWidget {
     var turn = spin.media.take(plan.turn).toList();
     if (turn.length < 8) return const [];
     if (!spin.media.every((m) => m.thumbUrl != null && (spin.cut || m.processedUrl == null))) return const [];
-    // From the frame matching the cover: the one the seller or the server marked, else the cover itself.
-    var start = turn.indexWhere((m) => m.originalUrl == l.coverFrame);
+    // From the frame matching the cover: the one the seller or the server marked, else the cover itself. A scan,
+    // like its listing page, keeps to where the camera started unless its cover is one of its frames.
+    var start = plan.scan ? -1 : turn.indexWhere((m) => m.originalUrl == l.coverFrame);
     if (start < 0) start = math.max(0, turn.indexWhere((m) => m.url == l.coverUrl));
     turn = [...turn.skip(start), ...turn.take(start)];
     if (turn.length <= maxFrames) return turn;
@@ -77,8 +78,12 @@ class _CardTurnState extends State<CardTurn> with SingleTickerProviderStateMixin
     _plan();
   }
 
-  static String _signatureOf(Listing l) =>
-      [l.id, l.coverUrl, for (final m in l.frames) '${m.originalUrl}|${m.processedUrl}|${m.thumbUrl}'].join(',');
+  static String _signatureOf(Listing l) => [
+        l.id,
+        l.coverUrl,
+        l.coverFrame,
+        for (final m in l.frames) '${m.originalUrl}|${m.processedUrl}|${m.thumbUrl}'
+      ].join(',');
 
   @override
   void didUpdateWidget(CardTurn old) {

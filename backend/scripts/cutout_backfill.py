@@ -1,5 +1,5 @@
-"""Prepare photos of existing listings: transparent-background versions, small scrolling copies, the backdrop
-and search-by-photo vectors.
+"""Prepare photos of existing listings: transparent-background versions, small scrolling copies, the backdrop,
+the 360° frame that matches the cover and search-by-photo vectors.
 
     VITRINA_CUTOUT_MODEL=models/isnet-general-use.onnx VITRINA_SEARCH_MODEL=models/mobilenetv2-12.onnx \
         python3 scripts/cutout_backfill.py
@@ -32,7 +32,9 @@ def main() -> None:
     with state.sessions() as db:
         uncut = select(Media.listing_id).where(Media.processed_url.is_(None) | Media.thumb_url.is_(None))
         current = select(ListingEmbedding.listing_id).where(ListingEmbedding.model == visual.MODEL_NAME)
-        ids = db.scalars(select(Listing.id).where(Listing.id.in_(uncut) | Listing.id.not_in(current))
+        turning = select(Media.listing_id).where(Media.angle == "frame")
+        unmatched = Listing.id.in_(turning) & Listing.cover_frame.is_(None)
+        ids = db.scalars(select(Listing.id).where(Listing.id.in_(uncut) | Listing.id.not_in(current) | unmatched)
                          .order_by(Listing.id)).all()
     for lid in ids:
         cut = cutout_listing(state, lid)

@@ -51,13 +51,17 @@ class CutoutUnitTests(unittest.TestCase):
         self.assertEqual((out.format, out.mode), ("WEBP", "RGBA"))
 
 
-def wedge(direction: str, size=(480, 360), box=(80, 80, 400, 280)) -> bytes:
-    """A cut-out "shoe": a wedge on a transparent canvas, its point to the left or right."""
+def wedge(direction: str, size=(480, 360), box=(80, 80, 400, 280), haze=False) -> bytes:
+    """A cut-out "shoe": a wedge on a transparent canvas, its point to the left or right; with haze, the nearly
+    clear specks a segmenter leaves in the corners."""
     img = Image.new("RGBA", size, (0, 0, 0, 0))
     x0, y0, x1, y1 = box
     points = [(x0, (y0 + y1) // 2), (x1, y0), (x1, y1)] if direction == "left" else [(x1, (y0 + y1) // 2),
                                                                                        (x0, y0), (x0, y1)]
     ImageDraw.Draw(img).polygon(points, fill=(60, 60, 70, 255))
+    if haze:
+        img.putpixel((0, 0), (60, 60, 70, 3))
+        img.putpixel((size[0] - 1, size[1] - 1), (60, 60, 70, 3))
     out = io.BytesIO()
     img.save(out, "PNG")
     return out.getvalue()
@@ -69,6 +73,13 @@ class CoverFrameUnitTests(unittest.TestCase):
         frames = [wedge("left"), b"not an image", wedge("right", box=(200, 150, 360, 250)), wedge("left")]
         self.assertEqual(closest_frame(cover, frames), 2)
         self.assertIsNone(closest_frame(cover, [b"broken"]))
+
+    def test_faint_specks_at_the_edges_do_not_change_the_shoe_box(self):
+        cover = wedge("right")
+        # A small shoe in a corner: only the crop to the shoe makes it look like the cover; the decoy points the
+        # other way but sits where the cover's shoe sits.
+        frames = [wedge("left", box=(90, 90, 390, 270)), wedge("right", box=(300, 220, 460, 340), haze=True)]
+        self.assertEqual(closest_frame(cover, frames), 1)
 
 
 class CutoutApiTests(MediaTests):
@@ -214,7 +225,6 @@ class CutoutApiTests(MediaTests):
         return [{"url": self.upload(self.seller, solid(c)).json()["url"], "angle": "frame"} for c in colours]
 
     def test_the_turn_starts_at_the_frame_that_looks_like_the_cover_unless_the_seller_chose_one(self):
-        self.app.state.segmenter = None
         shades = [(20 + 25 * i, 20 + 25 * i, 20 + 25 * i) for i in range(8)]
         frames = self.frames(shades)
         cover = self.four(shades[5])  # the cover looks like the sixth frame
@@ -238,6 +248,33 @@ class CutoutApiTests(MediaTests):
     def test_without_frames_there_is_no_cover_frame(self):
         r = self.post("/listings", self.seller, {**LISTING, "photos": self.four((120, 90, 60))})
         self.assertIsNone(self.mine(r.json()["id"])["cover_frame"])
+
+    def test_photos_that_are_not_cut_out_or_a_cover_off_the_turn_are_not_matched(self):
+        shades = [(20 + 25 * i,) * 3 for i in range(8)]
+        self.app.state.segmenter = None  # the backdrops would be compared, not the shoe
+        r = self.post("/listings", self.seller, {**LISTING, "photos": self.four(shades[5]) + self.frames(shades)})
+        self.assertIsNone(self.mine(r.json()["id"])["cover_frame"])
+        self.app.state.segmenter = center_segmenter
+        sole = [{**p, "angle": "sole"} for p in self.four(shades[5])[:1]]  # a sole is no angle of the turn
+        r = self.post("/listings", self.seller, {**LISTING, "photos": sole + self.four(shades[5]) + self.frames(shades)})
+        self.assertIsNone(self.mine(r.json()["id"])["cover_frame"])
+
+    def test_the_backfill_matches_listings_made_before_the_match(self):
+        from scripts import cutout_backfill
+        shades = [(20 + 25 * i,) * 3 for i in range(8)]
+        frames = self.frames(shades)
+        r = self.post("/listings", self.seller, {**LISTING, "photos": self.four(shades[3]) + frames})
+        from vitrina_api.models import Listing
+        with self.app.state.sessions() as db:
+            db.get(Listing, r.json()["id"]).cover_frame = None
+            db.commit()
+        real = cutout_backfill.Settings, cutout_backfill.make_storage
+        cutout_backfill.Settings, cutout_backfill.make_storage = (lambda: self.cfg), (lambda cfg: self.app.state.storage)
+        try:
+            cutout_backfill.main()
+        finally:
+            cutout_backfill.Settings, cutout_backfill.make_storage = real
+        self.assertEqual(self.mine(r.json()["id"])["cover_frame"], frames[3]["url"])
 
     def test_images_with_too_many_pixels_are_refused_before_decoding(self):
         out = io.BytesIO()

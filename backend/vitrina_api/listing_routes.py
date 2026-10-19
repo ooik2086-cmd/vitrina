@@ -125,21 +125,35 @@ def render_listing_promo(state, listing_id: int, lang: str) -> bool:
 PROMO_ANGLES = ("outer", "front", "inner", "back", "top")
 
 
-def match_cover_frame(storage: Storage, listing: Listing) -> None:
+# The cover angles a 360° turn passes through; a sole, a label or a close-up is no frame of it.
+TURN_ANGLES = {"front", "outer", "inner", "back"}
+
+
+def match_cover_frame(db: Session, storage: Storage, listing: Listing, made: dict[str, bytes] | None = None) -> None:
     """Finds the 360° frame that shows the shoe as the cover does, unless one is set for this cover and these
-    frames already (the seller's own choice stays). Compares the small copies, which are cheap to read."""
+    frames already (the seller's own choice stays). Compares the small copies of the cut-outs, which are cheap to
+    read and show the shoe's outline whatever the room; made holds the copies this run has just made."""
     cover = cover_photo(listing)
     frames = [m for m in listing.media if m.angle == "frame"]
-    if cover is None or not frames or cover_frame(listing) is not None:
+    if cover is None or cover.angle not in TURN_ANGLES or not frames or cover_frame(listing) is not None:
         return
-    if not all(m.thumb_url and storage.owns(m.thumb_url) for m in [cover, *frames]):
-        return  # until every small copy is made; the next run fills it in
-    try:
-        best = cutout.closest_frame(storage.read(cover.thumb_url), [storage.read(m.thumb_url) for m in frames])
-    except Exception:
-        log.exception("cover frame match failed for listing %s", listing.id)
+    if not all(m.processed_url and m.thumb_url and storage.owns(m.thumb_url) for m in [cover, *frames]):
+        return  # not cut out (yet): a backdrop compared with a backdrop says nothing about the angle
+    made = made or {}
+
+    def read(url: str) -> bytes:
+        try:
+            return made.get(url) or storage.read(url)
+        except Exception:
+            log.exception("small copy %s could not be read", url)
+            return b""  # skipped by the comparison
+
+    best = cutout.closest_frame(read(cover.thumb_url), [read(m.thumb_url) for m in frames])
+    if best is None:
         return
-    if best is not None:
+    # The seller may have chosen while this ran: their choice wins.
+    db.refresh(listing, ["cover_frame", "cover_frame_of"])
+    if cover_frame(listing) is None:
         listing.cover_frame, listing.cover_frame_of = frames[best].original_url, cover.original_url
 
 
@@ -147,6 +161,7 @@ def thumb_listing(state, listing_id: int) -> int:
     """Background job: the small copies the showcase shows while scrolling, and the backdrop that suits the shoe."""
     storage = state.storage
     done = 0
+    made: dict[str, bytes] = {}
     with state.sessions() as db:
         listing = db.get(Listing, listing_id)
         if listing is None:
@@ -156,12 +171,13 @@ def thumb_listing(state, listing_id: int) -> int:
             if m.thumb_url or not storage.owns(source):
                 continue
             try:
-                m.thumb_url = storage.put(cutout.make_thumb(storage.read(source)), owner_id=listing.seller_id,
-                                          ext="webp")
+                small = cutout.make_thumb(storage.read(source))
+                m.thumb_url = storage.put(small, owner_id=listing.seller_id, ext="webp")
+                made[m.thumb_url] = small
                 done += 1
             except Exception:
                 log.exception("thumbnail failed for %s", source)
-        match_cover_frame(storage, listing)
+        match_cover_frame(db, storage, listing, made)
         shown = sorted(listing.media, key=lambda m: (m.angle != "frame", m.angle != "front", m.position))
         first = next((m for m in shown if m.processed_url and storage.owns(m.processed_url)), None)
         try:

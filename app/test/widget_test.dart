@@ -2709,17 +2709,18 @@ void main() {
 
   group('editing what a listing shows', () {
     Future<List<Map<String, dynamic>>> show(WidgetTester tester, Map<String, dynamic> listing,
-        {bool manage = false}) async {
+        {bool manage = false, Map<String, dynamic>? fresh, Size size = const Size(400, 2400)}) async {
       final sent = <Map<String, dynamic>>[];
       final api = Api(
           base: 'http://x/api/v1',
           client: MockClient((req) async {
+            if (req.method == 'GET') return jsonResponse(fresh ?? listing); // the page reloads the listing
             expect((req.method, req.url.path), ('PATCH', '/api/v1/listings/7'));
             final body = jsonDecode(req.body) as Map<String, dynamic>;
             sent.add(body);
             return jsonResponse({...listing, if (body['title'] != null) 'title': body['title']});
           }));
-      tester.view.physicalSize = const Size(400, 2400);
+      tester.view.physicalSize = size;
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
       await tester.pumpWidget(SessionScope(
@@ -2738,24 +2739,27 @@ void main() {
       {'original_url': 'https://cdn/b.jpg', 'processed_url': null, 'angle': 'outer'},
     ];
 
+    final spinFrames = [
+      for (var i = 0; i < 8; i++)
+        {
+          'original_url': 'https://cdn/f$i.jpg',
+          'processed_url': null,
+          'thumb_url': 'https://cdn/t$i.webp',
+          'angle': 'frame'
+        }
+    ];
+
     testWidgets('the seller sets which 360° frame matches the cover', (tester) async {
-      final frames = [
-        for (var i = 0; i < 8; i++)
-          {
-            'original_url': 'https://cdn/f$i.jpg',
-            'processed_url': null,
-            'thumb_url': 'https://cdn/t$i.webp',
-            'angle': 'frame'
-          }
-      ];
-      final sent = await show(tester, {
-        ...listingJson(media: [...photos, ...frames]),
-        'cover_frame': 'https://cdn/f2.jpg'
-      });
+      final listing = listingJson(media: [...photos, ...spinFrames]);
+      // The server matched the cover after this page loaded: the picker starts from its match.
+      final sent = await show(tester, listing, fresh: {...listing, 'cover_frame': 'https://cdn/f2.jpg'});
       await tester.ensureVisible(find.byKey(const Key('cover-frame')));
       await tester.tap(find.byKey(const Key('cover-frame')));
       await tester.pumpAndSettle();
-      expect(find.text('Кадр 3 / 8'), findsOneWidget); // opens at the frame set now
+      expect(find.text('Кадр 3 / 8'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('cover-frame-next')));
+      await tester.pumpAndSettle();
+      expect(find.text('Кадр 4 / 8'), findsOneWidget);
       final slider = find.byKey(const Key('cover-frame-slider'));
       final box = tester.getRect(slider);
       await tester.tapAt(Offset(box.left + 24 + (box.width - 48) * 5 / 7, box.center.dy)); // the sixth frame
@@ -2766,6 +2770,44 @@ void main() {
       expect(sent, [
         {'cover_frame': 'https://cdn/f5.jpg'}
       ]);
+    });
+
+    testWidgets('the frame picker fits a phone on its side with large text', (tester) async {
+      final sent = await show(tester, listingJson(media: [...photos, ...spinFrames]), size: const Size(800, 400));
+      tester.platformDispatcher.textScaleFactorTestValue = 2;
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      await tester.ensureVisible(find.byKey(const Key('cover-frame')));
+      await tester.tap(find.byKey(const Key('cover-frame')));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(tester.getRect(find.byKey(const Key('cover-frame-save'))).bottom, lessThanOrEqualTo(400));
+      await tester.tap(find.byKey(const Key('cover-frame-prev')), warnIfMissed: false); // at the first frame: off
+      await tester.tap(find.byKey(const Key('cover-frame-save')));
+      await tester.pumpAndSettle();
+      expect(sent, [
+        {'cover_frame': 'https://cdn/f0.jpg'}
+      ]);
+    });
+
+    testWidgets('a scan has no frame picker: it turns from where the camera started', (tester) async {
+      final scan = [
+        for (var i = 0; i < 12; i++)
+          {
+            'original_url': 'https://cdn/s$i.jpg',
+            'processed_url': null,
+            'thumb_url': 'https://cdn/st$i.webp',
+            'angle': 'frame'
+          }
+      ];
+      await show(
+          tester,
+          listingJson(media: [
+            ...photos,
+            {'original_url': 'https://cdn/s10.jpg', 'processed_url': null, 'thumb_url': null, 'angle': 'top'},
+            ...scan
+          ]));
+      expect(find.byKey(const Key('remove-spin')), findsOneWidget);
+      expect(find.byKey(const Key('cover-frame')), findsNothing);
     });
 
     testWidgets('one Save sends only the name fields the seller changed', (tester) async {
@@ -3107,6 +3149,18 @@ void main() {
       expect(CardTurn.framesOf(l).first.originalUrl, 'https://cdn/f9.jpg');
       final unset = listing([for (var i = 0; i < 12; i++) frame(i)]);
       expect(ShowcasePlan.of(unset).steps.first.media.first.originalUrl, 'https://cdn/f0.jpg');
+      // A scan turns from where the camera started, on the page and on the card alike.
+      final scan = Listing.fromJson({
+        ...listingJson(media: [
+          {'original_url': 'https://cdn/side.jpg', 'processed_url': 'https://cdn/side.webp', 'angle': 'side'},
+          {...frame(10), 'angle': 'top'},
+          for (var i = 0; i < 12; i++) frame(i),
+        ]),
+        'cover_frame': 'https://cdn/f3.jpg',
+      });
+      expect(ShowcasePlan.of(scan).scan, isTrue);
+      expect(ShowcasePlan.of(scan).steps.first.media.first.originalUrl, 'https://cdn/f0.jpg');
+      expect(CardTurn.framesOf(scan).first.originalUrl, 'https://cdn/f0.jpg');
     });
 
     test('through at most 24 frames of one turn, from the cover, and only when it turns as the listing page does', () {
