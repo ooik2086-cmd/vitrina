@@ -1,4 +1,4 @@
-"""The 360° frame that matches the front photo
+"""The 360° frames that show each side photo
 
 Revision ID: c8e2f4a6b913
 Revises: b5d9e1f3a742
@@ -19,11 +19,9 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     with op.batch_alter_table('listings', schema=None) as batch_op:
-        batch_op.add_column(sa.Column('front_frame', sa.String(length=500), nullable=True))
-        batch_op.add_column(sa.Column('front_frame_of', sa.String(length=500), nullable=True))
+        batch_op.add_column(sa.Column('angle_frames', sa.Text(), nullable=True))
 
 
 def downgrade() -> None:
     with op.batch_alter_table('listings', schema=None) as batch_op:
-        batch_op.drop_column('front_frame_of')
-        batch_op.drop_column('front_frame')
+        batch_op.drop_column('angle_frames')

@@ -3320,7 +3320,16 @@ void main() {
         await tester.pumpWidget(MaterialApp(home: CompareScreen(items: items)));
       }
 
-      testWidgets('a drag on one shoe turns the others to the same angle, then all go back to their covers',
+      Listing marked(int id, Map<String, int> sides, {String cover = 'outer'}) => Listing.fromJson({
+            ...listingJson(media: [
+              {'original_url': 'https://cdn/c$id.jpg', 'processed_url': 'https://cdn/c$id.webp', 'angle': cover},
+              for (var i = 0; i < 12; i++) frame(i),
+            ]),
+            'id': id,
+            'angle_frames': {for (final MapEntry(:key, :value) in sides.entries) key: 'https://cdn/f$value.jpg'},
+          });
+
+      testWidgets('a drag on one shoe turns the others to the same side, and they stay there to be looked at',
           (tester) async {
         await pumpCompare(tester, [
           listing([for (var i = 0; i < 12; i++) frame(i)]),
@@ -3331,70 +3340,83 @@ void main() {
         expect((shownIn(tester, 7), shownIn(tester, 8)), ('https://cdn/t3.webp', 'https://cdn/t6.webp'));
         await g.up();
         await tester.pumpAndSettle();
-        expect((shownIn(tester, 7), shownIn(tester, 8)), (null, null));
+        expect((shownIn(tester, 7), shownIn(tester, 8)), ('https://cdn/t3.webp', 'https://cdn/t6.webp'));
+        // The other shoe carries on from there.
+        final g2 = await turn(tester, 8, 2 / 24);
+        expect((shownIn(tester, 7), shownIn(tester, 8)), ('https://cdn/t4.webp', 'https://cdn/t8.webp'));
+        await g2.up();
       });
 
-      testWidgets('a finger on another shoe while they turn back takes over from where they are', (tester) async {
+      testWidgets('a shoe picked while the others are turned takes their angle; dropping one leaves the rest',
+          (tester) async {
         await pumpCompare(tester, [
           listing([for (var i = 0; i < 12; i++) frame(i)]),
           listing([for (var i = 0; i < 12; i++) frame(i)], id: 8),
+          listing([for (var i = 0; i < 12; i++) frame(i)], id: 9),
         ]);
-        final g = await turn(tester, 7, 3.25 / 12);
+        final g = await turn(tester, 8, 3.2 / 12);
         await g.up();
-        await tester.pump(const Duration(milliseconds: 16)); // turning back
-        final g2 = await turn(tester, 8, 1 / 12);
-        await tester.pump(const Duration(milliseconds: 400)); // the first shoe's way back would be over by now
-        final now = shownIn(tester, 8);
-        expect(now, isNot(anyOf(isNull, 'https://cdn/t0.webp')));
-        expect(shownIn(tester, 7), now);
-        await g2.up();
-        await tester.pumpAndSettle();
-        expect((shownIn(tester, 7), shownIn(tester, 8)), (null, null));
+        await tester.tap(find.byKey(const Key('compare-pick-9')));
+        await tester.pump();
+        await tester.pump();
+        expect((shownIn(tester, 7), shownIn(tester, 8), shownIn(tester, 9)),
+            ('https://cdn/t3.webp', 'https://cdn/t3.webp', 'https://cdn/t3.webp'));
+        await tester.tap(find.byKey(const Key('compare-pick-7')));
+        await tester.pump();
+        await tester.pump();
+        expect((shownIn(tester, 8), shownIn(tester, 9)), ('https://cdn/t3.webp', 'https://cdn/t3.webp'));
       });
 
-      Listing facing(int id, int front) => Listing.fromJson({
-            ...listingJson(media: [
-              {'original_url': 'https://cdn/side.jpg', 'processed_url': 'https://cdn/side.webp', 'angle': 'side'},
-              for (var i = 0; i < 12; i++) frame(i),
-            ]),
-            'id': id,
-            'front_frame': 'https://cdn/f$front.jpg',
-          });
-
-      testWidgets('shoes turned different ways by their sellers show their fronts together', (tester) async {
-        await pumpCompare(tester, [facing(7, 3), facing(8, 9)]);
-        expect((CardTurn.frontOf(facing(7, 3)), CardTurn.frontOf(facing(8, 9))), (0.25, 0.75));
-        var g = await turn(tester, 7, 3.2 / 12);
-        expect((shownIn(tester, 7), shownIn(tester, 8)), ('https://cdn/t3.webp', 'https://cdn/t9.webp'));
-        await g.up();
-        await tester.pumpAndSettle();
-        // One turned unevenly: its front comes a frame later, and still shows at the same moment.
-        await tester.pumpWidget(const SizedBox());
-        await pumpCompare(tester, [facing(7, 3), facing(9, 4)]);
-        g = await turn(tester, 7, 3.2 / 12);
-        expect((shownIn(tester, 7), shownIn(tester, 9)), ('https://cdn/t3.webp', 'https://cdn/t4.webp'));
+      testWidgets('shoes turned either way, or with the front photo as the cover, show the same side together',
+          (tester) async {
+        await pumpCompare(tester, [
+          marked(7, {'outer': 0, 'front': 3}),
+          marked(8, {'outer': 0, 'front': 9}), // turned the other way
+          marked(9, {'front': 0, 'outer': 3}, cover: 'front'), // starts at the toe, turned the other way too
+        ]);
+        await tester.tap(find.byKey(const Key('compare-pick-9')));
+        await tester.pump();
+        final g = await turn(tester, 7, 3.2 / 12);
+        expect((shownIn(tester, 7), shownIn(tester, 8), shownIn(tester, 9)),
+            ('https://cdn/t3.webp', 'https://cdn/t9.webp', 'https://cdn/t0.webp'));
         await g.up();
       });
 
-      test('the shared angle puts every front at a quarter, whichever way and however evenly the shoe turns', () {
-        expect(TurnTogether.place(0.25, 3 / 12), closeTo(3 / 12, 1e-9));
-        expect(TurnTogether.place(0.25, 4 / 12), closeTo(4 / 12, 1e-9));
-        expect(TurnTogether.place(0.25, 9 / 12), closeTo(9 / 12, 1e-9)); // turned the other way
-        expect(TurnTogether.place(0.5, 9 / 12), closeTo(0.5, 1e-9));
-        expect(TurnTogether.place(0.1, null), closeTo(0.1, 1e-9));
-        for (final front in [null, 0.2, 0.25, 0.4, 0.6, 0.75, 0.9]) {
+      test('the shared angle lays each turn through its sides, whichever way and however evenly it goes', () {
+        const outer = 0.0, front = 0.25, inner = 0.5, back = 0.75;
+        final even = TurnMap({});
+        expect(even.place(front), closeTo(0.25, 1e-9));
+        final back3 = TurnMap({outer: 0, front: 0.75}); // turned the other way
+        expect(back3.place(front), closeTo(0.75, 1e-9));
+        expect(back3.place(inner), closeTo(0.5, 1e-9));
+        final uneven = TurnMap({outer: 0.9, front: 0.35, inner: 0.5, back: 0.65});
+        expect(uneven.place(front), closeTo(0.35, 1e-9));
+        expect(uneven.place(0.125), closeTo((0.9 + 0.225) % 1, 1e-9)); // half way from outer to front
+        // A front matched to the heel contradicts the rest: only the first side is kept.
+        final mixed = TurnMap({outer: 0, front: 0.25, inner: 0.1, back: 0.6});
+        expect(mixed.place(front), closeTo(0.25, 1e-9));
+        for (final map in [
+          even,
+          back3,
+          uneven,
+          mixed,
+          TurnMap({front: 0}),
+          TurnMap({inner: 0.4, back: 0.1})
+        ]) {
           for (var a = 0.0; a < 1; a += 0.05) {
-            expect(TurnTogether.angle(TurnTogether.place(a, front), front), closeTo(a, 1e-9), reason: '$front $a');
+            final back = map.angle(map.place(a));
+            expect(min((back - a).abs(), 1 - (back - a).abs()), lessThan(1e-9), reason: '$a');
           }
         }
       });
+
       testWidgets('no hint when only one of the shoes can turn', (tester) async {
         await pumpCompare(tester, [
           listing([for (var i = 0; i < 12; i++) frame(i)]),
           listing([for (var i = 0; i < 12; i++) frame(i, thumb: false)], id: 8),
         ]);
         expect(find.byKey(const Key('compare-turn-hint')), findsNothing);
-        final g = await turn(tester, 7, 3.25 / 12);
+        final g = await turn(tester, 7, 3.2 / 12);
         expect((shownIn(tester, 7), shownIn(tester, 8)), ('https://cdn/t3.webp', null));
         await g.up();
       });

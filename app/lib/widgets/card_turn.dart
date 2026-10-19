@@ -40,68 +40,121 @@ class CardTurn extends StatefulWidget {
   /// - some frames cut out and others not: the listing page then shows the photos as taken, whose small copies
   ///   are not kept.
   static List<MediaItem> framesOf(Listing l) {
-    final turn = _turnOf(l);
+    final turn = _turnOf(l).turn;
     if (turn.length <= maxFrames) return turn;
     return [for (var i = 0; i < maxFrames; i++) turn[i * turn.length ~/ maxFrames]];
   }
 
-  /// The whole turn the card shows, before it is thinned to [maxFrames].
-  static List<MediaItem> _turnOf(Listing l) {
-    if (l.frames.isEmpty) return const [];
+  /// The whole turn the card shows, before it is thinned to [maxFrames], and whether it starts at the cover.
+  static ({List<MediaItem> turn, bool atCover}) _turnOf(Listing l) {
+    const none = (turn: <MediaItem>[], atCover: false);
+    if (l.frames.isEmpty) return none;
     final plan = ShowcasePlan.of(l);
     final spin = plan.steps.first;
     final turn = spin.media.take(plan.turn).toList();
-    if (turn.length < 8) return const [];
-    if (!spin.media.every((m) => m.thumbUrl != null && (spin.cut || m.processedUrl == null))) return const [];
+    if (turn.length < 8) return none;
+    if (!spin.media.every((m) => m.thumbUrl != null && (spin.cut || m.processedUrl == null))) return none;
     // From the frame matching the cover: the one the seller or the server marked, else the cover itself. A scan,
     // like its listing page, keeps to where the camera started unless its cover is one of its frames.
     var start = plan.scan ? -1 : turn.indexWhere((m) => m.originalUrl == l.coverFrame);
-    if (start < 0) start = math.max(0, turn.indexWhere((m) => m.url == l.coverUrl));
-    return [...turn.skip(start), ...turn.take(start)];
+    if (start < 0) start = turn.indexWhere((m) => m.url == l.coverUrl);
+    return (turn: [...turn.skip(math.max(0, start)), ...turn.take(math.max(0, start))], atCover: start >= 0);
   }
 
-  /// How far into the card's turn the toe faces the camera, as a share of the turn (0 to 1); null when the
-  /// server has not found the frame, or it is where the turn starts.
-  static double? frontOf(Listing l) {
-    final turn = _turnOf(l);
-    final i = turn.indexWhere((m) => m.originalUrl == l.frontFrame);
-    return i > 0 ? i / turn.length : null;
+  /// How the shared angle of shoes turning together falls on this card's turn: through the frames the server
+  /// matched to its side photos, else the cover where the turn starts.
+  static TurnMap mapOf(Listing l) {
+    final (:turn, :atCover) = _turnOf(l);
+    final marks = <double, double>{};
+    for (final MapEntry(key: side, value: url) in l.angleFrames.entries) {
+      final angle = TurnMap.sides[side];
+      final i = turn.indexWhere((m) => m.originalUrl == url);
+      if (angle != null && i >= 0) marks[angle] = i / turn.length;
+    }
+    final cover = TurnMap.sides[l.media.where((m) => m.angle != 'frame').firstOrNull?.angle];
+    if (atCover && cover != null) marks.putIfAbsent(cover, () => 0);
+    return TurnMap(marks);
   }
 
   @override
   State<CardTurn> createState() => _CardTurnState();
 }
 
-/// Where shoes compared side by side are in their turns, so they show the same side at once; null shows their
-/// covers. Turns start at the frame matching the cover, but sellers turn the shoe either way and not always evenly,
-/// so the shared angle is one where a quarter (0.25) is the front: each shoe maps it onto its own turn through
-/// the frame the server matched to its front photo, the way round its front comes. A shoe without that frame
-/// turns evenly, the way its frames go.
+/// How a shared angle, where 0 is the outer side, 0.25 the toe, 0.5 the inner side and 0.75 the heel, falls on
+/// one shoe's turn (as a share of it, from its first frame). Sellers turn the shoe either way and not always
+/// evenly, so the turn is laid through the frames known to show a side square on ([marks]: angle to share), the
+/// way round they come; between them it is spread evenly. Without marks, the turn is taken to start at the outer
+/// side and go the usual way.
+class TurnMap {
+  factory TurnMap(Map<double, double> marks) {
+    final angles = marks.keys.toList()..sort();
+    if (angles.length < 2) {
+      final a = angles.firstOrNull ?? 0;
+      return TurnMap._([a], [marks[a] ?? 0], 1);
+    }
+    final shares = [for (final a in angles) marks[a]!];
+    // The way round in which the marks come in the order of their sides; when both fit (two marks), the one
+    // whose spacing is nearer the sides' own.
+    double? bestCost;
+    var way = 0;
+    for (final w in [1, -1]) {
+      var total = 0.0, cost = 0.0;
+      for (var k = 0; k < angles.length; k++) {
+        final n = (k + 1) % angles.length;
+        final gap = (w * (shares[n] - shares[k])) % 1;
+        total += gap;
+        cost += (gap - (angles[n] - angles[k]) % 1).abs();
+      }
+      if ((total - 1).abs() < 1e-9 && (bestCost == null || cost < bestCost)) {
+        bestCost = cost;
+        way = w;
+      }
+    }
+    // Marks that contradict each other (a front matched to the heel): only the first is kept.
+    if (way == 0) return TurnMap._([angles.first], [shares.first], 1);
+    return TurnMap._(angles, shares, way);
+  }
+
+  const TurnMap._(this._angles, this._shares, this._way);
+  final List<double> _angles;
+  final List<double> _shares;
+  final int _way;
+
+  static const sides = {'outer': 0.0, 'front': 0.25, 'inner': 0.5, 'back': 0.75};
+
+  double _angleGap(int k) => _angles.length == 1 ? 1 : (_angles[(k + 1) % _angles.length] - _angles[k]) % 1;
+  double _shareGap(int k) => _angles.length == 1 ? 1 : (_way * (_shares[(k + 1) % _shares.length] - _shares[k])) % 1;
+
+  /// Where in the turn (a share from its first frame) the shared [angle] falls.
+  double place(double angle) {
+    for (var k = 0; k < _angles.length; k++) {
+      final d = (angle - _angles[k]) % 1;
+      if (d < _angleGap(k) || k == _angles.length - 1) {
+        return (_shares[k] + _way * d / _angleGap(k) * _shareGap(k)) % 1;
+      }
+    }
+    return angle % 1;
+  }
+
+  /// The shared angle at [share] of the turn: the inverse of [place].
+  double angle(double share) {
+    for (var k = 0; k < _angles.length; k++) {
+      final d = (_way * (share - _shares[k])) % 1;
+      if (d < _shareGap(k) || k == _angles.length - 1) {
+        return (_angles[k] + d / _shareGap(k) * _angleGap(k)) % 1;
+      }
+    }
+    return share % 1;
+  }
+}
+
+/// Where shoes compared side by side are in their turns, as a shared angle (see [TurnMap]), so they show the
+/// same side at once; null shows their covers.
 class TurnTogether extends ChangeNotifier {
   double? _at;
   double? get at => _at;
 
-  /// Where in a turn whose front is at [front] (a share, see [CardTurn.frontOf]) the shared angle [at] falls.
-  static double place(double at, double? front) {
-    if (front == null || front == 0.5) return at % 1;
-    if (front > 0.5) return (1 - place(at, 1 - front)) % 1; // the front comes round the other way
-    final a = at % 1;
-    return a <= 0.25 ? a / 0.25 * front : front + (a - 0.25) / 0.75 * (1 - front);
-  }
-
-  /// The shared angle at [share] of a turn whose front is at [front]: the inverse of [place].
-  static double angle(double share, double? front) {
-    if (front == null || front == 0.5) return share % 1;
-    if (front > 0.5) return angle(1 - share, 1 - front);
-    final s = share % 1;
-    return s <= front ? s / front * 0.25 : 0.25 + (s - front) / (1 - front) * 0.75;
-  }
-
-  /// The card the finger is on, or that is turning back; the others only follow.
-  Object? _lead;
-
-  void _set(Object lead, double? at) {
-    _lead = lead;
+  void _set(double? at) {
     if (_at == at) return;
     _at = at;
     notifyListeners();
@@ -110,7 +163,7 @@ class TurnTogether extends ChangeNotifier {
 
 class _CardTurnState extends State<CardTurn> with SingleTickerProviderStateMixin {
   late List<MediaItem> _frames;
-  late double? _front;
+  late TurnMap _map;
   late bool _shadow;
   late String _signature;
 
@@ -130,13 +183,25 @@ class _CardTurnState extends State<CardTurn> with SingleTickerProviderStateMixin
     super.initState();
     _plan();
     widget.together?.addListener(_follow);
+    _joinTogether();
+  }
+
+  /// Side by side, the frames are fetched at once so the shoes follow from the first drag, and a shoe added while
+  /// the others are turned takes their angle.
+  void _joinTogether() {
+    if (widget.together == null || _frames.isEmpty) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _fetchMore();
+      if (widget.together?.at != null) _follow();
+    });
   }
 
   static String _signatureOf(Listing l) => [
         l.id,
         l.coverUrl,
         l.coverFrame,
-        l.frontFrame,
+        for (final MapEntry(:key, :value) in l.angleFrames.entries) '$key=$value',
         for (final m in l.frames) '${m.originalUrl}|${m.processedUrl}|${m.thumbUrl}'
       ].join(',');
 
@@ -155,13 +220,14 @@ class _CardTurnState extends State<CardTurn> with SingleTickerProviderStateMixin
       _lastGood = null;
       _fetched = 0;
       _plan();
+      _joinTogether();
     }
   }
 
   void _plan() {
     _signature = _signatureOf(widget.listing);
     _frames = CardTurn.framesOf(widget.listing);
-    _front = CardTurn.frontOf(widget.listing);
+    _map = CardTurn.mapOf(widget.listing);
     final plan = ShowcasePlan.of(widget.listing);
     // As on the listing page: a shadow under cut-outs, except a scan's, which carry their own.
     _shadow = _frames.isNotEmpty && plan.steps.first.cut && !plan.scan;
@@ -204,19 +270,15 @@ class _CardTurnState extends State<CardTurn> with SingleTickerProviderStateMixin
   void _put(double? at) {
     final together = widget.together;
     if (together != null && _frames.isNotEmpty) {
-      together._set(this, at == null ? null : TurnTogether.angle(at / _frames.length, _front));
+      together._set(at == null ? null : _map.angle(at / _frames.length));
     } else {
       _show(at);
     }
   }
 
-  /// The frame to show at [at]: the one the finger has reached, as on the listing page; a shoe that only follows
-  /// shows the nearest, so one that turns the other way keeps step with the lead.
-  int _nearest(double at) {
-    final together = widget.together;
-    final i = together == null || together._lead == this ? at.floor() : at.round();
-    return i % _frames.length;
-  }
+  /// The frame to show at [at]: the one the finger has reached, as on the listing page; side by side the
+  /// nearest, so shoes turned either way keep step.
+  int _nearest(double at) => (widget.together == null ? at.floor() : at.round()) % _frames.length;
 
   /// Shows [at], redrawing only when that is another frame or the cover.
   void _show(double? at) {
@@ -232,10 +294,9 @@ class _CardTurnState extends State<CardTurn> with SingleTickerProviderStateMixin
   void _follow() {
     final together = widget.together!;
     if (!mounted || _frames.isEmpty) return;
-    if (together._lead != this && _back.isAnimating) _back.stop();
     final at = together.at;
     if (at != null && _at == null) _fetchMore();
-    _show(at == null ? null : (TurnTogether.place(at, _front) * _frames.length) % _frames.length);
+    _show(at == null ? null : (_map.place(at) * _frames.length) % _frames.length);
   }
 
   /// The same feel as the listing page: one and a half card widths turn the shoe once round.
@@ -247,10 +308,11 @@ class _CardTurnState extends State<CardTurn> with SingleTickerProviderStateMixin
     _put((at - d.delta.dx * _framesPerPixel(width)) % _frames.length);
   }
 
-  /// Turns back the short way round to the start, then shows the cover.
+  /// Turns back the short way round to the start, then shows the cover. Side by side the shoes stay where the
+  /// finger left them, to be looked at together.
   void _end([DragEndDetails? _]) {
     final at = _at;
-    if (at == null) return;
+    if (at == null || widget.together != null) return;
     final n = _frames.length;
     final target = at > n / 2 ? n.toDouble() : 0.0;
     final distance = (target - at).abs();

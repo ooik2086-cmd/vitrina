@@ -33,9 +33,9 @@ def main() -> None:
         uncut = select(Media.listing_id).where(Media.processed_url.is_(None) | Media.thumb_url.is_(None))
         current = select(ListingEmbedding.listing_id).where(ListingEmbedding.model == visual.MODEL_NAME)
         turning = select(Media.listing_id).where(Media.angle == "frame")
-        fronted = select(Media.listing_id).where(Media.angle == "front")
+        sided = select(Media.listing_id).where(Media.angle.in_(["outer", "front", "inner", "back"]))
         unmatched = Listing.id.in_(turning) & (Listing.cover_frame.is_(None)
-                                               | Listing.front_frame.is_(None) & Listing.id.in_(fronted))
+                                               | Listing.angle_frames.is_(None) & Listing.id.in_(sided))
         ids = db.scalars(select(Listing.id).where(Listing.id.in_(uncut) | Listing.id.not_in(current) | unmatched)
                          .order_by(Listing.id)).all()
     for lid in ids:

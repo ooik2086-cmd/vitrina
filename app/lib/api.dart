@@ -454,7 +454,10 @@ class Listing {
         showcaseStyle = j['showcase_style'] as String,
         backdrop = j['backdrop'] as String?,
         coverFrame = j['cover_frame'] as String?,
-        frontFrame = j['front_frame'] as String?,
+        angleFrames = {
+          for (final MapEntry(:key, :value) in ((j['angle_frames'] as Map?) ?? const {}).entries)
+            if (key is String && value is String) key: value
+        },
         sizes = [for (final s in j['sizes'] as List) ShoeSize.fromJson(s as Map<String, dynamic>)],
         media = [for (final m in j['media'] as List) MediaItem.fromJson(m as Map<String, dynamic>)],
         shopName = (j['seller'] as Map)['shop_name'] as String?,
@@ -507,9 +510,9 @@ class Listing {
   /// The 360° frame (its original url) that shows the shoe as the cover does: a turn starts there.
   final String? coverFrame;
 
-  /// The 360° frame (its original url) where the toe faces the camera, as on the front photo: which way the turn
-  /// goes and where a quarter of it is. Matched by the server; null when unknown.
-  final String? frontFrame;
+  /// For each side photographed (outer, front, inner, back), the 360° frame (its original url) showing that side
+  /// square on: which way and how evenly the turn goes. Matched by the server; empty when unknown.
+  final Map<String, String> angleFrames;
   final String showcaseStyle;
   final List<ShoeSize> sizes;
   final List<MediaItem> media;

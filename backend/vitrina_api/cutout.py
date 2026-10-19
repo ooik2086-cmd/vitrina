@@ -155,6 +155,57 @@ def _match_print(data: bytes) -> Image.Image:
     return flat.convert("L").resize(MATCH_SIZE, Image.Resampling.BILINEAR)
 
 
+def _prints(frames: list[bytes]) -> list[bytes | None]:
+    out = []
+    for i, data in enumerate(frames):
+        try:
+            out.append(_match_print(data).tobytes())
+        except Exception:
+            log.exception("frame %s could not be compared", i)
+            out.append(None)
+    return out
+
+
+def _closest(target: bytes, prints: list[bytes | None]) -> int | None:
+    gaps = [(sum(abs(a - b) for a, b in zip(target, seen)), i) for i, seen in enumerate(prints) if seen is not None]
+    return min(gaps)[1] if gaps else None
+
+
+def _width(data: bytes) -> float | None:
+    """How wide the solid shoe is for its height: least toe or heel on, most side on."""
+    try:
+        img = Image.open(io.BytesIO(data))
+        img.load()
+        box = img.convert("RGBA").getchannel("A").point(lambda v: 255 if v >= 128 else 0).getbbox()
+    except Exception:
+        return None
+    return (box[2] - box[0]) / (box[3] - box[1]) if box and box != (0, 0, *img.size) else None
+
+
+def side_frames(photos: dict[str, bytes], turn: list[bytes]) -> dict[str, int]:
+    """For each side photo (outer, front, inner, back), the frame of one 360° turn that shows that side square on:
+    first the frame that looks most like the photo, then, within an eighth of a turn of it, the one where the
+    cut-out shoe is narrowest (toe or heel on) or widest (side on), since sellers rarely shoot exactly square on.
+    The frames are compared once, whatever the number of photos."""
+    prints, widths = _prints(turn), [_width(data) for data in turn]
+    reach = max(1, len(turn) // 8)
+    out = {}
+    for side, data in photos.items():
+        try:
+            best = _closest(_match_print(data).tobytes(), prints)
+        except Exception:
+            log.exception("the %s photo could not be compared", side)
+            continue
+        if best is None:
+            continue
+        near = [k % len(turn) for k in range(best - reach, best + reach + 1) if widths[k % len(turn)] is not None]
+        if near:
+            narrow = side in ("front", "back")
+            best = min(near, key=lambda k, b=best: (widths[k] if narrow else -widths[k], abs(k - b)))
+        out[side] = best
+    return out
+
+
 def closest_frame(cover: bytes, frames: list[bytes]) -> int | None:
     """Which of the 360° frames shows the shoe as the cover photo does, so a turn can start from the cover's angle.
     None when the cover or no frame can be read."""

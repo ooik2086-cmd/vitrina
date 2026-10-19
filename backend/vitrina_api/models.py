@@ -86,10 +86,10 @@ class Listing(Base):
     # voids it.
     cover_frame: Mapped[str | None] = mapped_column(String(500))
     cover_frame_of: Mapped[str | None] = mapped_column(String(500))
-    # The same for the front photo: the frame where the toe faces the camera. It tells which way the turn goes and
-    # where a quarter of it is, so shoes compared side by side turn alike. Matched by the media job only.
-    front_frame: Mapped[str | None] = mapped_column(String(500))
-    front_frame_of: Mapped[str | None] = mapped_column(String(500))
+    # JSON {side: {"frame": original_url, "of": the side photo's original_url}} for the outer, front, inner and back
+    # photos: the 360° frame of one turn showing that side square on. It tells which way and how evenly the turn
+    # goes, so shoes compared side by side turn alike. Matched by the media job; a new photo voids its side.
+    angle_frames: Mapped[str | None] = mapped_column(Text)
     search_text: Mapped[str] = mapped_column(Text, default="")
     views: Mapped[int] = mapped_column(Integer, default=0, server_default="0")  # product page opens by others
     promo_state: Mapped[str | None] = mapped_column(String(12))  # rendering | ready | failed; None = never made

@@ -154,9 +154,15 @@ class _Table extends StatelessWidget {
       builder: (context, size, _) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         _Row(items: items, cell: (l) => _Head(listing: l, together: together)),
         if (items.where((l) => CardTurn.framesOf(l).isNotEmpty).length > 1)
-          Text(tr('Бір аяқкиімді көлденең сүйресеңіз, бәрі бірге айналады'),
-              key: const Key('compare-turn-hint'),
-              style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+          // The turn is a gesture only; screen readers compare on the listing pages.
+          ExcludeSemantics(
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(tr('Бір аяқкиімді көлденең сүйресеңіз, 360° барлары бірге айналады'),
+                  key: const Key('compare-turn-hint'),
+                  style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+            ),
+          ),
         _Row(
           label: tr('Барлығы, жеткізумен'),
           items: items,
@@ -290,7 +296,8 @@ class _Row extends StatelessWidget {
         Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
           for (var i = 0; i < items.length; i++) ...[
             if (i > 0) const SizedBox(width: 12),
-            Expanded(child: cell(items[i])),
+            // Keyed, so a shoe keeps its own state when another is picked or removed.
+            Expanded(key: ValueKey(items[i].id), child: cell(items[i])),
           ],
         ]),
       ]),

@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from . import promo
 from .deps import get_db, now_utc
 from .models import Listing, Review, User
-from .serializers import cover_frame
+from .serializers import cover_frame, one_turn
 
 router = APIRouter()
 
@@ -199,17 +199,9 @@ def turn_shots(listing: Listing, media: list) -> tuple[list[tuple[str, str]], bo
     only when every frame has one (else the photos as taken). Each shot is (small copy, full photo); the small copy
     is the full photo when there is none. A scan carries on over the top and under the sole after its turn: only
     the turn, from where the camera started. Also says whether the turn is cut out."""
-    frames = [m for m in media if m.angle == "frame"]
+    frames, scan = one_turn(media)
     if not frames:
         return [], False
-    at = [next((i for i, f in enumerate(frames) if f.original_url == m.original_url), -1)
-          for m in (next((m for m in media if m.angle == angle), None) for angle in ("top", "sole", "detail")) if m]
-    scan = bool(at) and at[0] > 0 and all(b > a for a, b in zip(at, at[1:]))
-    if scan:
-        frames = frames[:at[0]]
-    # One turn: up to where its first frame comes round again.
-    frames = next((frames[:k] for k in range(1, len(frames)) if frames[k].original_url == frames[0].original_url),
-                  frames)
     if not scan:
         matched = cover_frame(listing)
         start = next((i for i, f in enumerate(frames) if f.original_url == matched), 0)

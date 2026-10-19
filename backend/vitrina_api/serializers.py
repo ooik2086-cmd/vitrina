@@ -84,7 +84,7 @@ def listing_out(db: Session, listing: Listing, *, owner: bool = False) -> dict:
         "segment": segment_for(db, listing), "condition": listing.condition, "authenticity": listing.authenticity,
         "defects": listing.defects, "description": listing.description, "showcase_style": listing.showcase_style,
         "backdrop": listing.backdrop, "cover_frame": cover_frame(listing),
-        "front_frame": front_frame(listing),
+        "angle_frames": angle_frames(listing),
         "sizes": [{"id": s.id, "label": s.label, "insole_cm": mm_to_cm(s.insole_mm), "available": s.quantity > 0,
                    **({"quantity": s.quantity} if owner else {})} for s in listing.sizes],
         "media": [{"original_url": m.original_url, "processed_url": m.processed_url, "thumb_url": m.thumb_url,
@@ -184,13 +184,40 @@ def cover_frame(listing: Listing) -> str | None:
     return listing.cover_frame
 
 
-def front_frame(listing: Listing) -> str | None:
-    """The frame matching the front photo, while both are still the listing's."""
-    front = next((m for m in listing.media if m.angle == "front"), None)
-    if (front is None or listing.front_frame is None or listing.front_frame_of != front.original_url
-            or not any(m.angle == "frame" and m.original_url == listing.front_frame for m in listing.media)):
-        return None
-    return listing.front_frame
+def one_turn(media: list) -> tuple[list, bool]:
+    """The frames of one 360° turn as the app shows it (ShowcasePlan.of), in the order taken, and whether they
+    are a scan: a scan carries on over the top and under the sole after its turn, its stop photos being frames
+    at increasing places. One turn ends where its first frame comes round again."""
+    frames = [m for m in media if m.angle == "frame"]
+    at = [next((i for i, f in enumerate(frames) if f.original_url == m.original_url), -1)
+          for m in (next((m for m in media if m.angle == angle), None) for angle in ("top", "sole", "detail")) if m]
+    scan = bool(frames) and bool(at) and at[0] > 0 and all(b > a for a, b in zip(at, at[1:]))
+    if scan:
+        frames = frames[:at[0]]
+    return next((frames[:k] for k in range(1, len(frames)) if frames[k].original_url == frames[0].original_url),
+                frames), scan
+
+
+def side_photo(listing: Listing, angle: str):
+    """The listing's photo of one side (outer, front, inner or back), as the cover and the app pick it: the first."""
+    return next((m for m in listing.media if m.angle == angle), None)
+
+
+def angle_frames(listing: Listing) -> dict[str, str]:
+    """For each side photographed, the 360° frame showing that side, while the photo and the frame are still the
+    listing's: where the toe or a side faces the camera, so shoes turned either way or unevenly line up."""
+    try:
+        stored = json.loads(listing.angle_frames or "{}")
+    except ValueError:
+        return {}
+    frames = {m.original_url for m in listing.media if m.angle == "frame"}
+    out = {}
+    for angle, mark in stored.items() if isinstance(stored, dict) else ():
+        photo = side_photo(listing, angle)
+        if (isinstance(mark, dict) and photo is not None and mark.get("of") == photo.original_url
+                and mark.get("frame") in frames):
+            out[angle] = mark["frame"]
+    return out
 
 
 def listing_cover(listing: Listing) -> str | None:
