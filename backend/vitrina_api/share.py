@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from . import promo
 from .deps import get_db, now_utc
 from .models import Listing, Review, User
+from .serializers import cover_frame
 
 router = APIRouter()
 
@@ -102,9 +103,9 @@ def shared_listing(listing_id: int, request: Request, db: Session = Depends(get_
         return page("VITRINA", f'<div class="info"><h1>{t["gone"]}</h1></div>', lang=lang, status=404)
     seller = db.get(User, listing.seller_id)
     media = sorted(listing.media, key=lambda m: m.position)
-    frames = [m.processed_url or m.original_url for m in media if m.angle == "frame"]
     showcase = [m for m in media if m.angle in SHOWCASE]
-    shots = frames or [m.processed_url or m.original_url for m in showcase]
+    # Each shot: the small copy shown while turning, and the full photo shown at rest.
+    shots = turn_shots(listing, media) or [(m.processed_url or m.original_url,) * 2 for m in showcase]
     # Previews use the original JPEG: some messengers do not show WebP.
     cover = next((m.original_url for m in showcase), media[0].original_url if media else None)
     price = promo.format_tenge(listing.price_tiyn)
@@ -125,21 +126,31 @@ def shared_listing(listing_id: int, request: Request, db: Session = Depends(get_
     spin_js = ""
     if len(shots) > 1:
         # Inside <script> a "</script>" in any string would end the block, so "<" never appears raw.
-        urls_js = json.dumps(shots).replace("<", "\\u003c")
+        small_js = json.dumps([small for small, _ in shots]).replace("<", "\\u003c")
+        full_js = json.dumps([full for _, full in shots]).replace("<", "\\u003c")
         spin_js = f"""<script>
 (() => {{
-  const urls = {urls_js}, img = document.getElementById('shot'), stage = document.getElementById('stage');
-  urls.forEach(u => {{ const i = new Image(); i.src = u; }});
-  let k = 0, x0 = null, k0 = 0;
-  const show = n => {{ k = ((n % urls.length) + urls.length) % urls.length; img.src = urls[k]; }};
-  stage.addEventListener('pointerdown', e => {{ x0 = e.clientX; k0 = k; stage.setPointerCapture(e.pointerId); }});
-  stage.addEventListener('pointermove', e => {{ if (x0 !== null) show(k0 + Math.round((e.clientX - x0) / 12)); }});
+  // Small copies while the shoe turns, the full photo once it rests; one slow turn on arrival, unless the phone
+  // asks for less motion. The small copies load one after another, so the first ones come first on slow data.
+  const small = {small_js}, full = {full_js}, img = document.getElementById('shot'), stage = document.getElementById('stage');
+  const n = small.length, calm = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const ready = new Set();
+  (function load(i) {{ if (i >= n) return; const p = new Image();
+    p.onload = p.onerror = () => {{ if (p.complete && p.naturalWidth) ready.add(i); load(i + 1); }}; p.src = small[i]; }})(0);
+  let k = 0, x0 = null, k0 = 0, rest = null, auto = null;
+  const settle = () => {{ clearTimeout(rest); rest = setTimeout(() => {{ img.src = full[k]; }}, 250); }};
+  const show = m => {{ m = ((m % n) + n) % n; if (m === k) return; k = m; if (ready.has(k) || !auto) img.src = small[k]; settle(); }};
+  const stop = () => {{ clearInterval(auto); auto = null; }};
+  stage.addEventListener('pointerdown', e => {{ stop(); x0 = e.clientX; k0 = k; stage.setPointerCapture(e.pointerId); }});
+  stage.addEventListener('pointermove', e => {{ if (x0 !== null) show(k0 + Math.round((e.clientX - x0) * n / (stage.clientWidth * 1.5))); }});
   stage.addEventListener('pointerup', () => {{ x0 = null; }});
-  let turn = 0; const auto = setInterval(() => {{ if (x0 === null) show(k + 1); if (++turn >= urls.length) clearInterval(auto); }}, 70);
+  stage.addEventListener('pointercancel', () => {{ x0 = null; }});
+  if (!calm) {{ let step = 0; auto = setInterval(() => {{ if (!ready.has((k + 1) % n)) return; show(k + 1);
+    if (++step >= n) {{ stop(); settle(); }} }}, Math.max(40, Math.round(2400 / n))); }}
 }})();
 </script>"""
     stage = (f'<div class="stage" id="stage" style="background:{backdrop}">'
-             f'<img id="shot" alt="{esc(listing.title)}" src="{esc(shots[0])}" draggable="false">'
+             f'<img id="shot" alt="{esc(listing.title)}" src="{esc(shots[0][1])}" draggable="false">'
              + (f'<div class="hint">↔ {t["drag"]}</div>' if len(shots) > 1 else "") + "</div>") if shots else ""
     body = f"""{stage}
 <div class="info">
@@ -152,6 +163,27 @@ def shared_listing(listing_id: int, request: Request, db: Session = Depends(get_
 <p class="note muted">{t["protected"]}</p>
 </div>{spin_js}"""
     return page(f"{listing.title} · {price} · VITRINA", body, lang=lang, meta=meta)
+
+
+def turn_shots(listing: Listing, media: list) -> list[tuple[str, str]]:
+    """The 360° turn as the app shows it: one turn, from the frame matching the cover, cut-outs only when every
+    frame has one (else the photos as taken). Each shot is (small copy, full photo); the small copy is the full
+    photo when there is none. A scan carries on over the top and under the sole after its turn: only the turn."""
+    frames = [m for m in media if m.angle == "frame"]
+    if not frames:
+        return []
+    at = [next((i for i, f in enumerate(frames) if f.original_url == m.original_url), -1)
+          for m in (next((m for m in media if m.angle == angle), None) for angle in ("top", "sole", "detail")) if m]
+    if at and at[0] > 0 and all(b > a for a, b in zip(at, at[1:])):
+        frames = frames[:at[0]]  # a scan: its turn starts where the camera did
+    else:
+        start = next((i for i, f in enumerate(frames) if f.original_url == cover_frame(listing)), 0)
+        frames = frames[start:] + frames[:start]
+    frames = next((frames[:k] for k in range(1, len(frames)) if frames[k].original_url == frames[0].original_url),
+                  frames)
+    cut = all(f.processed_url for f in frames)
+    return [(f.thumb_url if f.thumb_url and (cut or not f.processed_url) else full, full)
+            for f in frames for full in [f.processed_url if cut else f.original_url]]
 
 
 def cover_url(listing: Listing) -> str | None:

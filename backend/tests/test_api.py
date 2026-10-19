@@ -2,6 +2,7 @@
 import io
 import json
 import os
+import re
 import tempfile
 import time
 import unittest
@@ -2267,6 +2268,48 @@ class AuditFixTests(ApiTestCase):
         listing = self.publish(photos=LISTING["photos"] + frames)
         page = self.c.get(f"/l/{listing['id']}").text
         self.assertNotIn("</script><script>alert(1)", page)
+
+    def shared_turn(self, page):
+        small = json.loads(re.search(r"const small = (\[.*?\]), full", page).group(1))
+        full = json.loads(re.search(r"full = (\[.*?\]), img", page).group(1))
+        return small, full, re.search(r'id="shot"[^>]* src="([^"]+)"', page).group(1)
+
+    def test_share_page_turns_as_the_app_does_from_the_cover_light_on_data(self):
+        frames = [{"url": f"https://cdn.example/f{i}.jpg", "angle": "frame"} for i in range(12)]
+        listing = self.publish(photos=LISTING["photos"] + frames)
+        from vitrina_api.models import Listing
+        with self.app.state.sessions() as db:
+            row = db.get(Listing, listing["id"])
+            for m in row.media:
+                if m.angle == "frame":
+                    n = m.original_url.rsplit("/f", 1)[1].split(".")[0]
+                    m.processed_url, m.thumb_url = f"https://cdn.example/c{n}.webp", f"https://cdn.example/t{n}.webp"
+            row.cover_frame = "https://cdn.example/f7.jpg"
+            row.cover_frame_of = next(m.original_url for m in sorted(row.media, key=lambda m: m.position))
+            db.commit()
+        page = self.c.get(f"/l/{listing['id']}").text
+        small, full, first = self.shared_turn(page)
+        # From the frame matching the cover, small copies to turn through, full cut-outs at rest.
+        self.assertEqual(small[:2], ["https://cdn.example/t7.webp", "https://cdn.example/t8.webp"])
+        self.assertEqual(full[-1], "https://cdn.example/c6.webp")
+        self.assertEqual((len(small), first), (12, "https://cdn.example/c7.webp"))
+        self.assertIn("prefers-reduced-motion", page)
+        # One frame without its cut-out: the turn shows the photos as taken, as the app does.
+        with self.app.state.sessions() as db:
+            next(m for m in db.get(Listing, listing["id"]).media if m.angle == "frame").processed_url = None
+            db.commit()
+        small, full, _ = self.shared_turn(self.c.get(f"/l/{listing['id']}").text)
+        self.assertEqual((small[0], full[0]), ("https://cdn.example/f7.jpg", "https://cdn.example/f7.jpg"))
+        self.assertEqual(small[-1], "https://cdn.example/f6.jpg")
+
+    def test_share_page_turns_a_scan_through_its_turn_only(self):
+        frames = [{"url": f"https://cdn.example/s{i}.jpg", "angle": "frame"} for i in range(16)]
+        stops = [{"url": "https://cdn.example/s10.jpg", "angle": "top"}, {"url": "https://cdn.example/s13.jpg",
+                                                                          "angle": "sole"}]
+        listing = self.publish(photos=PHOTOS[:4] + stops + frames)  # no separate sole photo
+        small, full, first = self.shared_turn(self.c.get(f"/l/{listing['id']}").text)
+        self.assertEqual(len(small), 10)  # up to where the camera rises over the top
+        self.assertEqual((first, full[-1]), ("https://cdn.example/s0.jpg", "https://cdn.example/s9.jpg"))
 
     def test_sales_file_never_runs_a_formula_typed_by_a_buyer(self):
         listing = self.publish()
