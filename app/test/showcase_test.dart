@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -85,6 +86,50 @@ void showcaseTest(String description, WidgetTesterCallback body) => testWidgets(
     });
 
 void main() {
+  // The server keeps or drops a turn's cut-outs per part (serializers.showcase_parts), so it must split the frames
+  // as this page shows them. Both sides' tests read the same cases from contracts/.
+  group('splits the frames as the server does', () {
+    String name(MediaItem m) => m.originalUrl.split('/').last.replaceAll('.jpg', '');
+    List<List<MediaItem>> parts(ShowcasePlan plan) => plan.scan
+        ? [for (final s in plan.steps) s.media]
+        : [if (plan.steps.first.media.isNotEmpty) plan.steps.first.media];
+
+    test('in the shared cases', () {
+      final cases = (jsonDecode(File('../contracts/showcase_parts.json').readAsStringSync()) as Map)['cases'] as List;
+      expect(cases.length, greaterThan(5));
+      for (final c in cases.cast<Map<String, dynamic>>()) {
+        final plan = ShowcasePlan.of(Listing.fromJson({
+          ...listing(),
+          'media': [for (final m in (c['media'] as List).cast<List>()) media(m[0] as String, m[1] as String)],
+          'cover_frame': c['cover_frame'] == null ? null : 'https://cdn/${c['cover_frame']}.jpg',
+        }));
+        final want = [for (final p in (c['parts'] as List).cast<List>()) p.cast<String>()];
+        final got = [for (final p in parts(plan)) p.map(name).toList()];
+        // A plain turn starts at the cover's frame here; the server keeps the order taken.
+        List<String> sorted(List<String> l) => [...l]..sort();
+        expect(plan.scan ? got : got.map(sorted).toList(), plan.scan ? want : want.map(sorted).toList(),
+            reason: c['name'] as String);
+        expect(plan.turn, c['turn'], reason: c['name'] as String);
+      }
+    });
+
+    test('in the demo listings', () {
+      final demo = jsonDecode(File('demo/api.json').readAsStringSync()) as Map<String, dynamic>;
+      final want =
+          (jsonDecode(File('../contracts/showcase_parts_demo.json').readAsStringSync()) as Map)['listings'] as Map;
+      final keys = demo.keys.where((k) => RegExp(r'^GET /listings/\d+$').hasMatch(k)).toList();
+      expect(keys..sort(), want.keys.toList()..sort());
+      for (final k in keys) {
+        final plan = ShowcasePlan.of(Listing.fromJson(demo[k] as Map<String, dynamic>));
+        final p = parts(plan);
+        final w = want[k] as Map;
+        expect([for (final x in p) x.length], w['sizes'], reason: k);
+        expect(plan.turn, w['turn'], reason: k);
+        if (plan.scan) expect([for (final x in p) x.first.originalUrl], w['starts'], reason: k);
+      }
+    });
+  });
+
   group('plan', () {
     test('turns through the frames, then the top, sole and close-up', () {
       final plan = ShowcasePlan.of(Listing.fromJson(listing()));

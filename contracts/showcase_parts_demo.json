@@ -1,0 +1,11 @@
+{
+ "about": "How the demo listings split into showcase parts (see showcase_parts.json): each part's size and first frame, and the frames in one turn. Rewrite when app/demo/api.json is re-recorded.",
+ "listings": {
+  "GET /listings/6": {"sizes": [36], "starts": ["https://raw.githubusercontent.com/ooik2086-cmd/vitrina/claude/initial-code/app/demo/media/1/7c3dc278fe88bd527c6e36f86e404de1.jpg"], "turn": 36},
+  "GET /listings/4": {"sizes": [36], "starts": ["https://raw.githubusercontent.com/ooik2086-cmd/vitrina/claude/initial-code/app/demo/media/1/6385c80b296cf31a8711fe50fae15fb3.jpg"], "turn": 36},
+  "GET /listings/3": {"sizes": [54, 20, 28, 1], "starts": ["https://raw.githubusercontent.com/ooik2086-cmd/vitrina/claude/initial-code/app/demo/media/scan/31d5547df53edd07563cee18cd40a334.webp", "https://raw.githubusercontent.com/ooik2086-cmd/vitrina/claude/initial-code/app/demo/media/scan/8e12174ce2184c35acfae98b3ef2d7d4.webp", "https://raw.githubusercontent.com/ooik2086-cmd/vitrina/claude/initial-code/app/demo/media/scan/9f8cad2751e071028aac159a8a238409.webp", "https://raw.githubusercontent.com/ooik2086-cmd/vitrina/claude/initial-code/app/demo/media/scan/90dbb6f71b0fb251a6e0d227e5cd4d6e.webp"], "turn": 40},
+  "GET /listings/2": {"sizes": [36], "starts": ["https://raw.githubusercontent.com/ooik2086-cmd/vitrina/claude/initial-code/app/demo/media/1/7c3dc278fe88bd527c6e36f86e404de1.jpg"], "turn": 36},
+  "GET /listings/1": {"sizes": [54, 20, 28, 1], "starts": ["https://raw.githubusercontent.com/ooik2086-cmd/vitrina/claude/initial-code/app/demo/media/scan/7b84e0fe13b69c319f2d3c98ac7bf958.webp", "https://raw.githubusercontent.com/ooik2086-cmd/vitrina/claude/initial-code/app/demo/media/scan/a9dd3e0e1cea03913f2a384e0b813f6f.webp", "https://raw.githubusercontent.com/ooik2086-cmd/vitrina/claude/initial-code/app/demo/media/scan/c3dde4fc9163f0e2d66cc13b49b949a9.webp", "https://raw.githubusercontent.com/ooik2086-cmd/vitrina/claude/initial-code/app/demo/media/scan/44994298ed669b4ed9a6f56b3057d620.webp"], "turn": 40},
+  "GET /listings/5": {"sizes": [36], "starts": ["https://raw.githubusercontent.com/ooik2086-cmd/vitrina/claude/initial-code/app/demo/media/1/7c3dc278fe88bd527c6e36f86e404de1.jpg"], "turn": 36}
+ }
+}
