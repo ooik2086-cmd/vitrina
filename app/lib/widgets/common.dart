@@ -146,7 +146,8 @@ class LanguageSwitch extends StatelessWidget {
     return SegmentedButton<String>(
       key: const Key('language'),
       showSelectedIcon: false,
-      style: const ButtonStyle(visualDensity: VisualDensity.compact),
+      // Narrow, as the short names need, but a finger's 48 tall.
+      style: const ButtonStyle(minimumSize: WidgetStatePropertyAll(Size(56, 48))),
       segments: [
         for (final e in languages.entries)
           ButtonSegment(value: e.key, label: Text(languageShort[e.key]!), tooltip: e.value),

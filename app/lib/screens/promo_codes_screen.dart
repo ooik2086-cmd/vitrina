@@ -129,7 +129,7 @@ class _PromoCard extends StatelessWidget {
               color: Brand.accent.withValues(alpha: .12),
               borderRadius: BorderRadius.circular(10),
             ),
-            child: Text(value, style: weight(theme.textTheme.titleSmall!, 800).copyWith(color: Brand.accent)),
+            child: Text(value, style: weight(theme.textTheme.titleSmall!, 800).copyWith(color: accentText(context))),
           ),
           const SizedBox(width: 14),
           Expanded(

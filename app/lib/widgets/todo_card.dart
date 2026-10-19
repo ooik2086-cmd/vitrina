@@ -103,7 +103,7 @@ class _TodoCardState extends State<TodoCard> {
             trailing: Row(mainAxisSize: MainAxisSize.min, children: [
               CircleAvatar(
                 radius: 13,
-                backgroundColor: Brand.accent,
+                backgroundColor: Brand.accentStrong, // white on it reads 5.6:1
                 child: Text('${counts[l.key]}',
                     style: theme.textTheme.labelMedium?.copyWith(color: Colors.white, fontWeight: FontWeight.w700)),
               ),

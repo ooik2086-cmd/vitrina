@@ -911,7 +911,7 @@ class _PriceCard extends StatelessWidget {
           row(tr('Тауар'), formatTenge(o.itemPriceTiyn + o.promoDiscountTiyn)),
           if (o.promoCode != null)
             row(trf('Промокод {0}', [o.promoCode]), '−${formatTenge(o.promoDiscountTiyn)}',
-                style: theme.textTheme.bodyMedium?.copyWith(color: Brand.accent)),
+                style: theme.textTheme.bodyMedium?.copyWith(color: accentText(context))),
           row(tr('Жеткізу'), o.deliveryPriceTiyn == 0 ? tr('Тегін') : formatTenge(o.deliveryPriceTiyn)),
           const Divider(),
           row(tr('Жиыны'), formatTenge(o.totalTiyn),
@@ -1231,7 +1231,8 @@ class _ReviewFormState extends State<_ReviewForm> {
                   onPressed: _uploading ? null : _addPhoto,
                   child: _uploading
                       ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                      : const Icon(Icons.add_a_photo_outlined),
+                      // Only an icon shows, so a screen reader is told what it does.
+                      : Icon(Icons.add_a_photo_outlined, semanticLabel: tr('Фото қосу')),
                 ),
               ),
           ]),

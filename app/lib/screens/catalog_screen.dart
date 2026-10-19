@@ -267,7 +267,6 @@ class _CatalogScreenState extends State<CatalogScreen> {
                       onPressed: _openNotifications,
                       icon: Badge(
                         isLabelVisible: _unread > 0,
-                        backgroundColor: Brand.accent,
                         label: Text('$_unread'),
                         child: const Icon(Icons.notifications_none_rounded),
                       ),
@@ -336,7 +335,7 @@ class _CatalogScreenState extends State<CatalogScreen> {
           ),
           SliverToBoxAdapter(
             child: SizedBox(
-              height: 64,
+              height: 68, // a chip's 48 tap height and the padding
               child: ListView(
                 scrollDirection: Axis.horizontal,
                 padding: const EdgeInsets.fromLTRB(20, 12, 12, 8),
@@ -345,7 +344,6 @@ class _CatalogScreenState extends State<CatalogScreen> {
                     padding: const EdgeInsets.only(right: 8),
                     child: Badge(
                       isLabelVisible: _filter.active > 0,
-                      backgroundColor: Brand.accent,
                       label: Text('${_filter.active}'),
                       child: ActionChip(
                         tooltip: tr('Сүзгі'),
@@ -365,7 +363,7 @@ class _CatalogScreenState extends State<CatalogScreen> {
                       label: Text(tr('Жеңілдік')),
                       selected: _sale,
                       showCheckmark: false,
-                      selectedColor: Brand.accent,
+                      selectedColor: Brand.accentStrong, // white on it reads 5.6:1
                       labelStyle: TextStyle(color: _sale ? Colors.white : null, fontWeight: FontWeight.w600),
                       onSelected: (v) {
                         _sale = v;

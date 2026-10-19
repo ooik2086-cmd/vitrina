@@ -126,7 +126,7 @@ class _MyListingsScreenState extends State<MyListingsScreen> {
                 ),
               ),
             SizedBox(
-              height: 52,
+              height: 60, // a chip's 48 tap height and the padding
               child: ListView(
                 scrollDirection: Axis.horizontal,
                 padding: contentPadding(context, const EdgeInsets.fromLTRB(16, 8, 16, 4)),

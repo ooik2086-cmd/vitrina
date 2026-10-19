@@ -125,7 +125,7 @@ class _OfferSheetState extends State<OfferSheet> {
           width: double.infinity,
           child: FilledButton(
             key: const Key('offer-send'),
-            style: FilledButton.styleFrom(backgroundColor: Brand.accent, foregroundColor: Colors.white),
+            style: FilledButton.styleFrom(backgroundColor: Brand.accentStrong, foregroundColor: Colors.white),
             onPressed: _busy ? null : _send,
             child: Text(tr('Ұсыныс жіберу')),
           ),

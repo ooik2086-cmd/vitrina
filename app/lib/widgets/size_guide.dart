@@ -95,7 +95,7 @@ class SizeGuideSheet extends StatelessWidget {
                   if (context.mounted) Navigator.pop(context, r.cm);
                 },
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  padding: const EdgeInsets.symmetric(vertical: 12), // a row is a finger's 48 tall
                   child: Row(children: [
                     cell(r.cm, style: weight(theme.textTheme.bodyLarge!, 700)),
                     cell(r.eu),

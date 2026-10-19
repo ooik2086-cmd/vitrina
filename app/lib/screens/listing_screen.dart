@@ -280,7 +280,7 @@ class _ListingScreenState extends State<ListingScreen> {
           null => null,
         },
         leading: Padding(
-            padding: const EdgeInsets.all(6),
+            padding: const EdgeInsets.all(4), // the button keeps a finger's 48 in the bar's 56
             child: _RoundButton(dark: _stageTop == Brightness.dark, back: true, child: const BackButtonIcon())),
         actions: [
           Padding(

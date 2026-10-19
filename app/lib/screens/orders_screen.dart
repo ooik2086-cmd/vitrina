@@ -114,7 +114,7 @@ class _OrderListState extends State<_OrderList> {
                     if (index == 0) {
                       return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                         SizedBox(
-                          height: 56,
+                          height: 64, // a chip's 48 tap height and the padding
                           child: ListView(
                             scrollDirection: Axis.horizontal,
                             padding: contentPadding(context, const EdgeInsets.fromLTRB(16, 10, 16, 6)),
@@ -165,7 +165,7 @@ class _OrderListState extends State<_OrderList> {
                         if (waits)
                           TextSpan(
                               text: ' · ${tr('Сізді күтеді')}',
-                              style: TextStyle(color: Brand.accent, fontWeight: FontWeight.w700)),
+                              style: TextStyle(color: accentText(context), fontWeight: FontWeight.w700)),
                       ])),
                       trailing: Text(formatTenge(o.totalTiyn), style: const TextStyle(fontWeight: FontWeight.w700)),
                       onTap: () async {

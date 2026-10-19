@@ -102,7 +102,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
                               if (c.lastMessage != null)
                                 Text(_time(c.lastMessage!.createdAt), style: theme.textTheme.labelSmall),
                               const SizedBox(height: 4),
-                              if (c.unread > 0) Badge(label: Text('${c.unread}'), backgroundColor: Brand.accent),
+                              if (c.unread > 0) Badge(label: Text('${c.unread}')),
                             ]),
                         onTap: () async {
                           await Navigator.of(context)

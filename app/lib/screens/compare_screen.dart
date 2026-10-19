@@ -189,7 +189,8 @@ class _Table extends StatelessWidget {
                 padding: const EdgeInsets.only(top: 4),
                 child: Text(tr('Ең тиімді'),
                     key: Key('compare-cheapest-${l.id}'),
-                    style: theme.textTheme.labelSmall?.copyWith(color: Brand.accent, fontWeight: FontWeight.w800)),
+                    style:
+                        theme.textTheme.labelSmall?.copyWith(color: accentText(context), fontWeight: FontWeight.w800)),
               ),
           ]),
         ),

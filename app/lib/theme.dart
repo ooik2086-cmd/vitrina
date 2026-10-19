@@ -169,6 +169,8 @@ ThemeData buildTheme(Brightness brightness) {
         textStyle: _w(text.labelLarge!, 600).copyWith(fontSize: 16),
       ),
     ),
+    // A count on an icon: the deeper accent, so its white figure reads 5.6:1 in both themes.
+    badgeTheme: const BadgeThemeData(backgroundColor: Brand.accentStrong, textColor: Colors.white),
     chipTheme: ChipThemeData(
       shape: const StadiumBorder(),
       side: BorderSide(color: scheme.outlineVariant),

@@ -717,7 +717,7 @@ class _PromoCardState extends State<PromoCard> {
           Wrap(spacing: 8, runSpacing: 8, children: [
             FilledButton.icon(
               key: const Key('open-promo'),
-              style: FilledButton.styleFrom(backgroundColor: Brand.accent),
+              style: FilledButton.styleFrom(backgroundColor: Brand.accentStrong, foregroundColor: Colors.white),
               onPressed: () => launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication),
               icon: const Icon(Icons.play_arrow_rounded),
               label: Text(tr('Ашу')),
@@ -743,7 +743,7 @@ class _PromoCardState extends State<PromoCard> {
         else
           FilledButton.icon(
             key: const Key('make-promo'),
-            style: FilledButton.styleFrom(backgroundColor: Brand.accent),
+            style: FilledButton.styleFrom(backgroundColor: Brand.accentStrong, foregroundColor: Colors.white),
             onPressed: _make,
             icon: const Icon(Icons.auto_awesome_rounded),
             label: Text(tr('Видео жасау')),
@@ -825,11 +825,18 @@ class QualityCard extends StatelessWidget {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final q = quality;
+    final light = theme.brightness == Brightness.light;
     final color = q.score >= 85
         ? const Color(0xFF2E9E6A)
         : q.score >= 60
             ? Brand.accent
             : scheme.error;
+    // The verdict is small text, so it takes a deeper shade of the bar's colour where the card is white.
+    final verdictColor = q.score >= 85
+        ? (light ? const Color(0xFF1F7A50) : color)
+        : q.score >= 60
+            ? accentText(context)
+            : color;
     return Card(
       key: const Key('listing-quality'),
       child: Padding(
@@ -850,7 +857,8 @@ class QualityCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 8),
-          Text(q.verdict, style: theme.textTheme.labelMedium?.copyWith(color: color, fontWeight: FontWeight.w700)),
+          Text(q.verdict,
+              style: theme.textTheme.labelMedium?.copyWith(color: verdictColor, fontWeight: FontWeight.w700)),
           for (final t in q.tips.take(3)) ...[
             const SizedBox(height: 10),
             Row(crossAxisAlignment: CrossAxisAlignment.start, children: [

@@ -85,7 +85,7 @@ class _ShopSaleSheetState extends State<ShopSaleSheet> {
               trf('Мысалы: {0} → {1}',
                   [formatTenge(sample.priceTiyn), formatTenge(salePrice(sample.priceTiyn, _percent))]),
               key: const Key('sale-example'),
-              style: weight(theme.textTheme.bodyMedium!, 600).copyWith(color: Brand.accent),
+              style: weight(theme.textTheme.bodyMedium!, 600).copyWith(color: accentText(context)),
             ),
           ],
           const SizedBox(height: 20),
