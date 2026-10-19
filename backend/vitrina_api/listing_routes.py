@@ -274,10 +274,15 @@ def thumb_listing(state, listing_id: int) -> int:
 
 
 def prepare_listing_media(state, listing_id: int) -> None:
-    # Cut-outs first, so the search vector and the small copies are made from the shoe without its backdrop.
-    cutout_listing(state, listing_id)
-    thumb_listing(state, listing_id)
-    embed_listing(state, listing_id)
+    # Cut-outs first, so the search vector and the small copies are made from the shoe without its backdrop. Each
+    # job on its own: one that fails (the storage or the database away for a moment) must not leave a new listing
+    # without small copies to turn through, or out of search by photo, until the backfill runs. It is logged, and
+    # the backfill finds what is missing.
+    for job in (cutout_listing, thumb_listing, embed_listing):
+        try:
+            job(state, listing_id)
+        except Exception:
+            log.exception("%s failed for listing %s", job.__name__, listing_id)
 
 
 @router.post("/listings", status_code=201)

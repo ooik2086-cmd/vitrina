@@ -75,14 +75,17 @@ def main(argv: list[str] | None = None) -> None:
     try:
         for lid in ids:
             logged = errors.count
-            try:
-                cut = cutout_listing(state, lid)
-                thumbs = thumb_listing(state, lid)
-                embedded = embed_listing(state, lid)
-            except Exception:
-                logging.getLogger(__name__).exception("listing %s failed", lid)
-                embedded = None
-            if embedded is None or errors.count > logged:
+            # Each job on its own, as after an upload: small copies and the search vector are still made when the
+            # cut-outs fail, and the other way round. Any failure counts the listing as failed.
+            results = []
+            for job in (cutout_listing, thumb_listing, embed_listing):
+                try:
+                    results.append(job(state, lid))
+                except Exception:
+                    logging.getLogger(__name__).exception("listing %s: %s failed", lid, job.__name__)
+                    results.append(None)
+            cut, thumbs, embedded = results
+            if None in results or errors.count > logged:
                 failed.append(lid)
                 in_a_row += 1
                 print(f"listing {lid}: failed, see the error above", flush=True)

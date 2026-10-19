@@ -112,6 +112,32 @@ class CutoutApiTests(MediaTests):
         self.assertEqual(served.status_code, 200)
         self.assertEqual(Image.open(io.BytesIO(served.content)).mode, "RGBA")
 
+    def test_one_media_job_failing_does_not_stop_the_others(self):
+        from vitrina_api import listing_routes
+        real = listing_routes.cutout_listing, listing_routes.thumb_listing, listing_routes.embed_listing
+        embedded = []
+
+        def broken(state, lid):
+            raise RuntimeError("storage went away")
+        try:
+            # The cut-outs fail: the small copies, from the photos as taken, and the search vector still come.
+            listing_routes.cutout_listing = broken
+            listing_routes.embed_listing = lambda state, lid: embedded.append(lid)
+            with self.assertLogs("vitrina", level="ERROR") as logs:
+                r = self.post("/listings", self.seller, {**LISTING, "photos": self.four((120, 90, 60))})
+            self.assertEqual(r.status_code, 201, r.text)
+            self.assertIn("failed for listing", "\n".join(logs.output))
+            media = self.mine(r.json()["id"])["media"]
+            self.assertTrue(all(m["thumb_url"] and not m["processed_url"] for m in media), media)
+            self.assertEqual(embedded, [r.json()["id"]])
+            # The small copies fail: the search vector still comes.
+            listing_routes.cutout_listing, listing_routes.thumb_listing = real[0], broken
+            with self.assertLogs("vitrina", level="ERROR"):
+                r = self.post("/listings", self.seller, {**LISTING, "photos": self.four((120, 90, 60))})
+            self.assertEqual(embedded[-1], r.json()["id"])
+        finally:
+            listing_routes.cutout_listing, listing_routes.thumb_listing, listing_routes.embed_listing = real
+
     def test_without_a_model_photos_stay_original(self):
         self.app.state.segmenter = None
         url = self.upload(self.seller, jpeg()).json()["url"]
@@ -497,10 +523,20 @@ class CutoutApiTests(MediaTests):
             if lid == ids[1]:  # one photo's error is logged and the job carries on: still a failure here
                 logging.getLogger("vitrina_api.listing_routes").error("thumbnail failed for one photo")
             return thumb_listing(state, lid)
+        from scripts import cutout_backfill
+        from vitrina_api.listing_routes import embed_listing
+        embedded = []
+
+        def embed(state, lid):
+            embedded.append(lid)
+            return embed_listing(state, lid)
+        cutout_backfill.embed_listing = embed
+        self.addCleanup(setattr, cutout_backfill, "embed_listing", embed_listing)
         with self.assertLogs(level="ERROR"):
             code, out = self.backfill("--without-models", thumbs=thumbs)
         self.assertEqual(code, 1)
         self.assertIn(f"1 of 3 listings done; failed: {ids[0]}, {ids[1]}", out)
+        self.assertEqual(embedded, ids)  # the failed small copies did not keep the search vector from being made
         self.assertIsNone(self.mine(ids[0])["cover_frame"])
         self.assertIsNotNone(self.mine(ids[2])["cover_frame"])  # the next listing was still done
 
