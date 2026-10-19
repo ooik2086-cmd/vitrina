@@ -454,6 +454,7 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
   final _recentFull = <ImageProvider>[];
   static const _keepFull = 3;
   int? _jumpingTo; // a stop button was tapped: tick once on arrival, not for every stop passed
+  bool _jumping = false; // while a stop button's jump animates the page there
   /// How often the stage was built; tests check that scrolling within one frame does not rebuild it.
   @visibleForTesting
   int builds = 0;
@@ -562,22 +563,42 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
   void _precache() {
     if (_precached) return;
     _precached = true;
-    // The small copies scrolling shows are fetched first, in showing order; photos without one only near the shoe.
+    // The small copies scrolling shows are fetched first, in showing order. Of photos without one: the first of
+    // each stop, where scrolling on or a stop button lands (a stop is one photo, a scan's a few), and those near
+    // the shoe where the page actually is (a colour opened at the same side starts part way round).
     for (final s in _plan.steps) {
       for (final m in s.media) {
         if (_small(m, s)) _fetch(m, s);
       }
     }
-    _fetchNear(_shown);
+    for (var i = 1; i < _plan.steps.length; i++) {
+      _fetchNear((step: i, frame: 0), ahead: 0);
+    }
+    _fetchNear(_plan.at(_progress));
     final first = _plan.steps.first;
     if (!first.cut && first.media.isNotEmpty) _sampleEdge(_base(first.media.first, first));
   }
 
-  /// The photos without a small copy within [fullAhead] frames of [at], either way, as the shoe may turn back.
-  void _fetchNear(({int step, int frame}) at) {
-    final s = _plan.steps[at.step];
-    for (var i = math.max(0, at.frame - fullAhead); i <= math.min(s.media.length - 1, at.frame + fullAhead); i++) {
-      if (!_small(s.media[i], s)) _fetch(s.media[i], s);
+  /// The photos without a small copy within [ahead] photos of [at] in showing order, either way, as the shoe may
+  /// turn back, across the stops; on the turn also round it, as a sideways drag goes from its first frame
+  /// straight to its last.
+  void _fetchNear(({int step, int frame}) at, {int ahead = fullAhead}) {
+    void fetch(int step, int frame) {
+      final s = _plan.steps[step];
+      if (!_small(s.media[frame], s)) _fetch(s.media[frame], s);
+    }
+
+    final all = _plan.photos;
+    final i = all.indexOf(at);
+    for (var j = math.max(0, i - ahead); j <= math.min(all.length - 1, i + ahead); j++) {
+      fetch(all[j].step, all[j].frame);
+    }
+    final turn = _plan.turn;
+    if (at.step == 0 && _plan.steps.first.kind == 'spin' && at.frame < turn) {
+      for (var d = 1; d <= ahead; d++) {
+        fetch(0, (at.frame + d) % turn);
+        fetch(0, (at.frame - d + turn) % turn);
+      }
     }
   }
 
@@ -656,7 +677,8 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
         }
       }
       _shown = now;
-      _fetchNear(now);
+      // Not for each frame a stop button's jump only passes: its landing was fetched when it was tapped.
+      if (!_jumping) _fetchNear(now);
       // Small copies while turning; the full photo once the shoe has stopped on one frame for a moment.
       _settled = false;
       _settleSoon();
@@ -704,10 +726,14 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
     _resetZoom();
     final target = _plan.startOf(step) * _travel + (step == 0 ? 0 : 1);
     _jumpingTo = step;
+    _fetchNear(_plan.at((target / _travel).clamp(0.0, 1.0)));
     if (_reduceMotion) {
       widget.scroll.jumpTo(target);
     } else {
-      widget.scroll.animateTo(target, duration: const Duration(milliseconds: 450), curve: Curves.easeInOut);
+      _jumping = true;
+      widget.scroll
+          .animateTo(target, duration: const Duration(milliseconds: 450), curve: Curves.easeInOut)
+          .whenComplete(() => _jumping = false);
     }
   }
 
