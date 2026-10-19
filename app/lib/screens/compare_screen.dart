@@ -168,7 +168,7 @@ class _Table extends StatelessWidget {
       builder: (context, size, _) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         _Row(items: items, cell: (l) => _Head(listing: l, together: together)),
         if (turn)
-          // The turn is a gesture only; screen readers compare on the listing pages.
+          // The drag is a gesture only; screen readers press the side chips below, when shown, or open the listings.
           ExcludeSemantics(
             child: Padding(
               padding: const EdgeInsets.only(bottom: 8),
@@ -252,8 +252,8 @@ class _Table extends StatelessWidget {
 }
 
 /// One tap shows every compared shoe whose sides are known from the same side, for those who would rather not
-/// drag: the main photos, then the sides as the listing editor names them. Like the turn, a picture only, so
-/// screen readers compare on the listing pages.
+/// drag: the main photos, then the sides as the listing editor names them. Unlike the drag, the chips are buttons a
+/// screen reader can press, and each shoe's picture then says which side it shows.
 class _Sides extends StatelessWidget {
   const _Sides({required this.together});
   final TurnTogether together;
@@ -267,22 +267,20 @@ class _Sides extends StatelessWidget {
   };
 
   @override
-  Widget build(BuildContext context) => ExcludeSemantics(
-        child: ValueListenableBuilder<String?>(
-          valueListenable: together.picked,
-          builder: (context, picked, _) => Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            // The chips' tap targets already leave a gap between the rows.
-            child: Wrap(spacing: 8, children: [
-              for (final MapEntry(key: side, value: name) in _names.entries)
-                ChoiceChip(
-                  key: Key('compare-side-$side'),
-                  label: Text(tr(name)),
-                  selected: picked == side,
-                  onSelected: (_) => together.showSide(side == TurnTogether.cover ? null : side),
-                ),
-            ]),
-          ),
+  Widget build(BuildContext context) => ValueListenableBuilder<String?>(
+        valueListenable: together.picked,
+        builder: (context, picked, _) => Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          // The chips' tap targets already leave a gap between the rows.
+          child: Wrap(spacing: 8, children: [
+            for (final MapEntry(key: side, value: name) in _names.entries)
+              ChoiceChip(
+                key: Key('compare-side-$side'),
+                label: Text(tr(name)),
+                selected: picked == side,
+                onSelected: (_) => together.showSide(side == TurnTogether.cover ? null : side),
+              ),
+          ]),
         ),
       );
 }
@@ -299,49 +297,66 @@ class _Head extends StatelessWidget {
       key: Key('compare-open-${listing.id}'),
       onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => ListingScreen(listingId: listing.id))),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        AspectRatio(
-          aspectRatio: 1,
-          child: Container(
-            clipBehavior: Clip.antiAlias,
-            decoration: studioBackdrop(radius: BorderRadius.circular(14)),
-            child: Stack(fit: StackFit.expand, children: [
-              cover == null
-                  ? const Icon(Icons.image_outlined, color: Colors.black26)
-                  : CardTurn(
-                      listing: listing,
-                      together: together,
-                      cover: CoverPhoto(
-                          image: coverImage(cover),
-                          cutout: listing.coverIsCutout,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => const Icon(Icons.broken_image_outlined, color: Colors.black26)),
-                    ),
-              // A shoe that cannot show the side picked by name says so, rather than look like that side.
-              if (_Table.sided([listing]).isEmpty)
-                ExcludeSemantics(
-                  child: ValueListenableBuilder<String?>(
-                    valueListenable: together.picked,
-                    builder: (context, _, __) => !together.named
-                        ? const SizedBox.shrink()
-                        : Align(
-                            alignment: Alignment.topCenter, // the shoe sits lower, under empty backdrop
-                            child: Container(
-                              key: Key('compare-no-side-${listing.id}'),
-                              margin: const EdgeInsets.all(4),
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                  color: Colors.white.withValues(alpha: 0.9), borderRadius: BorderRadius.circular(8)),
-                              child: Text(tr('Бұл жағынан фото жоқ'),
-                                  textAlign: TextAlign.center,
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .labelSmall
-                                      ?.copyWith(color: Colors.black87, fontSize: 10, height: 1.2)),
+        // While a side is picked by name, the picture says which side it shows, or that it has none: a screen
+        // reader pressing a side chip otherwise hears nothing change. The drag stays a picture only.
+        ValueListenableBuilder<String?>(
+          valueListenable: together.picked,
+          // Always the same wrapper, so picking a side never rebuilds the turning picture under it.
+          builder: (context, _, picture) => Semantics(
+            key: Key('compare-shown-${listing.id}'),
+            label: !together.named
+                ? null
+                : _Table.sided([listing]).isEmpty
+                    ? tr('Бұл жағынан фото жоқ')
+                    : tr(_Sides._names[together.picked.value]!),
+            image: together.named,
+            child: picture,
+          ),
+          child: AspectRatio(
+            aspectRatio: 1,
+            child: Container(
+              clipBehavior: Clip.antiAlias,
+              decoration: studioBackdrop(radius: BorderRadius.circular(14)),
+              child: Stack(fit: StackFit.expand, children: [
+                cover == null
+                    ? const Icon(Icons.image_outlined, color: Colors.black26)
+                    : CardTurn(
+                        listing: listing,
+                        together: together,
+                        cover: CoverPhoto(
+                            image: coverImage(cover),
+                            cutout: listing.coverIsCutout,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) =>
+                                const Icon(Icons.broken_image_outlined, color: Colors.black26)),
+                      ),
+                // A shoe that cannot show the side picked by name says so, rather than look like that side.
+                if (_Table.sided([listing]).isEmpty)
+                  ExcludeSemantics(
+                    child: ValueListenableBuilder<String?>(
+                      valueListenable: together.picked,
+                      builder: (context, _, __) => !together.named
+                          ? const SizedBox.shrink()
+                          : Align(
+                              alignment: Alignment.topCenter, // the shoe sits lower, under empty backdrop
+                              child: Container(
+                                key: Key('compare-no-side-${listing.id}'),
+                                margin: const EdgeInsets.all(4),
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                    color: Colors.white.withValues(alpha: 0.9), borderRadius: BorderRadius.circular(8)),
+                                child: Text(tr('Бұл жағынан фото жоқ'),
+                                    textAlign: TextAlign.center,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .labelSmall
+                                        ?.copyWith(color: Colors.black87, fontSize: 10, height: 1.2)),
+                              ),
                             ),
-                          ),
+                    ),
                   ),
-                ),
-            ]),
+              ]),
+            ),
           ),
         ),
         const SizedBox(height: 6),

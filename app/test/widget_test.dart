@@ -3428,6 +3428,41 @@ void main() {
         expect((shownIn(tester, 7), shownIn(tester, 8)), (null, null));
       });
 
+      testWidgets('a screen reader presses the side chips and hears which side each shoe shows', (tester) async {
+        tester.view.physicalSize = const Size(2400, 3600);
+        addTearDown(tester.view.reset);
+        final semantics = tester.ensureSemantics();
+        await pumpCompare(tester, [
+          marked(7, {'outer': 0, 'front': 3}),
+          marked(8, {'outer': 0, 'front': 9}),
+          listing([for (var i = 0; i < 12; i++) frame(i)], id: 9), // turns, but which way is a guess
+        ]);
+        await tester.tap(find.byKey(const Key('compare-pick-9')));
+        await tester.pump();
+        await tester.pump();
+        // Only the chip says 'Алдынан' before it is pressed; the covers carry no side.
+        expect(find.semantics.byLabel('Алдынан'), findsOne);
+        tester.semantics.tap(find.semantics.byLabel('Алдынан'));
+        await tester.pump();
+        expect((shownIn(tester, 7), shownIn(tester, 8)), ('https://cdn/t3.webp', 'https://cdn/t9.webp'));
+        expect(tester.getSemantics(find.byKey(const Key('compare-side-front'))).flagsCollection.isSelected,
+            ui.Tristate.isTrue);
+        // Each shoe's picture is read with its title, which opens the listing.
+        String heard(int id) => tester.getSemantics(find.byKey(Key('compare-shown-$id'))).label;
+        for (final id in [7, 8]) {
+          expect(heard(id), startsWith('Алдынан\n'));
+        }
+        // The shoe that cannot show it says so once: the visible caption is not read a second time.
+        expect(heard(9), startsWith('Бұл жағынан фото жоқ\n'));
+        expect('Бұл жағынан фото жоқ'.allMatches(heard(9)), hasLength(1));
+        tester.semantics.tap(find.semantics.byLabel('Негізгі фото'));
+        await tester.pump();
+        for (final id in [7, 8, 9]) {
+          expect(heard(id), isNot(contains('\n')), reason: 'only the title once the covers are back');
+        }
+        semantics.dispose();
+      });
+
       testWidgets('a side picked by name is shown only where the sides are known; the others say so', (tester) async {
         tester.view.physicalSize = const Size(2400, 3600);
         addTearDown(tester.view.reset);
