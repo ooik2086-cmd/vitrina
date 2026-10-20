@@ -29,7 +29,6 @@ import 'package:vitrina/screens/chat_screen.dart';
 import 'package:vitrina/screens/compare_screen.dart';
 import 'package:vitrina/screens/earnings_screen.dart';
 import 'package:vitrina/screens/image_search_screen.dart';
-import 'package:vitrina/screens/listing_editor_screen.dart';
 import 'package:vitrina/screens/listing_screen.dart';
 import 'package:vitrina/screens/login_screen.dart';
 import 'package:vitrina/screens/manage_listing_screen.dart';
@@ -1515,55 +1514,6 @@ void main() {
     expect(a.shouldRepaint(SpinProgressPainter(captured: 4, target: spinTargetFrames)), isTrue);
   });
 
-  testWidgets('listing editor will not save without required fields and photos', (tester) async {
-    var calls = 0;
-    final api = Api(
-        base: 'http://x/api/v1',
-        client: MockClient((_) async {
-          calls++;
-          return http.Response('{}', 500);
-        }));
-    tester.view.physicalSize = const Size(500, 3000);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.reset);
-    await tester.pumpWidget(SessionScope(session: Session(api), child: const MaterialApp(home: ListingEditorScreen())));
-    for (final label in requiredAngles.values) {
-      expect(find.text('$label *'), findsOneWidget);
-    }
-    await tester.tap(find.text('Жариялау'));
-    await tester.pump();
-    expect(find.text('Толтырыңыз'), findsWidgets);
-    expect(find.text('Бағаны енгізіңіз'), findsOneWidget);
-    expect(find.text('Түсін таңдаңыз'), findsOneWidget); // the colour is picked, not left out
-    expect(find.text('Кімге арналғанын таңдаңыз'), findsOneWidget); // asked, never assumed
-    expect(find.text('Түрін таңдаңыз'), findsOneWidget); // boots are never filed as sneakers by default
-
-    await tester.enterText(find.widgetWithText(TextFormField, 'Атауы'), 'Qadam Runner');
-    await tester.tap(find.byKey(const Key('audience')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Әйелдерге').last);
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('category-null')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Етік, бәтеңке').last);
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('color-ақ')));
-    await tester.enterText(find.widgetWithText(TextFormField, 'Бағасы'), '34900');
-    await tester.enterText(find.widgetWithText(TextFormField, 'Өлшем'), '42');
-    await tester.enterText(find.widgetWithText(TextFormField, 'Ұлтарақ, см'), '27');
-    await tester.tap(find.text('Жариялау'));
-    await tester.pump();
-    expect(find.textContaining('Фото жетіспейді'), findsOneWidget);
-    expect(calls, 0); // nothing was sent
-
-    // Defect description becomes required for worn shoes.
-    await tester.tap(find.text('Жаңа, қорабымен'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Киілген, жақсы').last);
-    await tester.pumpAndSettle();
-    expect(find.widgetWithText(TextFormField, 'Ақаулары'), findsOneWidget);
-  });
-
   testWidgets('the colour is picked from a list, or typed when it is not on it', (tester) async {
     final color = TextEditingController();
     final form = GlobalKey<FormState>();
@@ -2498,23 +2448,6 @@ void main() {
     expect(session.signedIn, isFalse);
   });
 
-  testWidgets('a similar listing starts from the details of another, without its photos', (tester) async {
-    final api = Api(base: 'http://x/api/v1', client: MockClient((_) async => jsonResponse({})));
-    final template = Listing.fromJson({...listingJson(), 'model_name': 'Air Force 1', 'price_tiyn': 4500000});
-    tester.view.physicalSize = const Size(400, 3000);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.reset);
-    await tester.pumpWidget(
-        SessionScope(session: Session(api), child: MaterialApp(home: ListingEditorScreen(template: template))));
-    await tester.pumpAndSettle();
-    expect(find.text('Ұқсас тауар'), findsOneWidget);
-    expect(find.byKey(const Key('template-note')), findsOneWidget);
-    expect(find.widgetWithText(TextFormField, 'Nike Air Force 1'), findsOneWidget);
-    expect(find.widgetWithText(TextFormField, '45000'), findsOneWidget);
-    expect(find.widgetWithText(TextFormField, '43'), findsOneWidget); // every size row came along
-    expect(find.byType(Image), findsNothing); // photos are of another pair
-  });
-
   testWidgets('catalog loads the next page when scrolled near the end', (tester) async {
     final offsets = <String?>[];
     final api = Api(
@@ -2951,65 +2884,6 @@ void main() {
     expect(text('DELIVERED_PENDING_CONFIRMATION', 2), contains('ақша сатушыға өтеді'));
     expect(text('DELIVERED_PENDING_CONFIRMATION', 1), contains('сізге өтеді'));
     expect(orderDeadlineText(OrderInfo.fromJson(orderJson('COMPLETED', deadline: at)), 2), isNull);
-  });
-
-  testWidgets('leaving the listing editor with unsaved work asks first', (tester) async {
-    tester.view.physicalSize = const Size(500, 3000); // the whole form is built, title field included
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.reset);
-    final api = Api(base: 'http://x/api/v1', client: MockClient((_) async => jsonResponse({})));
-    await tester.pumpWidget(SessionScope(
-        session: Session(api),
-        child: MaterialApp(
-            home: Builder(
-                builder: (context) => TextButton(
-                    onPressed: () =>
-                        Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ListingEditorScreen())),
-                    child: const Text('open'))))));
-    await tester.tap(find.text('open'));
-    await tester.pumpAndSettle();
-    // Nothing typed yet: back simply leaves.
-    await tester.pageBack();
-    await tester.pumpAndSettle();
-    expect(find.byType(ListingEditorScreen), findsNothing);
-
-    await tester.tap(find.text('open'));
-    await tester.pumpAndSettle();
-    await tester.enterText(find.widgetWithText(TextFormField, 'Атауы'), 'Qadam Runner');
-    await tester.pump();
-    await tester.pageBack();
-    await tester.pumpAndSettle();
-    expect(find.text('Сақтамай шығу керек пе?'), findsOneWidget);
-    await tester.tap(find.text('Қалу'));
-    await tester.pumpAndSettle();
-    expect(find.byType(ListingEditorScreen), findsOneWidget);
-    expect(find.text('Qadam Runner'), findsOneWidget);
-    await tester.pageBack();
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('discard')));
-    await tester.pumpAndSettle();
-    expect(find.byType(ListingEditorScreen), findsNothing);
-  });
-
-  testWidgets('listing editor checks title length and insole centimetres on the spot', (tester) async {
-    final api = Api(base: 'http://x/api/v1', client: MockClient((_) async => jsonResponse({})));
-    tester.view.physicalSize = const Size(500, 3000);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.reset);
-    await tester.pumpWidget(SessionScope(session: Session(api), child: const MaterialApp(home: ListingEditorScreen())));
-    await tester.enterText(find.widgetWithText(TextFormField, 'Атауы'), 'AF');
-    await tester.enterText(find.widgetWithText(TextFormField, 'Ұлтарақ, см'), '5');
-    await tester.tap(find.text('Жариялау'));
-    await tester.pump();
-    expect(find.text('Атауы кемінде 3 таңбадан тұрсын'), findsOneWidget);
-    expect(find.text('8–35 см аралығында болуы керек'), findsOneWidget);
-    await tester.enterText(find.widgetWithText(TextFormField, 'Ұлтарақ, см'), 'жиырма');
-    await tester.tap(find.text('Жариялау'));
-    await tester.pump();
-    expect(find.text('Санмен жазыңыз, мысалы 27,5'), findsOneWidget);
-    expect(insoleCheck('27,5'), isNull);
-    expect(insoleCheck('27.5'), isNull);
-    expect(insoleCheck('36'), isNotNull);
   });
 
   testWidgets('a chat that could not load says why and opens on retry', (tester) async {

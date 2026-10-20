@@ -111,6 +111,8 @@ const en = <String, String>{
   'Міндетті емес, бірақ сатып алушы тауарды жан-жағынан көреді. Аяқкиімді аздап бұрып, {0} шақты кадр түсіріңіз.':
       'Optional, but buyers will see the item from every side. Turn the shoe slightly and take about {0} frames.',
   'Кейбір кадрлар жүктелмеді. Қайта түсіріңіз.': 'Some frames didn\'t upload. Retake them.',
+  'Кейбір фото жүктелмеді. Белгісі бар фотоны қайта түсіріңіз.': 'Some photos didn\'t upload. Retake the ones with the mark.',
+  'Ақау фотосы жүктелмеді. Қайта қосыңыз.': 'The defect photo didn\'t upload. Add it again.',
   'Түсіру': 'Shoot',
   'Галереядан': 'From gallery',
   'Атауы': 'Title',
@@ -128,6 +130,9 @@ const en = <String, String>{
   'Жеткізу': 'Delivery',
   'Өлшемдер': 'Sizes',
   'Ұлтарақ, см': 'Insole, cm',
+  'Тауар туралы': 'About the pair',
+  'Бағасы мен өлшемі': 'Price and sizes',
+  '{0}-қадам, барлығы {1}': 'Step {0} of {1}',
   'Саны': 'Quantity',
   'Өшіру': 'Delete',
   'Өлшем қосу': 'Add size',
