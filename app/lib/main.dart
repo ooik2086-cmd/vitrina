@@ -23,6 +23,9 @@ import 'recent.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // A scan's hundred-odd small frames (some 80 MB decoded) and a few sharp photos must all stay decoded, or the turn
+  // re-decodes frames mid-swipe and stutters; the default 100 MB was just too small. Memory pressure still clears it.
+  PaintingBinding.instance.imageCache.maximumSizeBytes = 160 << 20;
   await restoreLanguage(_deviceLanguage());
   await restoreMySize();
   await restoreRecent();

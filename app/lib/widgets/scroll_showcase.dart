@@ -2,7 +2,10 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/physics.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 
@@ -449,7 +452,7 @@ class ScrollShowcase extends StatefulWidget {
   State<ScrollShowcase> createState() => ScrollShowcaseState();
 }
 
-class ScrollShowcaseState extends State<ScrollShowcase> {
+class ScrollShowcaseState extends State<ScrollShowcase> with SingleTickerProviderStateMixin {
   late ShowcasePlan _plan;
   late bool _light;
   bool _settled = true;
@@ -494,6 +497,7 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
   @override
   void initState() {
     super.initState();
+    _spin; // made now, not on first touch: making it in dispose, after the widget left the tree, is not allowed
     _setUp();
     widget.scroll.addListener(_onScroll);
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -504,6 +508,7 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
 
   void _setUp() {
     _plan = ShowcasePlan.of(widget.listing);
+    if (_spinSim != null) _stopSpin();
     _light = widget.listing.backdrop != 'dark';
     _shown = (step: 0, frame: 0);
     _scale = 1;
@@ -536,6 +541,8 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     _precache();
+    // Covered by another page: the ticker is muted, and the shoe would jump to the spin's end when it came back.
+    if (!TickerMode.valuesOf(context).enabled) _stopSpin();
   }
 
   /// What the stage draws first for a photo: the small copy, or the photo decoded at screen size if there is none.
@@ -644,6 +651,7 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
   @override
   void dispose() {
     widget.scroll.removeListener(_onScroll);
+    _spin.dispose();
     _settle?.cancel();
     _stopSampling();
     if (_lockedOffset != null || _zoomed) widget.onLock?.call(false);
@@ -699,12 +707,20 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
   /// The full photo once the shoe has stopped on one photo for a moment: 140 ms after the finger is lifted, or
   /// 450 ms while it rests on the shoe. Decoding one at every short pause mid-drag made the turn stutter; a longer
   /// pause is someone looking closely, who should get the sharp photo.
-  void _settleSoon() {
+  void _settleSoon({int waited = 0}) {
     _settle?.cancel();
     _settle = Timer(Duration(milliseconds: _pointers.isEmpty ? 140 : 450), () {
-      if (mounted && !_settled) setState(() => _settled = true);
+      if (!mounted || _settled) return;
+      // Still turning on its own (a flick, or the page coasting after a swipe): decoding now would make the last,
+      // slow frames of the turn stutter. Once it stops, the next frame change or the end of the spin comes back here;
+      // after 3 s of waiting the sharp photo comes anyway, in case the page never reports itself still.
+      if ((_spin.isTicking || _coasting) && waited < 20) return _settleSoon(waited: waited + 1);
+      setState(() => _settled = true);
     });
   }
+
+  bool get _coasting =>
+      _pointers.isEmpty && widget.scroll.hasClients && widget.scroll.position.isScrollingNotifier.value;
 
   /// Which zoom each remembered full photo was decoded for.
   final _bucketOf = Expando<int>();
@@ -731,6 +747,7 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
 
   void _goTo(int step) {
     _resetZoom();
+    _stopSpin();
     final target = _plan.startOf(step) * _travel + (step == 0 ? 0 : 1);
     _jumpingTo = step;
     _fetchNear(_plan.at((target / _travel).clamp(0.0, 1.0)));
@@ -765,12 +782,15 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
 
   /// Takes a pointer event from the Listener around the page's list; events outside the stage are ignored.
   void handlePointer(PointerEvent e) {
+    // A finger or a mouse wheel anywhere on the page stops a spinning shoe: its spin would otherwise fight the scroll.
+    if (e is PointerDownEvent || e is PointerScrollEvent) _stopSpin();
     final box = _viewer.currentContext?.findRenderObject() as RenderBox?;
     if (box == null || !box.attached) return;
     final local = box.globalToLocal(e.position);
     if (e is PointerDownEvent) {
       if (!(Offset.zero & box.size).contains(local)) return;
       _pointers[e.pointer] = local;
+      _dragLast = null; // the drag's position is now another finger's, or the two together: not a move
       if (_pointers.length == 2) _startPinch();
     } else if (e is PointerMoveEvent) {
       final was = _pointers[e.pointer];
@@ -787,6 +807,7 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
       }
     } else if (e is PointerUpEvent || e is PointerCancelEvent) {
       if (_pointers.remove(e.pointer) == null) return;
+      _dragLast = null;
       if (_pointers.length < 2) _pinchStartDistance = 0;
       if (_pointers.isEmpty && !_zoomed) _setLock();
       if (_pointers.isEmpty && !_settled) _settleSoon(); // lifted: the sharp photo comes sooner
@@ -837,16 +858,74 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
   }
 
   double _dragFrame = 0;
+  Offset? _dragLast; // where the turning finger was: a sideways drag's own deltas leave out the up and down part
+  VelocityTracker? _dragSpeed; // the finger's speed both ways; the drag's own velocity counts sideways only
+  late final Ticker _spin = createTicker(_spinTick);
+  FrictionSimulation? _spinSim;
 
-  /// A sideways drag also turns the shoe, as the old 360° viewer did, round and round within one turn (a scan's
-  /// frames after the turn rise over the shoe, which a drag should not do).
+  /// The scroll that turns the shoe once round: the turn's stretch of the page.
+  double get _spinTravel => (_plan.steps.length > 1 ? _plan.startOf(1) : 1) * _travel;
+
+  /// Frames the shoe turns for a finger moving [dx] sideways across a stage [width] wide and [dy] up or down: right
+  /// turns it towards the viewer's right, as turning it by hand, and down as scrolling down does.
+  double _framesFor(double dx, double dy, double width) {
+    if (width <= 0 || _spinTravel <= 0) return 0;
+    return (-dx / (width * ShowcasePlan.turnWidths) - dy / _spinTravel) * _plan.turn;
+  }
+
+  /// A drag that sets off sideways turns the shoe, whichever way the finger then goes, round and round within one
+  /// turn (a scan's frames after the turn rise over the shoe, which a drag should not do).
   void _drag(DragUpdateDetails d, double width) {
-    if (_zoomed || _shown.step != 0 || !widget.scroll.hasClients) return;
+    final move = d.localPosition - (_dragLast ?? d.localPosition);
+    _dragLast = d.localPosition;
+    if (d.sourceTimeStamp case final t?) _dragSpeed?.addPosition(t, d.localPosition);
+    // Two fingers are a pinch, not a turn: the drag's position would jump to the other finger.
+    if (_pointers.length > 1 || _zoomed || _shown.step != 0 || !widget.scroll.hasClients) return;
+    _stopSpin();
     final turn = _plan.turn;
     if (_shown.frame >= turn || _dragFrame.floor() % turn != _shown.frame) _dragFrame = _shown.frame % turn * 1.0;
-    _dragFrame = (_dragFrame - d.delta.dx / (width * ShowcasePlan.turnWidths) * turn) % turn;
+    _showFrame(_dragFrame + _framesFor(move.dx, move.dy, width));
+  }
+
+  void _showFrame(double frame) {
+    final turn = _plan.turn;
+    _dragFrame = frame % turn;
     // A tiny negative remainder rounds up to the turn itself, which is a frame past it.
     widget.scroll.jumpTo(_plan.centreOf(0, _dragFrame.floor() % turn) * _travel);
+  }
+
+  /// The finger lifted mid-turn: the shoe keeps turning and slows to a stop, as a thing spun by hand does.
+  void _flick(DragEndDetails d, double width) {
+    _dragLast = null;
+    final tracked = _dragSpeed?.getVelocity();
+    _dragSpeed = null;
+    if (_pointers.isNotEmpty || _zoomed || _shown.step != 0 || !widget.scroll.hasClients || _reduceMotion) return;
+    // Measured both ways, as the turn moves both ways; the drag's own velocity is zero for a mostly vertical lift.
+    final v = (tracked ?? d.velocity).pixelsPerSecond;
+    // At most 4 turns a second, and no faster than about a frame per screen refresh: skipping frames looks jumpy.
+    final top = math.min(4.0 * _plan.turn, 72.0);
+    final speed = _framesFor(v.dx, v.dy, width).clamp(-top, top);
+    if (speed.abs() < _plan.turn * 0.25) return; // a slow lift: it stops where the finger left it
+    _stopSpin();
+    // Keeping 15% of its speed each second, a hard flick goes about two turns and a light one half a turn.
+    _spinSim = FrictionSimulation(0.15, _dragFrame, speed, tolerance: Tolerance(velocity: _plan.turn * 0.1));
+    _spin.start();
+  }
+
+  void _spinTick(Duration elapsed) {
+    final sim = _spinSim;
+    if (sim == null || !widget.scroll.hasClients || _zoomed || _shown.step != 0) return _stopSpin();
+    final t = elapsed.inMicroseconds / Duration.microsecondsPerSecond;
+    _showFrame(sim.x(t));
+    if (sim.isDone(t)) {
+      _stopSpin();
+      _settleSoon(); // at rest now: the sharp photo
+    }
+  }
+
+  void _stopSpin() {
+    if (_spin.isActive) _spin.stop();
+    _spinSim = null;
   }
 
   Widget _photo(MediaItem m, ShowcaseStep step, double width) {
@@ -1015,7 +1094,7 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
                     child: Semantics(
                       container: true,
                       slider: true,
-                      label: trf('360° көрініс: {0}. Бұру үшін бетті жоғары-төмен жылжытыңыз.', [step.label]),
+                      label: trf('360° көрініс: {0}. Бұру үшін саусақпен кез келген бағытқа сүйреңіз.', [step.label]),
                       value: _describe(index),
                       increasedValue: index < _plan.photos.length - 1 ? _describe(index + 1) : null,
                       decreasedValue: index > 0 ? _describe(index - 1) : null,
@@ -1027,7 +1106,18 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
                           behavior: HitTestBehavior.opaque,
                           onDoubleTapDown: (d) => _tapAt = d.localPosition,
                           onDoubleTap: () => _doubleTap(box.biggest),
+                          dragStartBehavior: DragStartBehavior.down, // the shoe follows from the first pixel
+                          onHorizontalDragStart: (d) {
+                            _dragLast = d.localPosition;
+                            _dragSpeed = VelocityTracker.withKind(d.kind ?? PointerDeviceKind.touch);
+                            if (d.sourceTimeStamp case final t?) _dragSpeed!.addPosition(t, d.localPosition);
+                          },
+                          onHorizontalDragCancel: () {
+                            _dragLast = null;
+                            _dragSpeed = null;
+                          },
                           onHorizontalDragUpdate: (d) => _drag(d, box.maxWidth),
+                          onHorizontalDragEnd: (d) => _flick(d, box.maxWidth),
                           // The soft light behind the shoe stays put while the shoe zooms, as on the approved demo page.
                           child: CustomPaint(
                             painter: ownBackdrop ? _Halo(scene.halo) : null,
@@ -1145,8 +1235,8 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
                       TextSpan(children: [
                         WidgetSpan(
                             alignment: PlaceholderAlignment.middle,
-                            child: Icon(Icons.south_rounded, size: 16, color: scene.muted)),
-                        TextSpan(text: ' ${tr('Төмен жүргізіңіз · екі саусақпен жақындатыңыз')}'),
+                            child: Icon(Icons.threesixty, size: 16, color: scene.muted)),
+                        TextSpan(text: ' ${tr('Саусақпен айналдырыңыз · екі саусақпен жақындатыңыз')}'),
                       ]),
                       key: const Key('showcase-hint'),
                       textAlign: TextAlign.center,

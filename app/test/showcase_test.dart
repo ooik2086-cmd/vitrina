@@ -757,6 +757,113 @@ void main() {
     expect(base(tester), isNot('https://cdn/f0-s.webp'));
   });
 
+  showcaseTest('a sideways flick keeps the shoe turning and slows it to a stop, within the turn', (tester) async {
+    await pump(tester, listing());
+    final stage = find.byKey(const Key('showcase'));
+    // A fast swipe of a third of the width: dragged alone it moves a few frames; the fling carries it on.
+    await tester.fling(stage, const Offset(-120, 0), 2400);
+    await tester.pump(const Duration(milliseconds: 100));
+    final early = page(tester).pixels;
+    expect(early, greaterThan(0));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(page(tester).pixels, isNot(early)); // still turning after the finger left
+    await tester.pumpAndSettle();
+    final rest = page(tester).pixels;
+    final travel = ScrollShowcase.travelFor(tester.getSize(stage).height, 4);
+    expect(rest, lessThan(ShowcasePlan.of(Listing.fromJson(listing())).startOf(1) * travel)); // never up over the shoe
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(page(tester).pixels, rest); // and it does stop
+  });
+
+  showcaseTest('a finger on the shoe stops a flick at once', (tester) async {
+    await pump(tester, listing());
+    final stage = find.byKey(const Key('showcase'));
+    await tester.fling(stage, const Offset(-120, 0), 2400);
+    await tester.pump(const Duration(milliseconds: 100));
+    final g = await tester.startGesture(tester.getCenter(stage));
+    await tester.pump(const Duration(milliseconds: 50));
+    final held = page(tester).pixels;
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(page(tester).pixels, held);
+    await g.up();
+    await tester.pumpAndSettle();
+  });
+
+  showcaseTest('a drag that sets off sideways turns the shoe with its up and down part too', (tester) async {
+    await pump(tester, listing());
+    final at = tester.getCenter(find.byKey(const Key('showcase')));
+    final g = await tester.startGesture(at);
+    await g.moveBy(const Offset(-30, 0)); // sideways first: this gesture is the shoe's, not the page's
+    await tester.pump(const Duration(milliseconds: 50));
+    await g.moveBy(const Offset(-30, 0));
+    await tester.pump(const Duration(milliseconds: 50));
+    final sideways = page(tester).pixels;
+    expect(sideways, greaterThan(0));
+    await g.moveBy(const Offset(0, -40)); // then down the page: the shoe turns on, it does not rise over the top
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(page(tester).pixels, greaterThan(sideways));
+    await g.moveBy(const Offset(0, 40)); // and back
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(page(tester).pixels, sideways);
+    await g.up();
+    await tester.pumpAndSettle();
+  });
+
+  showcaseTest('a drag that ends moving up or down flicks the shoe too', (tester) async {
+    await pump(tester, listing());
+    final stage = find.byKey(const Key('showcase'));
+    await tester.fling(stage, const Offset(-30, -150), 2000); // sideways first, then fast down the page
+    await tester.pump(const Duration(milliseconds: 100));
+    final early = page(tester).pixels;
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(page(tester).pixels, isNot(early)); // still turning
+    await tester.pumpAndSettle();
+  });
+
+  showcaseTest('a touch on the stops row stops a spinning shoe', (tester) async {
+    await pump(tester, listing());
+    await tester.fling(find.byKey(const Key('showcase')), const Offset(-120, 0), 2400);
+    await tester.pump(const Duration(milliseconds: 50));
+    final g = await tester.startGesture(tester.getCenter(find.byKey(const Key('showcase-step-top'))));
+    await tester.pump(const Duration(milliseconds: 50));
+    final held = page(tester).pixels;
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(page(tester).pixels, held);
+    await g.up();
+    await tester.pumpAndSettle();
+  });
+
+  showcaseTest('a second finger landing mid-drag does not turn the shoe', (tester) async {
+    await pump(tester, listing());
+    final at = tester.getCenter(find.byKey(const Key('showcase')));
+    final a = await tester.startGesture(at);
+    await a.moveBy(const Offset(-30, 0));
+    await tester.pump(const Duration(milliseconds: 50));
+    final turned = page(tester).pixels;
+    final b = await tester.startGesture(at + const Offset(150, 0));
+    await tester.pump(const Duration(milliseconds: 50));
+    await a.moveBy(const Offset(-30, 0)); // the pair's position jumps; the shoe must not
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(page(tester).pixels, turned);
+    await b.up();
+    await a.up();
+    await tester.pumpAndSettle();
+  });
+
+  showcaseTest('the sharp photo waits until the page stops coasting', (tester) async {
+    await pump(tester, listing());
+    final list = find.byType(Scrollable).first;
+    await tester.fling(list, const Offset(0, -150), 1500);
+    await tester.pump(const Duration(milliseconds: 160)); // past the 140 ms rest, still coasting
+    expect(page(tester).isScrollingNotifier.value, isTrue);
+    expect(find.byWidgetPredicate((w) => w is Image && (w.key?.toString() ?? '').contains('showcase-full')),
+        findsNothing);
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(find.byWidgetPredicate((w) => w is Image && (w.key?.toString() ?? '').contains('showcase-full')),
+        findsOneWidget);
+  });
+
   showcaseTest('the backdrop follows the shoe and can be switched by hand', (tester) async {
     await pump(tester, listing(backdrop: 'dark'));
     BoxDecoration deco() => tester.widget<DecoratedBox>(find.byKey(const Key('showcase'))).decoration as BoxDecoration;
