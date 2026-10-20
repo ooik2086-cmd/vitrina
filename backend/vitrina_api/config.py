@@ -47,6 +47,8 @@ class Settings:
     # non-public bucket, read through links that expire. Without a bucket they sit in private_media_dir and the API
     # serves them at /api/v1/private-media with a signed link.
     s3_private_bucket: str = field(default_factory=lambda: os.environ.get("VITRINA_S3_PRIVATE_BUCKET", ""))
+    # Copies of the database (python -m vitrina_api.backup, deploy/backup.sh): a third bucket, not public either.
+    s3_backup_bucket: str = field(default_factory=lambda: os.environ.get("VITRINA_S3_BACKUP_BUCKET", ""))
     private_media_dir: str = field(default_factory=lambda: os.environ.get("VITRINA_PRIVATE_MEDIA_DIR", "./media-private-dev"))
     # The API's own address as phones reach it, for links to private files kept on disk. Empty: the origin of
     # VITRINA_PUBLIC_MEDIA_URL, which is right while the API serves /media itself (no public bucket).
@@ -100,4 +102,7 @@ def production_problems(s: Settings) -> list[str]:
     if not s.s3_private_bucket or s.s3_private_bucket == s.s3_bucket:
         problems.append("VITRINA_S3_PRIVATE_BUCKET must name a second bucket without public read: receipts and "
                         "dispute evidence must not be reachable by address")
+    if not s.s3_backup_bucket or s.s3_backup_bucket in (s.s3_bucket, s.s3_private_bucket):
+        problems.append("VITRINA_S3_BACKUP_BUCKET must name a third bucket without public read: the database's "
+                        "nightly copies must outlive the server")
     return problems

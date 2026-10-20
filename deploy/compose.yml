@@ -1,0 +1,106 @@
+# A live server: PostgreSQL, the API (2 processes), the photo worker, the timed jobs and Caddy, which gets the
+# HTTPS certificate for VITRINA_DOMAIN by itself and is the only thing open to the internet (ports 80 and 443).
+# Sized for 2 cores and 4 GB. Settings and secrets come from deploy/.env (setup.sh makes it); see deploy/README.md.
+#
+#   docker compose -f deploy/compose.yml up -d --build
+name: vitrina
+
+x-logs: &logs   # without a cap, container logs grow until the disk is full
+  driver: json-file
+  options: {max-size: "10m", max-file: "5"}
+
+x-app: &app
+  build: ../backend
+  image: vitrina-api
+  env_file: .env
+  environment: &app-env
+    VITRINA_ENV: production   # the API refuses to start while anything in .env is unsafe, and says what
+    VITRINA_DEBUG_OTP: "0"
+    VITRINA_AUTO_CREATE_SCHEMA: "0"
+    VITRINA_PHOTO_WORK: worker
+    VITRINA_DATABASE_URL: postgresql+psycopg://vitrina:${POSTGRES_PASSWORD:?run deploy/setup.sh or fill deploy/.env}@db:5432/vitrina
+  restart: unless-stopped
+  logging: *logs
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: vitrina
+      POSTGRES_DB: vitrina
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?run deploy/setup.sh or fill deploy/.env}
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "vitrina"]
+      interval: 5s
+      retries: 10
+    shm_size: 256mb
+    restart: unless-stopped
+    stop_grace_period: 60s
+    logging: *logs
+    networks: [inner]   # no port: only the services below reach it
+
+  api:
+    <<: *app
+    environment:
+      <<: *app-env
+      VITRINA_WORKERS: "2"         # one per core
+      VITRINA_JOBS_INTERVAL: "0"   # two processes: the jobs service below runs them once
+      # Client addresses (rate limits) and https links are read from the headers only when Caddy sends them.
+      FORWARDED_ALLOW_IPS: 172.31.250.10
+    depends_on:
+      db: {condition: service_healthy}
+    networks: [inner, edge]
+
+  # Cut-outs, small copies and search vectors of new and edited listings. One only: two would cut out the same
+  # listing side by side. Measured: up to 1.7 GB while it cuts out a listing; the cap keeps the database safe.
+  photos:
+    <<: *app
+    command: ["python", "-m", "vitrina_api.photo_worker"]
+    depends_on:
+      api: {condition: service_healthy}   # the API has run the migrations
+    stop_grace_period: 150s   # it finishes the listing it is on (~2 minutes) before stopping
+    mem_limit: 2500m
+    healthcheck:   # it touches this file after every listing and every idle look
+      test: ["CMD-SHELL", "find /tmp/photo_worker.alive -mmin -10 | grep -q ."]
+      interval: 60s
+      start_period: 120s
+    networks: [inner]
+
+  # Unpaid orders let go, ignored ones refunded, unconfirmed ones completed, reminders: every 5 minutes.
+  jobs:
+    <<: *app
+    command: ["sh", "-c", "while :; do python -m vitrina_api.jobs || echo 'jobs pass failed'; sleep 300; done"]
+    init: true   # so a stop ends the sleep at once
+    healthcheck: {disable: true}
+    depends_on:
+      api: {condition: service_healthy}
+    networks: [inner]
+
+  caddy:
+    image: caddy:2.8
+    ports: ["80:80", "443:443", "443:443/udp"]
+    environment:
+      VITRINA_DOMAIN: ${VITRINA_DOMAIN:?set VITRINA_DOMAIN in deploy/.env}
+      VITRINA_TLS: "${VITRINA_TLS:?set VITRINA_TLS in deploy/.env to an email for Let's Encrypt}"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data   # the certificate and its key: keep it, or a new one is asked for on every start
+      - caddy_config:/config
+    depends_on:
+      api: {condition: service_healthy}
+    restart: unless-stopped
+    logging: *logs
+    networks:
+      edge: {ipv4_address: 172.31.250.10}
+
+networks:
+  inner:
+  edge:
+    ipam:
+      config: [{subnet: 172.31.250.0/24}]
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

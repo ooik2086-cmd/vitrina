@@ -1,0 +1,31 @@
+# Only for test/smoke.sh: the real compose.yml plus a stand-in S3 (fake_s3.py) behind the same Caddy, and a
+# certificate from a throwaway authority (made by smoke.sh) that the API, the worker and the jobs trust.
+x-trust: &trust
+  SSL_CERT_FILE: /certs/ca.pem
+services:
+  api:
+    environment: {<<: *trust}
+    volumes: [./test/certs/ca.pem:/certs/ca.pem:ro]
+  photos:
+    environment: {<<: *trust}
+    volumes: [./test/certs/ca.pem:/certs/ca.pem:ro]
+    networks: [inner, edge]
+  jobs:
+    environment: {<<: *trust}
+    volumes: [./test/certs/ca.pem:/certs/ca.pem:ro]
+  s3:
+    image: vitrina-api
+    command: ["python", "/test/fake_s3.py", "/tmp/s3"]
+    volumes: [./test/fake_s3.py:/test/fake_s3.py:ro]
+    healthcheck: {disable: true}
+    networks: [edge]
+  caddy:
+    volumes:
+      - ./test/Caddyfile.test:/etc/caddy/Caddyfile:ro
+      - ./Caddyfile:/etc/caddy/site.caddy:ro
+      - ./test/certs:/certs:ro
+    depends_on: [s3]
+    networks:
+      edge:
+        ipv4_address: 172.31.250.10
+        aliases: [vitrina.test, s3.test]

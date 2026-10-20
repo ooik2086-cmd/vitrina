@@ -1,0 +1,8 @@
+# The one public entrance: HTTPS for VITRINA_DOMAIN (certificate from Let's Encrypt, renewed by Caddy), plain
+# http redirected to it, everything passed to the API. Photos are not here: phones load them from the bucket.
+{$VITRINA_DOMAIN} {
+	tls {$VITRINA_TLS}
+	encode zstd gzip
+	header Strict-Transport-Security "max-age=31536000"
+	reverse_proxy api:8000
+}

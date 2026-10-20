@@ -1,0 +1,7 @@
+# The real Caddyfile, plus the stand-in S3 at s3.test.
+import /etc/caddy/site.caddy
+
+s3.test {
+	tls {$VITRINA_TLS}
+	reverse_proxy s3:9000
+}

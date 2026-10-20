@@ -173,3 +173,117 @@ class ChoiceTests(unittest.TestCase):
             s3 = make_storage(Settings(media_dir=tmp, s3_endpoint="https://s3.example.kz", s3_bucket="vitrina",
                                        s3_access_key="k", s3_secret_key="s", public_media_url="https://cdn.example.kz"))
             self.assertIsInstance(s3, S3Storage)
+
+
+class BackupBucket:
+    """The backup bucket: objects by key, ListObjectsV2 with a prefix, two keys a page."""
+
+    def __init__(self):
+        self.objects: dict[str, bytes] = {}
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        if not request.headers.get("authorization", "").startswith("AWS4-HMAC-SHA256 Credential=key/"):
+            return httpx.Response(403)
+        key = request.url.path.removeprefix("/vitrina-backup").lstrip("/")
+        if request.method == "GET" and not key:
+            prefix, at = request.url.params.get("prefix", ""), int(request.url.params.get("continuation-token", 0))
+            keys = sorted(k for k in self.objects if k.startswith(prefix))
+            page, more = keys[at:at + 2], at + 2 < len(keys)
+            body = ('<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">'
+                    f'<IsTruncated>{"true" if more else "false"}</IsTruncated>'
+                    + (f"<NextContinuationToken>{at + 2}</NextContinuationToken>" if more else "")
+                    + "".join(f"<Contents><Key>{k}</Key></Contents>" for k in page) + "</ListBucketResult>")
+            return httpx.Response(200, content=body.encode())
+        if request.method == "PUT":
+            self.objects[key] = request.content
+            return httpx.Response(200)
+        if request.method == "DELETE":
+            self.objects.pop(key, None)
+            return httpx.Response(204)
+        return httpx.Response(200, content=self.objects[key]) if key in self.objects else httpx.Response(404)
+
+
+class BackupTests(unittest.TestCase):
+    """The database's copies off the server (vitrina_api.backup, run by deploy/backup.sh)."""
+
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+        from vitrina_api import backup
+        self.backup, self.store = backup, BackupBucket()
+        self.client = httpx.Client(transport=httpx.MockTransport(self.store))
+        self.settings = Settings(s3_endpoint="https://s3.example.kz", s3_region="kz-1", s3_access_key="key",
+                                 s3_secret_key="secret", s3_bucket="vitrina", s3_private_bucket="vitrina-private",
+                                 s3_backup_bucket="vitrina-backup")
+        self.s3 = backup.bucket(self.settings, self.client)
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dir = Path(tmp.name)
+
+    def dump(self, name, data=b"PGDMP dump"):
+        (self.dir / name).write_bytes(data)
+        return self.dir / name
+
+    def test_a_copy_goes_up_with_its_checksum_and_comes_back_the_same(self):
+        import hashlib
+        digest = self.backup.put(self.s3, self.dump("vitrina-20261020T020000Z.dump", b"PGDMP one"))
+        self.assertEqual(digest, hashlib.sha256(b"PGDMP one").hexdigest())
+        self.assertEqual(self.store.objects["db/vitrina-20261020T020000Z.dump.sha256"], digest.encode())
+        back = self.dir / "back"
+        back.mkdir()
+        got = self.backup.get(self.s3, "vitrina-20261020T020000Z.dump", back)
+        self.assertEqual((got.name, got.read_bytes()), ("vitrina-20261020T020000Z.dump", b"PGDMP one"))
+
+    def test_a_copy_that_does_not_match_its_checksum_is_not_restored(self):
+        self.backup.put(self.s3, self.dump("vitrina-20261020T020000Z.dump"))
+        self.store.objects["db/vitrina-20261020T020000Z.dump"] = b"PGDMP cut sho"
+        with self.assertRaises(SystemExit):
+            self.backup.get(self.s3, "vitrina-20261020T020000Z.dump", self.dir / "x.dump")
+        self.assertFalse((self.dir / "x.dump").exists())
+
+    def test_prune_keeps_the_newest_and_leaves_other_files_alone(self):
+        for day in range(1, 6):  # listed two a page, so every page has to be read
+            self.backup.put(self.s3, self.dump(f"vitrina-202610{day:02d}T020000Z.dump"))
+        self.store.objects["db/notes.txt"] = b"left by hand"
+        self.assertEqual(len(self.backup.names(self.s3)), 5)
+        gone = self.backup.prune(self.s3, keep=2)
+        self.assertEqual(gone, [f"vitrina-202610{day:02d}T020000Z.dump" for day in (1, 2, 3)])
+        self.assertEqual(sorted(self.store.objects), ["db/notes.txt", "db/vitrina-20261004T020000Z.dump",
+                                                      "db/vitrina-20261004T020000Z.dump.sha256",
+                                                      "db/vitrina-20261005T020000Z.dump",
+                                                      "db/vitrina-20261005T020000Z.dump.sha256"])
+        with self.assertRaises(SystemExit):
+            self.backup.prune(self.s3, keep=0)
+
+    def test_refuses_odd_names_empty_dumps_and_a_shared_bucket(self):
+        from dataclasses import replace
+        for name in ("../etc.dump", "vitrina-latest.dump", "vitrina-20261020T020000Z.dump.sha256"):
+            with self.assertRaises(SystemExit):
+                self.backup.put(self.s3, self.dump(name.replace("/", "_")) if "/" in name else self.dump(name))
+            with self.assertRaises(SystemExit):
+                self.backup.get(self.s3, name, self.dir)
+        with self.assertRaises(SystemExit):
+            self.backup.put(self.s3, self.dump("vitrina-20261020T020000Z.dump", b""))
+        self.assertEqual(self.store.objects, {})
+        for shared in ("", "vitrina", "vitrina-private"):
+            with self.assertRaises(SystemExit):
+                self.backup.bucket(replace(self.settings, s3_backup_bucket=shared), self.client)
+
+    def test_the_command_line(self):
+        import contextlib
+        import io
+        import os
+        from unittest import mock
+        env = {"VITRINA_S3_ENDPOINT": "https://s3.example.kz", "VITRINA_S3_REGION": "kz-1",
+               "VITRINA_S3_ACCESS_KEY": "key", "VITRINA_S3_SECRET_KEY": "secret",
+               "VITRINA_S3_BACKUP_BUCKET": "vitrina-backup"}
+        path = self.dump("vitrina-20261020T020000Z.dump")
+        out = io.StringIO()
+        with mock.patch.dict(os.environ, env), contextlib.redirect_stdout(out):
+            self.backup.main(["put", str(path)], self.client)
+            self.backup.main(["list"], self.client)
+            path.unlink()
+            self.backup.main(["get", path.name, str(self.dir)], self.client)
+            self.backup.main(["prune", "--keep", "1"], self.client)
+        self.assertIn("vitrina-20261020T020000Z.dump\n", out.getvalue())
+        self.assertEqual(path.read_bytes(), b"PGDMP dump")

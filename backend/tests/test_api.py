@@ -1053,13 +1053,16 @@ class OpsTests(ApiTestCase):
                          database_url="postgresql+psycopg://u:p@db/vitrina", media_dir=self.tmp.name,
                          public_media_url="https://cdn.vitrina.kz", cors_origins=[], s3_bucket="vitrina",
                          s3_endpoint="https://s3.example.kz", s3_access_key="k", s3_secret_key="s",
-                         s3_private_bucket="vitrina-private", photo_work="worker")
+                         s3_private_bucket="vitrina-private", s3_backup_bucket="vitrina-backup",
+                         photo_work="worker")
         self.assertEqual(production_problems(ready), [])
         from dataclasses import replace
         for loose, env in ((dict(cors_origins=["*"]), "VITRINA_CORS_ORIGINS"),
                            (dict(allow_external_media=True), "VITRINA_ALLOW_EXTERNAL_MEDIA"),
                            (dict(s3_bucket=""), "VITRINA_S3_BUCKET"), (dict(s3_access_key=""), "VITRINA_S3_ACCESS_KEY"),
-                           (dict(photo_work="inline"), "VITRINA_PHOTO_WORK")):
+                           (dict(photo_work="inline"), "VITRINA_PHOTO_WORK"),
+                           (dict(s3_backup_bucket=""), "VITRINA_S3_BACKUP_BUCKET"),
+                           (dict(s3_backup_bucket="vitrina-private"), "VITRINA_S3_BACKUP_BUCKET")):
             self.assertIn(env, " ".join(production_problems(replace(ready, **loose))))
 
 
