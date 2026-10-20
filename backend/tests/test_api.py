@@ -551,9 +551,10 @@ class WeightTests(ApiTestCase):
             finally:
                 event.remove(engine, "before_cursor_execute", listen)
             self.assertEqual(r.status_code, 200, r.text)
-            # A row needs a listing's title and cover, never all its sizes or every 360° frame as ORM objects.
+            # A row needs a listing's title and cover, never all its sizes or its 360° frames.
             self.assertFalse([q for q in asked if re.search(r"\bFROM listing_sizes\b", q)
                               and "listing_sizes.listing_id IN" in q], path)
+            self.assertFalse([q for q in asked if re.search(r"\bFROM media\b", q) and "media.angle !=" not in q], path)
             return len(asked), r.json()
 
         pages = [("/orders", self.buyer), ("/orders?role=seller", self.seller), ("/conversations", self.buyer),
@@ -606,12 +607,16 @@ class WeightTests(ApiTestCase):
                 k = made
                 made += 1
                 buyer = (self.buyer, other)[k % 2]
-                listing = self.publish(title=f"Аяқкиім {k}")
+                # Photos of its own, 360° frames first: the cover is still the first photo that is not a frame.
+                listing = self.publish(title=f"Аяқкиім {k}", photos=[
+                    *({"url": f"https://cdn.example/{k}/f{i}.jpg", "angle": "frame"} for i in range(8)),
+                    *({**p, "url": p["url"].replace("/p", f"/{k}/p")} for p in PHOTOS)])
                 lid, sid = listing["id"], listing["sizes"][0]["id"]
                 title_of[lid] = listing["title"]
                 offer = self.post(f"/listings/{lid}/offers", buyer,
                                   {"size_id": sid, "amount_tiyn": listing["price_tiyn"] * 8 // 1000 * 100}).json()
-                offers[offer["id"]] = (buyer, listing["title"], listing["sizes"][0]["label"])
+                cover = next(m["processed_url"] or m["original_url"] for m in listing["media"] if m["angle"] != "frame")
+                offers[offer["id"]] = (buyer, listing["title"], listing["sizes"][0]["label"], cover)
                 self.assertEqual(self.post(f"/listings/{lid}/report", reporter, {"reason": "fake"}).status_code, 201)
                 shop = self.login(f"+770100002{k:02d}")
                 self.post("/me/seller", shop, {"shop_name": f"Дүкен {k}", "city": "Алматы"})
@@ -653,6 +658,9 @@ class WeightTests(ApiTestCase):
             finally:
                 event.remove(engine, "before_cursor_execute", listen)
             self.assertEqual(r.status_code, 200, r.text)
+            if path in ("/offers", "/offers?role=seller", "/admin/authenticity"):  # a cover, not every 360° frame
+                self.assertFalse([q for q in asked if re.search(r"\bFROM media\b", q) and "media.angle !=" not in q],
+                                 path)
             return len(asked), r
 
         pages = [("/offers", self.buyer), ("/offers?role=seller", self.seller), (f"/sellers/{seller_id}/reviews", other),
@@ -665,9 +673,8 @@ class WeightTests(ApiTestCase):
             m, got[path] = reads(path, token)
             self.assertEqual(m, n, path)
         rows = got["/offers?role=seller"].json()["items"]
-        self.assertEqual({o["id"]: (o["listing_title"], o["size_label"]) for o in rows},
-                         {i: (t, size) for i, (_, t, size) in offers.items()})
-        self.assertTrue(all(o["listing_cover"] for o in rows))
+        self.assertEqual({o["id"]: (o["listing_title"], o["size_label"], o["listing_cover"]) for o in rows},
+                         {i: (t, size, cover) for i, (_, t, size, cover) in offers.items()})
         self.assertEqual(len(got["/offers"].json()["items"]), sum(b == self.buyer for b, *_ in offers.values()))
         self.assertEqual({r["order_id"]: (r["text"], r["buyer_name"])
                           for r in got[f"/sellers/{seller_id}/reviews"].json()["items"]}, reviews)

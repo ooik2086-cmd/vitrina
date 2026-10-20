@@ -109,6 +109,23 @@ def with_light_media(db: Session, listings: list[Listing]) -> list[Listing]:
     return listings
 
 
+def with_covers(db: Session, listings: list[Listing]) -> list[Listing]:
+    """Only the cover of each listing, for rows that show nothing else: the photos without the 360° frames (a few a
+    listing, not ~43), in one query for the page; listing_cover then takes the first."""
+    ids = [listing.id for listing in listings if "_cover" not in listing.__dict__]
+    covers: dict[int, str | None] = {}
+    if ids:
+        for lid, original, processed in db.execute(
+                select(Media.listing_id, Media.original_url, Media.processed_url)
+                .where(Media.listing_id.in_(ids), Media.angle != "frame")
+                .order_by(Media.listing_id, Media.position, Media.id)):
+            covers.setdefault(lid, processed or original)
+        for listing in listings:
+            if listing.id in ids:
+                listing._cover = covers.get(listing.id)
+    return listings
+
+
 def media_of(listing: Listing) -> list:
     """The listing's photos in order: as read by with_light_media for a page, else through the ORM."""
     light = listing.__dict__.get("_light_media")
@@ -276,6 +293,8 @@ def angle_frames(listing: Listing) -> dict[str, str]:
 
 
 def listing_cover(listing: Listing) -> str | None:
+    if "_cover" in listing.__dict__:  # read by with_covers
+        return listing.__dict__["_cover"]
     return next((m.processed_url or m.original_url for m in media_of(listing) if m.angle != "frame"), None)
 
 
@@ -342,10 +361,10 @@ def preload(db: Session, name: str, model, ids, *options) -> dict:
 
 
 def preload_bare_listings(db: Session, ids, covers: bool = True) -> dict:
-    """Listings a row shows only by title and cover: no ORM photos or sizes, the cover's photos as plain rows."""
+    """Listings a row shows only by title and cover: no ORM photos or sizes, and only the cover read (with_covers)."""
     memo = preload(db, "bare_listing", Listing, ids, *BARE)
     if covers:
-        with_light_media(db, [memo[i] for i in set(ids) if i in memo and "_light_media" not in memo[i].__dict__])
+        with_covers(db, [memo[i] for i in set(ids) if i in memo])
     return memo
 
 

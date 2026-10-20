@@ -75,14 +75,14 @@ def preload_conversations(db: Session, convs: list[Conversation], user: User) ->
     """Reads what a list of chats shows (listings with their photos, the other people, each chat's last message and
     unread count) in a few queries for the whole list; conversation_out then finds them in db.info. The last message
     and unread count are this user's: a request serves one viewer."""
-    from .serializers import BARE, with_light_media  # serializers imports this module
+    from .serializers import BARE, with_covers  # serializers imports this module
     if not convs:
         return
     ids = [c.id for c in convs]
     listings = db.info.setdefault("conv_listing", {})
     listings.update({row.id: row for row in db.scalars(select(Listing).options(*BARE).where(
         Listing.id.in_({c.listing_id for c in convs})))})
-    with_light_media(db, list(listings.values()))
+    with_covers(db, list(listings.values()))
     people = db.info.setdefault("conv_user", {})
     people.update({row.id: row for row in db.scalars(select(User).where(
         User.id.in_({c.buyer_id for c in convs} | {c.seller_id for c in convs})))})

@@ -18,7 +18,7 @@ from . import services
 from .deps import current_user, get_db, get_private, staff_user
 from .errors import ApiError
 from .models import AuthProof, Listing, Order, User
-from .serializers import BARE, listing_cover, preload, with_light_media
+from .serializers import BARE, listing_cover, preload, with_covers
 from .storage import MAX_UPLOAD_BYTES, Storage, normalize_image, private_link
 
 router = APIRouter(prefix="/api/v1")
@@ -93,7 +93,7 @@ def delete_proof(listing_id: int, proof_id: int, user: User = Depends(current_us
 def admin_authenticity(staff: User = Depends(staff_user), db: Session = Depends(get_db),
                        files: Storage = Depends(get_private)):
     """Listings with proof waiting for staff, oldest first."""
-    rows = with_light_media(db, db.scalars(
+    rows = with_covers(db, db.scalars(
         select(Listing).options(*BARE).where(Listing.authenticity == SELLER_EVIDENCE,
                                              Listing.status.in_(("published", "paused", "sold", "moderation")))
         .order_by(Listing.id)).all())
