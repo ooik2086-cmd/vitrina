@@ -135,6 +135,14 @@ if [ "$STORAGE" = disk ]; then
 	grep -q '^HTTP/[0-9.]* 404' missing.head || fail "a missing photo is not 404"
 	if grep -qi immutable missing.head; then fail "a missing photo is cached for a year"; fi
 	rm missing.head
+
+	step "move_media: a new domain would move the stored photos; a mistyped old address is refused"
+	move() { $C run --rm --no-deps -T -e VITRINA_PUBLIC_MEDIA_URL=https://new.test/media api python -m vitrina_api.move_media "$@"; }
+	move https://vitrina.test/media > move.out 2>&1 || { cat move.out; fail "move_media dry run failed"; }
+	grep -q '^[1-9][0-9]* addresses in [1-9][0-9]* rows to rewrite' move.out || { cat move.out; fail "move_media found no photo"; }
+	if move https://vitrina.test --yes > move.out 2>&1; then cat move.out; fail "move_media took a wrong old address"; fi
+	grep -q 'photos found under: https://vitrina.test/media' move.out || { cat move.out; fail "move_media did not name the real address"; }
+	rm move.out
 fi
 
 if [ "$STORAGE" = s3 ]; then

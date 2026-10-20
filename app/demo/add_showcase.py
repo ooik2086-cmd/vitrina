@@ -7,7 +7,14 @@ Each listing's shoe is recognised by comparing its first 360° frame with backen
 stop photos come from the same folder (rendered from the same scan, tools/demo-frames). Photos go through the
 server's own code: normalize_image, the cut-out model when the listing's frames are cut out, make_thumb and
 backdrop_for. Safe to run again: done photos are skipped.
+
+After the renders of some stops change (tools/demo-frames), put the new ones in place of the old:
+
+    VITRINA_CUTOUT_MODEL=backend/models/isnet-general-use.onnx python3 app/demo/add_showcase.py --redo top,sole
+
+The old photos' files stay: a demo APK installed earlier still loads them from the branch.
 """
+import argparse
 import hashlib
 import json
 import os
@@ -50,6 +57,11 @@ def shoe_of(frame: Path) -> str | None:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Add the scrolling copies, backdrop and stops to the demo answers.")
+    parser.add_argument("--redo", default="", help="stops to make again from their renders, e.g. top,sole")
+    redo = {a for a in parser.parse_args().redo.split(",") if a}
+    if redo - {"top", "sole", "detail"}:
+        raise SystemExit("--redo takes top, sole and detail")
     model = os.environ.get("VITRINA_CUTOUT_MODEL")
     segment = cutout.load_segmenter(model) if model else None
     if segment is None:
@@ -66,6 +78,8 @@ def main() -> None:
         folder = frames[0]["original_url"].removeprefix(BASE).split("/")[0]
         cut = all(m["processed_url"] for m in frames)
         shoe = shoe_of(local(frames[0]["original_url"]))
+        if shoe is not None and redo:  # a scan's stops (use_scan.py) have no render here and stay
+            media[:] = [m for m in media if m["angle"] not in redo]
         have = {m["angle"] for m in media}
         stops = []
         for angle in ("top", "sole", "detail"):
@@ -77,9 +91,14 @@ def main() -> None:
             processed = cutout.process_photo(clean, segment) if cut and angle != "detail" else None
             stops.append({"original_url": put(clean, folder, "jpg"),
                           "processed_url": put(processed, folder, "webp") if processed else None, "angle": angle})
-        # The stops follow the four sides, before any defect photo and the frames, as the server orders them.
-        at = max(i for i, m in enumerate(media) if m["angle"] in ("outer", "front", "inner", "back")) + 1
-        media[at:at] = stops
+        # The stops follow the four sides, before any defect photo and the frames, as the server orders them, and
+        # each before the stops that come after it (a remade top goes back before the sole and the close-up).
+        order = ("top", "sole", "detail")
+        for stop in stops:
+            later = [i for i, m in enumerate(media) if m["angle"] in order[order.index(stop["angle"]) + 1:]]
+            at = later[0] if later else max(i for i, m in enumerate(media)
+                                            if m["angle"] in ("outer", "front", "inner", "back", *order)) + 1
+            media.insert(at, stop)
         for m in media:
             if not m.get("thumb_url"):
                 source = m["processed_url"] or m["original_url"]

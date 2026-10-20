@@ -25,7 +25,7 @@ write_env() {
 	if [ -f "$ENV_FILE" ]; then
 		kept=$(sed -n 's/^VITRINA_DOMAIN=//p' "$ENV_FILE")
 		if [ -n "$DOMAIN" ] && [ "$DOMAIN" != "$kept" ]; then
-			die "$ENV_FILE has VITRINA_DOMAIN=$kept, not $DOMAIN. To change it, edit VITRINA_DOMAIN, VITRINA_CORS_ORIGINS, VITRINA_PUBLIC_API_URL and VITRINA_PUBLIC_MEDIA_URL (and VITRINA_TLS for the email) there; with VITRINA_STORAGE=disk read deploy/README.md first, photos already stored keep the old address, keeping the secrets, then run: sh $0"
+			die "$ENV_FILE has VITRINA_DOMAIN=$kept, not $DOMAIN. To change it, edit VITRINA_DOMAIN, VITRINA_CORS_ORIGINS, VITRINA_PUBLIC_API_URL and VITRINA_PUBLIC_MEDIA_URL (and VITRINA_TLS for the email) there, keeping the secrets, then run: sh $0 and move the stored photos to the new address (python -m vitrina_api.move_media, see deploy/README.md)"
 		fi
 		echo "$ENV_FILE exists: keeping it, domain $kept (its secrets are in use)"
 		return

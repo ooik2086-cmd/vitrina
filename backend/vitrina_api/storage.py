@@ -129,6 +129,8 @@ class Storage(Protocol):
 
     def put(self, data: bytes, *, owner_id: int, ext: str = "jpg") -> str: ...
 
+    def put_at(self, key: str, data: bytes) -> str: ...
+
     def owns(self, url: str, owner_id: int | None = None) -> bool: ...
 
     def read(self, url: str) -> bytes: ...
@@ -211,11 +213,14 @@ class LocalStorage:
         return f"{self.link_base}/{checked_key(key)}?exp={expires}&sig={link_signature(self.link_secret, key, expires)}"
 
     def put(self, data: bytes, *, owner_id: int, ext: str = "jpg") -> str:
-        name = new_key(owner_id, ext)
-        path = self.root / name
+        return self.put_at(new_key(owner_id, ext), data)
+
+    def put_at(self, key: str, data: bytes) -> str:
+        """Writes under a key new_key made: a file moved in from another store keeps its key (move_media)."""
+        path = self.root / checked_key(key)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data)
-        return f"{self.public_base}/{name}"
+        return f"{self.public_base}/{key}"
 
     def owns(self, url: str, owner_id: int | None = None) -> bool:
         return key_of(self.public_base, url, owner_id) is not None
@@ -314,7 +319,11 @@ class S3Storage:
         return r
 
     def put(self, data: bytes, *, owner_id: int, ext: str = "jpg") -> str:
-        key = new_key(owner_id, ext)
+        return self.put_at(new_key(owner_id, ext), data)
+
+    def put_at(self, key: str, data: bytes) -> str:
+        """Writes under a key new_key made: a file moved in from another store keeps its key (move_media)."""
+        ext = checked_key(key).rsplit(".", 1)[1]
         self._send("PUT", key, data, {"content-type": CONTENT_TYPES.get(ext, "application/octet-stream"),
                                       "cache-control": "private, max-age=3600" if self.public_base == PRIVATE_BASE
                                       else "public, max-age=31536000, immutable"})

@@ -53,17 +53,22 @@ window.frame = async (variant, i, n) => {
   return renderer.domElement.toDataURL('image/jpeg', 0.9);
 };
 // The stops after the turn: the top, the sole and a close-up of the stitching, all from the same real scan.
-const home = { pos: camera.position.clone(), fov: camera.fov };
+const home = { pos: camera.position.clone(), fov: camera.fov, key: key.position.clone() };
 window.view = async (variant, kind) => {
   await setVariant(variant);
   pivot.rotation.set(0, 0, 0); pivot.position.set(0, 0, 0); ground.visible = true;
   camera.fov = home.fov;
   if (kind === 'top') {
-    pivot.rotation.y = -Math.PI / 2;
+    // The light straight above, so the shadow lies under the shoe: lit from the side, it fell beside the shoe and
+    // read as a grey copy of it.
+    pivot.rotation.y = -Math.PI / 2; key.position.set(0.15, 8, 0.25);
     camera.position.set(0, r * 2.35, r * 0.1); camera.lookAt(0, 0, 0);
   } else if (kind === 'sole') {
-    pivot.rotation.set(Math.PI, Math.PI / 2, 0); pivot.position.y = size.y; ground.visible = false;
-    camera.position.set(0, size.y + r * 2.35, r * 0.1); camera.lookAt(0, size.y, 0);
+    // At a slant, as the scan shows its sole, lit low from the side and a little darker: a white sole seen straight
+    // on and lit evenly was barely there on the milk-white backdrop. Now the tread shades and the upper outlines it.
+    pivot.rotation.set(0.82 * Math.PI, 0.55 * Math.PI, 0.12 * Math.PI); pivot.position.y = size.y; ground.visible = false;
+    key.position.set(-6, 0.5, 2); renderer.toneMappingExposure = 0.65;
+    camera.position.set(r * 0.45, size.y + r * 1.08, r * 1.13); camera.lookAt(-r * 0.07, size.y * 0.64, 0); // centred, as large as the turn
   } else {
     camera.fov = 18;
     camera.position.set(r * 0.9, size.y * 1.1, r * 0.9); camera.lookAt(r * 0.12, size.y * 0.4, 0);
@@ -72,6 +77,7 @@ window.view = async (variant, kind) => {
   renderer.render(scene, camera);
   const url = renderer.domElement.toDataURL('image/jpeg', 0.92);
   pivot.rotation.set(0, 0, 0); pivot.position.set(0, 0, 0); ground.visible = true;
+  key.position.copy(home.key); renderer.toneMappingExposure = 1.0;
   camera.fov = home.fov; camera.position.copy(home.pos); camera.lookAt(0, size.y * 0.42, 0); camera.updateProjectionMatrix();
   return url;
 };

@@ -87,6 +87,15 @@ class S3StorageTests(unittest.TestCase):
         self.assertEqual(self.s3.read(url), b"\xff\xd8photo")
         self.assertEqual(self.s3.put(b"v", owner_id=7, ext="mp4").rsplit(".", 1)[1], "mp4")
 
+    def test_put_at_keeps_the_key_and_types_the_file(self):
+        key = "7/" + "b" * 32 + ".webp"
+        self.assertEqual(self.s3.put_at(key, b"w"), "https://cdn.example.kz/" + key)
+        self.assertEqual(self.bucket.objects["/vitrina/" + key], (b"w", "image/webp"))
+        for bad in ("7/../../secret.jpg", "7/x.jpg", "notes/readme.txt"):
+            with self.assertRaises(ValueError):
+                self.s3.put_at(bad, b"x")
+        self.assertEqual(len(self.bucket.objects), 1)
+
     def test_refuses_urls_it_does_not_own_and_reports_failures(self):
         self.assertFalse(self.s3.owns("https://evil.example/7/x.jpg"))
         with self.assertRaises(ValueError):

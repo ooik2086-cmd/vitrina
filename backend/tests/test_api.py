@@ -6,6 +6,7 @@ import re
 import tempfile
 import time
 import unittest
+from pathlib import Path
 from unittest import mock
 from datetime import date, datetime, timedelta, timezone
 
@@ -3362,6 +3363,238 @@ class OrphanSweepTests(ApiTestCase):
             self.storage.read(lost)
         with self.db() as db:  # one record per store: the photos and the private files
             self.assertEqual(db.query(AuditLog).filter_by(action="orphans.delete").count(), 2)
+
+
+class MoveMediaTests(ApiTestCase):
+    """Stage 51: photos keep working when the site gets a new domain or moves from the server's disk to S3."""
+    external_media = False
+    NEW = "https://new.example.kz/media"
+
+    def setUp(self):
+        super().setUp()
+        from vitrina_api import move_media
+        self.move = move_media
+        self.photos = [{"url": self.c.post("/api/v1/media", files={"file": (f"{a}.jpg", jpeg(), "image/jpeg")},
+                                           headers=self.h(self.seller)).json()["url"], "angle": a}
+                       for a in ("front", "outer", "inner", "back", "sole")]
+        self.listing = self.publish(photos=self.photos,
+                                    sizes=[{"label": "EU 42", "insole_cm": "26,5", "quantity": 2}])
+        r = self.post("/orders", self.buyer, {"listing_id": self.listing["id"],
+                                              "size_id": self.listing["sizes"][0]["id"]}, **{"Idempotency-Key": "m1"})
+        self.assertEqual(r.status_code, 201, r.text)
+        self.order = r.json()
+        self.key = self.photos[0]["url"].removeprefix("http://test/media/")
+        # Text that starts like the old address but names no stored file stays as it is.
+        with self.db() as db:
+            db.query(User).filter_by(phone="+77010000002").one().last_delivery = json.dumps(
+                {"note": "http://test/media/readme.txt", "photo": self.photos[0]["url"]})
+            db.commit()
+
+    def texts(self):
+        """Every text in the database that names the old or the new address."""
+        found = []
+        with self.db() as db:
+            for table in Base.metadata.sorted_tables:
+                for c in self.move.text_columns(table):
+                    found += [v for v in db.scalars(select(c)) if v and "/media/" in v]
+        return found
+
+    def rewrite(self, apply=True, new=NEW):
+        with self.db() as db:
+            result = self.move.rewrite(db, "http://test/media", new, apply=apply)
+            db.commit()
+        return result
+
+    def test_a_new_domain_moves_every_address_and_the_seller_can_still_edit(self):
+        before = self.texts()
+        dry = self.rewrite(apply=False)
+        self.assertEqual(self.texts(), before)  # a dry run changes nothing
+        done = self.rewrite()
+        self.assertEqual((done.rows, done.addresses), (dry.rows, dry.addresses))
+        # The 5 photo rows (each with its thumbnail), the order (cover and photo list) and the JSON text.
+        self.assertEqual(done.rows, 7)
+        after = " ".join(self.texts())
+        self.assertNotRegex(after, r"http://test/media/\d+/")
+        self.assertIn("http://test/media/readme.txt", after)
+        self.assertIn(f"{self.NEW}/{self.key}", after)
+        self.app.state.storage.public_base = self.NEW  # the API restarted with the new address
+        listing = self.c.get(f"/api/v1/listings/{self.listing['id']}").json()
+        urls = [m[k] for m in listing["media"] for k in ("original_url", "thumb_url") if m.get(k)]
+        self.assertTrue(len(urls) >= 5 and all(u.startswith(self.NEW + "/") for u in urls), urls)
+        moved = [{**p, "url": p["url"].replace("http://test/media", self.NEW)} for p in self.photos]
+        r = self.c.patch(f"/api/v1/listings/{self.listing['id']}", headers=self.h(self.seller),
+                         json={"photos": moved[1:] + moved[:1]})
+        self.assertEqual(r.status_code, 200, r.text)  # still the seller's own files at their new address
+        order = self.c.get(f"/api/v1/orders/{self.order['id']}", headers=self.h(self.buyer)).json()
+        self.assertTrue(order["listing_cover"].startswith(self.NEW + "/"), order["listing_cover"])
+        self.assertEqual(self.rewrite().rows, 0)  # run again: nothing left
+
+    def test_a_new_text_too_long_for_its_column_stops_every_change(self):
+        before = self.texts()
+        result = self.rewrite(new="https://" + "x" * 450 + ".kz/media")
+        self.assertIn("media.original_url", " ".join(result.too_long))
+        self.assertEqual(self.texts(), before)
+
+    def test_a_row_the_app_changes_meanwhile_stops_every_change(self):
+        before = self.texts()
+        with self.db() as db:
+            real = db.execute
+
+            def execute(statement, *args, **kw):
+                if getattr(statement, "is_update", False) and statement.table.name == "orders":
+                    real(Base.metadata.tables["orders"].update().values(listing_cover=None))  # the app's write
+                return real(statement, *args, **kw)
+
+            db.execute = execute
+            with self.assertRaises(self.move.MoveRefused):
+                self.move.rewrite(db, "http://test/media", self.NEW, apply=True)
+            db.rollback()
+        self.assertEqual(self.texts(), before)
+
+    def test_the_old_address_must_be_an_address(self):
+        for bad in ("old.kz/media", "ftp://old.kz/media", "https:///media", "https://old.kz/media?x=1"):
+            with self.assertRaises(self.move.MoveRefused, msg=bad):
+                self.move.base_of(bad)
+        self.assertEqual(self.move.base_of(" https://old.kz/media/ "), "https://old.kz/media")
+        out, err = io.StringIO(), io.StringIO()
+        from contextlib import redirect_stderr, redirect_stdout
+        with mock.patch("vitrina_api.config.Settings", lambda: self.cfg), redirect_stdout(out), redirect_stderr(err):
+            self.assertEqual(self.move.main(["old.kz/media", "--yes"]), 2)
+        self.assertIn("not an address", err.getvalue())
+
+    def buckets(self, fail=None, public_read=True, new=None):
+        """The S3 buckets the photos move into: a public one (read by anyone at self.NEW) and a private one."""
+        import dataclasses
+        import httpx
+        from tests.test_storage import FakeBucket
+        from vitrina_api.storage import PRIVATE_BASE, S3Storage
+        public, private = FakeBucket(), FakeBucket()
+
+        def flaky(request):
+            if fail and request.method == "PUT" and request.url.path.endswith(fail[0]):
+                return httpx.Response(500)
+            if request.url.host == "new.example.kz":  # a phone loading a photo: no signature
+                found = public.objects.get("/vitrina/" + request.url.path.removeprefix("/media/"))
+                return httpx.Response(200, content=found[0]) if found and public_read else httpx.Response(403)
+            return public(request)
+
+        def bucket(handler, base):  # two buckets of one name on two endpoints: FakeBucket answers for "vitrina"
+            return S3Storage(endpoint="https://s3-private.example.kz" if base == PRIVATE_BASE else "https://s3.example.kz",
+                             bucket="vitrina", region="kz-1", access_key="key",
+                             secret_key="secret", public_base=base,
+                             client=httpx.Client(transport=httpx.MockTransport(handler)))
+        cfg = dataclasses.replace(self.cfg, public_media_url=new or self.NEW)
+        return public, private, mock.patch.multiple(
+            "vitrina_api.storage", make_storage=lambda s: bucket(flaky, s.public_media_url),
+            make_private_storage=lambda s: bucket(private, PRIVATE_BASE)), mock.patch(
+            "vitrina_api.config.Settings", lambda: cfg)
+
+    def run_move(self, patches, *args):
+        from contextlib import redirect_stderr, redirect_stdout
+        out = io.StringIO()
+        with patches[0], patches[1], redirect_stdout(out), redirect_stderr(out):
+            code = self.move.main(["http://test/media/", *args])
+        return code, out.getvalue()
+
+    def test_moving_to_s3_copies_every_file_before_any_address_changes(self):
+        from vitrina_api.models import AuditLog, AuthProof
+        r = self.c.post(f"/api/v1/listings/{self.listing['id']}/proofs", headers=self.h(self.seller),
+                        files={"file": ("receipt.jpg", jpeg(), "image/jpeg")})
+        self.assertEqual(r.status_code, 201, r.text)
+        with self.db() as db:
+            proof = db.scalars(select(AuthProof.url)).one()
+        before = self.texts()
+        files = self.move.disk_keys(Path(self.cfg.media_dir))  # the photos and their thumbnails
+        self.assertGreaterEqual(len(files), 5)
+        public, private, *patches = self.buckets()
+        code, out = self.run_move(patches)
+        self.assertEqual(code, 0, out)
+        self.assertIn(f"photos: {len(files)} to copy", out)
+        self.assertIn("private files: 1 to copy", out)
+        self.assertEqual((public.objects, private.objects), ({}, {}))  # a dry run copies nothing
+        self.assertEqual(self.texts(), before)
+        code, out = self.run_move(patches, "--yes")
+        self.assertEqual(code, 0, out)
+        with open(os.path.join(self.cfg.media_dir, self.key), "rb") as f:
+            self.assertEqual(public.objects[f"/vitrina/{self.key}"], (f.read(), "image/jpeg"))
+        self.assertEqual(sorted(public.objects), [f"/vitrina/{k}" for k in files])
+        self.assertEqual(list(private.objects), ["/vitrina/" + proof.removeprefix("private:/")])
+        self.assertNotRegex(" ".join(self.texts()), r"http://test/media/\d+/")
+        with self.db() as db:
+            self.assertEqual(db.scalars(select(AuthProof.url)).one(), proof)  # private: never an address
+            self.assertEqual(db.query(AuditLog).filter_by(action="media.move").count(), 1)
+        self.assertTrue(os.path.exists(os.path.join(self.cfg.media_dir, self.key)))  # the disk keeps its copy
+        code, out = self.run_move(patches, "--yes")  # again: nothing left to do
+        self.assertEqual(code, 0, out)
+        self.assertIn("photos: 0 copied", out)
+        self.assertIn(f"{len(files)} already there", out)
+        self.assertIn("nothing left to move", out)
+
+    def test_a_file_that_fails_to_copy_leaves_every_address_as_it_was(self):
+        before = self.texts()
+        fail = [self.key]
+        public, private, *patches = self.buckets(fail=fail)
+        code, out = self.run_move(patches, "--yes")
+        self.assertEqual(code, 1, out)
+        self.assertIn(f"failed: {self.key}", out)
+        files = self.move.disk_keys(Path(self.cfg.media_dir))
+        self.assertEqual(len(public.objects), len(files) - 1)  # the rest were copied
+        self.assertEqual(self.texts(), before)
+        fail[0] = "never"  # the bucket works again: the next run copies only the missing file and finishes
+        code, out = self.run_move(patches, "--yes")
+        self.assertEqual(code, 0, out)
+        self.assertIn("photos: 1 copied", out)
+        self.assertNotRegex(" ".join(self.texts()), r"http://test/media/\d+/")
+
+    def test_a_mistyped_old_address_stops_and_names_the_real_one(self):
+        from contextlib import redirect_stderr, redirect_stdout
+        import dataclasses
+        from vitrina_api.models import AuditLog
+        cfg = dataclasses.replace(self.cfg, public_media_url=self.NEW)
+        before = self.texts()
+        for typo in ("http://test", "https://test/media", "http://test/media2"):
+            out = io.StringIO()
+            with mock.patch("vitrina_api.config.Settings", lambda: cfg), redirect_stdout(out), redirect_stderr(out):
+                self.assertEqual(self.move.main([typo, "--yes"]), 2, typo)
+            self.assertIn("photos found under: http://test/media (", out.getvalue())
+        self.assertEqual(self.texts(), before)
+        with self.db() as db:
+            self.assertEqual(db.query(AuditLog).filter_by(action="media.move").count(), 0)
+
+    def test_a_move_to_s3_needs_the_bucket_address_and_a_bucket_phones_can_read(self):
+        before = self.texts()
+        _, _, *patches = self.buckets(new="http://test/media")  # VITRINA_PUBLIC_MEDIA_URL left as it was
+        code, out = self.run_move(patches, "--yes")
+        self.assertEqual(code, 2, out)
+        self.assertIn("still the old address", out)
+        public, _, *patches = self.buckets(public_read=False)
+        code, out = self.run_move(patches, "--yes")
+        self.assertEqual(code, 2, out)
+        self.assertIn("does not open without a key", out)
+        self.assertTrue(public.objects)  # the files were copied; only the addresses wait
+        self.assertEqual(self.texts(), before)
+
+    def test_copy_only_fills_the_buckets_and_leaves_every_address(self):
+        before = self.texts()
+        public, private, *patches = self.buckets()
+        code, out = self.run_move(patches, "--copy-only")
+        self.assertEqual(code, 0, out)
+        self.assertIn("files copied; no address changed", out)  # and no dry-run count of addresses either
+        self.assertNotIn("addresses in", out)
+        self.assertEqual(len(public.objects), len(self.move.disk_keys(Path(self.cfg.media_dir))))
+        self.assertEqual(self.texts(), before)
+        code, out = self.run_move(patches, "--yes")  # later, with the site stopped: only the addresses are left
+        self.assertEqual(code, 0, out)
+        self.assertIn("photos: 0 copied", out)
+        self.assertNotRegex(" ".join(self.texts()), r"http://test/media/\d+/")
+
+    def test_a_linked_folder_on_the_disk_is_not_copied(self):
+        outside = os.path.join(self.tmp.name, "outside", "5")
+        os.makedirs(outside)
+        with open(os.path.join(outside, "a" * 32 + ".jpg"), "wb") as f:
+            f.write(b"private")
+        os.symlink(outside, os.path.join(self.cfg.media_dir, "5"))
+        self.assertNotIn("5/" + "a" * 32 + ".jpg", self.move.disk_keys(Path(self.cfg.media_dir)))
 
 
 if __name__ == "__main__":
