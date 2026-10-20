@@ -46,12 +46,26 @@ def per_request(db: Session, name: str, key, make):
     return memo[key]
 
 
+_BOUNDS: dict[tuple, tuple] = {}
+
+
+def segment_bounds(db: Session, category: str):
+    """The category's price bands. Rebuilt only when its prices change, which one aggregate tells, instead of
+    reading and sorting every price in the category for each page (the whole catalog when it is all sneakers)."""
+    on_sale = (Listing.category == category, Listing.status.in_(("published", "sold")))
+    version = tuple(db.execute(select(func.count(Listing.id), func.max(Listing.id), func.sum(Listing.price_tiyn))
+                               .where(*on_sale)).one())
+    key = (id(db.get_bind()), category)
+    cached = _BOUNDS.get(key)
+    if cached and cached[0] == version:
+        return cached[1]
+    bounds = compute_bounds(category, list(db.scalars(select(Listing.price_tiyn).where(*on_sale))))
+    _BOUNDS[key] = (version, bounds)
+    return bounds
+
+
 def segment_for(db: Session, listing: Listing) -> str | None:
-    def bounds():
-        prices = db.scalars(select(Listing.price_tiyn).where(Listing.category == listing.category,
-                                                             Listing.status.in_(("published", "sold")))).all()
-        return compute_bounds(listing.category, list(prices))
-    b = per_request(db, "segment_bounds", listing.category, bounds)
+    b = per_request(db, "segment_bounds", listing.category, lambda: segment_bounds(db, listing.category))
     return b.segment_for(listing.price_tiyn).value if b else None
 
 

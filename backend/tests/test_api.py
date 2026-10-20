@@ -270,6 +270,35 @@ class WeightTests(ApiTestCase):
             event.remove(engine, "before_cursor_execute", listen)
         self.assertEqual(sum(re.search(r"\bFROM users\b", q) is not None for q in asked), 1, asked)
 
+    def test_price_bands_are_read_again_only_when_prices_change(self):
+        from sqlalchemy import event, insert, update
+        from vitrina_api.models import Listing
+        first = self.publish()
+        with self.db() as db:
+            src = db.get(Listing, first["id"])
+            row = {c.key: getattr(src, c.key) for c in Listing.__mapper__.column_attrs if c.key != "id"}
+            db.execute(insert(Listing), [{**row, "price_tiyn": (i + 1) * 1000} for i in range(250)])
+            db.commit()
+        engine = self.app.state.sessions.kw["bind"]
+        asked = []
+        listen = lambda *a: asked.append(a[2])  # noqa: E731
+
+        def segment_and_reads():
+            asked.clear()
+            event.listen(engine, "before_cursor_execute", listen)
+            try:
+                card = self.c.get(f"/api/v1/listings/{first['id']}").json()
+            finally:
+                event.remove(engine, "before_cursor_execute", listen)
+            return card["segment"], sum("SELECT listings.price_tiyn" in q for q in asked)
+        price = first["price_tiyn"]  # dearer than any copy: the top band
+        self.assertEqual(segment_and_reads(), ("luxury", 1))
+        self.assertEqual(segment_and_reads(), ("luxury", 0))  # nothing changed: the bands are kept
+        with self.db() as db:
+            db.execute(update(Listing).where(Listing.id != first["id"]).values(price_tiyn=Listing.price_tiyn + price))
+            db.commit()
+        self.assertEqual(segment_and_reads(), ("economy", 1))  # now the cheapest: read again
+
     def test_a_page_reads_its_photos_once_and_shows_them_as_the_listing_page_does(self):
         from sqlalchemy import event
         made = [self.publish(title=f"Аяқкиім {i}") for i in range(3)]

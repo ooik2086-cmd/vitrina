@@ -86,23 +86,29 @@ class ImageSearchApiTests(ApiTestCase):
         lonely = self.listing_with_photo((30, 40, 200))  # created without a model: no vector yet
         self.assertEqual(self.c.get(f"/api/v1/listings/{lonely}/similar").json()["items"], [])
 
-    def test_ranking_reads_only_the_listings_it_shows(self):
+    def test_ranking_reads_only_the_listings_it_shows_in_ranked_order(self):
         from sqlalchemy import event
         from vitrina_api.models import Listing
         self.app.state.embedder = colour_only_embedder
-        ids = [self.listing_with_photo(c) for c in ((200, 30, 30), (190, 40, 35), (20, 20, 20), (30, 40, 200))]
+        # The best matches are made last, so an answer in the order the database keeps them would be wrong.
+        black, red2, red, blue = (self.listing_with_photo(c)
+                                  for c in ((20, 20, 20), (190, 40, 35), (200, 30, 30), (30, 40, 200)))
         loaded = []
         listen = lambda target, _ctx: loaded.append(target.id)  # noqa: E731
         event.listen(Listing, "load", listen)
         try:
-            similar = self.c.get(f"/api/v1/listings/{ids[0]}/similar", params={"limit": 1}).json()["items"]
-            self.assertEqual(([i["id"] for i in similar], sorted(set(loaded))), ([ids[1]], sorted(ids[:2])))
+            similar = self.c.get(f"/api/v1/listings/{red}/similar", params={"limit": 2}).json()["items"]
+            self.assertEqual(sorted(set(loaded)), sorted([red] + [i["id"] for i in similar]))
             loaded.clear()
-            found = self.search((210, 40, 30), limit=2).json()["items"]
+            found = self.search((35, 45, 205), limit=2).json()["items"]
             self.assertEqual(sorted(set(loaded)), sorted(i["id"] for i in found))
-            self.assertEqual(len(found), 2)
         finally:
             event.remove(Listing, "load", listen)
+        self.assertEqual([i["id"] for i in similar][0], red2)
+        self.assertEqual([i["id"] for i in found][0], blue)
+        for items in (similar, found, self.c.get(f"/api/v1/listings/{red}/similar").json()["items"]):
+            scores = [i["similarity"] for i in items]
+            self.assertEqual(scores, sorted(scores, reverse=True))
 
     def test_photo_search_is_rate_limited_per_client(self):
         from vitrina_api.app import IMAGE_SEARCH_PER_MINUTE
@@ -128,6 +134,33 @@ class ImageSearchApiTests(ApiTestCase):
         self.assertEqual(self.post("/listings/suggest", self.buyer, {"photo_url": upload((1, 1, 1))}).status_code, 403)
         self.assertEqual(self.post("/listings/suggest", self.seller, {"photo_url": "http://evil/x.jpg"}).json()["code"],
                          "foreign_media")
+
+    def test_seller_suggestion_comes_from_the_closest_look_alikes(self):
+        self.app.state.embedder = colour_as_shape_embedder
+
+        def part_black(share_red):  # a red shoe with a black part: alike, but less than an all-red one
+            img = Image.new("RGB", (800, 600), (245, 245, 245))
+            ImageDraw.Draw(img).ellipse((150, 200, 650, 450), fill=(20, 20, 20))
+            ImageDraw.Draw(img).pieslice((150, 200, 650, 450), 0, 360 * share_red, fill=(200, 30, 30))
+            out = io.BytesIO()
+            img.save(out, "JPEG", quality=95)
+            return out.getvalue()
+
+        def listing(data, brand):
+            url = self.c.post("/api/v1/media", files={"file": ("p.jpg", data, "image/jpeg")},
+                              headers=self.h(self.seller)).json()["url"]
+            photos = [{"url": url, "angle": a} for a in ("front", "outer", "inner", "back", "sole")]
+            lid = self.post("/listings", self.seller, {**LISTING, "photos": photos, "brand": brand}).json()["id"]
+            self.assertEqual(self.post(f"/listings/{lid}/publish", self.seller).status_code, 200)
+        for _ in range(3):
+            listing(part_black(0.6), "Vans")
+        for _ in range(5):
+            listing(shoe_photo((200, 30, 30)), "Puma")
+        url = self.c.post("/api/v1/media", files={"file": ("q.jpg", shoe_photo((205, 32, 28)), "image/jpeg")},
+                          headers=self.h(self.seller)).json()["url"]
+        got = self.post("/listings/suggest", self.seller, {"photo_url": url}).json()
+        self.assertEqual((got["brand"], got["based_on"]), ("Puma", 5))  # the five closest, not any five above the bar
+        self.assertGreater(got["best_similarity"], 0.95)
 
     def test_without_model_search_by_photo_is_unavailable(self):
         self.app.state.embedder = None
