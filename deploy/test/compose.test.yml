@@ -18,7 +18,9 @@ services:
     command: ["python", "/test/fake_s3.py", "/tmp/s3"]
     environment: {S3_PUBLIC: vitrina-photos}
     volumes: [./test/fake_s3.py:/test/fake_s3.py:ro]
-    healthcheck: {disable: true}
+    healthcheck:   # some compose versions refuse --wait on a service without one
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 9000), 2)"]
+      interval: 5s
     networks: [edge]
   caddy:
     volumes:

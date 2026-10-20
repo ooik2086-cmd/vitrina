@@ -96,6 +96,11 @@ services:
       - caddy_config:/config
     depends_on:
       api: {condition: service_healthy}
+    healthcheck:   # its admin endpoint, on the container's own loopback only
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2019/config/"]
+      interval: 30s
+      start_period: 20s
+      start_interval: 2s
     restart: unless-stopped
     logging: *logs
     networks:
