@@ -17,3 +17,9 @@ media-private-dev/
 # Server settings and secrets (deploy/setup.sh writes it)
 deploy/.env
 deploy/backup.env
+
+# The Play upload key and its base64 copy: never committed (app/README.md).
+*.jks
+*.keystore
+*.b64
+key.properties

@@ -17,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from . import authenticity, coupons, cutout, delivery_eta, jobs, offers, payouts, private_media, qa, slip, visual
 from .config import Settings, production_problems
 from .errors import ApiError, api_error_handler
+from .legal import router as legal_router
 from .share import router as share_router
 from .social import router as social_router
 from .models import make_session_factory
@@ -140,6 +141,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(hooks)
     app.include_router(social_router)
     app.include_router(share_router)
+    app.include_router(legal_router)
     app.include_router(offers.router)
     app.include_router(authenticity.router)
     app.include_router(coupons.router)

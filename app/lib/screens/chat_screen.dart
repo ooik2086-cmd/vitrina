@@ -121,9 +121,12 @@ class _ChatsScreenState extends State<ChatsScreen> {
 
 /// One thread. New messages are fetched every few seconds while the screen is open.
 class ChatScreen extends StatefulWidget {
-  const ChatScreen({super.key, required this.conversationId, this.pollEvery = const Duration(seconds: 4)});
+  const ChatScreen({super.key, required this.conversationId, this.pollEvery = const Duration(seconds: 4), this.draft});
   final int conversationId;
   final Duration pollEvery;
+
+  /// Put in the message box, for the person to change or send: e.g. the size picked on the listing.
+  final String? draft;
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -138,6 +141,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   bool _sending = false;
   bool _loading = false;
   bool _started = false;
+  bool _payments = true;
   Object? _loadError; // the first load failed, so there is nothing to show but the error and a retry
 
   Api get _api => SessionScope.of(context).api;
@@ -146,6 +150,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    if (widget.draft case final draft?) _input.text = draft;
   }
 
   @override
@@ -155,6 +160,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _started = true;
       _fetch();
       _startPolling();
+      SessionScope.of(context).api.paymentsOn().then((on) {
+        if (mounted && on != _payments) setState(() => _payments = on);
+      });
     }
   }
 
@@ -355,11 +363,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                       itemCount: _messages.length,
                       itemBuilder: (context, i) {
                         final m = _messages[i];
-                        return _Bubble(message: m, mine: m.senderId == me);
+                        return _Bubble(message: m, mine: m.senderId == me, payments: _payments);
                       },
                     ),
         ),
-        if (conv?.role == 'seller') _QuickReplies(onPick: _useReply),
+        if (conv?.role == 'seller') _QuickReplies(onPick: _useReply, payments: _payments),
         Material(
           color: scheme.surface,
           child: SafeArea(
@@ -409,9 +417,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 }
 
 class _Bubble extends StatelessWidget {
-  const _Bubble({required this.message, required this.mine});
+  const _Bubble({required this.message, required this.mine, this.payments = true});
   final ChatMessage message;
   final bool mine;
+  final bool payments;
 
   @override
   Widget build(BuildContext context) {
@@ -460,6 +469,7 @@ class _Bubble extends StatelessWidget {
         ]),
       ),
       // Shown to the reader of a message with a phone number or link: deals outside the app lose the protection.
+      // While online payment is off every deal is outside the app, so the warning is about paying ahead instead.
       if (message.contactWarning && !mine)
         Padding(
           padding: const EdgeInsets.only(bottom: 6),
@@ -467,7 +477,10 @@ class _Bubble extends StatelessWidget {
             Icon(Icons.shield_outlined, size: 14, color: scheme.error),
             const SizedBox(width: 4),
             Flexible(
-              child: Text(tr('Төлемді тек VITRINA арқылы жасаңыз, әйтпесе ақшаңыз қорғалмайды.'),
+              child: Text(
+                  tr(payments
+                      ? 'Төлемді тек VITRINA арқылы жасаңыз, әйтпесе ақшаңыз қорғалмайды.'
+                      : 'Тауарды көрмей тұрып толық аударым жасамаңыз.'),
                   style: theme.textTheme.labelSmall?.copyWith(color: scheme.error)),
             ),
           ]),
@@ -495,15 +508,16 @@ class _PhotoViewer extends StatelessWidget {
 }
 
 class _QuickReplies extends StatelessWidget {
-  const _QuickReplies({required this.onPick});
+  const _QuickReplies({required this.onPick, required this.payments});
   final ValueChanged<String> onPick;
+  final bool payments;
 
   @override
   Widget build(BuildContext context) {
     return ValueListenableBuilder<List<String>?>(
       valueListenable: quickReplies,
       builder: (context, _, __) {
-        final items = currentQuickReplies();
+        final items = currentQuickReplies(payments: payments);
         return SizedBox(
           height: 48,
           child: ListView(
@@ -522,7 +536,7 @@ class _QuickReplies extends StatelessWidget {
                     context: context,
                     isScrollControlled: true,
                     showDragHandle: true,
-                    builder: (_) => const QuickRepliesSheet(),
+                    builder: (_) => QuickRepliesSheet(payments: payments),
                   ),
                 ),
               ),
@@ -547,7 +561,8 @@ class _QuickReplies extends StatelessWidget {
 
 /// Add, change or remove ready answers.
 class QuickRepliesSheet extends StatefulWidget {
-  const QuickRepliesSheet({super.key});
+  const QuickRepliesSheet({super.key, this.payments = true});
+  final bool payments;
 
   @override
   State<QuickRepliesSheet> createState() => _QuickRepliesSheetState();
@@ -555,7 +570,7 @@ class QuickRepliesSheet extends StatefulWidget {
 
 class _QuickRepliesSheetState extends State<QuickRepliesSheet> {
   late final List<TextEditingController> _rows = [
-    for (final t in currentQuickReplies()) TextEditingController(text: t)
+    for (final t in currentQuickReplies(payments: widget.payments)) TextEditingController(text: t)
   ];
 
   @override

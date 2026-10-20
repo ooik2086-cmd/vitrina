@@ -10,6 +10,7 @@ import 'package:http/testing.dart';
 import 'package:vitrina/api.dart';
 import 'package:vitrina/demo.dart';
 import 'package:vitrina/screens/manage_listing_screen.dart';
+import 'package:vitrina/screens/chat_screen.dart';
 import 'package:vitrina/screens/offers_screen.dart';
 import 'package:vitrina/screens/order_screen.dart';
 import 'package:vitrina/screens/listing_screen.dart';
@@ -154,5 +155,80 @@ void main() {
         reason: 'the count left is shown');
     await save();
     expect(sent.last.containsKey('sizes'), isFalse, reason: 'the screen now holds the count left, 1, not 3');
+  });
+
+  /// Scrolls the listing to its sizes and picks 42, as a buyer would.
+  Future<void> pick42(WidgetTester tester) async {
+    await tester.scrollUntilVisible(find.text('42'), 300,
+        scrollable: find.byWidgetPredicate((w) => w is Scrollable && w.axis == Axis.vertical).first);
+    Scrollable.ensureVisible(tester.element(find.text('42').first), alignment: 0.4);
+    await tester.pump();
+    await tester.tap(find.text('42').first);
+    await settle(tester);
+  }
+
+  testWidgets('online payment not switched on yet: the buy button writes to the seller and offers are hidden',
+      (tester) async {
+    final demo = jsonDecode(File('demo/api.json').readAsStringSync()) as Map<String, dynamic>;
+    final conversation = ((demo['GET /conversations'] as Map)['items'] as List).first as Map<String, dynamic>;
+    final asked = await _open(
+        tester,
+        const ListingScreen(listingId: 1),
+        (req) => req.url.path.endsWith('/app-config')
+            ? http.Response(jsonEncode({'payments': false}), 200, headers: {'content-type': 'application/json'})
+            : req.method == 'POST' && req.url.path.endsWith('/conversations')
+                ? http.Response(jsonEncode(conversation), 200,
+                    headers: {'content-type': 'application/json; charset=utf-8'})
+                : null);
+    expect(asked, contains('GET /app-config'));
+    expect(find.descendant(of: find.byKey(const Key('buy')), matching: find.text('Сатушыға жазу')), findsOneWidget);
+    await pick42(tester);
+    expect(find.byKey(const Key('make-offer')), findsNothing);
+    // Where the promise of money held by VITRINA was, the honest line.
+    await tester.scrollUntilVisible(find.textContaining('Онлайн төлем әзірге қосылмаған'), 300,
+        scrollable: find.byWidgetPredicate((w) => w is Scrollable && w.axis == Axis.vertical).first);
+    expect(find.textContaining('Ақшаңыз VITRINA-да сақталады'), findsNothing);
+    await tester.tap(find.byKey(const Key('buy')));
+    await settle(tester);
+    expect(asked, contains('POST /conversations'), reason: 'the chat with the seller opens');
+    expect(asked, isNot(contains('POST /orders')));
+    expect(find.byType(ChatScreen), findsOneWidget);
+    expect(find.widgetWithText(TextField, 'Сәлеметсіз бе! 42 өлшемі бар ма?'), findsOneWidget,
+        reason: 'the size picked is in the message box, ready to send');
+  });
+
+  testWidgets('the payments check failing counts as on: the listing is still sold as before', (tester) async {
+    await _open(tester, const ListingScreen(listingId: 1),
+        (req) => req.url.path.endsWith('/app-config') ? http.Response('<html>bad gateway</html>', 502) : null);
+    expect(find.descendant(of: find.byKey(const Key('buy')), matching: find.text('Өлшемді таңдаңыз')), findsOneWidget);
+    await pick42(tester);
+    expect(find.byKey(const Key('make-offer')), findsOneWidget, reason: 'the same place shows the offer when on');
+  });
+
+  testWidgets('an order refused as payments_off turns the page into the chat one', (tester) async {
+    final asked = await _open(
+        tester,
+        const ListingScreen(listingId: 1),
+        (req) => req.method == 'POST' && req.url.path.endsWith('/orders')
+            ? http.Response(
+                jsonEncode(
+                    {'code': 'payments_off', 'message_kk': 'Онлайн төлем әзірге қосылмаған.', 'message_ru': '-'}),
+                503,
+                headers: {'content-type': 'application/json; charset=utf-8'})
+            : null);
+    await pick42(tester);
+    await tester.tap(find.byKey(const Key('buy')));
+    await settle(tester);
+    await tester.enterText(find.byKey(const Key('delivery-name')), 'Аза Сапар');
+    await tester.enterText(find.byKey(const Key('delivery-phone')), '+7 701 000 00 00');
+    await tester.enterText(find.byKey(const Key('delivery-city')), 'Алматы');
+    await tester.enterText(find.byKey(const Key('delivery-address')), 'Абай даңғылы 10');
+    await tester.ensureVisible(find.byKey(const Key('delivery-continue')));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('delivery-continue')));
+    await settle(tester);
+    expect(asked, contains('POST /orders'));
+    expect(find.descendant(of: find.byKey(const Key('buy')), matching: find.text('Сатушыға жазу')), findsOneWidget);
+    expect(find.byKey(const Key('make-offer')), findsNothing);
   });
 }

@@ -227,6 +227,7 @@ void main() {
   test('share link points at the public listing page, not the API', () {
     expect(listingShareUrl(7, base: 'https://vitrina.kz/api/v1'), 'https://vitrina.kz/l/7');
     expect(listingShareUrl(7, base: 'http://10.0.2.2:8000/api/v1/'), 'http://10.0.2.2:8000/l/7');
+    expect(privacyUrl('ru', base: 'https://vitrina.kz/api/v1'), 'https://vitrina.kz/privacy?lang=ru');
     expect(shopShareUrl(3, base: 'https://vitrina.kz/api/v1'), 'https://vitrina.kz/s/3');
   });
 
@@ -808,6 +809,102 @@ void main() {
     expect(payWithinMinutes, 30); // backend/vitrina_api/services.py UNPAID_CREATED_TTL
     expect(sellerAnswersWithinHours, 48); // SELLER_ANSWER_TTL
     expect(buyerChecksWithinDays, 5); // config.py confirm_window
+  });
+
+  test('the payments check: a failure or an odd answer counts as on and is asked again; off is kept', () async {
+    final answers = [
+      http.Response('<html>bad gateway</html>', 502),
+      http.Response('null', 200),
+      jsonResponse({'payments': false}),
+    ];
+    var asked = 0;
+    final api = Api(base: 'http://x/api/v1', client: MockClient((req) async => answers[asked++]));
+    expect(await api.paymentsOn(), isTrue);
+    expect(await api.paymentsOn(), isTrue);
+    expect(await api.paymentsOn(), isFalse);
+    expect(await api.paymentsOn(), isFalse);
+    expect(asked, 3, reason: 'a real answer is kept for the run');
+    api.paymentsTurnedOff();
+    expect(
+        await Api(base: 'http://x/api/v1', client: MockClient((req) async => jsonResponse({'payments': true})))
+            .paymentsOn(),
+        isTrue);
+  });
+
+  testWidgets('while online payment is off, help and intro promise no held money', (tester) async {
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async =>
+            req.url.path.endsWith('/app-config') ? jsonResponse({'payments': false}) : http.Response('{}', 404)));
+    Future<void> show(Widget page) async {
+      await tester.pumpWidget(SessionScope(session: Session(api), child: MaterialApp(home: page)));
+      await tester.pumpAndSettle();
+    }
+
+    await show(const HelpScreen());
+    expect(find.text('Қазір қалай сатып аламын?'), findsOneWidget);
+    expect(find.textContaining('«Сатушыға жазу»'), findsOneWidget); // first topic starts open
+    expect(find.text('Алаяқтықтан қалай сақтанамын?'), findsOneWidget);
+    for (final gone in ['Ақшам қалай қорғалады?', 'Тапсырыс қалай жүреді?', 'Неге чаттан шықпау керек?']) {
+      expect(find.text(gone), findsNothing, reason: gone);
+    }
+    expect(find.text('Түпнұсқа екенін қалай білемін?'), findsOneWidget); // what still holds stays
+
+    await show(const OnboardingScreen());
+    await tester.tap(find.byKey(const Key('onboarding-next')));
+    await tester.pumpAndSettle();
+    expect(find.text('Сатушымен тікелей келісіңіз'), findsOneWidget);
+    expect(find.text('Ақшаңыз қорғалған'), findsNothing);
+  });
+
+  testWidgets('while online payment is off, a phone number in the chat warns about paying ahead instead',
+      (tester) async {
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async => req.url.path.endsWith('/app-config')
+            ? jsonResponse({'payments': false})
+            : jsonResponse({
+                'conversation': {
+                  'id': 9,
+                  'listing_id': 7,
+                  'listing_title': 'Кроссовка',
+                  'listing_cover': null,
+                  'price_tiyn': 2490000,
+                  'role': 'seller',
+                  'other_name': 'Qadam Store',
+                  'last_message': null,
+                  'unread': 0,
+                },
+                'items': [
+                  {
+                    'id': 1,
+                    'sender_id': 3,
+                    'body': 'Бар, +7 701 123 45 67',
+                    'photo_url': null,
+                    'contact_warning': true,
+                    'created_at': '2026-10-17T10:01:00Z'
+                  },
+                ],
+              })));
+    final session = Session(api)
+      ..me = Me.fromJson({
+        'id': 2,
+        'phone': '+77010000002',
+        'display_name': null,
+        'city': null,
+        'is_seller': false,
+        'shop_name': null
+      });
+    await tester.pumpWidget(SessionScope(
+        session: session,
+        child: const MaterialApp(home: ChatScreen(conversationId: 9, pollEvery: Duration(hours: 1)))));
+    await tester.pumpAndSettle();
+    expect(find.text('Бар, +7 701 123 45 67'), findsOneWidget);
+    expect(find.text('Тауарды көрмей тұрып толық аударым жасамаңыз.'), findsOneWidget);
+    expect(find.textContaining('Төлемді тек VITRINA арқылы'), findsNothing);
+    expect(find.text('Сәлеметсіз бе! Иә, бар.'), findsOneWidget); // the seller's ready answers
+    expect(find.textContaining('VITRINA-да сақталады'), findsNothing);
+    expect(find.text('Төлем түскен күні жіберемін.'), findsNothing);
   });
 
   testWidgets('to-do card lists only what waits and opens where it is done', (tester) async {
@@ -3146,10 +3243,14 @@ void main() {
           return jsonResponse({'sent': true, 'resend_after': 3, 'dev_code': '123456'});
         }));
     await tester.pumpWidget(SessionScope(session: Session(api), child: const MaterialApp(home: LoginScreen())));
+    // Before the first code: what getting it agrees to, and a link to read it.
+    expect(find.text('Кодты алу арқылы сіз жеке деректеріңізді жинауға және өңдеуге келісім бересіз.'), findsOneWidget);
+    expect(find.byKey(const Key('privacy')), findsOneWidget);
     await tester.enterText(find.byType(TextField).first, '+77010000001');
     await tester.tap(find.text('Код алу'));
     await tester.pump();
     await tester.pump();
+    expect(find.byKey(const Key('privacy')), findsNothing);
     expect(find.text('Жаңа код: 3 сек кейін'), findsOneWidget);
     expect(find.text('Код +77010000001 нөміріне жіберілді'), findsOneWidget);
     expect(tester.widget<TextButton>(find.byKey(const Key('resend-code'))).onPressed, isNull);

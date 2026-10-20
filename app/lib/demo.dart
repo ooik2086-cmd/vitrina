@@ -60,6 +60,7 @@ class DemoClient extends http.BaseClient {
     if (path == '/me') {
       return (200, {...(_answers['GET /me'] as Map), 'is_seller': true, 'shop_name': 'Qadam Store', 'city': 'Алматы'});
     }
+    if (path == '/app-config') return (200, {'payments': true});
     if (path == '/listings') return (200, {'items': _catalog(query)});
     if (path == '/search/suggest') return (200, {'items': _suggest(query['q'] ?? '')});
     if (path == '/sellers/2') return _get('/sellers/$_demoShopId', query);

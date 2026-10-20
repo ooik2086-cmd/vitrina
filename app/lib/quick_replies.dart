@@ -16,6 +16,9 @@ const maxQuickReplyLength = 300;
 const _defaults = [
   'Сәлеметсіз бе! Иә, бар.',
   'Өлшемі сай келеді. Табанының ұзындығын тауар бетінен қараңыз.',
+];
+// Only while online payment works: they speak of money paid in the app and held by VITRINA.
+const _paidDefaults = [
   'Төлем түскен күні жіберемін.',
   'Ақшаңыз VITRINA-да сақталады: сіз тауарды алғаныңызды растағанда не тексеру мерзімі өткенде ғана маған өтеді.',
 ];
@@ -23,7 +26,12 @@ const _defaults = [
 /// Null while the seller has not changed the list.
 final quickReplies = ValueNotifier<List<String>?>(null);
 
-List<String> currentQuickReplies() => quickReplies.value ?? [for (final d in _defaults) tr(d)];
+/// The seller's own answers, or the defaults; [payments] is whether online payment is on now.
+List<String> currentQuickReplies({bool payments = true}) =>
+    quickReplies.value ??
+    [
+      for (final d in [..._defaults, if (payments) ..._paidDefaults]) tr(d)
+    ];
 
 Future<void> restoreQuickReplies() async {
   try {

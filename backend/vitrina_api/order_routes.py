@@ -62,6 +62,8 @@ def clean_delivery(body: DeliveryIn) -> dict:
 @router.post("/orders", status_code=201)
 def create_order(body: OrderIn, user: User = Depends(current_user), db: Session = Depends(get_db),
                  cfg: Settings = Depends(get_settings), idempotency_key: str | None = Header(default=None)):
+    if cfg.payments == "off":
+        raise ApiError(503, "payments_off")
     if not idempotency_key:
         raise ApiError(400, "idempotency_key_required")
     # Everything that changes a listing's stock (orders, the seller's edits, cancels) queues on its row first, then

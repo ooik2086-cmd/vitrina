@@ -96,6 +96,8 @@ class _ListingScreenState extends State<ListingScreen> {
   // One key per order attempt: a retried tap after a lost response returns the same order.
   String _orderKey = newIdempotencyKey();
   Set<int>? _alerts; // sold-out sizes the buyer waits for, once they tap one
+  // Off until a payment partner is signed: the buy button then opens the chat with the seller and offers are hidden.
+  bool _payments = true;
 
   @override
   void initState() {
@@ -118,7 +120,13 @@ class _ListingScreenState extends State<ListingScreen> {
     _loadListing();
     if (_similar == null) _loadSimilar();
     _loadOffer();
+    _loadPayments();
   }
+
+  /// Asked once per app run; after a failed check «Try again» asks again.
+  void _loadPayments() => SessionScope.of(context).api.paymentsOn().then((on) {
+        if (mounted && on != _payments) setState(() => _payments = on);
+      });
 
   @override
   void dispose() {
@@ -148,6 +156,7 @@ class _ListingScreenState extends State<ListingScreen> {
       _loadListing();
       _loadSimilar();
     });
+    _loadPayments();
     if (_offer == null) _loadOffer();
   }
 
@@ -271,6 +280,11 @@ class _ListingScreenState extends State<ListingScreen> {
       await Navigator.of(context).push(MaterialPageRoute(builder: (_) => OrderScreen(orderId: order.id)));
     } catch (e) {
       if (mounted) showError(context, e);
+      // Online payment was switched off after this page asked: from now on the button writes to the seller.
+      if (e is ApiException && e.code == 'payments_off' && mounted) {
+        SessionScope.of(context).api.paymentsTurnedOff();
+        setState(() => _payments = false);
+      }
       // The seller changed the photos meanwhile, or another buyer took the last pair: show the listing as it is now,
       // nothing was ordered. A size that is gone is picked again.
       if (e is ApiException && (e.code == 'photos_changed' || e.code == 'out_of_stock') && mounted) {
@@ -284,12 +298,13 @@ class _ListingScreenState extends State<ListingScreen> {
     }
   }
 
-  Future<void> _chat(Listing listing) => once((this, #chat), () async {
+  Future<void> _chat(Listing listing, {String? draft}) => once((this, #chat), () async {
         if (!await _ensureSignedIn() || !mounted) return;
         try {
           final conv = await SessionScope.of(context).api.openConversation(listing.id);
           if (!mounted) return;
-          await Navigator.of(context).push(MaterialPageRoute(builder: (_) => ChatScreen(conversationId: conv.id)));
+          await Navigator.of(context)
+              .push(MaterialPageRoute(builder: (_) => ChatScreen(conversationId: conv.id, draft: draft)));
         } catch (e) {
           if (mounted) showError(context, e);
         }
@@ -515,7 +530,7 @@ class _ListingScreenState extends State<ListingScreen> {
     final me = SessionScope.of(context).me;
     final own = me?.id == l.sellerId;
     final away = l.sellerAwayUntil;
-    final canOffer = l.status == 'published' && me?.id != l.sellerId && !_offerLive && away == null;
+    final canOffer = _payments && l.status == 'published' && me?.id != l.sellerId && !_offerLive && away == null;
     final deal = _offer?.status == 'accepted' && _offer!.sizeId == selected?.id ? _offer : null;
     final itemPrice = deal == null ? l.priceTiyn : (deal.priceTiyn < l.priceTiyn ? deal.priceTiyn : l.priceTiyn);
     return Column(children: [
@@ -846,11 +861,11 @@ class _ListingScreenState extends State<ListingScreen> {
                           decoration: BoxDecoration(
                               color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(Brand.radius)),
                           child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                            const Icon(Icons.shield_outlined),
+                            Icon(_payments ? Icons.shield_outlined : Icons.chat_bubble_outline_rounded),
                             const SizedBox(width: 12),
                             Expanded(
                               child: Text(
-                                tr(protectionText),
+                                tr(_payments ? protectionText : directDealText),
                                 style: theme.textTheme.bodySmall,
                               ),
                             ),
@@ -880,11 +895,13 @@ class _ListingScreenState extends State<ListingScreen> {
                           ? tr('Қазір сатылымда жоқ')
                           : away != null
                               ? trf('{0} бастап', [formatDay(away.add(const Duration(days: 1)))])
-                              : selected == null
-                                  ? tr('Өлшемді таңдаңыз')
-                                  : deal != null
-                                      ? tr('Келісілген бағамен алу')
-                                      : tr('Тапсырыс беру');
+                              : !_payments
+                                  ? tr('Сатушыға жазу')
+                                  : selected == null
+                                      ? tr('Өлшемді таңдаңыз')
+                                      : deal != null
+                                          ? tr('Келісілген бағамен алу')
+                                          : tr('Тапсырыс беру');
               final label =
                   Text(tr('Жиыны'), style: theme.textTheme.labelMedium?.copyWith(color: scheme.onSurfaceVariant));
               final price = Text(formatTenge(itemPrice + l.deliveryPriceTiyn),
@@ -914,12 +931,16 @@ class _ListingScreenState extends State<ListingScreen> {
                 key: const Key('buy'),
                 style: FilledButton.styleFrom(backgroundColor: Brand.accentStrong, foregroundColor: Colors.white),
                 onPressed: l.status == 'published' && !own && !_ordering && away == null
-                    ? selected != null
-                        ? () => _order(l)
-                        // No size yet: take the buyer to the sizes, past the showcase, instead of a dead button.
-                        : l.sizes.any((s) => s.available)
-                            ? () => _toSizes(l)
-                            : null
+                    ? !_payments
+                        // The size picked goes with it, so the seller knows which pair the buyer means.
+                        ? () => _chat(l,
+                            draft: selected == null ? null : trf('Сәлеметсіз бе! {0} өлшемі бар ма?', [selected.label]))
+                        : selected != null
+                            ? () => _order(l)
+                            // No size yet: take the buyer to the sizes, past the showcase, instead of a dead button.
+                            : l.sizes.any((s) => s.available)
+                                ? () => _toSizes(l)
+                                : null
                     : null,
                 child: Text(text, key: const Key('buy-text'), textAlign: TextAlign.center),
               );

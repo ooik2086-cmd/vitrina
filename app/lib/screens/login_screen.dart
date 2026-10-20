@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:clock/clock.dart';
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../api.dart';
 import '../session.dart';
@@ -137,6 +138,17 @@ class _LoginScreenState extends State<LoginScreen> {
                   ? trf('Жаңа код: {0} кейін', [_waitText])
                   : tr('Код алу')),
         ),
+        if (!_codeSent) ...[
+          const SizedBox(height: 12),
+          Text(tr('Кодты алу арқылы сіз жеке деректеріңізді жинауға және өңдеуге келісім бересіз.'),
+              textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodySmall),
+          TextButton(
+            key: const Key('privacy'),
+            onPressed: () => launchUrl(Uri.parse(privacyUrl(appLanguage.value)), mode: LaunchMode.externalApplication)
+                .catchError((_) => false),
+            child: Text(tr('Құпиялылық саясаты')),
+          ),
+        ],
         if (_codeSent) ...[
           TextButton(
             key: const Key('resend-code'),

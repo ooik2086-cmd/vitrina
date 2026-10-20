@@ -155,6 +155,68 @@ class FakeMobizon:
         return httpx.Response(200, json={"code": self.code, "data": {"messageId": 1}, "message": "no money"})
 
 
+class PaymentsOffTests(ApiTestCase):
+    """No licensed payment partner yet (VITRINA_PAYMENTS=off, required in production): buyers write to the seller
+    instead of ordering, and nothing takes stock for an order nobody could pay."""
+
+    def test_no_orders_or_offers_and_the_app_is_told(self):
+        listing = self.publish()
+        self.assertEqual(self.c.get("/api/v1/app-config").json(), {"payments": True})
+        self.app.state.settings.payments = "off"
+        self.assertEqual(self.c.get("/api/v1/app-config").json(), {"payments": False})
+        r = self.post("/orders", self.buyer, {"listing_id": listing["id"], "size_id": listing["sizes"][0]["id"]},
+                      **{"Idempotency-Key": "off"})
+        self.assertEqual((r.status_code, r.json()["code"]), (503, "payments_off"))
+        self.assertIn("чат", r.json()["message_kk"])
+        r = self.post(f"/listings/{listing['id']}/offers", self.buyer,
+                      {"size_id": listing["sizes"][0]["id"], "amount_tiyn": 1_000_000})
+        self.assertEqual((r.status_code, r.json()["code"]), (503, "payments_off"))
+        self.assertTrue(self.c.get(f"/api/v1/listings/{listing['id']}").json()["sizes"][0]["available"])  # stock kept
+        r = self.post("/conversations", self.buyer, {"listing_id": listing["id"]})
+        self.assertIn(r.status_code, (200, 201), r.text)  # the chat with the seller still works
+        # The shared pages no longer promise money held by the site.
+        seller_id = self.c.get("/api/v1/me", headers=self.h(self.seller)).json()["id"]
+        for path in (f"/l/{listing['id']}", f"/s/{seller_id}"):
+            page = self.c.get(path).text
+            self.assertIn("чатта келісесіз", page)
+            self.assertNotIn("растағанша", page)
+
+
+    def test_offers_left_from_before_can_be_closed_but_not_agreed(self):
+        listing = self.publish()
+        size = listing["sizes"][0]["id"]
+        first = self.post(f"/listings/{listing['id']}/offers", self.buyer, {"size_id": size, "amount_tiyn": listing["price_tiyn"] * 8 // 1000 * 100})
+        self.assertEqual(first.status_code, 201, first.text)
+        self.app.state.settings.payments = "off"
+        for path, body in ((f"/offers/{first.json()['id']}/accept", None),
+                           (f"/offers/{first.json()['id']}/counter", {"amount_tiyn": listing["price_tiyn"] * 9 // 1000 * 100})):
+            r = self.post(path, self.seller, body)
+            self.assertEqual((r.status_code, r.json()["code"]), (503, "payments_off"), path)
+        r = self.post(f"/offers/{first.json()['id']}/decline", self.seller)
+        self.assertEqual((r.status_code, r.json()["status"]), (200, "declined"))
+
+
+class LegalPagesTests(ApiTestCase):
+    """The privacy and account-deletion pages Google Play links to: in the reader's language, naming who runs the
+    site and where to write, marked as a draft until a lawyer has read them."""
+
+    def test_privacy_and_delete_account_pages(self):
+        self.app.state.settings.operator = "ИП <Сапар>"
+        self.app.state.settings.support_contact = "help@vitrina.kz"
+        for path, kk, ru in (("/privacy", "Құпиялылық саясаты", "Политика конфиденциальности"),
+                             ("/delete-account", "Аккаунтты өшіру", "Удаление аккаунта")):
+            r = self.c.get(path)
+            self.assertEqual(r.status_code, 200)
+            self.assertIn(f"<h1>{kk}</h1>", r.text)
+            self.assertIn("ИП &lt;Сапар&gt;", r.text)  # escaped: the operator's name is text, never markup
+            self.assertIn("<b>help@vitrina.kz</b>", r.text)
+            self.assertIn("Алдын ала нұсқа", r.text)
+            self.assertIn(f"<h1>{ru}</h1>", self.c.get(path, params={"lang": "ru"}).text)
+            self.assertIn(f"<h1>{ru}</h1>", self.c.get(path, headers={"Accept-Language": "ru-RU"}).text)
+            self.assertIn('lang="en"', self.c.get(path, params={"lang": "en"}).text)
+        self.assertIn('href="/delete-account?lang=kk"', self.c.get("/privacy").text)
+
+
 class SmsTests(ApiTestCase):
     """Sign-in codes go out by SMS through Mobizon; the code never comes back in the answer."""
 
@@ -1212,7 +1274,8 @@ class OpsTests(ApiTestCase):
                          public_media_url="https://cdn.vitrina.kz", cors_origins=[], s3_bucket="vitrina",
                          s3_endpoint="https://s3.example.kz", s3_access_key="k", s3_secret_key="s",
                          s3_private_bucket="vitrina-private", s3_backup_bucket="vitrina-backup", storage="s3",
-                         photo_work="worker", sms_provider="mobizon", mobizon_api_key="k")
+                         photo_work="worker", sms_provider="mobizon", mobizon_api_key="k", payments="off",
+                         operator="ИП Тест", support_contact="help@vitrina.kz")
         self.assertEqual(production_problems(ready), [])
         from dataclasses import replace
         for loose, env in ((dict(cors_origins=["*"]), "VITRINA_CORS_ORIGINS"),
@@ -1223,7 +1286,9 @@ class OpsTests(ApiTestCase):
                            (dict(s3_backup_bucket="vitrina-private"), "VITRINA_S3_BACKUP_BUCKET"),
                            (dict(sms_provider=""), "VITRINA_SMS_PROVIDER"), (dict(mobizon_api_key=""), "VITRINA_MOBIZON_API_KEY"),
                            (dict(mobizon_url="http://api.mobizon.kz"), "VITRINA_MOBIZON_URL"),
-                           (dict(storage=""), "VITRINA_STORAGE"), (dict(storage="local"), "VITRINA_STORAGE")):
+                           (dict(storage=""), "VITRINA_STORAGE"), (dict(storage="local"), "VITRINA_STORAGE"),
+                           (dict(payments="sandbox"), "VITRINA_PAYMENTS"),
+                           (dict(operator=""), "VITRINA_OPERATOR"), (dict(support_contact=""), "VITRINA_SUPPORT_CONTACT")):
             self.assertIn(env, " ".join(production_problems(replace(ready, **loose))))
         # On the server's own disk: no buckets needed, not even for the backups.
         disk = replace(ready, storage="disk", s3_bucket="", s3_private_bucket="", s3_backup_bucket="", s3_endpoint="",
@@ -2142,6 +2207,46 @@ class DeleteAccountTests(ApiTestCase):
             self.assertIsNone(gone.last_delivery)
         fresh = self.login("+77010000002")  # the number is free again: a new, empty account
         self.assertNotEqual(self.c.get("/api/v1/me", headers=self.h(fresh)).json()["id"], old_id)
+
+    def test_support_deletes_an_account_for_someone_who_cannot_open_the_app(self):
+        """/delete-account promises it: the same steps as in the app, by the account's number."""
+        from contextlib import redirect_stderr, redirect_stdout
+        from unittest import mock
+        from vitrina_api import delete_account as command
+        from vitrina_api.models import PayoutAccount
+        self.c.put("/api/v1/me/shop-about", json={"text": "Жексенбіде демаламыз"}, headers=self.h(self.seller))
+        body = {"holder_name": "ЖК Qadam Store", "iban": "kz86 125K ZT50 0410 0100",
+                "tax_id": with_check_digit("90010130012")}
+        self.assertEqual(self.c.put("/api/v1/me/payout-account", json=body, headers=self.h(self.seller)).status_code,
+                         200)
+        seller_id = self.c.get("/api/v1/me", headers=self.h(self.seller)).json()["id"]
+        self.assertEqual(command.phone_of("8 701 000 00 01"), "+77010000001")
+        out = io.StringIO()
+        with mock.patch("vitrina_api.config.Settings", lambda: self.cfg), redirect_stdout(out), \
+                redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(command.main(["+7 701 000 00 01"]), 0)  # shown, nothing changed
+            self.assertEqual(self.c.get("/api/v1/me", headers=self.h(self.seller)).status_code, 200)
+            self.assertEqual(command.main(["+77019999999", "--yes"]), 1)
+            self.assertIn("no account", err.getvalue())
+            self.assertEqual(command.main(["+77010000001", "--yes"]), 0)
+        self.assertIn("Qadam Store", out.getvalue())
+        self.assertEqual(self.c.get("/api/v1/me", headers=self.h(self.seller)).status_code, 401)
+        with self.db() as db:
+            gone = db.get(User, seller_id)
+            self.assertEqual((gone.phone, gone.shop_name, gone.shop_about), (f"deleted:{seller_id}", None, None))
+            self.assertIsNone(db.get(PayoutAccount, seller_id))  # the bank details and IIN go too
+
+    def test_the_command_refuses_while_an_order_is_open(self):
+        from contextlib import redirect_stderr, redirect_stdout
+        from unittest import mock
+        from vitrina_api import delete_account as command
+        self.ordered()
+        err = io.StringIO()
+        with mock.patch("vitrina_api.config.Settings", lambda: self.cfg), redirect_stdout(io.StringIO()), \
+                redirect_stderr(err):
+            self.assertEqual(command.main(["+77010000002", "--yes"]), 2)
+        self.assertIn("open_orders", err.getvalue())
+        self.assertEqual(self.c.get("/api/v1/me", headers=self.h(self.buyer)).status_code, 200)
 
     def test_a_deleted_shop_leaves_the_catalog(self):
         listing = self.publish()

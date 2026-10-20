@@ -14,6 +14,8 @@ import 'screens.dart';
 const _hints = [
   '/me/todo', // the count on the profile tab; the profile itself says when it cannot load
   '/delivery-estimate', // the arrival guess under the price; a city the buyer picks is said when it fails
+  // Whether online payment is on: unknown counts as on and is asked again, and the server refuses an order itself.
+  '/app-config',
 ];
 
 /// Presses everything with the connection down: whatever it tries to send or fetch is said, and nothing keeps spinning.

@@ -36,6 +36,8 @@ Future<void> main() async {
     session.update(await session.api.me());
   } else {
     session = Session(Api())..restore();
+    // Asked now, so the first listing opened already knows whether to offer an order or a chat.
+    unawaited(session.api.paymentsOn());
   }
   runApp(VitrinaApp(session: session));
 }

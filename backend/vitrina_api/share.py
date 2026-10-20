@@ -16,7 +16,8 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from . import promo
-from .deps import get_db, now_utc
+from .config import Settings
+from .deps import get_db, get_settings, now_utc
 from .models import Listing, Review, User
 from .serializers import cover_frame, one_turn
 
@@ -34,6 +35,7 @@ CONDITIONS = {
 TEXT = {
     "kk": {"open": "Қосымшада ашу", "drag": "Айналдыру үшін сүйреңіз", "sizes": "Өлшемдер", "delivery": "Жеткізу",
            "free": "тегін", "protected": "Ақша сатып алушы тауарды алып, растағанша сақталады.",
+           "chat": "Төлем мен жеткізуді сатушымен қосымшадағы чатта келісесіз.",
            "gone": "Бұл тауар енді сатылымда жоқ.", "seller": "Сатушы", "open_shop": "Дүкенді қосымшада ашу",
            "shop_gone": "Бұл дүкен табылмады.", "empty": "Дүкенде қазір тауар жоқ.", "goods": "тауар",
            "reviews": "пікір", "away": "Сатушы демалыста, тапсырыстар кейін қабылданады.",
@@ -41,12 +43,14 @@ TEXT = {
     "ru": {"open": "Открыть в приложении", "drag": "Проведите, чтобы повернуть", "sizes": "Размеры",
            "delivery": "Доставка", "free": "бесплатно",
            "protected": "Деньги хранятся, пока покупатель не получит товар и не подтвердит это.",
+           "chat": "Оплату и доставку вы согласуете с продавцом в чате приложения.",
            "gone": "Этот товар больше не продаётся.", "seller": "Продавец", "open_shop": "Открыть магазин в приложении",
            "shop_gone": "Этот магазин не найден.", "empty": "Сейчас в магазине нет товаров.", "goods": "товаров",
            "reviews": "отзывов", "away": "Продавец в отпуске, заказы примет позже.",
            "keys": "Чтобы повернуть, нажимайте стрелки влево и вправо."},
     "en": {"open": "Open in the app", "drag": "Drag to turn", "sizes": "Sizes", "delivery": "Delivery", "free": "free",
            "protected": "The money is held until the buyer receives the item and confirms it.",
+           "chat": "You agree payment and delivery with the seller in the app's chat.",
            "gone": "This listing is no longer on sale.", "seller": "Seller", "open_shop": "Open the shop in the app",
            "shop_gone": "This shop wasn't found.", "empty": "The shop has nothing on sale right now.",
            "goods": "items", "reviews": "reviews", "away": "The seller is away and will take orders later.",
@@ -98,9 +102,11 @@ padding:16px;border-radius:16px;font-size:17px}}
 
 
 @router.get("/l/{listing_id}", response_class=HTMLResponse, include_in_schema=False)
-def shared_listing(listing_id: int, request: Request, db: Session = Depends(get_db)):
+def shared_listing(listing_id: int, request: Request, db: Session = Depends(get_db),
+                   cfg: Settings = Depends(get_settings)):
     lang = pick_lang(request)
     t = TEXT[lang]
+    deal = t["protected"] if cfg.payments != "off" else t["chat"]
     listing = db.get(Listing, listing_id)
     if listing is None or listing.status != "published":
         return page("VITRINA", f'<div class="info"><h1>{t["gone"]}</h1></div>', lang=lang, status=404)
@@ -189,7 +195,7 @@ def shared_listing(listing_id: int, request: Request, db: Session = Depends(get_
 {f'<p><a class="muted" href="/s/{seller.id}">{t["seller"]}: {esc(seller.shop_name or "")} →</a></p>' if seller else ""}
 <h3>{t["sizes"]}</h3><div class="chips">{sizes}</div>
 <a class="cta" href="vitrina://open/listing/{listing.id}">{t["open"]}</a>
-<p class="note muted">{t["protected"]}</p>
+<p class="note muted">{deal}</p>
 </div>{spin_js}"""
     return page(f"{listing.title} · {price} · VITRINA", body, lang=lang, meta=meta)
 
@@ -223,7 +229,8 @@ def cover_url(listing: Listing) -> str | None:
 
 
 @router.get("/s/{seller_id}", response_class=HTMLResponse, include_in_schema=False)
-def shared_shop(seller_id: int, request: Request, db: Session = Depends(get_db)):
+def shared_shop(seller_id: int, request: Request, db: Session = Depends(get_db),
+                cfg: Settings = Depends(get_settings)):
     """A seller's whole shop as one link for an Instagram bio or a WhatsApp status: what is on sale now, the
     platform's own rating, and the way into the app. Each card opens the listing's own shared page."""
     lang = pick_lang(request)
@@ -263,5 +270,5 @@ def shared_shop(seller_id: int, request: Request, db: Session = Depends(get_db))
 </div>
 {f'<div class="grid">{cards}</div>' if listings else f'<p class="info muted">{t["empty"]}</p>'}
 <div class="info"><a class="cta" href="vitrina://open/shop/{seller.id}">{t["open_shop"]}</a>
-<p class="note muted">{t["protected"]}</p></div>"""
+<p class="note muted">{t["protected"] if cfg.payments != "off" else t["chat"]}</p></div>"""
     return page(f"{name} · VITRINA", body, lang=lang, meta=meta)

@@ -145,7 +145,9 @@ class Line extends http.BaseClient {
     final what = '${request.method} ${request.url.path.replaceFirst(RegExp(r'^.*/api/v1'), '')}';
     asked.add((what, request.headers['Idempotency-Key']));
     if (down && !request.url.path.endsWith('/me')) {
-      dropped.add(what);
+      // Whether online payment is on is rightly quiet: unknown counts as on, it is asked again next time, and the
+      // server refuses an order itself.
+      if (!request.url.path.endsWith('/app-config')) dropped.add(what);
       throw http.ClientException('offline', request.url);
     }
     served.add(what);

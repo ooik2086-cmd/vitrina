@@ -61,10 +61,13 @@ if [ -n "${SMOKE_SETUP:-}" ]; then
 	cat setup.out
 	[ "$status" = 2 ] || fail "setup.sh did not stop for the unfilled SMS key (exit $status)"
 	grep -qx '  VITRINA_MOBIZON_API_KEY' setup.out || fail "setup.sh did not ask for the Mobizon key"
+	grep -qx '  VITRINA_OPERATOR' setup.out || fail "setup.sh did not ask who runs the site"
 	rm setup.out
 fi
 sed -i -e 's|^VITRINA_TLS=.*|VITRINA_TLS=/certs/site.pem /certs/site.key|' \
-	-e 's|^VITRINA_MOBIZON_API_KEY=.*|VITRINA_MOBIZON_API_KEY=smoke-mobizon-key|' .env
+	-e 's|^VITRINA_MOBIZON_API_KEY=.*|VITRINA_MOBIZON_API_KEY=smoke-mobizon-key|' \
+	-e 's|^VITRINA_OPERATOR=.*|VITRINA_OPERATOR=ИП Smoke, ИИН 000000000000|' \
+	-e 's|^VITRINA_SUPPORT_CONTACT=.*|VITRINA_SUPPORT_CONTACT=help@vitrina.test|' .env
 if [ "$STORAGE" = s3 ]; then
 	sed -i -e 's|^VITRINA_STORAGE=.*|VITRINA_STORAGE=s3|' \
 		-e 's|^VITRINA_S3_ENDPOINT=.*|VITRINA_S3_ENDPOINT=https://s3.test|' \
@@ -100,6 +103,9 @@ fi
 step "HTTPS, and plain http sent to it"
 [ "$(https https://vitrina.test/api/v1/health)" = '{"ok":true}' ] || fail "health over https"
 https -o /dev/null -D - https://vitrina.test/api/v1/health | grep -qi '^strict-transport-security: max-age=31536000' || fail "no HSTS"
+[ "$(https https://vitrina.test/api/v1/app-config)" = '{"payments":false}' ] || fail "online payment is not off"
+https https://vitrina.test/privacy | grep -q 'ИП Smoke, ИИН 000000000000' || fail "the privacy page does not name who runs the site"
+https https://vitrina.test/delete-account | grep -q 'help@vitrina.test' || fail "the account-deletion page has no contact"
 redirect=$(curl -sS --noproxy "*" -o /dev/null -w '%{http_code} %{redirect_url}' --resolve vitrina.test:80:127.0.0.1 http://vitrina.test/admin/)
 [ "$redirect" = "308 https://vitrina.test/admin/" ] || fail "http is not redirected to https: $redirect"
 

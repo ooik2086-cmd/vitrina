@@ -16,6 +16,10 @@ String listingShareUrl(int id, {String base = apiBase}) => '${base.replaceFirst(
 String shopShareUrl(int sellerId, {String base = apiBase}) =>
     '${base.replaceFirst(RegExp(r'/api/v1/?$'), '')}/s/$sellerId';
 
+/// The privacy policy on the site, in the interface language: what is kept, why, and who to write to.
+String privacyUrl(String lang, {String base = apiBase}) =>
+    '${base.replaceFirst(RegExp(r'/api/v1/?$'), '')}/privacy?lang=$lang';
+
 /// Error as the API returns it: a stable code plus ready messages in Kazakh, Russian and English.
 class ApiException implements Exception {
   ApiException(this.status, this.code, this.messageKk, [this.detail, this.messageRu, this.messageEn]) : _local = false;
@@ -1023,6 +1027,20 @@ class Api {
   }
 
   Future<Me> me() async => Me.fromJson(await _send('GET', '/me') as Map<String, dynamic>);
+
+  Future<bool>? _payments;
+
+  /// Whether the server takes orders and offers now. Until a payment partner is signed it does not, and buyers write
+  /// to the seller instead. Asked once; a failed check counts as yes and is asked again next time, because the server
+  /// still refuses an order itself, with words for people.
+  Future<bool> paymentsOn() =>
+      _payments ??= _send('GET', '/app-config').then((r) => (r as Map)['payments'] != false).catchError((Object _) {
+        _payments = null;
+        return true;
+      });
+
+  /// The server refused an order with payments_off: the app knows it for the rest of the run.
+  void paymentsTurnedOff() => _payments = Future.value(false);
 
   Future<Me> setAway(DateTime? until) async => Me.fromJson(await _send('PUT', '/me/away', body: {
         'until': until == null

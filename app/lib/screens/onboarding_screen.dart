@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../i18n.dart';
 import '../my_size.dart';
+import '../session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/size_guide.dart';
@@ -44,6 +45,10 @@ const _pages = [
       'Табан ұзындығын сантиметрмен енгізсеңіз, каталог пен тауар беті сізге сай өлшемді бірден көрсетеді.'),
 ];
 
+// The second page while online payment is off: nothing is held, so nothing is promised.
+const _directPage = _Page(Icons.chat_bubble_outline_rounded, 'Сатушымен тікелей келісіңіз',
+    'Онлайн төлем әзірге қосылмаған. Тауар бетінде «Сатушыға жазу» басып, төлем мен жеткізуді чатта келісіңіз. Тауарды қолыңызға алғанда төлеген қауіпсіз.');
+
 /// Three short pages on first launch: what the 360° showcase is, why paying here is safe, and the buyer's size.
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key});
@@ -55,6 +60,18 @@ class OnboardingScreen extends StatefulWidget {
 class _OnboardingScreenState extends State<OnboardingScreen> {
   final _pager = PageController();
   int _page = 0;
+  bool _payments = true;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Without a session (this page tested alone) the pages stay as they are.
+    SessionScope.maybeOf(context)?.api.paymentsOn().then((on) {
+      if (mounted && on != _payments) setState(() => _payments = on);
+    });
+  }
+
+  List<_Page> get _shown => _payments ? _pages : [_pages[0], _directPage, _pages[2]];
 
   @override
   void dispose() {
@@ -63,7 +80,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   }
 
   void _next() {
-    if (_page == _pages.length - 1) {
+    if (_page == _shown.length - 1) {
       finishOnboarding();
     } else {
       _pager.nextPage(duration: const Duration(milliseconds: 280), curve: Curves.easeOutCubic);
@@ -73,7 +90,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final last = _page == _pages.length - 1;
+    final last = _page == _shown.length - 1;
     return Scaffold(
       body: SafeArea(
         child: Column(children: [
@@ -87,13 +104,13 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           Expanded(
             child: PageView.builder(
               controller: _pager,
-              itemCount: _pages.length,
+              itemCount: _shown.length,
               onPageChanged: (i) => setState(() => _page = i),
-              itemBuilder: (context, i) => _PageBody(page: _pages[i], showSize: i == _pages.length - 1),
+              itemBuilder: (context, i) => _PageBody(page: _shown[i], showSize: i == _shown.length - 1),
             ),
           ),
           Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-            for (var i = 0; i < _pages.length; i++)
+            for (var i = 0; i < _shown.length; i++)
               AnimatedContainer(
                 duration: const Duration(milliseconds: 200),
                 margin: const EdgeInsets.symmetric(horizontal: 4),

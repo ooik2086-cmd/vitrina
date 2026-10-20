@@ -180,7 +180,23 @@ const en = <String, String>{
   'Сынақ режимі: SMS жіберілмейді, код {0}': 'Test mode: no SMS is sent, the code is {0}',
   'Растау': 'Confirm',
   'Код алу': 'Get code',
+  'Онлайн төлем әзірге қосылмаған: төлем мен жеткізуді сатушымен чатта келісесіз. Тауарды қолыңызға алғанда төлеген қауіпсіз.':
+      'Online payment isn\'t switched on yet: you agree payment and delivery with the seller in the chat. It\'s safest to pay once the pair is in your hands.',
+  'Қазір қалай сатып аламын?': 'How do I buy right now?',
+  'Онлайн төлем әзірге қосылмаған. Тауар бетінде «Сатушыға жазу» басып, өлшемді, бағаны, төлем мен жеткізуді чатта келісіңіз. VITRINA ақшаны ұстамайды және қайтара алмайды.':
+      'Online payment isn\'t switched on yet. On the listing tap «Message seller» and agree the size, price, payment and delivery in the chat. VITRINA doesn\'t hold the money and can\'t refund it.',
+  'Алаяқтықтан қалай сақтанамын?': 'How do I avoid scams?',
+  'Тауарды көрмей тұрып толық аударым жасамаңыз: кездескенде не жеткізу қызметі арқылы алғанда төлеген қауіпсіз. Сатушының рейтингі мен пікірлерін, «Құжаты бар» белгісін қараңыз. Күмәнді болса, тауар бетінен шағым жіберіңіз.':
+      'Don\'t send the full amount before you see the pair: it\'s safer to pay when you meet or when a delivery service hands it over. Check the seller\'s rating and reviews and the «Has documents» badge. If something feels wrong, report it from the listing.',
+  'Сатушымен тікелей келісіңіз': 'Agree directly with the seller',
+  'Онлайн төлем әзірге қосылмаған. Тауар бетінде «Сатушыға жазу» басып, төлем мен жеткізуді чатта келісіңіз. Тауарды қолыңызға алғанда төлеген қауіпсіз.':
+      'Online payment isn\'t switched on yet. On the listing tap «Message seller» and agree payment and delivery in the chat. It\'s safest to pay once the pair is in your hands.',
+  'Тауарды көрмей тұрып толық аударым жасамаңыз.': 'Don\'t send the full amount before you see the pair.',
+  'Сәлеметсіз бе! {0} өлшемі бар ма?': 'Hello! Do you have size {0}?',
   'Нөмірді өзгерту': 'Change number',
+  'Кодты алу арқылы сіз жеке деректеріңізді жинауға және өңдеуге келісім бересіз.':
+      'By getting a code you consent to the collection and processing of your personal data.',
+  'Құпиялылық саясаты': 'Privacy policy',
   'Жоба': 'Draft',
   'Тексерілуде': 'In review',
   'Сатылымда': 'On sale',

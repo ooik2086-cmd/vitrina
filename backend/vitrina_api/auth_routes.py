@@ -26,7 +26,7 @@ from .deps import current_user, get_db, get_settings, now_utc, sha256
 from .errors import ApiError
 from .social import CONTACT_RE
 from .models import (Block, Follow, Notification, Offer, SavedSearch, StockAlert, AuthToken, Favorite, Listing, Order,
-                     OtpCode, User)
+                     OtpCode, PayoutAccount, User)
 from .api_common import ALMATY, PHONE_RE
 from .schemas import OtpRequest, OtpVerify, ProfilePatch, SellerOn
 from .serializers import me_out
@@ -190,6 +190,13 @@ def logout(everywhere: bool = False, authorization: str | None = Header(default=
     return {"ok": True}
 
 
+@router.get("/app-config")
+def app_config(cfg: Settings = Depends(get_settings)):
+    """What the app shows depending on the server: without online payment, a chat with the seller replaces
+    ordering and price offers."""
+    return {"payments": cfg.payments != "off"}
+
+
 @router.get("/health")
 def health(db: Session = Depends(get_db)):
     """For the load balancer and uptime checks: the process answers and the database does too."""
@@ -232,8 +239,14 @@ def put_notification_settings(body: dict[str, bool], user: User = Depends(curren
 
 @router.delete("/me")
 def delete_me(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    delete_account(db, user)
+    return {"deleted": True}
+
+
+def delete_account(db: Session, user: User) -> None:
     """Deletes the account: personal data goes, the person is signed out everywhere and their listings leave the
-    catalog. Orders, payments and the ledger stay, without the name, because the law requires keeping them."""
+    catalog. Orders, payments and the ledger stay, without the name, because the law requires keeping them.
+    Also run by support for someone who cannot open the app: `python -m vitrina_api.delete_account`."""
     open_orders = db.scalar(select(func.count(Order.id)).where(
         or_(Order.buyer_id == user.id, Order.seller_id == user.id),
         Order.status.not_in([s.value for s in (S.COMPLETED, S.REFUNDED, S.CANCELLED)])))
@@ -245,7 +258,9 @@ def delete_me(user: User = Depends(current_user), db: Session = Depends(get_db))
     now = now_utc()
     for model, column in ((Favorite, Favorite.user_id), (SavedSearch, SavedSearch.user_id),
                           (Follow, Follow.user_id), (Follow, Follow.seller_id), (StockAlert, StockAlert.user_id),
-                          (Notification, Notification.user_id), (Block, Block.user_id), (Block, Block.blocked_id)):
+                          (Notification, Notification.user_id), (Block, Block.user_id), (Block, Block.blocked_id),
+                          # Bank details: each payout already made keeps its own copy, as the ledger needs.
+                          (PayoutAccount, PayoutAccount.seller_id)):
         db.execute(delete(model).where(column == user.id))
     db.execute(update(AuthToken).where(AuthToken.user_id == user.id).values(revoked=True))
     db.execute(update(Offer).where(or_(Offer.buyer_id == user.id, Offer.seller_id == user.id),
@@ -254,10 +269,9 @@ def delete_me(user: User = Depends(current_user), db: Session = Depends(get_db))
                .values(status="paused"))
     services.audit(db, user.id, "delete_account", f"user:{user.id}")
     user.phone = f"deleted:{user.id}"  # frees the number: signing in with it again starts a new account
-    user.display_name = user.city = user.shop_name = user.last_delivery = user.away_until = None
+    user.display_name = user.city = user.shop_name = user.shop_about = user.last_delivery = user.away_until = None
     user.is_blocked, user.deleted_at = True, now
     db.commit()
-    return {"deleted": True}
 
 
 @router.patch("/me")

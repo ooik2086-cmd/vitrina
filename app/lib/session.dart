@@ -52,4 +52,7 @@ class SessionScope extends InheritedNotifier<Session> {
   const SessionScope({super.key, required Session session, required super.child}) : super(notifier: session);
 
   static Session of(BuildContext context) => context.dependOnInheritedWidgetOfExactType<SessionScope>()!.notifier!;
+
+  /// The session, when there is one above: a page shown on its own (in a test) has none.
+  static Session? maybeOf(BuildContext context) => context.getInheritedWidgetOfExactType<SessionScope>()?.notifier;
 }

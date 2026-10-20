@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
+import '../api.dart';
 import '../appearance.dart';
 import '../labels.dart';
 import '../session.dart';
@@ -153,6 +155,15 @@ class ProfileScreen extends StatelessWidget {
                     subtitle: Text(tr('Төлем, мерзімдер, қайтару, дау')),
                     trailing: const Icon(Icons.chevron_right),
                     onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const HelpScreen())),
+                  ),
+                  ListTile(
+                    key: const Key('privacy'),
+                    leading: const Icon(Icons.privacy_tip_outlined),
+                    title: Text(tr('Құпиялылық саясаты')),
+                    trailing: const Icon(Icons.open_in_new_rounded),
+                    onTap: () =>
+                        launchUrl(Uri.parse(privacyUrl(appLanguage.value)), mode: LaunchMode.externalApplication)
+                            .catchError((_) => false),
                   ),
                   ListTile(
                     leading: const Icon(Icons.translate),

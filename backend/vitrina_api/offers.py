@@ -14,7 +14,8 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from . import promo, services
-from .deps import current_user, get_db, now_utc
+from .config import Settings
+from .deps import current_user, get_db, get_settings, now_utc
 from .errors import ApiError
 from .models import Listing, ListingSize, Offer, User
 
@@ -64,8 +65,16 @@ def whole_tenge(amount_tiyn: int) -> None:
         raise ApiError(422, "validation", "amount must be whole tenge")
 
 
+def payments_on(cfg: Settings = Depends(get_settings)) -> None:
+    """An agreed price could not be paid while online payment is off: no offers are made, accepted or countered then.
+    Declining and withdrawing stay open, so offers left from before can be closed."""
+    if cfg.payments == "off":
+        raise ApiError(503, "payments_off")
+
+
 @router.post("/listings/{listing_id}/offers", status_code=201)
-def make_offer(listing_id: int, body: OfferIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+def make_offer(listing_id: int, body: OfferIn, user: User = Depends(current_user), db: Session = Depends(get_db),
+               _: None = Depends(payments_on)):
     listing = db.get(Listing, listing_id)
     if listing is None or listing.status != "published":
         raise ApiError(404, "not_found")
@@ -147,7 +156,8 @@ def tell_other(db: Session, offer: Offer, user: User, kk: str, ru: str, en: str)
 
 
 @router.post("/offers/{offer_id}/accept")
-def accept_offer(offer_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+def accept_offer(offer_id: int, user: User = Depends(current_user), db: Session = Depends(get_db),
+                 _: None = Depends(payments_on)):
     offer = own_offer(db, offer_id, user)
     answer(offer, user)
     offer.status, offer.expires_at = "accepted", now_utc() + BUY_WITHIN
@@ -174,7 +184,8 @@ def decline_offer(offer_id: int, user: User = Depends(current_user), db: Session
 
 
 @router.post("/offers/{offer_id}/counter")
-def counter_offer(offer_id: int, body: CounterIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+def counter_offer(offer_id: int, body: CounterIn, user: User = Depends(current_user), db: Session = Depends(get_db),
+                  _: None = Depends(payments_on)):
     offer = own_offer(db, offer_id, user)
     if user.id != offer.seller_id:
         raise ApiError(409, "invalid_status")

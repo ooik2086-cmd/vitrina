@@ -16,6 +16,13 @@ class Settings:
     # Development only: returns the OTP in the API response because no SMS provider is connected yet.
     debug_otp: bool = field(default_factory=lambda: os.environ.get("VITRINA_DEBUG_OTP", "1") == "1")
     otp_secret: bytes = field(default_factory=lambda: os.environ.get("VITRINA_OTP_SECRET", "dev-otp-secret").encode())
+    # Online payment: "sandbox" (development and tests: signed test webhooks mark orders paid) or "off" (no
+    # licensed payment partner yet: no orders or price offers, the app offers a chat with the seller instead).
+    payments: str = field(default_factory=lambda: os.environ.get("VITRINA_PAYMENTS", "sandbox"))
+    # Who runs the site and where people write about their data, as the public /privacy page names them (the
+    # personal-data law): e.g. "ИП Сапар А., ИИН 000000000000" and "help@vitrina.kz".
+    operator: str = field(default_factory=lambda: os.environ.get("VITRINA_OPERATOR", "").strip())
+    support_contact: str = field(default_factory=lambda: os.environ.get("VITRINA_SUPPORT_CONTACT", "").strip())
     payment_webhook_secret: bytes = field(default_factory=lambda: os.environ.get("VITRINA_PAYMENT_SECRET", "dev-payment-secret").encode())
     delivery_webhook_secret: bytes = field(default_factory=lambda: os.environ.get("VITRINA_DELIVERY_SECRET", "dev-delivery-secret").encode())
     otp_ttl: timedelta = timedelta(minutes=5)
@@ -111,6 +118,12 @@ def production_problems(s: Settings) -> list[str]:
                         "codes are sent nowhere and nobody can sign in")
     elif not s.mobizon_url.startswith("https://"):
         problems.append("VITRINA_MOBIZON_URL must use https: the key travels in it")
+    if not s.operator or not s.support_contact:
+        problems.append("VITRINA_OPERATOR and VITRINA_SUPPORT_CONTACT must be set: the privacy page and the "
+                        "account-deletion page name who runs the site and where to write")
+    if s.payments != "off":
+        problems.append("VITRINA_PAYMENTS must be off: there is no licensed payment partner yet, and with sandbox "
+                        "buyers would place orders nobody can pay")
     if s.photo_work != "worker":
         problems.append("VITRINA_PHOTO_WORK must be worker, with `python -m vitrina_api.photo_worker` running: "
                         "cutting out photos inside the API slows every buyer down for minutes")
