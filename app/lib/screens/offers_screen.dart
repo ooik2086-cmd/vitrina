@@ -404,7 +404,8 @@ class _CounterDialogState extends State<_CounterDialog> {
 final _compact = ButtonStyle(
   padding: const WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 6, vertical: 12)),
   minimumSize: const WidgetStatePropertyAll(Size(0, 44)),
-  textStyle: const WidgetStatePropertyAll(TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+  // The app's font as everywhere else: a bare TextStyle here would replace the theme's and fall back to the system font.
+  textStyle: WidgetStatePropertyAll(weight(const TextStyle(fontFamily: appFont, fontSize: 14), 600)),
 );
 
 class _OfferTile extends StatelessWidget {

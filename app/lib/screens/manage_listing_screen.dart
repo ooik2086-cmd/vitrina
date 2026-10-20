@@ -358,7 +358,9 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
                       SizedBox(
                         width: 40,
                         child: Text('${_stock[s.id]}',
-                            textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.w700)),
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                                fontWeight: FontWeight.w700, fontVariations: [FontVariation('wght', 700)])),
                       ),
                       IconButton.outlined(
                         tooltip: tr('Көбейту'),
@@ -653,7 +655,8 @@ class ModerationCard extends StatelessWidget {
             const SizedBox(width: 8),
             Expanded(
               child: Text(rejected ? tr('Тауар қайтарылды') : tr('Тауар тексерілуде'),
-                  style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
+                  style: theme.textTheme.titleSmall
+                      ?.copyWith(fontWeight: FontWeight.w700, fontVariations: const [FontVariation('wght', 700)])),
             ),
           ]),
           const SizedBox(height: 8),
@@ -743,7 +746,8 @@ class _PhotosPendingCardState extends State<PhotosPendingCard> {
             const SizedBox(width: 8),
             Expanded(
               child: Text(tr('Фотолар өңделуде'),
-                  style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
+                  style: theme.textTheme.titleSmall
+                      ?.copyWith(fontWeight: FontWeight.w700, fontVariations: const [FontVariation('wght', 700)])),
             ),
           ]),
           const SizedBox(height: 8),
@@ -935,7 +939,10 @@ class _StatusPill extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         child: Text(tr(listingStatuses[status] ?? status),
             style: TextStyle(
-                color: live ? scheme.onPrimary : scheme.onSurface, fontSize: 12, fontWeight: FontWeight.w600)),
+                color: live ? scheme.onPrimary : scheme.onSurface,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                fontVariations: const [FontVariation('wght', 600)])),
       ),
     );
   }
@@ -991,7 +998,10 @@ class QualityCard extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(q.verdict,
-              style: theme.textTheme.labelMedium?.copyWith(color: verdictColor, fontWeight: FontWeight.w700)),
+              style: theme.textTheme.labelMedium?.copyWith(
+                  color: verdictColor,
+                  fontWeight: FontWeight.w700,
+                  fontVariations: const [FontVariation('wght', 700)])),
           for (final t in q.tips.take(3)) ...[
             const SizedBox(height: 10),
             Row(crossAxisAlignment: CrossAxisAlignment.start, children: [

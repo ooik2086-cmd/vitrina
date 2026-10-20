@@ -118,13 +118,14 @@ class _SellerReviewsScreenState extends State<SellerReviewsScreen> {
                   padding: const EdgeInsets.all(16),
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Row(children: [
-                      Expanded(child: Text(r.buyerName, style: theme.textTheme.titleSmall)),
+                      Expanded(child: Text(personName(r.buyerName), style: theme.textTheme.titleSmall)),
                       Stars(value: r.rating.toDouble()),
                     ]),
                     if (r.fit != null) ...[
                       const SizedBox(height: 6),
                       Text(trf('Өлшемі: {0}', [tr(fits[r.fit] ?? r.fit!)]),
-                          style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600)),
+                          style: theme.textTheme.bodySmall?.copyWith(
+                              fontWeight: FontWeight.w600, fontVariations: const [FontVariation('wght', 600)])),
                     ],
                     if (r.text != null) ...[const SizedBox(height: 8), Text(r.text!)],
                     if (r.photos.isNotEmpty) ...[

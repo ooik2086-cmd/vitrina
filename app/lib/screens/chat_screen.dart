@@ -87,7 +87,8 @@ class _ChatsScreenState extends State<ChatsScreen> {
                                     fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Icon(Icons.image_outlined)),
                           ),
                         ),
-                        title: Text(c.otherName, style: weight(theme.textTheme.titleSmall!, c.unread > 0 ? 750 : 600)),
+                        title: Text(personName(c.otherName),
+                            style: weight(theme.textTheme.titleSmall!, c.unread > 0 ? 750 : 600)),
                         subtitle: Text(
                           c.lastMessage == null
                               ? c.listingTitle
@@ -231,7 +232,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(trf('{0}: бұғаттау керек пе?', [conv.otherName])),
+        title: Text(trf('{0}: бұғаттау керек пе?', [personName(conv.otherName)])),
         content: Text(tr(
             'Екеуіңіз бір-біріңізге жаза алмайсыз, баға ұсынысы, сұрақ пен тапсырыс та жабылады. Профильдегі «Бұғатталғандар» бөлімінен қайтаруға болады.')),
         actions: [
@@ -247,7 +248,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     try {
       await _api.blockInChat(conv.id);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(trf('{0}: бұғатталды.', [conv.otherName]))));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(trf('{0}: бұғатталды.', [personName(conv.otherName)]))));
       Navigator.of(context).pop();
     } catch (e) {
       if (mounted) showError(context, e);
@@ -316,7 +318,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             ),
         ],
         title: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(conv?.otherName ?? '', style: theme.textTheme.titleMedium),
+          Text(personName(conv?.otherName ?? ''), style: theme.textTheme.titleMedium),
           if (conv != null)
             Text('${conv.listingTitle} · ${formatTenge(conv.priceTiyn)}',
                 style: theme.textTheme.labelMedium?.copyWith(color: scheme.onSurfaceVariant),

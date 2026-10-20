@@ -124,7 +124,10 @@ class _TodoCardState extends State<TodoCard> {
                 radius: 13,
                 backgroundColor: Brand.accentStrong, // white on it reads 5.6:1
                 child: Text('${counts[l.key]}',
-                    style: theme.textTheme.labelMedium?.copyWith(color: Colors.white, fontWeight: FontWeight.w700)),
+                    style: theme.textTheme.labelMedium?.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                        fontVariations: const [FontVariation('wght', 700)])),
               ),
               const Icon(Icons.chevron_right),
             ]),

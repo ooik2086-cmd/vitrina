@@ -69,7 +69,7 @@ class _BlockedScreenState extends State<BlockedScreen> {
                 for (final b in items)
                   ListTile(
                     leading: const Icon(Icons.block),
-                    title: Text(b.name),
+                    title: Text(personName(b.name)),
                     subtitle: Text(trf('{0} бастап', [formatDay(b.since)])),
                     trailing: TextButton(
                       key: Key('unblock-${b.userId}'),

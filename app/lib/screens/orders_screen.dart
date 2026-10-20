@@ -165,9 +165,14 @@ class _OrderListState extends State<_OrderList> {
                         if (waits)
                           TextSpan(
                               text: ' · ${tr('Сізді күтеді')}',
-                              style: TextStyle(color: accentText(context), fontWeight: FontWeight.w700)),
+                              style: TextStyle(
+                                  color: accentText(context),
+                                  fontWeight: FontWeight.w700,
+                                  fontVariations: const [FontVariation('wght', 700)])),
                       ])),
-                      trailing: Text(formatTenge(o.totalTiyn), style: const TextStyle(fontWeight: FontWeight.w700)),
+                      trailing: Text(formatTenge(o.totalTiyn),
+                          style: const TextStyle(
+                              fontWeight: FontWeight.w700, fontVariations: [FontVariation('wght', 700)])),
                       onTap: () async {
                         await Navigator.of(context).push(MaterialPageRoute(builder: (_) => OrderScreen(orderId: o.id)));
                         _reload();

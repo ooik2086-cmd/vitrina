@@ -296,7 +296,11 @@ class SaleBadge extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
           child: Text('−${salePercent(listing)}%',
-              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 12)),
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w800,
+                  fontVariations: [FontVariation('wght', 800)],
+                  fontSize: 12)),
         ),
       );
 }

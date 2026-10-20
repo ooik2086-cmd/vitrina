@@ -206,7 +206,9 @@ class _EarningsScreenState extends State<EarningsScreen> {
                   subtitle: Text('№${i.orderId} · ${tr(_kinds[i.kind] ?? i.kind)} · '
                       '${i.at.toLocal().day.toString().padLeft(2, '0')}.${i.at.toLocal().month.toString().padLeft(2, '0')}'
                       '${i.feeTiyn > 0 ? ' · комиссия ${formatTenge(i.feeTiyn)}' : ''}'),
-                  trailing: Text(formatTenge(i.netTiyn), style: const TextStyle(fontWeight: FontWeight.w700)),
+                  trailing: Text(formatTenge(i.netTiyn),
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w700, fontVariations: [FontVariation('wght', 700)])),
                 ),
             ]),
           );
@@ -262,7 +264,8 @@ class _PayoutTile extends StatelessWidget {
       title: Text.rich(TextSpan(children: [
         TextSpan(
             text: tr(_payoutStatuses[p.status] ?? p.status),
-            style: TextStyle(color: color, fontWeight: FontWeight.w700)),
+            style: TextStyle(
+                color: color, fontWeight: FontWeight.w700, fontVariations: const [FontVariation('wght', 700)])),
         TextSpan(text: ' · $day · ${p.ibanMasked}'),
       ])),
       subtitle: p.status == 'rejected' && p.reason != null
@@ -270,7 +273,8 @@ class _PayoutTile extends StatelessWidget {
           : p.bankRef != null
               ? Text(trf('Төлем тапсырмасы {0}', [p.bankRef]))
               : null,
-      trailing: Text(formatTenge(p.amountTiyn), style: const TextStyle(fontWeight: FontWeight.w700)),
+      trailing: Text(formatTenge(p.amountTiyn),
+          style: const TextStyle(fontWeight: FontWeight.w700, fontVariations: [FontVariation('wght', 700)])),
     );
   }
 }

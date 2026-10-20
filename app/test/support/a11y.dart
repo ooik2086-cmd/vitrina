@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:vitrina/theme.dart';
 
 /// Android's 48×48 for anything a finger taps. Text that can only be selected (an address to copy) is not a control,
 /// and a control cut by the edge of a list scrolled part way is whole once scrolled.
@@ -142,6 +143,41 @@ bool _close(Color a, Color b) =>
 
 String _hex(Color c) => '#${c.toARGB32().toRadixString(16).padLeft(8, '0')}';
 
+final _letter = RegExp(r'[\p{L}\p{N}₸%]', unicode: true); // words, numbers and prices; icons are glyphs of their own
+
+/// Every word in the app's own font, at the weight it asks for: a style that names no family falls back to the
+/// phone's, and on the variable font a bare fontWeight is ignored while the inherited 'wght' setting stays.
+void oneFont(List<String> errors) {
+  void check(String text, TextStyle? style) {
+    if (!_letter.hasMatch(text)) return;
+    final short = text.length > 30 ? text.substring(0, 30) : text;
+    if (style?.fontFamily != appFont) errors.add('font ${style?.fontFamily}: "$short"');
+    final wght = style?.fontVariations?.where((v) => v.axis == 'wght').firstOrNull?.value;
+    final asked = style?.fontWeight?.value;
+    if (wght != null && asked != null && (wght / 100).round() * 100 != asked) {
+      errors.add('weight $asked drawn at ${wght.round()}: "$short"');
+    }
+  }
+
+  void walk(InlineSpan span, TextStyle? inherited) {
+    final style = inherited?.merge(span.style) ?? span.style;
+    if (span is! TextSpan) return;
+    check(span.text ?? '', style);
+    for (final child in span.children ?? const <InlineSpan>[]) {
+      walk(child, style);
+    }
+  }
+
+  for (final element in find.byType(RichText).evaluate()) {
+    walk((element.widget as RichText).text, null);
+  }
+  // Fields and selectable text draw through EditableText, not RichText.
+  for (final element in find.byType(EditableText).evaluate()) {
+    final field = element.widget as EditableText;
+    check(field.controller.text, field.style);
+  }
+}
+
 /// What a screen reader and a finger need, wherever the screen is.
 Future<void> look(WidgetTester tester, List<String> errors) async {
   final handle = tester.ensureSemantics();
@@ -150,5 +186,6 @@ Future<void> look(WidgetTester tester, List<String> errors) async {
     if (!result.passed) errors.add(result.reason!);
   }
   await textContrast(tester, errors);
+  oneFont(errors);
   handle.dispose();
 }

@@ -112,7 +112,10 @@ class _ShopScreenState extends State<ShopScreen> {
                           backgroundColor: Theme.of(context).colorScheme.primary,
                           foregroundColor: Theme.of(context).colorScheme.onPrimary,
                           child: Text(shop.shopName.characters.first.toUpperCase(),
-                              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w700)),
+                              style: const TextStyle(
+                                  fontSize: 24,
+                                  fontWeight: FontWeight.w700,
+                                  fontVariations: [FontVariation('wght', 700)])),
                         ),
                         const SizedBox(width: 16),
                         Expanded(

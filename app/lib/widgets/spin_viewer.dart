@@ -154,7 +154,11 @@ class _SpinViewerState extends State<SpinViewer> {
                       ),
                       const SizedBox(width: 8),
                       Text(tr('сүйреңіз'),
-                          style: TextStyle(color: Brand.ink, fontSize: 12, fontWeight: FontWeight.w600)),
+                          style: TextStyle(
+                              color: Brand.ink,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              fontVariations: const [FontVariation('wght', 600)])),
                     ]),
                   ),
                 ),

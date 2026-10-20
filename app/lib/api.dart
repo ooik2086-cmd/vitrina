@@ -203,7 +203,7 @@ class Suggestion {
 class Shop {
   Shop.fromJson(Map<String, dynamic> j)
       : id = j['id'] as int,
-        shopName = j['shop_name'] as String? ?? tr('Сатушы'),
+        _shopName = j['shop_name'] as String?,
         city = j['city'] as String?,
         since = DateTime.parse(j['since'] as String),
         completedSales = j['completed_sales'] as int,
@@ -216,7 +216,10 @@ class Shop {
         shipBucket = (j['ship_time'] as Map?)?['bucket'] as String?,
         about = j['about'] as String?;
   final int id;
-  final String shopName;
+  final String? _shopName;
+
+  /// Translated when shown, not when loaded, so a language picked later reaches it too.
+  String get shopName => _shopName ?? tr('Сатушы');
 
   /// The seller's own few lines: shipping, returns, hours. Never contacts; the server refuses those.
   final String? about;
@@ -240,13 +243,14 @@ class Shop {
 class FollowedShop {
   FollowedShop.fromJson(Map<String, dynamic> j)
       : id = j['id'] as int,
-        shopName = j['shop_name'] as String? ?? tr('Сатушы'),
+        _shopName = j['shop_name'] as String?,
         city = j['city'] as String?,
         listings = j['listings'] as int,
         rating = (j['rating'] as num?)?.toDouble(),
         awayUntil = j['away_until'] == null ? null : DateTime.parse(j['away_until'] as String);
   final int id;
-  final String shopName;
+  final String? _shopName;
+  String get shopName => _shopName ?? tr('Сатушы');
   final String? city;
   final int listings;
   final double? rating;

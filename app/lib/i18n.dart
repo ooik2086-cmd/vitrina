@@ -36,6 +36,11 @@ Future<void> setLanguage(String code) async {
 
 String tr(String kk) => _tables[appLanguage.value]?[kk] ?? kk;
 
+/// A person's name as the server sends it: its stand-ins for a missing name follow the interface language.
+/// Matched by their exact words, which the server already sends to installed apps; someone who took one of these
+/// words as a name sees it translated, which says the same.
+String personName(String name) => const {'Сатушы', 'Сатып алушы', 'Пайдаланушы'}.contains(name) ? tr(name) : name;
+
 /// Picks the server's own text for the interface language, falling back to Russian, then Kazakh.
 String pick(String kk, String? ru, String? en) => switch (appLanguage.value) {
       'en' => en ?? ru ?? kk,

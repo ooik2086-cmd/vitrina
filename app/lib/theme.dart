@@ -118,7 +118,7 @@ ThemeData buildTheme(Brightness brightness) {
     surfaceContainerHighest: dark ? const Color(0xFF232327) : const Color(0xFFE6E3DC), // apart from the paper
     outlineVariant: dark ? const Color(0xFF2A2A2F) : const Color(0xFFE4E2DD),
   );
-  final base = ThemeData(useMaterial3: true, brightness: brightness, colorScheme: scheme, fontFamily: 'Inter');
+  final base = ThemeData(useMaterial3: true, brightness: brightness, colorScheme: scheme, fontFamily: appFont);
   final text = _withWeights(base.textTheme).copyWith(
     headlineMedium: _w(base.textTheme.headlineMedium!, 750).copyWith(letterSpacing: -0.8),
     headlineSmall: _w(base.textTheme.headlineSmall!, 750).copyWith(letterSpacing: -0.6),
@@ -143,7 +143,7 @@ ThemeData buildTheme(Brightness brightness) {
       centerTitle: false,
       // Sizes are only merged into the text theme later by MaterialApp, so give the title its full style here.
       titleTextStyle:
-          _w(TextStyle(fontFamily: 'Inter', fontSize: 22, color: scheme.onSurface, letterSpacing: -0.4), 700),
+          _w(TextStyle(fontFamily: appFont, fontSize: 22, color: scheme.onSurface, letterSpacing: -0.4), 700),
     ),
     cardTheme: CardThemeData(
       elevation: 0,
@@ -273,6 +273,9 @@ TextTheme _withWeights(TextTheme t) {
 /// Accent for text: the deeper shade on light screens, the bright one where the canvas is dark.
 Color accentText(BuildContext context) =>
     Theme.of(context).brightness == Brightness.dark ? Brand.accent : Brand.accentStrong;
+
+/// The one font every word is set in (assets/fonts/Inter.ttf, a variable font: weights go through [weight]).
+const appFont = 'Inter';
 
 /// Bold weight helper for one-off emphasis (prices, badges).
 TextStyle weight(TextStyle s, double w) => _w(s, w);

@@ -64,6 +64,8 @@ import 'package:vitrina/widgets/filter_sheet.dart';
 import 'package:vitrina/widgets/spin_viewer.dart';
 import 'package:vitrina/widgets/studio.dart';
 
+import 'support/screens.dart' show screens, visit;
+
 Map<String, dynamic> listingJson({List<Map<String, dynamic>>? media}) => {
       'id': 7,
       'status': 'published',
@@ -1448,6 +1450,31 @@ void main() {
     await tester.pump();
     expect(tester.widget<ChoiceChip>(find.byKey(const Key('color-other'))).selected, isTrue);
     expect(find.widgetWithText(TextField, 'бордо с ақ'), findsOneWidget);
+  });
+
+  testWidgets('order steps follow a language picked after they were first shown', (tester) async {
+    addTearDown(() => appLanguage.value = 'kk');
+    final seen = <String>{};
+    // Read once the order has loaded, before the visit scrolls the steps away.
+    Future<void> read(WidgetTester tester, List<String> errors) async =>
+        seen.addAll(find.byType(Text).evaluate().map((e) => (e.widget as Text).data ?? ''));
+    expect(await visit(tester, 'kk', const Size(360, 720), 1, screens['order2']!, look: read), isEmpty);
+    expect(seen, contains('Төленді'));
+    seen.clear();
+    expect(await visit(tester, 'ru', const Size(360, 720), 1, screens['order2']!, look: read), isEmpty);
+    expect(seen, containsAll(['Оплачен', 'Принят продавцом']));
+    expect(seen, isNot(contains('Төленді')));
+  });
+
+  test("the server's stand-ins for a missing name follow the interface language, real names stay", () {
+    addTearDown(() => appLanguage.value = 'kk');
+    appLanguage.value = 'ru';
+    expect(personName('Сатып алушы'), 'Покупатель');
+    expect(personName('Сатушы'), 'Продавец');
+    expect(personName('Пайдаланушы'), 'Пользователь');
+    expect(personName('Айгерім'), 'Айгерім');
+    appLanguage.value = 'kk';
+    expect(personName('Сатып алушы'), 'Сатып алушы');
   });
 
   test('listed colours show in the interface language, typed ones as typed', () {

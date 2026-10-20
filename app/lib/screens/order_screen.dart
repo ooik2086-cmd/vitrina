@@ -729,7 +729,8 @@ class _EvidenceCardState extends State<_EvidenceCard> {
                   '${formatDay(until)} ${until.hour.toString().padLeft(2, '0')}:${until.minute.toString().padLeft(2, '0')}'
                 ]),
                 key: const Key('evidence-until'),
-                style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600)),
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(fontWeight: FontWeight.w600, fontVariations: const [FontVariation('wght', 600)])),
           ],
           if (widget.order.status == 'DELIVERED_PENDING_CONFIRMATION') ...[
             const SizedBox(height: 4),
@@ -1003,13 +1004,14 @@ class _Timeline extends StatelessWidget {
   const _Timeline({required this.order});
   final OrderInfo order;
 
-  static final _steps = [
-    ('PAID', tr('Төленді'), Icons.lock_outline_rounded),
-    ('SELLER_ACCEPTED', tr('Сатушы қабылдады'), Icons.storefront_outlined),
-    ('SHIPPED', tr('Жіберілді'), Icons.local_shipping_outlined),
-    ('DELIVERED_PENDING_CONFIRMATION', tr('Жеткізілді'), Icons.inventory_2_outlined),
-    ('COMPLETED', tr('Аяқталды'), Icons.check_circle_outline_rounded),
-  ];
+  // Built on each call, not cached: a cached list would keep the language the app started in.
+  static List<(String, String, IconData)> get _steps => [
+        ('PAID', tr('Төленді'), Icons.lock_outline_rounded),
+        ('SELLER_ACCEPTED', tr('Сатушы қабылдады'), Icons.storefront_outlined),
+        ('SHIPPED', tr('Жіберілді'), Icons.local_shipping_outlined),
+        ('DELIVERED_PENDING_CONFIRMATION', tr('Жеткізілді'), Icons.inventory_2_outlined),
+        ('COMPLETED', tr('Аяқталды'), Icons.check_circle_outline_rounded),
+      ];
   static const _off = {'DISPUTED', 'RETURN_REQUESTED', 'REFUND_PENDING', 'REFUNDED', 'CANCELLED'};
 
   @override
@@ -1018,6 +1020,7 @@ class _Timeline extends StatelessWidget {
     final scheme = theme.colorScheme;
     final o = order;
     final reached = {for (final h in o.history) h.status: h.at};
+    final steps = _steps;
     String when(DateTime t) =>
         '${t.day.toString().padLeft(2, '0')}.${t.month.toString().padLeft(2, '0')}, ${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
     return Card(
@@ -1038,7 +1041,7 @@ class _Timeline extends StatelessWidget {
               padding: const EdgeInsets.only(bottom: 12),
               child: Text(label(orderStatuses, o.status), style: theme.textTheme.titleSmall),
             ),
-          for (final (i, (code, title, icon)) in _steps.indexed)
+          for (final (i, (code, title, icon)) in steps.indexed)
             IntrinsicHeight(
               child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                 Column(children: [
@@ -1048,12 +1051,12 @@ class _Timeline extends StatelessWidget {
                     child: Icon(icon,
                         size: 16, color: reached.containsKey(code) ? scheme.onPrimary : scheme.onSurfaceVariant),
                   ),
-                  if (i < _steps.length - 1)
+                  if (i < steps.length - 1)
                     Expanded(
                       child: Container(
                         width: 2,
                         margin: const EdgeInsets.symmetric(vertical: 2),
-                        color: reached.containsKey(_steps[i + 1].$1) ? scheme.primary : scheme.outlineVariant,
+                        color: reached.containsKey(steps[i + 1].$1) ? scheme.primary : scheme.outlineVariant,
                       ),
                     ),
                 ]),

@@ -1086,7 +1086,11 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
                       scene: scene,
                       tooltip: tr('Бастапқы өлшем'),
                       onTap: _resetZoom,
-                      child: Text('1×', style: TextStyle(fontWeight: FontWeight.w700, color: scene.fg)),
+                      child: Text('1×',
+                          style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontVariations: const [FontVariation('wght', 700)],
+                              color: scene.fg)),
                     ),
                   if (ownBackdrop)
                     _RoundChip(

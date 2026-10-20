@@ -368,7 +368,10 @@ class _CatalogScreenState extends State<CatalogScreen> {
                       selected: _sale,
                       showCheckmark: false,
                       selectedColor: Brand.accentStrong, // white on it reads 5.6:1
-                      labelStyle: TextStyle(color: _sale ? Colors.white : null, fontWeight: FontWeight.w600),
+                      labelStyle: TextStyle(
+                          color: _sale ? Colors.white : null,
+                          fontWeight: FontWeight.w600,
+                          fontVariations: const [FontVariation('wght', 600)]),
                       onSelected: (v) {
                         _sale = v;
                         _search();
@@ -530,7 +533,10 @@ class _SizeButton extends StatelessWidget {
             Icon(Icons.straighten_rounded, size: 20, color: active ? scheme.onPrimary : scheme.onSurface),
             const SizedBox(width: 6),
             Text(active ? trf('{0} см', [sizeCm]) : tr('Өлшем'),
-                style: TextStyle(color: active ? scheme.onPrimary : scheme.onSurface, fontWeight: FontWeight.w600)),
+                style: TextStyle(
+                    color: active ? scheme.onPrimary : scheme.onSurface,
+                    fontWeight: FontWeight.w600,
+                    fontVariations: const [FontVariation('wght', 600)])),
           ]),
         ),
       ),

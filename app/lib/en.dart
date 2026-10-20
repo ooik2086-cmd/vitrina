@@ -917,6 +917,7 @@ const en = <String, String>{
   'Екі тарап та, қолдау қызметі де көреді. Жіберілген дәлелді өзгертуге не өшіруге болмайды.':
       'Both sides and support can see these. Sent evidence cannot be changed or deleted.',
   'Мысалы: оң аяқтың табаны жарылған': 'For example: the right sole is cracked',
+  'Пайдаланушы': 'User',
   'Сатып алушы': 'Buyer',
   'Сіз': 'You',
   'Тапсырыс берген кездегі сипаттама': 'Description when ordered',
