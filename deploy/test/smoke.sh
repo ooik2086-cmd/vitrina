@@ -54,13 +54,16 @@ if [ -n "${SMOKE_SETUP:-}" ]; then
 	step "setup.sh on this Ubuntu machine stops until the storage lines are filled"
 	status=0
 	VITRINA_BUILD="${SMOKE_BUILD:---build}" sh setup.sh || status=$?
-	[ "$status" = 2 ] || fail "setup.sh did not stop for the unfilled S3 lines (exit $status)"
+	[ "$status" = 2 ] || fail "setup.sh did not stop for the unfilled S3 and SMS lines (exit $status)"
 fi
 sed -i -e 's|^VITRINA_TLS=.*|VITRINA_TLS=/certs/site.pem /certs/site.key|' \
 	-e 's|^VITRINA_S3_ENDPOINT=.*|VITRINA_S3_ENDPOINT=https://s3.test|' \
 	-e 's|^VITRINA_S3_ACCESS_KEY=.*|VITRINA_S3_ACCESS_KEY=smoke|' \
 	-e 's|^VITRINA_S3_SECRET_KEY=.*|VITRINA_S3_SECRET_KEY=smoke-secret|' \
-	-e 's|^VITRINA_PUBLIC_MEDIA_URL=.*|VITRINA_PUBLIC_MEDIA_URL=https://s3.test/vitrina-photos|' .env
+	-e 's|^VITRINA_PUBLIC_MEDIA_URL=.*|VITRINA_PUBLIC_MEDIA_URL=https://s3.test/vitrina-photos|' \
+	-e 's|^VITRINA_MOBIZON_API_KEY=.*|VITRINA_MOBIZON_API_KEY=smoke-mobizon-key|' .env
+# The stand-in Mobizon is the fake S3 too (fake_s3.py), at an address only the test knows.
+echo 'VITRINA_MOBIZON_URL=https://s3.test' >> .env
 
 if [ -n "${SMOKE_SETUP:-}" ]; then
 	step "setup.sh again: starts, checks the buckets, makes the first backup, installs the timer"

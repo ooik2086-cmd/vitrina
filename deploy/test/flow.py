@@ -4,20 +4,18 @@
     python flow.py count          how many listings there are
     python flow.py check ID       its share page carries the https address (the proxy headers are trusted)
 """
-import hashlib
 import io
 import os
 import secrets
 import sys
 import time
-from datetime import datetime, timedelta, timezone
 
 import httpx
 from PIL import Image, ImageDraw
 from sqlalchemy import func, select
 
 from vitrina_api.config import Settings
-from vitrina_api.models import AuthToken, Listing, User, make_session_factory
+from vitrina_api.models import Listing, make_session_factory
 
 SITE = f"https://{os.environ['VITRINA_DOMAIN']}"
 API = f"{SITE}/api/v1"
@@ -33,16 +31,16 @@ def photo(seed: int) -> bytes:
 
 
 def seller_token() -> str:
-    """Sign-in codes go out by SMS in production, so the test seller's session is made in the database."""
-    raw = secrets.token_urlsafe(32)
-    with sessions() as db:
-        user = User(phone=f"+7701{secrets.randbelow(10**7):07d}")
-        db.add(user)
-        db.flush()
-        db.add(AuthToken(token_hash=hashlib.sha256(raw.encode()).hexdigest(), user_id=user.id,
-                         expires_at=datetime.now(timezone.utc) + timedelta(hours=1)))
-        db.commit()
-    return raw
+    """Signs in as a person does: the API sends the code by SMS (to the stand-in Mobizon in fake_s3.py) and never
+    puts it in its answer; the code is read off the SMS."""
+    phone = f"+7701{secrets.randbelow(10**7):07d}"
+    answer = must(httpx.post(f"{API}/auth/otp", json={"phone": phone}, timeout=30))
+    if "dev_code" in answer:
+        sys.exit("the sign-in code is in the API's answer: production must send it by SMS only")
+    sms = httpx.get(f"https://s3.test/_sms/{phone[1:]}", timeout=30)
+    if sms.status_code != 200 or not sms.text[:6].isdigit():
+        sys.exit(f"no SMS reached the provider for {phone}: {sms.status_code} {sms.text[:100]}")
+    return must(httpx.post(f"{API}/auth/verify", json={"phone": phone, "code": sms.text[:6]}, timeout=30))["token"]
 
 
 def must(r: httpx.Response, status: int = 200) -> dict:

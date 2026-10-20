@@ -11,7 +11,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
 from PIL import Image
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, func, select
 
 os.environ.setdefault("VITRINA_LOG_LEVEL", "WARNING")  # keep test output to what failed
 
@@ -130,6 +130,99 @@ class ApiTestCase(unittest.TestCase):
             u.role = "support"
             db.commit()
         return token
+
+
+class FakeMobizon:
+    """Mobizon's sendsmsmessage as its documentation describes it; answers with the code it is told to."""
+
+    def __init__(self, code=0):
+        self.code, self.sent = code, []
+
+    def __call__(self, request):
+        import httpx
+        from urllib.parse import parse_qs
+        if request.url.path != "/service/message/sendsmsmessage" or request.method != "POST":
+            return httpx.Response(404)
+        q = dict(request.url.params)
+        if (q.get("output"), q.get("api"), q.get("apiKey")) != ("json", "v1", "secret-key"):
+            return httpx.Response(200, json={"code": 8, "data": "", "message": "wrong key"})
+        form = {k: v[0] for k, v in parse_qs(request.content.decode()).items()}
+        if self.code == 0:
+            self.sent.append(form)
+        return httpx.Response(200, json={"code": self.code, "data": {"messageId": 1}, "message": "no money"})
+
+
+class SmsTests(ApiTestCase):
+    """Sign-in codes go out by SMS through Mobizon; the code never comes back in the answer."""
+
+    def setUp(self):
+        super().setUp()
+        import httpx
+        from vitrina_api.sms import MobizonSender
+        self.mobizon = FakeMobizon()
+        self.app.state.sms = MobizonSender("secret-key", url="https://api.mobizon.kz", sender="VITRINA",
+                                           client=httpx.Client(transport=httpx.MockTransport(self.mobizon)))
+        self.app.state.settings.debug_otp = False
+
+    def test_the_code_goes_by_sms_and_signs_in(self):
+        r = self.c.post("/api/v1/auth/otp", json={"phone": "+77011234567"})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertNotIn("dev_code", r.json())
+        [sms] = self.mobizon.sent
+        self.assertEqual((sms["recipient"], sms["from"]), ("77011234567", "VITRINA"))
+        code = sms["text"][:6]
+        self.assertRegex(code, r"^\d{6}$")
+        self.assertLessEqual(len(sms["text"]), 70)  # one Cyrillic SMS segment
+        r = self.c.post("/api/v1/auth/verify", json={"phone": "+77011234567", "code": code})
+        self.assertEqual(r.status_code, 200, r.text)
+
+    def test_a_refused_sms_says_so_and_does_not_hold_the_next_try(self):
+        from vitrina_api.models import OtpCode
+        self.app.state.settings.otp_resend_after = timedelta(seconds=60)
+        self.mobizon.code = 4  # e.g. no money left on the account
+        with self.assertLogs("vitrina_api.auth_routes", "ERROR") as logs:
+            r = self.c.post("/api/v1/auth/otp", json={"phone": "+77011234567"})
+        self.assertEqual((r.status_code, r.json()["code"]), (503, "sms_failed"))
+        self.assertIn("code 4", logs.output[0])
+        self.assertNotIn("secret-key", " ".join(logs.output))
+        self.assertNotIn("1234567", " ".join(logs.output))  # not the whole number either
+        with self.db() as db:
+            self.assertEqual(db.scalar(select(func.count(OtpCode.id)).where(OtpCode.phone == "+77011234567")), 0)  # taken back
+        self.mobizon.code = 0
+        self.assertEqual(self.c.post("/api/v1/auth/otp", json={"phone": "+77011234567"}).status_code, 200)
+
+    def test_an_unreachable_provider_does_not_leak_the_key(self):
+        import httpx
+        from vitrina_api.sms import MobizonSender, SmsError
+
+        def down(request):
+            raise httpx.ConnectError(f"cannot reach {request.url}")
+        sender = MobizonSender("secret-key", client=httpx.Client(transport=httpx.MockTransport(down)))
+        with self.assertRaises(SmsError) as err:
+            sender.send("+77011234567", "x")
+        self.assertNotIn("secret-key", str(err.exception))
+        self.assertIsNone(err.exception.__cause__)
+        bad = MobizonSender("wrong", client=httpx.Client(transport=httpx.MockTransport(FakeMobizon())))
+        with self.assertRaises(SmsError):
+            bad.send("+77011234567", "x")
+
+    def test_the_daily_cap_stops_sending(self):
+        from vitrina_api.models import OtpCode
+        with self.db() as db:  # the test's own sign-ins count too
+            self.app.state.settings.sms_per_day = db.scalar(select(func.count(OtpCode.id))) + 2
+        for phone in ("+77011234561", "+77011234562"):
+            self.assertEqual(self.c.post("/api/v1/auth/otp", json={"phone": phone}).status_code, 200)
+        with self.assertLogs("vitrina_api.auth_routes", "ERROR"):
+            r = self.c.post("/api/v1/auth/otp", json={"phone": "+77011234563"})
+        self.assertEqual((r.status_code, r.json()["code"]), (503, "sms_failed"))
+        self.assertEqual(len(self.mobizon.sent), 2)
+
+    def test_the_provider_is_chosen_by_settings(self):
+        from vitrina_api.sms import MobizonSender, make_sender
+        self.assertIsNone(make_sender(Settings()))
+        self.assertIsInstance(make_sender(Settings(sms_provider="mobizon", mobizon_api_key="k")), MobizonSender)
+        with self.assertRaises(RuntimeError):
+            make_sender(Settings(sms_provider="smsc"))
 
 
 class AuthTests(ApiTestCase):
@@ -1054,7 +1147,7 @@ class OpsTests(ApiTestCase):
                          public_media_url="https://cdn.vitrina.kz", cors_origins=[], s3_bucket="vitrina",
                          s3_endpoint="https://s3.example.kz", s3_access_key="k", s3_secret_key="s",
                          s3_private_bucket="vitrina-private", s3_backup_bucket="vitrina-backup",
-                         photo_work="worker")
+                         photo_work="worker", sms_provider="mobizon", mobizon_api_key="k")
         self.assertEqual(production_problems(ready), [])
         from dataclasses import replace
         for loose, env in ((dict(cors_origins=["*"]), "VITRINA_CORS_ORIGINS"),
@@ -1062,7 +1155,9 @@ class OpsTests(ApiTestCase):
                            (dict(s3_bucket=""), "VITRINA_S3_BUCKET"), (dict(s3_access_key=""), "VITRINA_S3_ACCESS_KEY"),
                            (dict(photo_work="inline"), "VITRINA_PHOTO_WORK"),
                            (dict(s3_backup_bucket=""), "VITRINA_S3_BACKUP_BUCKET"),
-                           (dict(s3_backup_bucket="vitrina-private"), "VITRINA_S3_BACKUP_BUCKET")):
+                           (dict(s3_backup_bucket="vitrina-private"), "VITRINA_S3_BACKUP_BUCKET"),
+                           (dict(sms_provider=""), "VITRINA_SMS_PROVIDER"), (dict(mobizon_api_key=""), "VITRINA_MOBIZON_API_KEY"),
+                           (dict(mobizon_url="http://api.mobizon.kz"), "VITRINA_MOBIZON_URL")):
             self.assertIn(env, " ".join(production_problems(replace(ready, **loose))))
 
 

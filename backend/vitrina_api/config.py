@@ -23,6 +23,15 @@ class Settings:
     otp_per_phone_per_hour: int = 5
     # A second code for the same phone waits this long: people tap "send again" before the first SMS arrives.
     otp_resend_after: timedelta = timedelta(seconds=60)
+    # Sign-in codes by SMS (vitrina_api/sms.py): "mobizon", or empty in development (the code is in the answer).
+    sms_provider: str = field(default_factory=lambda: os.environ.get("VITRINA_SMS_PROVIDER", ""))
+    mobizon_api_key: str = field(default_factory=lambda: os.environ.get("VITRINA_MOBIZON_API_KEY", ""))
+    mobizon_url: str = field(default_factory=lambda: os.environ.get("VITRINA_MOBIZON_URL", "https://api.mobizon.kz"))
+    # A sender name registered in the Mobizon account; empty: Mobizon's shared one.
+    mobizon_from: str = field(default_factory=lambda: os.environ.get("VITRINA_MOBIZON_FROM", ""))
+    # Codes sent per day at most, across all API processes: someone cycling through numbers cannot empty the SMS
+    # balance (each code costs money), while 2 000 is far above what real sign-ins need for now.
+    sms_per_day: int = field(default_factory=lambda: int(os.environ.get("VITRINA_SMS_PER_DAY", "2000")))
     token_ttl: timedelta = timedelta(days=30)
     # Buyer confirmation window before auto-complete. Hypothesis: the real value needs legal review.
     confirm_window: timedelta = timedelta(days=5)
@@ -93,6 +102,11 @@ def production_problems(s: Settings) -> list[str]:
         problems.append("VITRINA_CORS_ORIGINS and VITRINA_PUBLIC_MEDIA_URL must use https")
     if "*" in s.cors_origins:
         problems.append("VITRINA_CORS_ORIGINS must list the app's origins, not *")
+    if s.sms_provider != "mobizon" or not s.mobizon_api_key:
+        problems.append("VITRINA_SMS_PROVIDER=mobizon and VITRINA_MOBIZON_API_KEY must be set: without them sign-in "
+                        "codes are sent nowhere and nobody can sign in")
+    elif not s.mobizon_url.startswith("https://"):
+        problems.append("VITRINA_MOBIZON_URL must use https: the key travels in it")
     if s.photo_work != "worker":
         problems.append("VITRINA_PHOTO_WORK must be worker, with `python -m vitrina_api.photo_worker` running: "
                         "cutting out photos inside the API slows every buyer down for minutes")

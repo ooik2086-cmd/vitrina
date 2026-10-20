@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import logging
 import math
 import secrets
 import threading
@@ -27,12 +28,16 @@ from .models import (Block, Follow, Notification, Offer, SavedSearch, StockAlert
 from .api_common import ALMATY, PHONE_RE
 from .schemas import OtpRequest, OtpVerify, ProfilePatch, SellerOn
 from .serializers import me_out
+from .sms import SmsError, otp_text
 
 
+log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1")
 
 
-OTP_REQUESTS_PER_ADDRESS_PER_HOUR = 20
+# Per client address. Phones on mobile data share a few carrier addresses (CGNAT), so this is set for a crowd; the
+# per-phone limits and the daily cap on codes sent (VITRINA_SMS_PER_DAY) do the real guarding.
+OTP_REQUESTS_PER_ADDRESS_PER_HOUR = 120
 OTP_FAILURES_PER_DAY = 15
 STAFF_TOKEN_TTL = timedelta(hours=12)
 
@@ -82,11 +87,25 @@ def request_otp(body: OtpRequest, request: Request, db: Session = Depends(get_db
         client = request.client.host if request.client else "unknown"
         if not request.app.state.otp_limiter.allow(client, time.monotonic()):
             raise ApiError(429, "rate_limited")
+        sender = request.app.state.sms
+        if sender is not None and db.scalar(select(func.count(OtpCode.id)).where(
+                OtpCode.created_at > now - timedelta(days=1))) >= cfg.sms_per_day:
+            log.error("sign-in codes: the daily cap of %s SMS is reached (VITRINA_SMS_PER_DAY)", cfg.sms_per_day)
+            raise ApiError(503, "sms_failed")
         code = f"{secrets.randbelow(10**6):06d}"
         digest = hmac.new(cfg.otp_secret, f"{body.phone}:{code}".encode(), hashlib.sha256).hexdigest()
-        db.add(OtpCode(phone=body.phone, code_hash=digest, expires_at=now + cfg.otp_ttl))
+        otp = OtpCode(phone=body.phone, code_hash=digest, expires_at=now + cfg.otp_ttl)
+        db.add(otp)
         db.commit()
-    # TODO(sms): send `code` through the SMS provider once one is contracted.
+    if sender is not None:
+        try:
+            sender.send(body.phone, otp_text(code))
+        except SmsError as e:
+            # The code never went out: it is taken back, so it neither waits out "send again" nor counts as sent.
+            log.error("sign-in code to %s…%s not sent: %s", body.phone[:4], body.phone[-2:], e)
+            db.execute(delete(OtpCode).where(OtpCode.id == otp.id))
+            db.commit()
+            raise ApiError(503, "sms_failed")
     return {"sent": True, "resend_after": math.ceil(cfg.otp_resend_after.total_seconds()),
             **({"dev_code": code} if cfg.debug_otp else {})}
 

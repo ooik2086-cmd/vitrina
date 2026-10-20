@@ -83,7 +83,7 @@ check_dns() {
 
 # Lines of .env still empty or still the example's placeholders.
 unfilled() {
-	grep -E '^(VITRINA_S3_ACCESS_KEY|VITRINA_S3_SECRET_KEY)=$|^VITRINA_S3_ENDPOINT=https://s3\.example\.kz$|^VITRINA_PUBLIC_MEDIA_URL=https://s3\.example\.kz/' "$ENV_FILE" | cut -d= -f1 || true
+	grep -E '^(VITRINA_S3_ACCESS_KEY|VITRINA_S3_SECRET_KEY|VITRINA_MOBIZON_API_KEY)=$|^VITRINA_S3_ENDPOINT=https://s3\.example\.kz$|^VITRINA_PUBLIC_MEDIA_URL=https://s3\.example\.kz/' "$ENV_FILE" | cut -d= -f1 || true
 }
 
 if [ "$ENV_ONLY" = 1 ]; then
@@ -148,7 +148,7 @@ write_env
 write_backup_env
 missing=$(unfilled)
 if [ -n "$missing" ]; then
-	echo "Fill these in $ENV_FILE (from the storage provider), then run this script again:"
+	echo "Fill these in $ENV_FILE (VITRINA_S3_*: from the storage provider, VITRINA_MOBIZON_API_KEY: from the Mobizon account), then run this script again:"
 	echo "$missing" | sed 's/^/  /'
 	exit 2
 fi
