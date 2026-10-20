@@ -7,6 +7,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../net_image.dart';
 import '../api.dart';
 import '../labels.dart';
 import '../session.dart';
@@ -686,8 +687,8 @@ class _EvidenceCardState extends State<_EvidenceCard> {
                   height: 72,
                   child: video
                       ? const Icon(Icons.play_circle_outline, size: 36, color: Colors.black87)
-                      : Image.network(e.url,
-                          cacheWidth: 216,
+                      : Image(
+                          image: ResizeImage.resizeIfNeeded(216, null, netImage(e.url, keep: false)),
                           gaplessPlayback: true, // a reload with a new link keeps the old picture until it is in
                           fit: BoxFit.cover,
                           errorBuilder: (_, __, ___) => const Icon(Icons.image_outlined, color: Colors.black54)),
@@ -793,7 +794,8 @@ class _OrderedPhotos extends StatelessWidget {
           insetPadding: const EdgeInsets.all(16),
           child: Stack(children: [
             InteractiveViewer(
-              child: Image.network(url,
+              child: Image(
+                  image: netImage(url),
                   fit: BoxFit.contain,
                   semanticLabel: tr('Тапсырыс берген кездегі фото'),
                   loadingBuilder: (_, child, progress) => progress == null
@@ -844,10 +846,10 @@ class _OrderedPhotos extends StatelessWidget {
                       borderRadius: BorderRadius.circular(12),
                       child: ColoredBox(
                         color: Brand.studio,
-                        child: Image.network(p.url,
+                        child: Image(
+                            image: ResizeImage.resizeIfNeeded(216, null, netImage(p.url)),
                             width: 72,
                             height: 72,
-                            cacheWidth: 216,
                             fit: BoxFit.cover,
                             semanticLabel: tr(photoAngles[p.angle] ?? 'Фото'),
                             errorBuilder: (_, __, ___) => const SizedBox(
@@ -943,8 +945,10 @@ class _OrderHeader extends StatelessWidget {
               color: Brand.studio,
               child: o.listingCover == null
                   ? const Icon(Icons.image_outlined)
-                  : Image.network(o.listingCover!,
-                      fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Icon(Icons.image_outlined)),
+                  : Image(
+                      image: netImage(o.listingCover!),
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => const Icon(Icons.image_outlined)),
             ),
           ),
           const SizedBox(width: 14),
@@ -1205,10 +1209,10 @@ class _ReviewFormState extends State<_ReviewForm> {
               Stack(children: [
                 ClipRRect(
                   borderRadius: BorderRadius.circular(12),
-                  child: Image.network(url,
+                  child: Image(
+                      image: ResizeImage.resizeIfNeeded(216, null, netImage(url)),
                       width: 72,
                       height: 72,
-                      cacheWidth: 216,
                       fit: BoxFit.cover,
                       errorBuilder: (_, __, ___) => const SizedBox(width: 72, height: 72)),
                 ),

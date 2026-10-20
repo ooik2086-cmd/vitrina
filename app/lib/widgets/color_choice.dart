@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../net_image.dart';
 import '../api.dart';
 import '../colors.dart';
 import '../i18n.dart';
@@ -81,7 +82,7 @@ class ColorSwatches extends StatelessWidget {
                                     : Opacity(
                                         opacity: c.inStock ? 1 : 0.5,
                                         child: Image(
-                                          image: ResizeImage(NetworkImage(c.thumbUrl!),
+                                          image: ResizeImage(netImage(c.thumbUrl!),
                                               width: side, height: side, policy: ResizeImagePolicy.fit),
                                           fit: c.cutout ? BoxFit.contain : BoxFit.cover,
                                           errorBuilder: (_, __, ___) => const SizedBox.expand(),

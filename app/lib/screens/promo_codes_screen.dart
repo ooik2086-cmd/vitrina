@@ -47,7 +47,9 @@ class _PromoCodesScreenState extends State<PromoCodesScreen> {
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Жабу'))),
           FilledButton(
-              key: const Key('confirm-end'), onPressed: () => Navigator.pop(context, true), child: Text(tr('Промокодты тоқтату'))),
+              key: const Key('confirm-end'),
+              onPressed: () => Navigator.pop(context, true),
+              child: Text(tr('Промокодты тоқтату'))),
         ],
       ),
     );

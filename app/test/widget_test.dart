@@ -12,6 +12,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:vitrina/net_image.dart';
 import 'package:vitrina/api.dart';
 import 'package:vitrina/appearance.dart';
 import 'package:vitrina/colors.dart';
@@ -3426,7 +3427,7 @@ void main() {
     ui.Image? picture;
     setUp(() => CardTurn.network = (url) => _TestFrame(url, picture!, failing));
     tearDown(() {
-      CardTurn.network = NetworkImage.new;
+      CardTurn.network = netImage;
       failing.clear();
     });
 

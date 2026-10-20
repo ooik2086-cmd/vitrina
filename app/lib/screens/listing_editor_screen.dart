@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../net_image.dart';
 import '../api.dart';
 import '../labels.dart';
 import '../session.dart';
@@ -568,7 +569,12 @@ class _PhotoSlot extends StatelessWidget {
     } else if (u.url == null) {
       inner = const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2));
     } else {
-      inner = Image.network(u.url!, fit: BoxFit.cover, width: 96, height: 96, cacheWidth: 288);
+      inner = Image(
+        image: ResizeImage.resizeIfNeeded(288, null, netImage(u.url!)),
+        fit: BoxFit.cover,
+        width: 96,
+        height: 96,
+      );
     }
     return Semantics(
       container: true,

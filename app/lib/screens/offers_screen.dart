@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../net_image.dart';
 import '../api.dart';
 import '../i18n.dart';
 import '../labels.dart';
@@ -446,8 +447,10 @@ class _OfferTile extends StatelessWidget {
                   color: Brand.studio,
                   child: o.listingCover == null
                       ? const Icon(Icons.image_outlined)
-                      : Image.network(o.listingCover!,
-                          fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Icon(Icons.image_outlined)),
+                      : Image(
+                          image: netImage(o.listingCover!),
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => const Icon(Icons.image_outlined)),
                 ),
               ),
               const SizedBox(width: 12),

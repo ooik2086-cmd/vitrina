@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../net_image.dart';
 import '../api.dart';
 import '../session.dart';
 import '../theme.dart';
@@ -142,7 +143,8 @@ class _SellerReviewsScreenState extends State<SellerReviewsScreen> {
                                   insetPadding: const EdgeInsets.all(12),
                                   clipBehavior: Clip.antiAlias,
                                   child: InteractiveViewer(
-                                      child: Image.network(url,
+                                      child: Image(
+                                          image: netImage(url),
                                           fit: BoxFit.contain,
                                           errorBuilder: (_, __, ___) => const SizedBox(
                                               height: 200, child: Center(child: Icon(Icons.broken_image_outlined))))),
@@ -150,7 +152,8 @@ class _SellerReviewsScreenState extends State<SellerReviewsScreen> {
                               ),
                               child: ClipRRect(
                                 borderRadius: BorderRadius.circular(12),
-                                child: Image.network(url,
+                                child: Image(
+                                    image: netImage(url),
                                     key: Key('review-photo-$url'),
                                     width: 84,
                                     height: 84,

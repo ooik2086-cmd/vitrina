@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../net_image.dart';
 import '../api.dart';
 import '../labels.dart';
 import '../session.dart';
@@ -237,8 +238,10 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
                       color: Brand.studio,
                       child: _l.coverUrl == null
                           ? const Icon(Icons.image_outlined)
-                          : Image.network(_l.coverUrl!,
-                              fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Icon(Icons.image_outlined)),
+                          : Image(
+                              image: netImage(_l.coverUrl!),
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) => const Icon(Icons.image_outlined)),
                     ),
                   ),
                   const SizedBox(width: 16),
@@ -581,10 +584,10 @@ class _AuthenticityCardState extends State<AuthenticityCard> with WidgetsBinding
               Stack(children: [
                 ClipRRect(
                   borderRadius: BorderRadius.circular(12),
-                  child: Image.network(item.url,
+                  child: Image(
+                      image: ResizeImage.resizeIfNeeded(216, null, netImage(item.url, keep: false)),
                       width: 72,
                       height: 72,
-                      cacheWidth: 216,
                       gaplessPlayback: true,
                       fit: BoxFit.cover,
                       errorBuilder: (_, __, ___) => Container(width: 72, height: 72, color: Brand.studio)),

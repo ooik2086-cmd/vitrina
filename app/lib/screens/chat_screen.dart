@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../net_image.dart';
 import '../api.dart';
 import '../labels.dart';
 import '../session.dart';
@@ -83,8 +84,10 @@ class _ChatsScreenState extends State<ChatsScreen> {
                             color: Brand.studio,
                             child: c.listingCover == null
                                 ? const Icon(Icons.image_outlined)
-                                : Image.network(c.listingCover!,
-                                    fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Icon(Icons.image_outlined)),
+                                : Image(
+                                    image: netImage(c.listingCover!),
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, __, ___) => const Icon(Icons.image_outlined)),
                           ),
                         ),
                         title: Text(personName(c.otherName),
@@ -454,8 +457,8 @@ class _Bubble extends StatelessWidget {
                     MaterialPageRoute(builder: (_) => _PhotoViewer(url: message.photoUrl!), fullscreenDialog: true)),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(12),
-                  child: Image.network(
-                    message.photoUrl!,
+                  child: Image(
+                    image: netImage(message.photoUrl!, keep: false),
                     width: 220,
                     height: 220,
                     fit: BoxFit.cover,
@@ -504,7 +507,7 @@ class _PhotoViewer extends StatelessWidget {
           backgroundColor: Colors.black,
           foregroundColor: Colors.white,
           systemOverlayStyle: SystemUiOverlayStyle.light), // white icons on the black viewer
-      body: InteractiveViewer(maxScale: 5, child: Center(child: Image.network(url))),
+      body: InteractiveViewer(maxScale: 5, child: Center(child: Image(image: netImage(url, keep: false)))),
     );
   }
 }

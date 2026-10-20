@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 
+import '../net_image.dart';
 import '../api.dart';
 import '../colors.dart';
 import '../i18n.dart';
@@ -135,7 +136,8 @@ class _Pick extends StatelessWidget {
             border: Border.all(color: picked ? Theme.of(context).colorScheme.primary : Colors.transparent, width: 2),
           ),
           child: Stack(fit: StackFit.expand, children: [
-            if (cover != null) Image.network(cover, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const SizedBox()),
+            if (cover != null)
+              Image(image: netImage(cover), fit: BoxFit.cover, errorBuilder: (_, __, ___) => const SizedBox()),
             if (picked)
               Positioned(
                 right: 4,

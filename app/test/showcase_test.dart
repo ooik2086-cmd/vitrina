@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:vitrina/net_image.dart';
 import 'package:vitrina/api.dart';
 import 'package:vitrina/colors.dart';
 import 'package:vitrina/screens/listing_screen.dart';
@@ -384,7 +385,7 @@ void main() {
       asked.add(url);
       return NetworkImage(url);
     };
-    addTearDown(() => ScrollShowcaseState.screenSize = NetworkImage.new);
+    addTearDown(() => ScrollShowcaseState.screenSize = netImage);
     final body = listing(cutFrames: false);
     for (final m in body['media'] as List) {
       (m as Map)['thumb_url'] = null;
@@ -418,7 +419,7 @@ void main() {
       asked.add(url);
       return NetworkImage(url);
     };
-    addTearDown(() => ScrollShowcaseState.screenSize = NetworkImage.new);
+    addTearDown(() => ScrollShowcaseState.screenSize = netImage);
     final body = listing(cutFrames: false);
     for (final m in body['media'] as List) {
       (m as Map)['thumb_url'] = null;
@@ -445,7 +446,7 @@ void main() {
       asked.add(url);
       return NetworkImage(url);
     };
-    addTearDown(() => ScrollShowcaseState.screenSize = NetworkImage.new);
+    addTearDown(() => ScrollShowcaseState.screenSize = netImage);
     // Every other frame could not be cut out: the turn shows the photos as taken. The odd frames' small copies are
     // of those photos and fit; the even frames' are of their cut-outs and do not.
     await pump(tester, listing(cutFrames: false));

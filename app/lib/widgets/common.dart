@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../net_image.dart';
 import '../api.dart';
 import '../labels.dart';
 import '../screens/listing_screen.dart';
@@ -223,7 +224,7 @@ class LanguageSwitch extends StatelessWidget {
 
 /// A listing's cover as tiles and the page opening from them draw it, so both share one decoded copy.
 /// A tile is at most 240 wide; three times that covers dense screens.
-ImageProvider coverImage(String url) => ResizeImage.resizeIfNeeded(720, null, NetworkImage(url));
+ImageProvider coverImage(String url) => ResizeImage.resizeIfNeeded(720, null, netImage(url));
 
 class ListingTile extends StatelessWidget {
   const ListingTile({super.key, required this.listing, this.turns = true});

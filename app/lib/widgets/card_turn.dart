@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
+import '../net_image.dart';
 import '../api.dart';
 import 'scroll_showcase.dart' show ShowcasePlan, TurnMap;
 import 'studio.dart';
@@ -40,7 +41,7 @@ class CardTurn extends StatefulWidget {
 
   /// Where frames are fetched from; tests replace it.
   @visibleForTesting
-  static ImageProvider Function(String url) network = NetworkImage.new;
+  static ImageProvider Function(String url) network = netImage;
 
   /// The frames a card turns through, starting at the one that matches the cover; none when the card
   /// cannot turn as the listing page does:

@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../net_image.dart';
 import '../theme.dart';
 import '../i18n.dart';
 import 'studio.dart';
@@ -51,7 +52,7 @@ class _SpinViewerState extends State<SpinViewer> {
     if (_precached) return;
     _precached = true;
     final loads = [
-      for (final url in widget.frameUrls) precacheImage(NetworkImage(url), context, onError: (_, __) {}),
+      for (final url in widget.frameUrls) precacheImage(netImage(url), context, onError: (_, __) {}),
     ];
     if (widget.introSpin && widget.frameUrls.length > 1) {
       Future.wait(loads).then((_) {
@@ -123,7 +124,8 @@ class _SpinViewerState extends State<SpinViewer> {
           onHorizontalDragDown: (_) => _intro?.cancel(),
           onHorizontalDragUpdate: _onDrag,
           child: Stack(fit: StackFit.expand, children: [
-            Image.network(widget.frameUrls[_index],
+            Image(
+                image: netImage(widget.frameUrls[_index]),
                 fit: BoxFit.cover,
                 gaplessPlayback: true,
                 errorBuilder: (_, __, ___) => const Center(child: Icon(Icons.broken_image_outlined, size: 48))),
@@ -196,9 +198,9 @@ class _PhotoGalleryState extends State<PhotoGallery> {
         onPageChanged: (p) => setState(() => _page = p),
         children: [
           for (final u in widget.urls)
-            Image.network(u,
+            Image(
+                image: ResizeImage.resizeIfNeeded(math.min(side, 2000), null, netImage(u)),
                 fit: BoxFit.cover,
-                cacheWidth: math.min(side, 2000),
                 errorBuilder: (_, __, ___) => const Center(child: Icon(Icons.broken_image_outlined))),
         ],
       ),

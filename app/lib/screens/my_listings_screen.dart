@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../net_image.dart';
 import '../api.dart';
 import '../session.dart';
 import 'listing_editor_screen.dart';
@@ -162,7 +163,8 @@ class _MyListingsScreenState extends State<MyListingsScreen> {
                               height: 56,
                               child: cover == null
                                   ? const Icon(Icons.image_outlined)
-                                  : Image.network(cover,
+                                  : Image(
+                                      image: netImage(cover),
                                       fit: BoxFit.cover,
                                       errorBuilder: (_, __, ___) => const Icon(Icons.broken_image_outlined)),
                             ),

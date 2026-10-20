@@ -207,8 +207,8 @@ class _EarningsScreenState extends State<EarningsScreen> {
                       '${i.at.toLocal().day.toString().padLeft(2, '0')}.${i.at.toLocal().month.toString().padLeft(2, '0')}'
                       '${i.feeTiyn > 0 ? ' · комиссия ${formatTenge(i.feeTiyn)}' : ''}'),
                   trailing: Text(formatTenge(i.netTiyn),
-                      style: const TextStyle(
-                          fontWeight: FontWeight.w700, fontVariations: [FontVariation('wght', 700)])),
+                      style:
+                          const TextStyle(fontWeight: FontWeight.w700, fontVariations: [FontVariation('wght', 700)])),
                 ),
             ]),
           );

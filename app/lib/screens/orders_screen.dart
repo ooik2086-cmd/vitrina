@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../net_image.dart';
 import '../api.dart';
 import '../labels.dart';
 import '../session.dart';
@@ -154,8 +155,10 @@ class _OrderListState extends State<_OrderList> {
                           color: Brand.studio,
                           child: o.listingCover == null
                               ? const Icon(Icons.image_outlined)
-                              : Image.network(o.listingCover!,
-                                  fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Icon(Icons.image_outlined)),
+                              : Image(
+                                  image: netImage(o.listingCover!),
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (_, __, ___) => const Icon(Icons.image_outlined)),
                         ),
                       ),
                       title: Text(o.listingTitle ?? trf('Тапсырыс №{0}', [o.id]),

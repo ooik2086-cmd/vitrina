@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../net_image.dart';
 import '../api.dart';
 import '../colors.dart';
 import '../i18n.dart';
@@ -350,10 +351,11 @@ class _ListingContentsCardState extends State<ListingContentsCard> {
                       // Cut-outs are transparent: the studio backdrop keeps them readable in dark mode too.
                       child: ColoredBox(
                         color: Brand.studio,
-                        child: Image.network(_l.media[i].processedUrl ?? _l.media[i].originalUrl,
+                        child: Image(
+                            image: ResizeImage.resizeIfNeeded(
+                                240, null, netImage(_l.media[i].processedUrl ?? _l.media[i].originalUrl)),
                             width: 80,
                             height: 80,
-                            cacheWidth: 240,
                             fit: BoxFit.cover,
                             semanticLabel: _l.media[i].noShoe
                                 ? trf('{0}: аяқкиім табылмады, фоны алынбайды',
@@ -510,7 +512,7 @@ class _CoverFramePickerState extends State<CoverFramePicker> {
   final _ready = <int>{};
   bool _fetching = false;
 
-  ImageProvider _image(MediaItem m) => ResizeImage.resizeIfNeeded(480, null, NetworkImage(m.thumbUrl ?? m.url));
+  ImageProvider _image(MediaItem m) => ResizeImage.resizeIfNeeded(480, null, netImage(m.thumbUrl ?? m.url));
 
   @override
   void didChangeDependencies() {

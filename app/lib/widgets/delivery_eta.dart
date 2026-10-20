@@ -117,8 +117,7 @@ class _DeliveryEtaState extends State<DeliveryEta> {
                 TextSpan(text: '${tr(e.city)}: '),
                 TextSpan(
                     text: trf('шамамен {0}', [dateRange(e.earliest, e.latest)]),
-                    style: const TextStyle(
-                        fontWeight: FontWeight.w700, fontVariations: [FontVariation('wght', 700)])),
+                    style: const TextStyle(fontWeight: FontWeight.w700, fontVariations: [FontVariation('wght', 700)])),
               ],
             ])),
           ),

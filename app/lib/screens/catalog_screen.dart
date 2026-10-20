@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
+import '../net_image.dart';
 import '../api.dart';
 import '../colors.dart';
 import '../labels.dart';
@@ -628,8 +629,10 @@ class _RecentRow extends StatelessWidget {
                     decoration: studioBackdrop(radius: BorderRadius.circular(16)),
                     child: r.coverUrl == null
                         ? const Icon(Icons.image_outlined)
-                        : Image.network(r.coverUrl!,
-                            fit: BoxFit.contain, errorBuilder: (_, __, ___) => const Icon(Icons.image_outlined)),
+                        : Image(
+                            image: netImage(r.coverUrl!),
+                            fit: BoxFit.contain,
+                            errorBuilder: (_, __, ___) => const Icon(Icons.image_outlined)),
                   ),
                   const SizedBox(height: 6),
                   Text(formatTenge(r.priceTiyn), style: weight(theme.textTheme.labelLarge!, 700)),

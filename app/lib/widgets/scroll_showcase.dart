@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 
+import '../net_image.dart';
 import '../api.dart';
 import '../i18n.dart';
 import 'spin_viewer.dart' show showcaseBackground;
@@ -394,7 +395,7 @@ class ScrollShowcase extends StatefulWidget {
     final step = plan.steps[shown.step];
     final m = step.media[shown.frame];
     if (m.thumbUrl == null || !(step.cut || m.processedUrl == null)) return null;
-    return ResizeImage.resizeIfNeeded(ScrollShowcaseState.thumbSide, null, NetworkImage(m.thumbUrl!));
+    return ResizeImage.resizeIfNeeded(ScrollShowcaseState.thumbSide, null, netImage(m.thumbUrl!));
   }
 
   /// [view] of [from] as [to] shows it: the same side of the turn when both turns' sides are known, else the
@@ -543,7 +544,7 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
 
   /// Where a photo is fetched at screen size when it has no small copy to scroll with; tests replace it.
   @visibleForTesting
-  static ImageProvider Function(String url) screenSize = NetworkImage.new;
+  static ImageProvider Function(String url) screenSize = netImage;
 
   /// How many frames either side of the one shown are fetched ahead when they have no small copy. Fetching every
   /// one of them at screen size on arrival cost megabytes of mobile data, and the decoded photos, a few megabytes
@@ -552,7 +553,7 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
 
   ImageProvider _base(MediaItem m, ShowcaseStep step) {
     // 400 px, as the demo page's scrolling copies: a scan's hundred or so frames then fit the image cache.
-    if (_small(m, step)) return ResizeImage.resizeIfNeeded(thumbSide, null, NetworkImage(m.thumbUrl!));
+    if (_small(m, step)) return ResizeImage.resizeIfNeeded(thumbSide, null, netImage(m.thumbUrl!));
     final width = (MediaQuery.sizeOf(context).width * MediaQuery.devicePixelRatioOf(context)).round();
     return ResizeImage.resizeIfNeeded(math.min(2000, width), null, screenSize(step.cut ? m.url : m.originalUrl));
   }
@@ -862,7 +863,7 @@ class ScrollShowcaseState extends State<ScrollShowcase> {
     // At rest: the full photo over the small copy, faded in once decoded, at the pixels the zoom needs.
     final bucket = _scale <= 1.05 ? 1 : (_scale <= 2 ? 2 : 3);
     final provider = ResizeImage.resizeIfNeeded(
-        math.min(6000, (width * dpr * bucket).round()), null, NetworkImage(step.cut ? m.url : m.originalUrl));
+        math.min(6000, (width * dpr * bucket).round()), null, netImage(step.cut ? m.url : m.originalUrl));
     // With no small copy the base is already this photo at screen size: nothing to lay over it, nothing to drop.
     final sharpen = (_settled || _zoomed) && provider != small;
     if (sharpen) _remember(provider, bucket);
