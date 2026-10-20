@@ -233,18 +233,23 @@ def render_listing_promo(state, listing_id: int, lang: str) -> bool:
         frames = [m for m in media if m.angle == "frame"]
         spin = len(frames) >= MIN_SPIN_FRAMES
         chosen = frames[:SPIN_PROMO_MAX_FRAMES] if spin else [m for m in media if m.angle in PROMO_ANGLES]
-        try:
-            photos = [Image.open(io.BytesIO(storage.read(m.processed_url or m.original_url))) for m in chosen
-                      if storage.owns(m.processed_url or m.original_url)]
-            video = promo.render_video(photos, title=listing.title, price=promo.format_tenge(listing.price_tiyn),
-                                       style=listing.showcase_style, lang=lang, spin=spin)
-            listing.promo_url = storage.put(video, owner_id=listing.seller_id, ext="mp4")
-            listing.promo_state = "ready"
-        except Exception:
-            log.exception("promo video failed for listing %s", listing_id)
-            listing.promo_state = "failed"
+        urls = [m.processed_url or m.original_url for m in chosen]
+        title, price, style, seller = (listing.title, listing.price_tiyn, listing.showcase_style,
+                                       listing.seller_id)
+        db.rollback()  # nothing held open while the photos are read and the video is made (see PG_LIMITS)
+    url, state_ = None, "failed"
+    try:
+        photos = [Image.open(io.BytesIO(storage.read(u))) for u in urls if storage.owns(u)]
+        video = promo.render_video(photos, title=title, price=promo.format_tenge(price), style=style, lang=lang,
+                                   spin=spin)
+        url, state_ = storage.put(video, owner_id=seller, ext="mp4"), "ready"
+    except Exception:
+        log.exception("promo video failed for listing %s", listing_id)
+    with state.sessions() as db:
+        db.execute(update(Listing).where(Listing.id == listing_id)
+                   .values(promo_state=state_, **({"promo_url": url} if url else {})))
         db.commit()
-        return listing.promo_state == "ready"
+    return state_ == "ready"
 
 
 PROMO_ANGLES = ("outer", "front", "inner", "back", "top")

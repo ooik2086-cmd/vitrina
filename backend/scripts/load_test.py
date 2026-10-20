@@ -2,11 +2,13 @@
 
     python3 scripts/load_test.py --db DB_URL --api http://127.0.0.1:8000/api/v1 --users 50 --seconds 30 [--grow 800]
 
-Prints per kind of request: how many, p50/p95/max in ms, and the answers. --grow first copies the listings already
-there (run scripts/seed_demo.py before) until there are that many. People sign in by tokens written straight into the
-database, so it runs only against a server on this machine and never against a real one.
-Measured 2026-10-20 on a 4-core machine sharing its CPU with this script, one server process, 800 listings:
-50 people, 25 requests a second, a catalog page in 1.6 s at p50 (it waits for the one process).
+Prints per kind of request: how many, p50/p95/max in ms, and the answers; a request waits 20 s at most, as the app
+does. --grow first copies the listings already there (run scripts/seed_demo.py before) until there are that many.
+People sign in by tokens written straight into the database, so it runs only with a server and a database on this
+machine, the database's name saying load, dev or test, and it makes its own people (numbers no real phone has).
+Measured 2026-10-20 on a 4-core machine sharing its CPU with this script, 800 listings: one server process answers
+about 30 requests a second; with 50 people a catalog page takes 1.3 s at p50 and 1.8 s at p95; with 150 people answers
+pass 20 s and some fail. Two processes (uvicorn --workers 2) answer about 49 a second.
 """
 import argparse
 import hashlib
@@ -21,7 +23,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import httpx
-from sqlalchemy import create_engine, insert, select
+from sqlalchemy import create_engine, insert, make_url, select
 from sqlalchemy.orm import Session
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -53,12 +55,18 @@ def grow(engine, n: int) -> None:
         db.commit()
 
 
+PHONE = "+7000{:07d}"  # +7 000 is no operator's code
+NAME = "Load test {}"
+
+
 def people(engine, n: int) -> list[str]:
     tokens = []
     with Session(engine) as db:
         for i in range(n):
-            phone = f"+7702{i:07d}"
-            u = db.scalar(select(User).where(User.phone == phone)) or User(phone=phone, display_name=f"Load {i}")
+            phone = PHONE.format(i)
+            u = db.scalar(select(User).where(User.phone == phone)) or User(phone=phone, display_name=NAME.format(i))
+            if u.display_name != NAME.format(i):
+                raise SystemExit(f"{phone} is someone else's account")
             db.add(u)
             db.flush()
             raw = secrets.token_urlsafe(32)
@@ -77,9 +85,12 @@ def main() -> None:
     p.add_argument("--seconds", type=float, default=30)
     p.add_argument("--grow", type=int, default=0)
     a = p.parse_args()
-    if urlparse(a.api).hostname not in ("127.0.0.1", "localhost"):
-        raise SystemExit("only against a server on this machine")
-    engine = create_engine(a.db)
+    db_url = make_url(a.db)
+    if (urlparse(a.api).hostname not in ("127.0.0.1", "localhost")
+            or db_url.host not in (None, "", "127.0.0.1", "localhost")
+            or not any(word in (db_url.database or "") for word in ("load", "dev", "test"))):
+        raise SystemExit("only with a server and a load/dev/test database on this machine")
+    engine = create_engine(db_url)
     if a.grow:
         grow(engine, a.grow)
     tokens = people(engine, a.users)
@@ -91,8 +102,21 @@ def main() -> None:
     stop = time.monotonic() + a.seconds
 
     def user(token):
-        c = httpx.Client(base_url=a.api, headers={"Authorization": f"Bearer {token}"}, timeout=30)
+        c = httpx.Client(base_url=a.api, headers={"Authorization": f"Bearer {token}"}, timeout=20)
         rnd = random.Random(token)
+
+        def timed(kind, call):
+            t = time.perf_counter()
+            try:
+                res = call()
+                code = res.status_code
+            except Exception as exc:  # noqa: BLE001  a timeout counts as what the app shows: a failure
+                res, code = None, type(exc).__name__
+            with lock:
+                times[kind].append((time.perf_counter() - t) * 1000)
+                codes[kind][code] += 1
+            return res
+
         while time.monotonic() < stop:
             r = rnd.random()
             lid = rnd.choice(ids)
@@ -121,18 +145,9 @@ def main() -> None:
                                                      headers={"Idempotency-Key": secrets.token_hex(8)})
             else:
                 kind, call = "chat", lambda: c.post("/conversations", json={"listing_id": lid})
-            t = time.perf_counter()
-            try:
-                res = call()
-                code = res.status_code
-                if kind == "order" and code == 201 and rnd.random() < 0.5:
-                    c.post(f"/orders/{res.json()['id']}/cancel")
-            except Exception as exc:  # noqa: BLE001
-                code = type(exc).__name__
-            ms = (time.perf_counter() - t) * 1000
-            with lock:
-                times[kind].append(ms)
-                codes[kind][code] += 1
+            res = timed(kind, call)
+            if kind == "order" and res is not None and res.status_code == 201 and rnd.random() < 0.5:
+                timed("cancel", lambda: c.post(f"/orders/{res.json()['id']}/cancel"))
 
     threads = [threading.Thread(target=user, args=(t,)) for t in tokens]
     start = time.monotonic()

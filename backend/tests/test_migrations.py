@@ -93,10 +93,6 @@ class MigrationTests(unittest.TestCase):
             self.assertEqual(got[marble], ("мраморный", "old"))  # not listed: left as it was
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 @unittest.skipUnless(os.environ.get("VITRINA_TEST_DATABASE_URL"), "needs PostgreSQL")
 class PostgresMigrationTests(unittest.TestCase):
     """The server runs PostgreSQL: the migrations must build the same schema there, column types included, and go
@@ -125,3 +121,7 @@ class PostgresMigrationTests(unittest.TestCase):
             with admin.connect() as conn:
                 conn.execute(text(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)'))
             admin.dispose()
+
+
+if __name__ == "__main__":
+    unittest.main()

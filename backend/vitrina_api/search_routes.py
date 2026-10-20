@@ -7,6 +7,7 @@ import time
 from typing import Literal
 
 from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -57,7 +58,9 @@ def search_listings(q: str | None = None, category: str | None = None, brand: st
     out = {"items": [listing_out(db, r) for r in rows]}
     if not rows and q and offset == 0:
         out["did_you_mean"] = did_you_mean(db, q)
-    return out
+    # Already plain JSON values: sent as they are, without FastAPI walking all ~10 000 of them again (a fifth of
+    # the time of a catalog page).
+    return JSONResponse(out)
 
 
 _VOCAB: dict[int, tuple[tuple, dict[str, str]]] = {}

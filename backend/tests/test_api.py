@@ -956,6 +956,16 @@ class PromoTests(ApiTestCase):
         r = self.c.patch(f"/api/v1/listings/{lid}", json={"price_tiyn": 3_900_000}, headers=self.h(self.seller))
         self.assertEqual(r.json()["promo"], {"state": None, "url": None})  # it showed the old price
 
+    def test_a_video_that_cannot_be_made_is_said_so(self):
+        urls = [self.c.post("/api/v1/media", files={"file": ("p.jpg", jpeg(), "image/jpeg")},
+                            headers=self.h(self.seller)).json()["url"] for _ in range(4)]
+        lid = self.publish(photos=[{"url": u, "angle": a} for u, a in zip(urls, ("front", "outer", "inner", "back"))])["id"]
+        with mock.patch.object(promo, "render_video", side_effect=RuntimeError("ffmpeg died")), \
+                self.assertLogs("vitrina.api", "ERROR"):
+            self.post(f"/listings/{lid}/promo", self.seller, {"lang": "kk"})
+        mine = self.c.get("/api/v1/me/listings", headers=self.h(self.seller)).json()["items"][0]["promo"]
+        self.assertEqual(mine, {"state": "failed", "url": None})  # the seller may try again, not wait for ever
+
 
 class OpsTests(ApiTestCase):
     def test_health_answers_with_the_database(self):

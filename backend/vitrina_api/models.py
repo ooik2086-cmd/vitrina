@@ -494,7 +494,8 @@ class Notification(Base):
 
 # No request keeps a connection for ever, so a few stuck ones cannot take the whole pool: a query or a wait for a lock
 # that runs this long is stopped (the app gets its usual "try again"), and so is a transaction left open with nothing
-# running in it. Jobs end their transaction before slow work (cutting out photos, rendering video).
+# running in it. The cut-out and promo video jobs end their transaction before their slow work; the thumbnail and
+# search-vector jobs hold one through a few seconds of work per listing.
 PG_LIMITS = "-c statement_timeout=30s -c lock_timeout=10s -c idle_in_transaction_session_timeout=5min"
 
 
