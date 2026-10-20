@@ -28,7 +28,7 @@ if [ -f backup.env ]; then set -a; . ./backup.env; set +a; fi
 umask 077
 mkdir -p "$DIR"
 if [ "$1" = "--files" ]; then
-	[ -d "$DIR/files/media" ] && [ -d "$DIR/files/private" ] || { echo "no copy of the files in $DIR/files"; exit 1; }
+	if [ ! -d "$DIR/files/media" ] || [ ! -d "$DIR/files/private" ]; then echo "no copy of the files in $DIR/files"; exit 1; fi
 	$C run --rm --no-deps -T -u 0 -v "$DIR/files:/copy:ro" api sh -c \
 		'python -m vitrina_api.backup mirror --keep-extra /copy/media /data/media && python -m vitrina_api.backup mirror --keep-extra /copy/private /data/private && chown -R vitrina /data/media /data/private'
 	echo "files put back from $DIR/files (files removed in the last 30 days are in $DIR/files/removed/DATE)"
