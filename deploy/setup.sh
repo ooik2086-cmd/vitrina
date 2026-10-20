@@ -6,7 +6,7 @@
 #
 # It installs Docker, turns on the firewall (only ssh, 80 and 443), adds 2 GB of swap, turns on security updates,
 # writes deploy/.env with new random secrets (once: an existing .env is never overwritten), checks the domain,
-# starts everything, checks the three buckets, makes the first backup and installs the nightly one. Run it again after filling the S3 lines in deploy/.env; it is safe to repeat.
+# starts everything, checks the three buckets, makes the first backup and installs the nightly one. Run it again after filling the S3 and Mobizon lines in deploy/.env; it is safe to repeat.
 #
 #   sh deploy/setup.sh --env-only DOMAIN EMAIL   only writes deploy/.env (nothing installed or started)
 set -eu
@@ -81,10 +81,8 @@ check_dns() {
 	[ -z "$six" ] || echo "WARNING: $domain also has an AAAA record ($six). Let's Encrypt tries it first: remove it unless it is this server."
 }
 
-# Lines of .env still empty or still the example's placeholders.
-unfilled() {
-	grep -E '^(VITRINA_S3_ACCESS_KEY|VITRINA_S3_SECRET_KEY|VITRINA_MOBIZON_API_KEY)=$|^VITRINA_S3_ENDPOINT=https://s3\.example\.kz$|^VITRINA_PUBLIC_MEDIA_URL=https://s3\.example\.kz/' "$ENV_FILE" | cut -d= -f1 || true
-}
+# shellcheck disable=SC1091  # deploy/env.sh
+. "$DEPLOY/env.sh"
 
 if [ "$ENV_ONLY" = 1 ]; then
 	write_env
@@ -146,12 +144,7 @@ ufw --force enable
 say "settings"
 write_env
 write_backup_env
-missing=$(unfilled)
-if [ -n "$missing" ]; then
-	echo "Fill these in $ENV_FILE (VITRINA_S3_*: from the storage provider, VITRINA_MOBIZON_API_KEY: from the Mobizon account), then run this script again:"
-	echo "$missing" | sed 's/^/  /'
-	exit 2
-fi
+need_filled
 
 say "nightly backup"
 cat > /etc/systemd/system/vitrina-backup.service <<EOF

@@ -136,13 +136,16 @@ class FakeMobizon:
     """Mobizon's sendsmsmessage as its documentation describes it; answers with the code it is told to."""
 
     def __init__(self, code=0):
-        self.code, self.sent = code, []
+        self.code, self.sent, self.calls = code, [], 0
 
     def __call__(self, request):
         import httpx
         from urllib.parse import parse_qs
         if request.url.path != "/service/message/sendsmsmessage" or request.method != "POST":
             return httpx.Response(404)
+        self.calls += 1
+        if self.code == "html":  # a proxy's error page after the request went in
+            return httpx.Response(502, text="<html>Bad Gateway</html>")
         q = dict(request.url.params)
         if (q.get("output"), q.get("api"), q.get("apiKey")) != ("json", "v1", "secret-key"):
             return httpx.Response(200, json={"code": 8, "data": "", "message": "wrong key"})
@@ -180,9 +183,11 @@ class SmsTests(ApiTestCase):
         from vitrina_api.models import OtpCode
         self.app.state.settings.otp_resend_after = timedelta(seconds=60)
         self.mobizon.code = 4  # e.g. no money left on the account
-        with self.assertLogs("vitrina_api.auth_routes", "ERROR") as logs:
+        hits = len(self.app.state.otp_limiter._hits["testclient"])
+        with self.assertLogs("vitrina.auth", "ERROR") as logs:
             r = self.c.post("/api/v1/auth/otp", json={"phone": "+77011234567"})
         self.assertEqual((r.status_code, r.json()["code"]), (503, "sms_failed"))
+        self.assertEqual(len(self.app.state.otp_limiter._hits["testclient"]), hits)  # the address is not charged
         self.assertIn("code 4", logs.output[0])
         self.assertNotIn("secret-key", " ".join(logs.output))
         self.assertNotIn("1234567", " ".join(logs.output))  # not the whole number either
@@ -202,20 +207,80 @@ class SmsTests(ApiTestCase):
             sender.send("+77011234567", "x")
         self.assertNotIn("secret-key", str(err.exception))
         self.assertIsNone(err.exception.__cause__)
+        self.assertFalse(err.exception.maybe_sent)  # no connection: surely nothing went out
         bad = MobizonSender("wrong", client=httpx.Client(transport=httpx.MockTransport(FakeMobizon())))
         with self.assertRaises(SmsError):
             bad.send("+77011234567", "x")
 
-    def test_the_daily_cap_stops_sending(self):
-        from vitrina_api.models import OtpCode
-        with self.db() as db:  # the test's own sign-ins count too
-            self.app.state.settings.sms_per_day = db.scalar(select(func.count(OtpCode.id))) + 2
+    def test_the_daily_cap_stops_new_numbers_only(self):
+        self.app.state.settings.sms_per_day = 2  # the seller's and buyer's codes in setUp are to accounts: not counted
         for phone in ("+77011234561", "+77011234562"):
             self.assertEqual(self.c.post("/api/v1/auth/otp", json={"phone": phone}).status_code, 200)
-        with self.assertLogs("vitrina_api.auth_routes", "ERROR"):
+        with self.assertLogs("vitrina.auth", "ERROR"):
             r = self.c.post("/api/v1/auth/otp", json={"phone": "+77011234563"})
-        self.assertEqual((r.status_code, r.json()["code"]), (503, "sms_failed"))
+        self.assertEqual((r.status_code, r.json()["code"]), (503, "signup_paused"))
+        self.assertTrue(80000 < int(r.json()["detail"]) <= 86400, r.json())  # until the oldest leaves the day
         self.assertEqual(len(self.mobizon.sent), 2)
+        # Someone filling the cap with made-up numbers does not lock out the people who have accounts.
+        self.assertEqual(self.c.post("/api/v1/auth/otp", json={"phone": "+77010000001"}).status_code, 200)
+        self.assertEqual(len(self.mobizon.sent), 3)
+
+    def test_codes_go_to_kazakhstan_numbers_only(self):
+        for phone in ("+79161234567", "+73011234567"):  # Russian mobile and landline
+            r = self.c.post("/api/v1/auth/otp", json={"phone": phone})
+            self.assertEqual((r.status_code, r.json()["code"]), (422, "invalid_phone"), phone)
+        self.assertEqual(self.mobizon.calls, 0)
+        self.assertEqual(self.c.post("/api/v1/auth/otp", json={"phone": "+76001234567"}).status_code, 200)
+
+    def test_an_answer_lost_after_sending_keeps_the_code(self):
+        """The request reached Mobizon but its answer was a proxy's page: the SMS may still come, so its code
+        stays valid and counted, and the person is told it went (they can ask again in a minute)."""
+        from vitrina_api.models import OtpCode
+        self.mobizon.code = "html"
+        with self.assertLogs("vitrina.auth", "WARNING") as logs:
+            r = self.c.post("/api/v1/auth/otp", json={"phone": "+77011234567"})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertNotIn("secret-key", " ".join(logs.output))
+        with self.db() as db:
+            self.assertEqual(db.scalar(select(func.count(OtpCode.id)).where(OtpCode.phone == "+77011234567")), 1)
+
+    def test_failures_in_a_row_pause_the_provider(self):
+        import httpx
+        from vitrina_api.sms import MobizonSender, SmsError
+        mobizon = FakeMobizon(code=4)
+        sender = MobizonSender("secret-key", client=httpx.Client(transport=httpx.MockTransport(mobizon)))
+        for _ in range(MobizonSender.FAILURES_BEFORE_PAUSE + 2):
+            with self.assertRaises(SmsError) as err:
+                sender.send("+77011234567", "x")
+            self.assertFalse(err.exception.maybe_sent)
+        self.assertEqual(mobizon.calls, MobizonSender.FAILURES_BEFORE_PAUSE)  # the rest answered at once
+        sender._paused_until = 0
+        mobizon.code = 0
+        sender.send("+77011234567", "x")
+        self.assertEqual(sender._failures, 0)
+
+    def test_the_key_never_reaches_the_logs(self):
+        """httpx logs each request's URL at INFO, and Mobizon's URL carries the key."""
+        import logging
+        root = logging.getLogger()
+        level = root.level
+        root.setLevel(logging.DEBUG)
+        try:
+            with self.assertLogs(level="DEBUG") as logs:
+                logging.getLogger("vitrina.test").debug("start")
+                self.assertEqual(self.c.post("/api/v1/auth/otp", json={"phone": "+77011234567"}).status_code, 200)
+        finally:
+            root.setLevel(level)
+        self.assertNotIn("secret-key", " ".join(logs.output))
+
+    def test_an_ipv6_client_is_limited_by_its_64(self):
+        """One machine holds a whole IPv6 /64: walking through its addresses must not reset the address limit."""
+        from types import SimpleNamespace
+        from vitrina_api.auth_routes import client_key
+        key = lambda host: client_key(SimpleNamespace(client=SimpleNamespace(host=host)))
+        self.assertEqual(key("2a02:2168:8a1:1::1"), key("2a02:2168:8a1:1:ffff::9"))
+        self.assertNotEqual(key("2a02:2168:8a1:1::1"), key("2a02:2168:8a1:2::1"))
+        self.assertEqual((key("5.34.1.2"), key("testclient")), ("5.34.1.2", "testclient"))
 
     def test_the_provider_is_chosen_by_settings(self):
         from vitrina_api.sms import MobizonSender, make_sender

@@ -53,8 +53,11 @@ grep -q '^VITRINA_CORS_ORIGINS=https://vitrina.test$' .env || fail "CORS origin 
 if [ -n "${SMOKE_SETUP:-}" ]; then
 	step "setup.sh on this Ubuntu machine stops until the storage lines are filled"
 	status=0
-	VITRINA_BUILD="${SMOKE_BUILD:---build}" sh setup.sh || status=$?
+	VITRINA_BUILD="${SMOKE_BUILD:---build}" sh setup.sh > setup.out || status=$?
+	cat setup.out
 	[ "$status" = 2 ] || fail "setup.sh did not stop for the unfilled S3 and SMS lines (exit $status)"
+	grep -qx '  VITRINA_MOBIZON_API_KEY' setup.out || fail "setup.sh did not ask for the Mobizon key"
+	rm setup.out
 fi
 sed -i -e 's|^VITRINA_TLS=.*|VITRINA_TLS=/certs/site.pem /certs/site.key|' \
 	-e 's|^VITRINA_S3_ENDPOINT=.*|VITRINA_S3_ENDPOINT=https://s3.test|' \
@@ -126,6 +129,20 @@ sh restore.sh --from-bucket "$name" --yes
 ls "$VITRINA_BACKUP_DIR"/before-restore-*.dump > /dev/null || fail "no copy of the database from before the restore"
 [ "$(https https://vitrina.test/api/v1/health)" = '{"ok":true}' ] || fail "health after the restore"
 flow check "$first_id"
+
+step "update on a server whose .env predates SMS: the lines are added and nothing is touched until the key is in"
+cp .env env.full
+grep -v '^VITRINA_SMS_PROVIDER=\|^VITRINA_MOBIZON_' env.full > .env
+started=$($C ps -q api)
+status=0
+VITRINA_NO_PULL=1 sh update.sh > update.out || status=$?
+cat update.out
+[ "$status" = 2 ] || fail "update.sh went on without the SMS settings (exit $status)"
+grep -qx '  VITRINA_MOBIZON_API_KEY' update.out || fail "update.sh did not ask for the Mobizon key"
+grep -qx 'VITRINA_SMS_PROVIDER=mobizon' .env || fail "update.sh did not add the new settings to .env"
+[ "$($C ps -q api)" = "$started" ] || fail "update.sh replaced the API before the settings were filled"
+mv env.full .env
+rm update.out
 
 step "update: a backup first, the API migrates with the worker and jobs stopped, all healthy after"
 VITRINA_NO_PULL=1 VITRINA_NO_BUILD=${SMOKE_UPDATE_NO_BUILD:-} sh update.sh

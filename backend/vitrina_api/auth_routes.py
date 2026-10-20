@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import ipaddress
 import logging
 import math
+import re
 import secrets
 import threading
 import time
@@ -31,13 +33,17 @@ from .serializers import me_out
 from .sms import SmsError, otp_text
 
 
-log = logging.getLogger(__name__)
+log = logging.getLogger("vitrina.auth")
 router = APIRouter(prefix="/api/v1")
 
 
-# Per client address. Phones on mobile data share a few carrier addresses (CGNAT), so this is set for a crowd; the
-# per-phone limits and the daily cap on codes sent (VITRINA_SMS_PER_DAY) do the real guarding.
+# Per client address (an IPv6 one by its /64, which one machine holds whole). Phones on mobile data share a few
+# carrier addresses (CGNAT), so this is set for a crowd; the per-phone limits and the daily cap on codes to new
+# numbers (VITRINA_SMS_PER_DAY) do the real guarding.
 OTP_REQUESTS_PER_ADDRESS_PER_HOUR = 120
+# Codes go only to Kazakhstan numbers (+7 6xx and 7xx): a Russian +7 number costs an international SMS and is the
+# usual target of SMS pumping.
+KZ_PHONE_RE = re.compile(r"^\+7[67]\d{9}$")
 OTP_FAILURES_PER_DAY = 15
 STAFF_TOKEN_TTL = timedelta(hours=12)
 
@@ -53,6 +59,15 @@ def lock_phone(db: Session, phone: str) -> threading.Lock:
     return _PHONE_LOCKS[int(hashlib.sha256(phone.encode()).hexdigest(), 16) % len(_PHONE_LOCKS)]
 
 
+def client_key(request: Request) -> str:
+    host = request.client.host if request.client else "unknown"
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return host
+    return str(ipaddress.ip_network(f"{ip}/64", strict=False)) if ip.version == 6 else host
+
+
 def seconds_until(moment, now) -> int:
     return max(1, math.ceil((services.aware(moment) - now).total_seconds()))
 
@@ -60,7 +75,7 @@ def seconds_until(moment, now) -> int:
 @router.post("/auth/otp")
 def request_otp(body: OtpRequest, request: Request, db: Session = Depends(get_db),
                 cfg: Settings = Depends(get_settings)):
-    if not PHONE_RE.match(body.phone):
+    if not PHONE_RE.match(body.phone) or not KZ_PHONE_RE.match(body.phone):
         raise ApiError(422, "invalid_phone")
     with lock_phone(db, body.phone):
         now = now_utc()
@@ -83,15 +98,21 @@ def request_otp(body: OtpRequest, request: Request, db: Session = Depends(get_db
             OtpCode.expires_at > now))
         if live is not None and services.aware(live) + cfg.otp_resend_after > now:
             raise ApiError(429, "otp_too_soon", str(seconds_until(live + cfg.otp_resend_after, now)))
+        sender = request.app.state.sms
+        # The daily cap counts and stops only numbers with no account yet, so someone cycling through numbers can
+        # pause sign-ups at worst, never sign-in for the people already here.
+        if sender is not None and db.scalar(select(User.id).where(User.phone == body.phone)) is None:
+            new_today = select(OtpCode.created_at).where(OtpCode.created_at > now - timedelta(days=1),
+                                                         OtpCode.phone.not_in(select(User.phone)))
+            if db.scalar(select(func.count()).select_from(new_today.subquery())) >= cfg.sms_per_day:
+                log.error("sign-in codes: the daily cap of %s SMS to new numbers is reached (VITRINA_SMS_PER_DAY)",
+                          cfg.sms_per_day)
+                oldest = db.scalar(select(func.min(new_today.subquery().c.created_at)))
+                raise ApiError(503, "signup_paused", str(seconds_until(oldest + timedelta(days=1), now)))
         # Counted only when a code is really sent: refusals above cost no SMS and do not use up the address.
-        client = request.client.host if request.client else "unknown"
+        client = client_key(request)
         if not request.app.state.otp_limiter.allow(client, time.monotonic()):
             raise ApiError(429, "rate_limited")
-        sender = request.app.state.sms
-        if sender is not None and db.scalar(select(func.count(OtpCode.id)).where(
-                OtpCode.created_at > now - timedelta(days=1))) >= cfg.sms_per_day:
-            log.error("sign-in codes: the daily cap of %s SMS is reached (VITRINA_SMS_PER_DAY)", cfg.sms_per_day)
-            raise ApiError(503, "sms_failed")
         code = f"{secrets.randbelow(10**6):06d}"
         digest = hmac.new(cfg.otp_secret, f"{body.phone}:{code}".encode(), hashlib.sha256).hexdigest()
         otp = OtpCode(phone=body.phone, code_hash=digest, expires_at=now + cfg.otp_ttl)
@@ -101,11 +122,18 @@ def request_otp(body: OtpRequest, request: Request, db: Session = Depends(get_db
         try:
             sender.send(body.phone, otp_text(code))
         except SmsError as e:
-            # The code never went out: it is taken back, so it neither waits out "send again" nor counts as sent.
-            log.error("sign-in code to %s…%s not sent: %s", body.phone[:4], body.phone[-2:], e)
-            db.execute(delete(OtpCode).where(OtpCode.id == otp.id))
-            db.commit()
-            raise ApiError(503, "sms_failed")
+            masked = f"{body.phone[:4]}…{body.phone[-2:]}"
+            if e.maybe_sent:
+                # It may still arrive: the code stays valid and counted, and the person can ask again in a minute.
+                log.warning("sign-in code to %s maybe not sent: %s", masked, e)
+            else:
+                # The code never went out: it is taken back, so it neither waits out "send again" nor counts as
+                # sent, nor uses up the address.
+                log.error("sign-in code to %s not sent: %s", masked, e)
+                db.execute(delete(OtpCode).where(OtpCode.id == otp.id))
+                db.commit()
+                request.app.state.otp_limiter.give_back(client)
+                raise ApiError(503, "sms_failed")
     return {"sent": True, "resend_after": math.ceil(cfg.otp_resend_after.total_seconds()),
             **({"dev_code": code} if cfg.debug_otp else {})}
 

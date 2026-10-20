@@ -135,6 +135,12 @@ class SlidingWindowLimiter:
             hits.append(now)
             return True
 
+    def give_back(self, key: str) -> None:
+        """Takes back the last hit of `key`: what it was spent on did not happen after all."""
+        with self._lock:
+            if self._hits.get(key):
+                self._hits[key].pop()
+
 
 IMAGE_SEARCH_PER_MINUTE = 20
 

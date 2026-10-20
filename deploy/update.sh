@@ -5,6 +5,7 @@
 #
 #   sh /opt/vitrina/deploy/update.sh
 #
+# If .env lacks a setting the new version needs, it is added there and the script stops (exit 2) until it is filled.
 # If the new version does not come up, it prints how to go back to the previous image and the database as it was.
 set -eu
 
@@ -12,6 +13,13 @@ cd "$(dirname "$0")"
 C="docker compose ${VITRINA_COMPOSE_FILES:-}"
 
 [ -n "${VITRINA_NO_PULL:-}" ] || git -C .. pull --ff-only
+# A new version may need new settings: they are added to .env and, while one is empty, nothing is touched yet.
+DEPLOY=$PWD
+# shellcheck disable=SC2034  # read by env.sh
+ENV_FILE="$DEPLOY/.env"
+# shellcheck disable=SC1091  # deploy/env.sh
+. ./env.sh
+need_filled
 sh ./backup.sh
 # shellcheck disable=SC2012  # names without spaces, made by backup.sh
 dump=$(ls -t "${VITRINA_BACKUP_DIR:-/var/backups/vitrina}"/vitrina-*.dump | head -n 1)
