@@ -19,6 +19,10 @@ x-app: &app
     VITRINA_AUTO_CREATE_SCHEMA: "0"
     VITRINA_PHOTO_WORK: worker
     VITRINA_DATABASE_URL: postgresql+psycopg://vitrina:${POSTGRES_PASSWORD:?run deploy/setup.sh or fill deploy/.env}@db:5432/vitrina
+    # VITRINA_STORAGE=disk keeps the files here (empty with s3); Caddy serves the photos' volume at /media.
+    VITRINA_MEDIA_DIR: /data/media
+    VITRINA_PRIVATE_MEDIA_DIR: /data/private
+  volumes: [media:/data/media, private:/data/private]
   restart: unless-stopped
   logging: *logs
 
@@ -92,6 +96,7 @@ services:
       VITRINA_TLS: "${VITRINA_TLS:?set VITRINA_TLS in deploy/.env to an email for Let's Encrypt}"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - media:/srv/media:ro   # the photos (VITRINA_STORAGE=disk); the private files' volume is not here
       - caddy_data:/data   # the certificate and its key: keep it, or a new one is asked for on every start
       - caddy_config:/config
     depends_on:
@@ -114,5 +119,7 @@ networks:
 
 volumes:
   pgdata:
+  media:
+  private:
   caddy_data:
   caddy_config:

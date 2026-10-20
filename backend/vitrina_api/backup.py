@@ -7,6 +7,7 @@ makes a dump every night and hands it here; deploy/restore.sh brings one back.
     python -m vitrina_api.backup get vitrina-20261020T213000Z-3f9a0c1d.dump /backups/
     python -m vitrina_api.backup prune --keep 30
     python -m vitrina_api.backup check     # the three buckets work, and only the photos one is public
+    python -m vitrina_api.backup mirror /data/media /backups/files/media    # disk storage: a copy of the files
 
 Each copy goes under db/ with its SHA-256 beside it (db/NAME.sha256), and get refuses a copy that does not match,
 so a file cut short on the way is never restored. The bucket must not be public: a dump holds phone numbers and
@@ -17,13 +18,19 @@ The backup bucket may have a key of its own (VITRINA_S3_BACKUP_ACCESS_KEY, VITRI
 deploy/backup.env, which only backup.sh and restore.sh read): then a break-in through the API, which holds the
 photos' key, cannot delete the copies. A dump is read whole into memory to sign it, which is fine while it is some
 hundreds of megabytes.
+
+With VITRINA_STORAGE=disk the photos and private files are on the server's disk too: backup.sh keeps a copy of
+both folders beside the dumps (mirror), and the backup bucket is optional. Without one, nothing leaves the server
+until someone copies /var/backups/vitrina off it (deploy/README.md).
 """
 from __future__ import annotations
 
 import argparse
 import hashlib
 import re
+import os
 import secrets
+import shutil
 import sys
 from pathlib import Path
 from xml.etree import ElementTree
@@ -110,17 +117,72 @@ def prune(s3: S3Storage, keep: int) -> list[str]:
     return gone
 
 
+def mirror(src: Path, dst: Path, *, keep_extra: bool = False) -> tuple[int, int]:
+    """Makes dst hold what src holds: new and changed files copied (through a temporary name, so a cut-off run
+    never leaves half a file), files src no longer has removed unless keep_extra. Returns (copied, removed)."""
+    if not src.is_dir():
+        raise SystemExit(f"{src} is not a folder")
+    files = {p.relative_to(src) for p in src.rglob("*") if p.is_file() and not p.is_symlink()}
+    if not files and not keep_extra and dst.is_dir() and any(p.is_file() for p in dst.rglob("*")):
+        # An empty source is far likelier a missing volume than every file deleted: the copy is not wiped.
+        raise SystemExit(f"{src} is empty but its copy {dst} is not: not removing the copy")
+    dst.mkdir(parents=True, exist_ok=True)  # even for an empty folder: restore.sh --files expects both copies
+    copied = removed = 0
+    for rel in sorted(files):
+        a, b = src / rel, dst / rel
+        sa = a.stat()
+        if b.is_file() and (b.stat().st_size, int(b.stat().st_mtime)) == (sa.st_size, int(sa.st_mtime)):
+            continue
+        b.parent.mkdir(parents=True, exist_ok=True)
+        tmp = b.with_name(b.name + ".mirror-part")
+        shutil.copy2(a, tmp)
+        os.replace(tmp, b)
+        copied += 1
+    if not keep_extra and dst.is_dir():
+        for b in sorted(dst.rglob("*"), reverse=True):  # files before their folders
+            rel = b.relative_to(dst)
+            if b.is_file() and rel not in files:  # with a .mirror-part left by a run cut off
+                b.unlink()
+                removed += 1
+            elif b.is_dir() and not any(b.iterdir()):
+                b.rmdir()
+    return copied, removed
+
+
+def check_disk(settings: Settings) -> list[str]:
+    """Disk storage: each folder takes a file, gives it back and lets it go (the volumes are mounted and writable).
+    Whether Caddy serves the photos at VITRINA_PUBLIC_MEDIA_URL is checked from outside (setup.sh, smoke.sh)."""
+    from .storage import make_private_storage, make_storage
+    problems = []
+    for label, store in (("VITRINA_MEDIA_DIR", make_storage(settings)),
+                         ("VITRINA_PRIVATE_MEDIA_DIR", make_private_storage(settings))):
+        try:
+            url = store.put(b"vitrina storage check", owner_id=0, ext="jpg")
+            if store.read(url) != b"vitrina storage check":
+                problems.append(f"{label}: the file read back is not the one written")
+            store.delete(url.removeprefix(store.public_base + "/"))
+        except OSError as e:
+            problems.append(f"{label}: {e}")
+    return problems
+
+
 def check(settings: Settings, client=None) -> list[str]:
     """Writes a small file to each bucket, reads it back the way the app does and deletes it: the photos bucket must
-    answer at VITRINA_PUBLIC_MEDIA_URL without a key, the other two must refuse a stranger. Returns what is wrong."""
+    answer at VITRINA_PUBLIC_MEDIA_URL without a key, the other two must refuse a stranger. Returns what is wrong.
+    With disk storage: the two folders, and the backup bucket if there is one."""
     from .storage import make_private_storage, make_storage
-    if not (settings.s3_bucket and settings.s3_private_bucket):
+    if settings.storage == "disk":
+        stores = [("VITRINA_S3_BACKUP_BUCKET", bucket(settings), False)] if settings.s3_backup_bucket else []
+        problems = check_disk(settings)
+    elif not (settings.s3_bucket and settings.s3_private_bucket):
         raise SystemExit("set VITRINA_S3_BUCKET and VITRINA_S3_PRIVATE_BUCKET: this checks the live storage")
-    problems = []
+    else:
+        stores = [("VITRINA_S3_BUCKET", make_storage(settings), True),
+                  ("VITRINA_S3_PRIVATE_BUCKET", make_private_storage(settings), False),
+                  ("VITRINA_S3_BACKUP_BUCKET", bucket(settings), False)]
+        problems = []
     probe = b"vitrina storage check"
-    for label, store, public in (("VITRINA_S3_BUCKET", make_storage(settings), True),
-                                 ("VITRINA_S3_PRIVATE_BUCKET", make_private_storage(settings), False),
-                                 ("VITRINA_S3_BACKUP_BUCKET", bucket(settings), False)):
+    for label, store, public in stores:
         if client is not None:
             store.client = client
         key = f"check/{secrets.token_hex(8)}.txt"
@@ -150,11 +212,23 @@ def main(argv: list[str] | None = None, client=None) -> None:
     g.add_argument("dest", type=Path)
     sub.add_parser("prune").add_argument("--keep", type=int, default=30)
     sub.add_parser("check")
+    m = sub.add_parser("mirror")
+    m.add_argument("src", type=Path)
+    m.add_argument("dst", type=Path)
+    m.add_argument("--keep-extra", action="store_true", help="never remove a file from dst")
     args = parser.parse_args(argv)
     if args.cmd == "check":
-        problems = check(Settings(), client)
-        print("\n".join(problems) or "storage ok: photos public, private and backup buckets closed")
+        settings = Settings()
+        problems = check(settings, client)
+        print("\n".join(problems) or ("storage ok: both folders writable" + (", backup bucket closed"
+                                       if settings.s3_backup_bucket else ", no backup bucket")
+                                       if settings.storage == "disk" else
+                                       "storage ok: photos public, private and backup buckets closed"))
         raise SystemExit(1 if problems else 0)
+    if args.cmd == "mirror":
+        copied, removed = mirror(args.src, args.dst, keep_extra=args.keep_extra)
+        print(f"{args.src} -> {args.dst}: {copied} copied, {removed} removed")
+        return
     s3 = bucket(Settings(), client)
     if args.cmd == "put":
         print(f"{args.file.name} {put(s3, args.file)}")

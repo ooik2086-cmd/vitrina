@@ -3,6 +3,7 @@
     python flow.py list           a new listing, published; prints its id once the photo worker is done with it
     python flow.py count          how many listings there are
     python flow.py check ID       its share page carries the https address (the proxy headers are trusted)
+    python flow.py photo ID       the address of its first photo
 """
 import io
 import os
@@ -56,7 +57,7 @@ def new_listing() -> None:
     for seed, angle in enumerate(("front", "outer", "inner", "back")):
         url = must(c.post(f"{API}/media", files={"file": ("p.jpg", photo(seed), "image/jpeg")}), 201)["url"]
         if not url.startswith(os.environ["VITRINA_PUBLIC_MEDIA_URL"]):
-            sys.exit(f"photo stored at {url}, not in the photos bucket")
+            sys.exit(f"photo stored at {url}, not at VITRINA_PUBLIC_MEDIA_URL")
         if httpx.get(url, timeout=30).status_code != 200:  # what a buyer's phone does
             sys.exit(f"the photo is not readable at its public address {url}")
         photos.append({"url": url, "angle": angle})
@@ -85,6 +86,8 @@ def check(lid: str) -> None:
 if __name__ == "__main__":
     if sys.argv[1] == "list":
         new_listing()
+    elif sys.argv[1] == "photo":
+        print(httpx.get(f"{API}/listings/{sys.argv[2]}", timeout=30).json()["media"][0]["original_url"])
     elif sys.argv[1] == "count":
         with sessions() as db:
             print(db.scalar(select(func.count(Listing.id))))

@@ -1,7 +1,9 @@
 #!/bin/sh
 # A copy of the database: dumped to /var/backups/vitrina (the last 7 days kept) and sent to the backup bucket
 # (VITRINA_S3_BACKUP_BUCKET, the last 30 kept). setup.sh runs it every night (vitrina-backup.timer); it can be
-# run by hand at any time. Photos are not in it: they live in the photos bucket.
+# run by hand at any time. With VITRINA_STORAGE=s3 the photos are in their bucket, not here. With
+# VITRINA_STORAGE=disk the photos and private files are copied to /var/backups/vitrina/files too, and the backup
+# bucket is optional: without it nothing leaves the server unless that folder is copied off it (deploy/README.md).
 #
 #   sh deploy/backup.sh
 #   systemctl list-timers vitrina-backup.timer; journalctl -u vitrina-backup -n 30   (when it ran, what it said)
@@ -18,6 +20,7 @@ C="docker compose ${VITRINA_COMPOSE_FILES:-}"
 # shellcheck source=/dev/null
 if [ -f backup.env ]; then set -a; . ./backup.env; set +a; fi
 PING=${VITRINA_BACKUP_PING_URL:-}
+setting() { sed -n "s/^$1=//p" .env | tail -n 1; }
 ping_url() { [ -z "$PING" ] || curl -fsS -m 10 --retry 3 -o /dev/null "$1" || echo "could not reach $1"; }
 trap 'if [ $? != 0 ]; then echo "BACKUP FAILED"; ping_url "$PING/fail"; fi' EXIT
 
@@ -38,8 +41,19 @@ backup() {
 	$C run --rm --no-deps -T -u 0 -v "$DIR:/backups" \
 		-e VITRINA_S3_BACKUP_ACCESS_KEY -e VITRINA_S3_BACKUP_SECRET_KEY api python -m vitrina_api.backup "$@"
 }
-backup put "/backups/$name"
-backup prune --keep "${VITRINA_BACKUP_KEEP:-30}"
+if [ "$(setting VITRINA_STORAGE)" = disk ]; then
+	# The folders as they are now (files deleted since the last night leave the copy too). Through the API's image,
+	# which has the volumes mounted; owned by root and readable by root only, like the dumps.
+	$C run --rm --no-deps -T -u 0 -v "$DIR/files:/copy" api sh -c \
+		'python -m vitrina_api.backup mirror /data/media /copy/media && python -m vitrina_api.backup mirror /data/private /copy/private'
+	chmod 700 "$DIR/files"
+fi
+if [ -n "$(setting VITRINA_S3_BACKUP_BUCKET)" ]; then
+	backup put "/backups/$name"
+	backup prune --keep "${VITRINA_BACKUP_KEEP:-30}"
+else
+	echo "no backup bucket (VITRINA_S3_BACKUP_BUCKET): the copies are on this server only; copy $DIR off it (deploy/README.md)"
+fi
 
 find "$DIR" -maxdepth 1 \( -name 'vitrina-*.dump' -o -name 'vitrina-*.dump.sha256' \) -mtime +"${VITRINA_BACKUP_KEEP_LOCAL:-7}" -delete
 find "$DIR" -maxdepth 1 -name 'before-restore-*.dump' -mtime +30 -delete

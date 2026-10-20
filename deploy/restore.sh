@@ -5,13 +5,15 @@
 #
 #   sh deploy/restore.sh /var/backups/vitrina/vitrina-20261020T213000Z-3f9a0c1d.dump --yes
 #   sh deploy/restore.sh --from-bucket vitrina-20261020T213000Z-3f9a0c1d.dump --yes   (from the backup bucket)
+#   sh deploy/restore.sh --files --yes   (VITRINA_STORAGE=disk: photos and private files back from the nightly copy;
+#                                         files added since are kept)
 #   docker compose -f deploy/compose.yml run --rm --no-deps api python -m vitrina_api.backup list
 set -eu
 
-usage="usage: restore.sh FILE.dump --yes  |  restore.sh --from-bucket NAME --yes"
+usage="usage: restore.sh FILE.dump --yes  |  restore.sh --from-bucket NAME --yes  |  restore.sh --files --yes"
 [ "${2:-}" = "--yes" ] || [ "${3:-}" = "--yes" ] || { echo "$usage"; echo "It replaces the whole database: add --yes."; exit 1; }
 case $1 in
-	--from-bucket | /*) ;;
+	--from-bucket | --files | /*) ;;
 	*) set -- "$PWD/$1" "$2" "${3:-}" ;;   # a path given from where the operator stands
 esac
 
@@ -22,6 +24,13 @@ C="docker compose ${VITRINA_COMPOSE_FILES:-}"
 if [ -f backup.env ]; then set -a; . ./backup.env; set +a; fi
 umask 077
 mkdir -p "$DIR"
+if [ "$1" = "--files" ]; then
+	[ -d "$DIR/files/media" ] && [ -d "$DIR/files/private" ] || { echo "no copy of the files in $DIR/files"; exit 1; }
+	$C run --rm --no-deps -T -u 0 -v "$DIR/files:/copy:ro" api sh -c \
+		'python -m vitrina_api.backup mirror --keep-extra /copy/media /data/media && python -m vitrina_api.backup mirror --keep-extra /copy/private /data/private && chown -R vitrina /data/media /data/private'
+	echo "files put back from $DIR/files"
+	exit 0
+fi
 if [ "$1" = "--from-bucket" ]; then
 	$C run --rm --no-deps -T -u 0 -v "$DIR:/backups" -e VITRINA_S3_BACKUP_ACCESS_KEY -e VITRINA_S3_BACKUP_SECRET_KEY \
 		api python -m vitrina_api.backup get "$2" /backups/

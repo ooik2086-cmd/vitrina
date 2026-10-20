@@ -6,7 +6,7 @@
 #
 # It installs Docker, turns on the firewall (only ssh, 80 and 443), adds 2 GB of swap, turns on security updates,
 # writes deploy/.env with new random secrets (once: an existing .env is never overwritten), checks the domain,
-# starts everything, checks the three buckets, makes the first backup and installs the nightly one. Run it again after filling the S3 and Mobizon lines in deploy/.env; it is safe to repeat.
+# starts everything, checks the storage, makes the first backup and installs the nightly one. Run it again after filling the lines it names in deploy/.env (the Mobizon key; the S3 ones with VITRINA_STORAGE=s3); it is safe to repeat.
 #
 #   sh deploy/setup.sh --env-only DOMAIN EMAIL   only writes deploy/.env (nothing installed or started)
 set -eu
@@ -25,7 +25,7 @@ write_env() {
 	if [ -f "$ENV_FILE" ]; then
 		kept=$(sed -n 's/^VITRINA_DOMAIN=//p' "$ENV_FILE")
 		if [ -n "$DOMAIN" ] && [ "$DOMAIN" != "$kept" ]; then
-			die "$ENV_FILE has VITRINA_DOMAIN=$kept, not $DOMAIN. To change it, edit VITRINA_DOMAIN and VITRINA_CORS_ORIGINS (and VITRINA_TLS for the email) there, keeping the secrets, then run: sh $0"
+			die "$ENV_FILE has VITRINA_DOMAIN=$kept, not $DOMAIN. To change it, edit VITRINA_DOMAIN, VITRINA_CORS_ORIGINS and VITRINA_PUBLIC_API_URL (and VITRINA_TLS for the email) there, keeping the secrets, then run: sh $0"
 		fi
 		echo "$ENV_FILE exists: keeping it, domain $kept (its secrets are in use)"
 		return
@@ -38,6 +38,9 @@ write_env() {
 	sed -e "s|^VITRINA_DOMAIN=.*|VITRINA_DOMAIN=$DOMAIN|" \
 		-e "s|^VITRINA_TLS=.*|VITRINA_TLS=$EMAIL|" \
 		-e "s|^VITRINA_CORS_ORIGINS=.*|VITRINA_CORS_ORIGINS=https://$DOMAIN|" \
+		-e "s|^VITRINA_STORAGE=.*|VITRINA_STORAGE=disk|" \
+		-e "s|^VITRINA_PUBLIC_API_URL=.*|VITRINA_PUBLIC_API_URL=https://$DOMAIN|" \
+		-e "s|^VITRINA_PUBLIC_MEDIA_URL=.*|VITRINA_PUBLIC_MEDIA_URL=https://$DOMAIN/media|" \
 		-e "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$(openssl rand -hex 32)|" \
 		-e "s|^VITRINA_OTP_SECRET=.*|VITRINA_OTP_SECRET=$(openssl rand -hex 32)|" \
 		-e "s|^VITRINA_PAYMENT_SECRET=.*|VITRINA_PAYMENT_SECRET=$(openssl rand -hex 32)|" \

@@ -323,3 +323,61 @@ class BackupTests(unittest.TestCase):
         problems = self.backup.check(settings, httpx.Client(transport=httpx.MockTransport(wrong)))
         self.assertEqual(len(problems), 3)
         self.assertIn("HTTP 403", problems[0])
+
+
+class DiskStorageTests(unittest.TestCase):
+    """VITRINA_STORAGE=disk: photos and private files on the server's own disk, copied beside the dumps."""
+
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+        from vitrina_api import backup
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.backup, self.dir = backup, Path(tmp.name)
+        self.src, self.dst = self.dir / "media", self.dir / "copy"
+        (self.src / "7").mkdir(parents=True)
+
+    def test_the_copy_follows_the_folder(self):
+        import os
+        (self.src / "7" / "a.jpg").write_bytes(b"a")
+        (self.src / "7" / "b.jpg").write_bytes(b"b")
+        self.assertEqual(self.backup.mirror(self.src, self.dst), (2, 0))
+        self.assertEqual(self.backup.mirror(self.src, self.dst), (0, 0))  # nothing new: nothing copied
+        (self.src / "7" / "b.jpg").unlink()
+        (self.src / "7" / "a.jpg").write_bytes(b"a2")
+        os.utime(self.src / "7" / "a.jpg", (1, 2_000_000_000))
+        (self.dst / "7" / "c.jpg.mirror-part").write_bytes(b"half")  # a run cut off before
+        self.assertEqual(self.backup.mirror(self.src, self.dst), (1, 2))
+        self.assertEqual(sorted(p.name for p in self.dst.rglob("*") if p.is_file()), ["a.jpg"])
+        self.assertEqual((self.dst / "7" / "a.jpg").read_bytes(), b"a2")
+
+    def test_an_empty_folder_does_not_wipe_the_copy(self):
+        (self.src / "7" / "a.jpg").write_bytes(b"a")
+        self.backup.mirror(self.src, self.dst)
+        (self.src / "7" / "a.jpg").unlink()
+        with self.assertRaises(SystemExit):  # e.g. the volume not mounted
+            self.backup.mirror(self.src, self.dst)
+        self.assertTrue((self.dst / "7" / "a.jpg").is_file())
+        with self.assertRaises(SystemExit):
+            self.backup.mirror(self.dir / "missing", self.dst)
+        with self.assertRaises(SystemExit):  # even with nothing to protect: a wrong path is said
+            self.backup.mirror(self.dir / "missing", self.dir / "new-copy")
+        self.assertEqual(self.backup.mirror(self.src / "7" / "..", self.dir / "empty-copy"), (0, 0))
+        self.assertTrue((self.dir / "empty-copy").is_dir())  # an empty folder still has its (empty) copy
+
+    def test_putting_files_back_keeps_newer_ones(self):
+        (self.src / "7" / "a.jpg").write_bytes(b"a")
+        (self.dst / "8").mkdir(parents=True)
+        (self.dst / "8" / "new.jpg").write_bytes(b"uploaded since")
+        self.assertEqual(self.backup.mirror(self.src, self.dst, keep_extra=True), (1, 0))
+        self.assertTrue((self.dst / "8" / "new.jpg").is_file())
+
+    def test_check_writes_reads_and_removes_in_both_folders(self):
+        settings = Settings(storage="disk", media_dir=str(self.dir / "m"), private_media_dir=str(self.dir / "p"),
+                            public_media_url="https://vitrina.kz/media", public_api_url="https://vitrina.kz")
+        self.assertEqual(self.backup.check(settings), [])
+        self.assertEqual([p for p in self.dir.rglob("*") if p.is_file()], [])  # nothing left behind
+        (self.dir / "p" / "0").rmdir()
+        (self.dir / "p" / "0").write_bytes(b"")  # where the check's folder goes: it cannot write there
+        self.assertIn("VITRINA_PRIVATE_MEDIA_DIR", " ".join(self.backup.check(settings)))

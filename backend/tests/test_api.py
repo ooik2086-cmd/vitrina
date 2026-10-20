@@ -1211,7 +1211,7 @@ class OpsTests(ApiTestCase):
                          database_url="postgresql+psycopg://u:p@db/vitrina", media_dir=self.tmp.name,
                          public_media_url="https://cdn.vitrina.kz", cors_origins=[], s3_bucket="vitrina",
                          s3_endpoint="https://s3.example.kz", s3_access_key="k", s3_secret_key="s",
-                         s3_private_bucket="vitrina-private", s3_backup_bucket="vitrina-backup",
+                         s3_private_bucket="vitrina-private", s3_backup_bucket="vitrina-backup", storage="s3",
                          photo_work="worker", sms_provider="mobizon", mobizon_api_key="k")
         self.assertEqual(production_problems(ready), [])
         from dataclasses import replace
@@ -1222,8 +1222,23 @@ class OpsTests(ApiTestCase):
                            (dict(s3_backup_bucket=""), "VITRINA_S3_BACKUP_BUCKET"),
                            (dict(s3_backup_bucket="vitrina-private"), "VITRINA_S3_BACKUP_BUCKET"),
                            (dict(sms_provider=""), "VITRINA_SMS_PROVIDER"), (dict(mobizon_api_key=""), "VITRINA_MOBIZON_API_KEY"),
-                           (dict(mobizon_url="http://api.mobizon.kz"), "VITRINA_MOBIZON_URL")):
+                           (dict(mobizon_url="http://api.mobizon.kz"), "VITRINA_MOBIZON_URL"),
+                           (dict(storage=""), "VITRINA_STORAGE"), (dict(storage="local"), "VITRINA_STORAGE")):
             self.assertIn(env, " ".join(production_problems(replace(ready, **loose))))
+        # On the server's own disk: no buckets needed, not even for the backups.
+        disk = replace(ready, storage="disk", s3_bucket="", s3_private_bucket="", s3_backup_bucket="", s3_endpoint="",
+                       s3_access_key="", s3_secret_key="", media_dir="/data/media", private_media_dir="/data/private",
+                       public_api_url="https://vitrina.kz", public_media_url="https://vitrina.kz/media")
+        self.assertEqual(production_problems(disk), [])
+        self.assertEqual(production_problems(replace(disk, s3_backup_bucket="b", s3_endpoint="https://s3.kz",
+                                                     s3_access_key="k", s3_secret_key="s")), [])
+        for loose, env in ((dict(s3_bucket="vitrina"), "VITRINA_S3_BUCKET"),
+                           (dict(public_api_url=""), "VITRINA_PUBLIC_API_URL"),
+                           (dict(public_api_url="http://vitrina.kz", public_media_url="http://vitrina.kz/media"), "VITRINA_PUBLIC_API_URL"),
+                           (dict(public_media_url="https://cdn.vitrina.kz"), "VITRINA_PUBLIC_MEDIA_URL"),
+                           (dict(media_dir="./media"), "VITRINA_MEDIA_DIR"),
+                           (dict(s3_backup_bucket="b"), "VITRINA_S3_ENDPOINT")):
+            self.assertIn(env, " ".join(production_problems(replace(disk, **loose))))
 
 
 class ShareTests(ApiTestCase):

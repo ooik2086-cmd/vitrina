@@ -42,7 +42,11 @@ class Settings:
     jobs_interval_s: int = field(default_factory=lambda: int(os.environ.get("VITRINA_JOBS_INTERVAL", "0")))
     # Development and tests create tables directly. Production sets this to 0 and runs `alembic upgrade head`.
     auto_create_schema: bool = field(default_factory=lambda: os.environ.get("VITRINA_AUTO_CREATE_SCHEMA", "1") == "1")
-    # Uploaded photos on local disk, used when no S3 bucket is set (development and tests).
+    # Where photos and private files live: "s3" (the buckets below) or "disk" (media_dir and private_media_dir, on
+    # the server's own disk; Caddy serves media_dir at /media). Production must name one; empty: s3 when a bucket
+    # is set, else disk (development and tests).
+    storage: str = field(default_factory=lambda: os.environ.get("VITRINA_STORAGE", ""))
+    # Uploaded photos on local disk, used when no S3 bucket is set (development, tests and VITRINA_STORAGE=disk).
     media_dir: str = field(default_factory=lambda: os.environ.get("VITRINA_MEDIA_DIR", "./media-dev"))
     public_media_url: str = field(default_factory=lambda: os.environ.get("VITRINA_PUBLIC_MEDIA_URL", "http://127.0.0.1:8000/media"))
     # S3-compatible bucket for photos and videos. Set the bucket to use it; VITRINA_PUBLIC_MEDIA_URL is then the
@@ -112,14 +116,32 @@ def production_problems(s: Settings) -> list[str]:
                         "cutting out photos inside the API slows every buyer down for minutes")
     if s.allow_external_media:
         problems.append("VITRINA_ALLOW_EXTERNAL_MEDIA must be 0: listings could show images from any site")
-    if not s.s3_bucket:
-        problems.append("VITRINA_S3_BUCKET must be set: photos on the API server's disk are lost with the server")
-    elif not (s.s3_endpoint.startswith("https://") and s.s3_access_key and s.s3_secret_key):
-        problems.append("VITRINA_S3_ENDPOINT (https), VITRINA_S3_ACCESS_KEY and VITRINA_S3_SECRET_KEY must be set")
-    if not s.s3_private_bucket or s.s3_private_bucket == s.s3_bucket:
-        problems.append("VITRINA_S3_PRIVATE_BUCKET must name a second bucket without public read: receipts and "
-                        "dispute evidence must not be reachable by address")
-    if not s.s3_backup_bucket or s.s3_backup_bucket in (s.s3_bucket, s.s3_private_bucket):
-        problems.append("VITRINA_S3_BACKUP_BUCKET must name a third bucket without public read: the database's "
-                        "nightly copies must outlive the server")
+    if s.storage == "s3":
+        if not s.s3_bucket:
+            problems.append("VITRINA_S3_BUCKET must be set with VITRINA_STORAGE=s3")
+        if not s.s3_private_bucket or s.s3_private_bucket == s.s3_bucket:
+            problems.append("VITRINA_S3_PRIVATE_BUCKET must name a second bucket without public read: receipts and "
+                            "dispute evidence must not be reachable by address")
+        if not s.s3_backup_bucket or s.s3_backup_bucket in (s.s3_bucket, s.s3_private_bucket):
+            problems.append("VITRINA_S3_BACKUP_BUCKET must name a third bucket without public read: the database's "
+                            "nightly copies must outlive the server")
+    elif s.storage == "disk":
+        # Photos at https://SITE/media (Caddy serves the folder), private files through the API's signed links.
+        if s.s3_bucket or s.s3_private_bucket:
+            problems.append("VITRINA_S3_BUCKET and VITRINA_S3_PRIVATE_BUCKET must be empty with VITRINA_STORAGE=disk")
+        if not s.public_api_url.startswith("https://"):
+            problems.append("VITRINA_PUBLIC_API_URL must be the site's https address: links to private files name it")
+        elif s.public_media_url.rstrip("/") != s.public_api_url.rstrip("/") + "/media":
+            problems.append("VITRINA_PUBLIC_MEDIA_URL must be VITRINA_PUBLIC_API_URL + /media with "
+                            "VITRINA_STORAGE=disk: that is where Caddy serves the photos")
+        if not (os.path.isabs(s.media_dir) and os.path.isabs(s.private_media_dir)):
+            problems.append("VITRINA_MEDIA_DIR and VITRINA_PRIVATE_MEDIA_DIR must be absolute (the volumes)")
+    else:
+        problems.append("VITRINA_STORAGE must be disk (the server's own disk) or s3 (buckets)")
+    # The backup bucket is optional on disk: without it the copies stay on the server (deploy/README.md says how
+    # to take them off it).
+    if s.s3_bucket or s.s3_private_bucket or s.s3_backup_bucket:
+        if not (s.s3_endpoint.startswith("https://") and s.s3_access_key and s.s3_secret_key):
+            problems.append("VITRINA_S3_ENDPOINT (https), VITRINA_S3_ACCESS_KEY and VITRINA_S3_SECRET_KEY must be "
+                            "set for the buckets")
     return problems

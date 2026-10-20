@@ -108,13 +108,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: shellcheck -s sh deploy/*.sh deploy/test/*.sh
-      - name: setup.sh on this fresh Ubuntu machine, then the live-server stack end to end, with a stand-in S3
+      - name: setup.sh on this fresh Ubuntu machine, then the live-server stack end to end, photos on the disk
         shell: bash
         run: |
           set -o pipefail
           # The script's last lines go into an annotation (about 4 KB), which can be read where the full log cannot.
           sudo SMOKE_SETUP=1 sh deploy/test/smoke.sh 2>&1 | tee /tmp/smoke.log || {
             echo "::error title=deploy smoke::$(grep -Ev '^ *(Container|Network|Volume|Image) |^[a-z0-9-]+-1 +[|]|^#[0-9]+ |^ *$' /tmp/smoke.log | tail -n 25 | cut -c1-200 | sed ':a;N;$!ba;s/%/%25/g;s/\r//g;s/\n/%0A/g')"
+            exit 1
+          }
+      - name: the same stack with photos in the stand-in S3's buckets instead of on the disk
+        shell: bash
+        run: |
+          set -o pipefail
+          sudo SMOKE_STORAGE=s3 sh deploy/test/smoke.sh 2>&1 | tee /tmp/smoke.log || {
+            echo "::error title=deploy smoke s3::$(grep -Ev '^ *(Container|Network|Volume|Image) |^[a-z0-9-]+-1 +[|]|^#[0-9]+ |^ *$' /tmp/smoke.log | tail -n 25 | cut -c1-200 | sed ':a;N;$!ba;s/%/%25/g;s/\r//g;s/\n/%0A/g')"
             exit 1
           }
 
