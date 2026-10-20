@@ -96,11 +96,11 @@ services:
       VITRINA_TLS: "${VITRINA_TLS:?set VITRINA_TLS in deploy/.env to an email for Let's Encrypt}"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - media:/srv/media:ro   # the photos (VITRINA_STORAGE=disk); the private files' volume is not here
       - caddy_data:/data   # the certificate and its key: keep it, or a new one is asked for on every start
       - caddy_config:/config
     depends_on:
       api: {condition: service_healthy}
+      media: {condition: service_healthy}
     healthcheck:   # its admin endpoint, on the container's own loopback only
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2019/config/"]
       interval: 30s
@@ -110,6 +110,28 @@ services:
     logging: *logs
     networks:
       edge: {ipv4_address: 172.31.250.10}
+
+  # The photos' volume served at /media (VITRINA_STORAGE=disk; empty with s3). Not the Caddy above: this one holds
+  # no certificate key, nothing but the photos (read only), and runs as nobody (the files are world-readable).
+  media:
+    image: caddy:2.8
+    command: ["caddy", "run", "--config", "/etc/caddy/Caddyfile"]
+    user: "65534:65534"
+    read_only: true
+    environment: {XDG_DATA_HOME: /tmp, XDG_CONFIG_HOME: /tmp}
+    tmpfs: [/tmp]
+    volumes:
+      - ./Caddyfile.media:/etc/caddy/Caddyfile:ro
+      - media:/srv/media:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/health"]
+      interval: 30s
+      start_period: 10s
+      start_interval: 2s
+    mem_limit: 128m
+    restart: unless-stopped
+    logging: *logs
+    networks: [edge]
 
 networks:
   inner:

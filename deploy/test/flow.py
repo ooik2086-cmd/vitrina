@@ -4,6 +4,7 @@
     python flow.py count          how many listings there are
     python flow.py check ID       its share page carries the https address (the proxy headers are trusted)
     python flow.py photo ID       the address of its first photo
+    python flow.py proof ID       its receipt (a private file) opens through a signed link; prints the file's key
 """
 import io
 import os
@@ -16,7 +17,8 @@ from PIL import Image, ImageDraw
 from sqlalchemy import func, select
 
 from vitrina_api.config import Settings
-from vitrina_api.models import Listing, make_session_factory
+from vitrina_api.models import AuthProof, Listing, make_session_factory
+from vitrina_api.storage import make_private_storage
 
 SITE = f"https://{os.environ['VITRINA_DOMAIN']}"
 API = f"{SITE}/api/v1"
@@ -66,6 +68,8 @@ def new_listing() -> None:
         "condition": "new_with_box", "price_tiyn": 2_000_000,
         "sizes": [{"label": "42", "insole_cm": "27", "quantity": 1}], "photos": photos}), 201)["id"]
     must(c.post(f"{API}/listings/{lid}/publish"))
+    # A receipt: a private file, kept out of the public photos and opened only through a signed link.
+    must(c.post(f"{API}/listings/{lid}/proofs", files={"file": ("r.jpg", photo(9), "image/jpeg")}), 201)
     for _ in range(120):  # the photo worker cuts the four photos out
         mine = next(i for i in must(c.get(f"{API}/me/listings"))["items"] if i["id"] == lid)
         if not mine["photos_pending"] and all(m["thumb_url"] for m in mine["media"]):
@@ -74,6 +78,16 @@ def new_listing() -> None:
     else:
         sys.exit(f"listing {lid}: the photo worker did not finish its photos")
     print(lid)
+
+
+def proof(lid: str) -> None:
+    with sessions() as db:
+        ref = db.scalar(select(AuthProof.url).where(AuthProof.listing_id == int(lid)))
+    key = ref.removeprefix("private:/")
+    r = httpx.get(make_private_storage(Settings()).signed_url(key, 300), timeout=30)
+    if r.status_code != 200 or not r.content.startswith(b"\xff\xd8"):
+        sys.exit(f"the receipt {key} does not open through its signed link: {r.status_code}")
+    print(key)
 
 
 def check(lid: str) -> None:
@@ -86,6 +100,8 @@ def check(lid: str) -> None:
 if __name__ == "__main__":
     if sys.argv[1] == "list":
         new_listing()
+    elif sys.argv[1] == "proof":
+        proof(sys.argv[2])
     elif sys.argv[1] == "photo":
         print(httpx.get(f"{API}/listings/{sys.argv[2]}", timeout=30).json()["media"][0]["original_url"])
     elif sys.argv[1] == "count":

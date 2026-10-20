@@ -112,6 +112,7 @@ curl -fsS --noproxy "*" --max-time 3 http://127.0.0.1:8000/api/v1/health > /dev/
 step "a seller lists a shoe: photos stored ($STORAGE), served at their address, cut out by the photo worker"
 first_id=$(flow list)
 flow check "$first_id"
+receipt=$(flow proof "$first_id")
 if [ "$STORAGE" = disk ]; then
 	photo=$(flow photo "$first_id")
 	https -o /dev/null -D - "$photo" > photo.head || fail "Caddy does not serve the photo $photo"
@@ -119,8 +120,15 @@ if [ "$STORAGE" = disk ]; then
 	grep -qi '^x-content-type-options: nosniff' photo.head || fail "the photo has no nosniff"
 	grep -qi '^content-type: image/' photo.head || fail "the photo is not served as an image"
 	rm photo.head
-	[ "$(curl -sS --noproxy "*" -o /dev/null -w '%{http_code}' --cacert test/certs/ca.pem --resolve vitrina.test:443:127.0.0.1 https://vitrina.test/media/)" = 404 ] ||
-		fail "/media/ lists or answers something"
+	code() { curl -sS --noproxy "*" -o /dev/null -w '%{http_code}' --cacert test/certs/ca.pem --resolve vitrina.test:443:127.0.0.1 "$1"; }
+	for path in /media/ /media/1/ /media/1/..%2f..%2fetc%2fpasswd /media/1/x.txt "/media/${receipt}"; do
+		[ "$(code "https://vitrina.test$path")" = 404 ] || fail "$path answers something other than 404"
+	done
+	missing=$(echo "$photo" | sed 's|/[0-9a-f]\{32\}\.|/00000000000000000000000000000000.|')
+	curl -sS --noproxy "*" -o /dev/null -D - --cacert test/certs/ca.pem --resolve vitrina.test:443:127.0.0.1 "$missing" > missing.head
+	grep -q '^HTTP/[0-9.]* 404' missing.head || fail "a missing photo is not 404"
+	if grep -qi immutable missing.head; then fail "a missing photo is cached for a year"; fi
+	rm missing.head
 fi
 
 if [ "$STORAGE" = s3 ]; then
@@ -148,6 +156,7 @@ else
 	grep -q 'no backup bucket' backup.out || fail "backup.sh did not say the copies stay on the server"
 	copied=$(find "$VITRINA_BACKUP_DIR/files/media" -type f | wc -l)
 	[ "$copied" -ge 8 ] || fail "the photos were not copied beside the dumps ($copied files)"
+	[ -f "$VITRINA_BACKUP_DIR/files/private/$receipt" ] || fail "the receipt was not copied beside the dumps"
 	[ "$(stat -c %a "$VITRINA_BACKUP_DIR/files")" = 700 ] || fail "the files' copy is readable by others"
 fi
 rm backup.out
@@ -173,11 +182,13 @@ ls "$VITRINA_BACKUP_DIR"/before-restore-*.dump > /dev/null || fail "no copy of t
 flow check "$first_id"
 
 if [ "$STORAGE" = disk ]; then
-	step "a photo lost from the disk comes back from the nightly copy"
-	$C exec -T api sh -c "rm /data/media/${photo#https://vitrina.test/media/}"
+	step "a photo and a receipt lost from the disk come back from the nightly copy"
+	$C exec -T api sh -c "rm /data/media/${photo#https://vitrina.test/media/} /data/private/$receipt"
 	if https -o /dev/null "$photo" 2> /dev/null; then fail "the photo was not removed"; fi
+	if sh restore.sh --files; then fail "restore.sh --files ran without --yes"; fi
 	sh restore.sh --files --yes
 	https -o /dev/null "$photo" || fail "the photo did not come back from the copy"
+	flow proof "$first_id" > /dev/null || fail "the receipt did not come back from the copy"
 	$C exec -T api test -O "/data/media/${photo#https://vitrina.test/media/}" || fail "the restored photo is not the API's"
 fi
 

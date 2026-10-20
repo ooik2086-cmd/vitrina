@@ -25,7 +25,7 @@ write_env() {
 	if [ -f "$ENV_FILE" ]; then
 		kept=$(sed -n 's/^VITRINA_DOMAIN=//p' "$ENV_FILE")
 		if [ -n "$DOMAIN" ] && [ "$DOMAIN" != "$kept" ]; then
-			die "$ENV_FILE has VITRINA_DOMAIN=$kept, not $DOMAIN. To change it, edit VITRINA_DOMAIN, VITRINA_CORS_ORIGINS and VITRINA_PUBLIC_API_URL (and VITRINA_TLS for the email) there, keeping the secrets, then run: sh $0"
+			die "$ENV_FILE has VITRINA_DOMAIN=$kept, not $DOMAIN. To change it, edit VITRINA_DOMAIN, VITRINA_CORS_ORIGINS, VITRINA_PUBLIC_API_URL and VITRINA_PUBLIC_MEDIA_URL (and VITRINA_TLS for the email) there; with VITRINA_STORAGE=disk read deploy/README.md first, photos already stored keep the old address, keeping the secrets, then run: sh $0"
 		fi
 		echo "$ENV_FILE exists: keeping it, domain $kept (its secrets are in use)"
 		return
@@ -197,7 +197,7 @@ set -a
 . "$DEPLOY/backup.env"
 set +a
 $C run --rm --no-deps -T -e VITRINA_S3_BACKUP_ACCESS_KEY -e VITRINA_S3_BACKUP_SECRET_KEY api \
-	python -m vitrina_api.backup check || die "fix VITRINA_S3_* in $ENV_FILE (what is wrong is said above), then run: sh $0"
+	python -m vitrina_api.backup check || die "fix what is said above (disk: the volumes must be writable; s3: VITRINA_S3_* in $ENV_FILE), then run: sh $0"
 
 say "first backup"
 sh "$DEPLOY/backup.sh" || die "the first backup failed (see above)"

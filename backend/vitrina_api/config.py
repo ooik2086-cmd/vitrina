@@ -138,10 +138,12 @@ def production_problems(s: Settings) -> list[str]:
             problems.append("VITRINA_MEDIA_DIR and VITRINA_PRIVATE_MEDIA_DIR must be absolute (the volumes)")
     else:
         problems.append("VITRINA_STORAGE must be disk (the server's own disk) or s3 (buckets)")
-    # The backup bucket is optional on disk: without it the copies stay on the server (deploy/README.md says how
-    # to take them off it).
-    if s.s3_bucket or s.s3_private_bucket or s.s3_backup_bucket:
+    if s.s3_bucket or s.s3_private_bucket:
         if not (s.s3_endpoint.startswith("https://") and s.s3_access_key and s.s3_secret_key):
             problems.append("VITRINA_S3_ENDPOINT (https), VITRINA_S3_ACCESS_KEY and VITRINA_S3_SECRET_KEY must be "
                             "set for the buckets")
+    elif s.s3_backup_bucket and not s.s3_endpoint.startswith("https://"):
+        # The backup bucket alone (optional on disk): the API never uses it, so its key may live in backup.env only,
+        # out of the running services' reach; backup.sh says so if there is none.
+        problems.append("VITRINA_S3_ENDPOINT must be the backup bucket's https address")
     return problems

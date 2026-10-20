@@ -1232,6 +1232,8 @@ class OpsTests(ApiTestCase):
         self.assertEqual(production_problems(disk), [])
         self.assertEqual(production_problems(replace(disk, s3_backup_bucket="b", s3_endpoint="https://s3.kz",
                                                      s3_access_key="k", s3_secret_key="s")), [])
+        # Its key may be in backup.env only, which the running services never get.
+        self.assertEqual(production_problems(replace(disk, s3_backup_bucket="b", s3_endpoint="https://s3.kz")), [])
         for loose, env in ((dict(s3_bucket="vitrina"), "VITRINA_S3_BUCKET"),
                            (dict(public_api_url=""), "VITRINA_PUBLIC_API_URL"),
                            (dict(public_api_url="http://vitrina.kz", public_media_url="http://vitrina.kz/media"), "VITRINA_PUBLIC_API_URL"),

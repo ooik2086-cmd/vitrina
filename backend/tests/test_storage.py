@@ -366,6 +366,21 @@ class DiskStorageTests(unittest.TestCase):
         self.assertEqual(self.backup.mirror(self.src / "7" / "..", self.dir / "empty-copy"), (0, 0))
         self.assertTrue((self.dir / "empty-copy").is_dir())  # an empty folder still has its (empty) copy
 
+    def test_files_gone_from_the_folder_are_kept_aside(self):
+        """backup.sh moves what left the volume into removed/DATE: a loss noticed days later can still be undone,
+        and a folder emptied on purpose (the last receipt deleted) does not stop the nightly backup."""
+        (self.src / "7" / "a.jpg").write_bytes(b"a")
+        self.backup.mirror(self.src, self.dst)
+        (self.src / "7" / "a.jpg").unlink()
+        aside = self.dir / "removed" / "20261020"
+        self.assertEqual(self.backup.mirror(self.src, self.dst, removed_to=aside), (0, 1))
+        self.assertEqual((aside / "7" / "a.jpg").read_bytes(), b"a")
+        self.assertFalse((self.dst / "7" / "a.jpg").exists())
+
+    def test_symbolic_links_are_not_copied(self):
+        (self.src / "7" / "a.jpg").symlink_to("/etc/hostname")
+        self.assertEqual(self.backup.mirror(self.src, self.dst), (0, 0))
+
     def test_putting_files_back_keeps_newer_ones(self):
         (self.src / "7" / "a.jpg").write_bytes(b"a")
         (self.dst / "8").mkdir(parents=True)
@@ -374,10 +389,21 @@ class DiskStorageTests(unittest.TestCase):
         self.assertTrue((self.dst / "8" / "new.jpg").is_file())
 
     def test_check_writes_reads_and_removes_in_both_folders(self):
+        from dataclasses import replace
         settings = Settings(storage="disk", media_dir=str(self.dir / "m"), private_media_dir=str(self.dir / "p"),
                             public_media_url="https://vitrina.kz/media", public_api_url="https://vitrina.kz")
         self.assertEqual(self.backup.check(settings), [])
         self.assertEqual([p for p in self.dir.rglob("*") if p.is_file()], [])  # nothing left behind
+        # With a backup bucket on disk, that bucket is checked too: it must not be public.
+        store = BackupBucket()
+        store.public = ("vitrina-backup",)
+        with_bucket = replace(settings, s3_backup_bucket="vitrina-backup", s3_endpoint="https://s3.example.kz",
+                              s3_access_key="key", s3_secret_key="secret", s3_region="kz-1")
+        problems = self.backup.check(with_bucket, httpx.Client(transport=httpx.MockTransport(store)))
+        self.assertEqual(len(problems), 1)
+        self.assertIn("VITRINA_S3_BACKUP_BUCKET", problems[0])
+        store.public = ()
+        self.assertEqual(self.backup.check(with_bucket, httpx.Client(transport=httpx.MockTransport(store))), [])
         (self.dir / "p" / "0").rmdir()
         (self.dir / "p" / "0").write_bytes(b"")  # where the check's folder goes: it cannot write there
         self.assertIn("VITRINA_PRIVATE_MEDIA_DIR", " ".join(self.backup.check(settings)))

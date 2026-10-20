@@ -11,6 +11,9 @@
 set -eu
 
 usage="usage: restore.sh FILE.dump --yes  |  restore.sh --from-bucket NAME --yes  |  restore.sh --files --yes"
+if [ "${1:-}" = "--files" ] && [ "${2:-}" != "--yes" ]; then
+	echo "$usage"; echo "It puts the photos and private files back from the nightly copy (newer ones are kept): add --yes."; exit 1
+fi
 [ "${2:-}" = "--yes" ] || [ "${3:-}" = "--yes" ] || { echo "$usage"; echo "It replaces the whole database: add --yes."; exit 1; }
 case $1 in
 	--from-bucket | --files | /*) ;;
@@ -28,7 +31,7 @@ if [ "$1" = "--files" ]; then
 	[ -d "$DIR/files/media" ] && [ -d "$DIR/files/private" ] || { echo "no copy of the files in $DIR/files"; exit 1; }
 	$C run --rm --no-deps -T -u 0 -v "$DIR/files:/copy:ro" api sh -c \
 		'python -m vitrina_api.backup mirror --keep-extra /copy/media /data/media && python -m vitrina_api.backup mirror --keep-extra /copy/private /data/private && chown -R vitrina /data/media /data/private'
-	echo "files put back from $DIR/files"
+	echo "files put back from $DIR/files (files removed in the last 30 days are in $DIR/files/removed/DATE)"
 	exit 0
 fi
 if [ "$1" = "--from-bucket" ]; then

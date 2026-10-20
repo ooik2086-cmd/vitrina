@@ -117,13 +117,16 @@ def prune(s3: S3Storage, keep: int) -> list[str]:
     return gone
 
 
-def mirror(src: Path, dst: Path, *, keep_extra: bool = False) -> tuple[int, int]:
+def mirror(src: Path, dst: Path, *, keep_extra: bool = False, removed_to: Path | None = None) -> tuple[int, int]:
     """Makes dst hold what src holds: new and changed files copied (through a temporary name, so a cut-off run
-    never leaves half a file), files src no longer has removed unless keep_extra. Returns (copied, removed)."""
+    never leaves half a file), files src no longer has taken out of dst unless keep_extra: moved under removed_to
+    when given (backup.sh keeps them there for 30 days, so a loss noticed late can still be undone), else deleted.
+    Symbolic links in src are never followed or copied. Returns (copied, removed)."""
     if not src.is_dir():
         raise SystemExit(f"{src} is not a folder")
     files = {p.relative_to(src) for p in src.rglob("*") if p.is_file() and not p.is_symlink()}
-    if not files and not keep_extra and dst.is_dir() and any(p.is_file() for p in dst.rglob("*")):
+    if (not files and not keep_extra and removed_to is None and dst.is_dir()
+            and any(p.is_file() for p in dst.rglob("*"))):
         # An empty source is far likelier a missing volume than every file deleted: the copy is not wiped.
         raise SystemExit(f"{src} is empty but its copy {dst} is not: not removing the copy")
     dst.mkdir(parents=True, exist_ok=True)  # even for an empty folder: restore.sh --files expects both copies
@@ -142,7 +145,11 @@ def mirror(src: Path, dst: Path, *, keep_extra: bool = False) -> tuple[int, int]
         for b in sorted(dst.rglob("*"), reverse=True):  # files before their folders
             rel = b.relative_to(dst)
             if b.is_file() and rel not in files:  # with a .mirror-part left by a run cut off
-                b.unlink()
+                if removed_to is None or b.name.endswith(".mirror-part"):
+                    b.unlink()
+                else:
+                    (removed_to / rel).parent.mkdir(parents=True, exist_ok=True)
+                    os.replace(b, removed_to / rel)
                 removed += 1
             elif b.is_dir() and not any(b.iterdir()):
                 b.rmdir()
@@ -216,6 +223,7 @@ def main(argv: list[str] | None = None, client=None) -> None:
     m.add_argument("src", type=Path)
     m.add_argument("dst", type=Path)
     m.add_argument("--keep-extra", action="store_true", help="never remove a file from dst")
+    m.add_argument("--removed-to", type=Path, help="move files gone from src here instead of deleting them")
     args = parser.parse_args(argv)
     if args.cmd == "check":
         settings = Settings()
@@ -226,7 +234,7 @@ def main(argv: list[str] | None = None, client=None) -> None:
                                        "storage ok: photos public, private and backup buckets closed"))
         raise SystemExit(1 if problems else 0)
     if args.cmd == "mirror":
-        copied, removed = mirror(args.src, args.dst, keep_extra=args.keep_extra)
+        copied, removed = mirror(args.src, args.dst, keep_extra=args.keep_extra, removed_to=args.removed_to)
         print(f"{args.src} -> {args.dst}: {copied} copied, {removed} removed")
         return
     s3 = bucket(Settings(), client)
