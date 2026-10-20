@@ -9,7 +9,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -71,22 +71,58 @@ def message_out(m: Message) -> dict:
             "created_at": services.aware(m.created_at).isoformat()}
 
 
+def preload_conversations(db: Session, convs: list[Conversation], user: User) -> None:
+    """Reads what a list of chats shows (listings with their photos, the other people, each chat's last message and
+    unread count) in a few queries for the whole list; conversation_out then finds them in db.info. The last message
+    and unread count are this user's: a request serves one viewer."""
+    from .serializers import BARE, with_light_media  # serializers imports this module
+    if not convs:
+        return
+    ids = [c.id for c in convs]
+    listings = db.info.setdefault("conv_listing", {})
+    listings.update({row.id: row for row in db.scalars(select(Listing).options(*BARE).where(
+        Listing.id.in_({c.listing_id for c in convs})))})
+    with_light_media(db, list(listings.values()))
+    people = db.info.setdefault("conv_user", {})
+    people.update({row.id: row for row in db.scalars(select(User).where(
+        User.id.in_({c.buyer_id for c in convs} | {c.seller_id for c in convs})))})
+    newest = select(func.max(Message.id)).where(Message.conversation_id.in_(ids)).group_by(Message.conversation_id)
+    last = db.info.setdefault("conv_last", {})
+    last.update({c: None for c in ids})
+    last.update({m.conversation_id: m for m in db.scalars(select(Message).where(Message.id.in_(newest)))})
+    read_up_to = case((Conversation.buyer_id == user.id, Conversation.buyer_last_read_id),
+                      else_=Conversation.seller_last_read_id)
+    unread = db.info.setdefault("conv_unread", {})
+    unread.update({c: 0 for c in ids})
+    unread.update(dict(db.execute(
+        select(Message.conversation_id, func.count(Message.id))
+        .join(Conversation, Conversation.id == Message.conversation_id)
+        .where(Message.conversation_id.in_(ids), Message.id > read_up_to, Message.sender_id != user.id)
+        .group_by(Message.conversation_id)).all()))
+
+
 def conversation_out(db: Session, conv: Conversation, user: User) -> dict:
-    listing = db.get(Listing, conv.listing_id)
+    listing = db.info.get("conv_listing", {}).get(conv.listing_id) or db.get(Listing, conv.listing_id)
     me_buyer = user.id == conv.buyer_id
-    other = db.get(User, conv.seller_id if me_buyer else conv.buyer_id)
+    people = db.info.get("conv_user", {})
+    other_id = conv.seller_id if me_buyer else conv.buyer_id
+    other = people.get(other_id) or db.get(User, other_id)
     last_read = conv.buyer_last_read_id if me_buyer else conv.seller_last_read_id
-    last = db.scalar(select(Message).where(Message.conversation_id == conv.id).order_by(Message.id.desc()).limit(1))
-    unread = db.scalar(select(func.count(Message.id)).where(
-        Message.conversation_id == conv.id, Message.id > last_read, Message.sender_id != user.id))
-    cover = next((m.processed_url or m.original_url for m in listing.media if m.angle != "frame"), None)
+    if conv.id in db.info.get("conv_last", {}):
+        last, unread = db.info["conv_last"][conv.id], db.info["conv_unread"][conv.id]
+    else:
+        last = db.scalar(select(Message).where(Message.conversation_id == conv.id).order_by(Message.id.desc()).limit(1))
+        unread = db.scalar(select(func.count(Message.id)).where(
+            Message.conversation_id == conv.id, Message.id > last_read, Message.sender_id != user.id))
+    from .serializers import listing_cover  # serializers imports this module
+    cover = listing_cover(listing)
     return {
         "id": conv.id, "listing_id": listing.id, "listing_title": listing.title, "listing_cover": cover,
         "price_tiyn": listing.price_tiyn, "role": "buyer" if me_buyer else "seller",
         # Names only, never phone numbers.
         "other_name": (other.shop_name if me_buyer else other.display_name) or ("Сатушы" if me_buyer else "Сатып алушы"),
         "last_message": message_out(last) if last else None, "unread": int(unread or 0),
-        "seller_away_until": seller_away(db.get(User, conv.seller_id)),
+        "seller_away_until": seller_away(people.get(conv.seller_id) or db.get(User, conv.seller_id)),
     }
 
 
@@ -144,6 +180,7 @@ def list_conversations(user: User = Depends(current_user), db: Session = Depends
         or_(and_(Conversation.buyer_id == user.id, Conversation.seller_id.not_in(mine)),
             and_(Conversation.seller_id == user.id, Conversation.buyer_id.not_in(mine))))
                       .order_by(Conversation.last_message_at.desc()).limit(100)).all()
+    preload_conversations(db, rows, user)
     return {"items": [conversation_out(db, c, user) for c in rows]}
 
 

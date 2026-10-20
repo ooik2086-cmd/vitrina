@@ -24,7 +24,8 @@ from .models import IdempotencyRecord, Listing, ListingSize, Order, OrderEvent, 
 from .api_common import DECLINABLE, IN_DELIVERY, PHONE_RE
 from .schemas import DeliveryIn, OrderIn, ReasonIn, ShipIn
 from .serializers import (away_until, delivery_out, details_snapshot, evidence_out, listing_cover, order_out,
-                          order_summary, ordered_details, ordered_photos, photo_snapshot, photos_version)
+                          order_summary, ordered_details, ordered_photos, photo_snapshot, photos_version,
+                          preload_orders)
 from .storage import MAX_UPLOAD_BYTES, Storage, VideoUnavailable, clean_video, is_video, normalize_image
 
 
@@ -140,6 +141,7 @@ def list_orders(role: Literal["buyer", "seller"] = "buyer", user: User = Depends
                 db: Session = Depends(get_db)):
     column = Order.buyer_id if role == "buyer" else Order.seller_id
     rows = db.scalars(select(Order).where(column == user.id).order_by(Order.id.desc()).limit(100)).all()
+    preload_orders(db, rows)
     return {"items": [order_summary(db, o) for o in rows]}
 
 

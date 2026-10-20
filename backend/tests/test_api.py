@@ -491,6 +491,104 @@ class WeightTests(ApiTestCase):
             event.remove(engine, "before_cursor_execute", listen)
         self.assertEqual(sum(re.search(r"\bFROM users\b", q) is not None for q in asked), 1, asked)
 
+    def test_lists_of_orders_and_chats_read_the_same_few_rows_however_long_they_are(self):
+        """Orders, sales, chats, earnings and support's orders each read a fixed number of queries: a buyer with
+        forty orders waited for forty times three reads before. Every row still shows its own order's and chat's
+        values, also for orders from before the title and cover were kept on the order."""
+        from sqlalchemy import event, update
+        from vitrina_api.models import Order
+        staff = self.make_staff()
+        rival = self.login("+77010000003")
+        self.post("/me/seller", rival, {"shop_name": "Басқа", "city": "Алматы"})
+        theirs = self.post("/listings", rival, LISTING).json()
+        theirs = self.post(f"/listings/{theirs['id']}/publish", rival).json()
+        their_order = self.post("/orders", self.buyer, {"listing_id": theirs["id"], "size_id": theirs["sizes"][0]["id"]},
+                                **{"Idempotency-Key": "rival"}).json()
+        self.post(f"/orders/{their_order['id']}/pay", self.buyer)
+        self.assertEqual(self.pay(their_order, event_id="p_rival").json()["status"], "PAID")
+        made, held, title_of, chat = 0, {}, {}, {}
+
+        def grow(n):
+            nonlocal made
+            for _ in range(n):
+                k, title = made, f"Аяқкиім {made}"
+                made += 1
+                listing = self.publish(title=title)
+                order = self.post("/orders", self.buyer, {"listing_id": listing["id"], "size_id": listing["sizes"][0]["id"]},
+                                  **{"Idempotency-Key": f"q{k}"}).json()
+                title_of[order["id"]] = title
+                if k % 2:  # every other order is paid: held, or (one in two of those) delivered and settled
+                    self.post(f"/orders/{order['id']}/pay", self.buyer)
+                    self.assertEqual(self.pay(order, event_id=f"p{k}").json()["status"], "PAID")
+                    if k % 4 == 1:
+                        self.post(f"/orders/{order['id']}/accept", self.seller)
+                        self.post(f"/orders/{order['id']}/ship", self.seller, {"tracking_number": f"KZ{k}"})
+                        self.deliver(f"KZ{k}", event_id=f"d{k}")
+                        self.assertEqual(self.post(f"/orders/{order['id']}/confirm", self.buyer).json()["status"],
+                                         "COMPLETED")
+                    else:
+                        held[order["id"]] = order["total_tiyn"]
+                if k % 4 < 2:  # as orders made before the title and cover were kept on them
+                    with self.db() as db:
+                        db.execute(update(Order).where(Order.id == order["id"])
+                                   .values(listing_title=None, listing_cover=None))
+                        db.commit()
+                cid = self.post("/conversations", self.buyer, {"listing_id": listing["id"]}).json()["id"]
+                # Chats differ: a seller's answer leaves the buyer one unread, two questions leave the seller two.
+                said = [(self.buyer, f"Өлшемі дәл ме? {k}"), (self.seller, f"Иә {k}")] if k % 2 else \
+                    [(self.buyer, f"Сәлем {k}"), (self.buyer, f"Бар ма? {k}")]
+                for token, text in said:
+                    self.assertEqual(self.post(f"/conversations/{cid}/messages", token, {"body": text}).status_code, 201)
+                chat[cid] = (title, said[-1][1], int(said[-1][0] == self.seller), 2 * int(said[-1][0] == self.buyer))
+
+        def reads(path, token):
+            engine = self.app.state.sessions.kw["bind"]
+            asked = []
+            listen = lambda *a: asked.append(a[2])  # noqa: E731
+            event.listen(engine, "before_cursor_execute", listen)
+            try:
+                r = self.c.get(f"/api/v1{path}", headers=self.h(token))
+            finally:
+                event.remove(engine, "before_cursor_execute", listen)
+            self.assertEqual(r.status_code, 200, r.text)
+            # A row needs a listing's title and cover, never all its sizes or every 360° frame as ORM objects.
+            self.assertFalse([q for q in asked if re.search(r"\bFROM listing_sizes\b", q)
+                              and "listing_sizes.listing_id IN" in q], path)
+            return len(asked), r.json()
+
+        pages = [("/orders", self.buyer), ("/orders?role=seller", self.seller), ("/conversations", self.buyer),
+                 ("/conversations", self.seller), ("/me/earnings", self.seller), ("/admin/orders", staff)]
+        grow(2)
+        few = [reads(path, token)[0] for path, token in pages]
+        grow(4)
+        got = {}
+        for (path, token), n in zip(pages, few):
+            m, got[path, token] = reads(path, token)
+            self.assertEqual(m, n, path)
+        # Each row its own: title, last word and unread count of each chat, for the buyer and for the seller.
+        for token, unread in ((self.buyer, 2), (self.seller, 3)):
+            rows = got["/conversations", token]["items"]
+            self.assertEqual({c["id"]: (c["listing_title"], c["last_message"]["body"], c["unread"]) for c in rows},
+                             {cid: (c[0], c[1], c[unread]) for cid, c in chat.items()})
+            self.assertTrue(all(c["listing_cover"] for c in rows))
+        for path, token in (("/orders", self.buyer), ("/orders?role=seller", self.seller)):
+            rows = [o for o in got[path, token]["items"] if o["id"] in title_of]
+            self.assertEqual(len(rows), 6, path)
+            self.assertEqual({o["id"]: (o["listing_title"], o["seller_name"], o["size_label"]) for o in rows},
+                             {i: (t, "Qadam Store", LISTING["sizes"][0]["label"]) for i, t in title_of.items()})
+            self.assertTrue(all(o["listing_cover"] for o in rows), path)
+        # Held is the sum of this seller's paid orders only; settled ones are listed with their titles.
+        earnings = got["/me/earnings", self.seller]
+        self.assertEqual(earnings["held_tiyn"], sum(held.values()))
+        self.assertEqual(sorted(i["listing_title"] for i in earnings["items"]), ["Аяқкиім 1", "Аяқкиім 5"])
+        self.assertTrue(all(i["net_tiyn"] > 0 and i["fee_tiyn"] > 0 for i in earnings["items"]))
+        # Support sees each order's own history.
+        admin = got["/admin/orders", staff]["items"]
+        self.assertEqual(len(admin), 7)
+        for o in admin:
+            detail = self.c.get(f"/api/v1/orders/{o['id']}", headers=self.h(self.buyer)).json()
+            self.assertEqual([e["status"] for e in o["history"]], [e["status"] for e in detail["history"]], o["id"])
+
     def test_price_bands_are_read_again_only_when_prices_change(self):
         from sqlalchemy import event, insert, update
         from vitrina_api.models import Listing

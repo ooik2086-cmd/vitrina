@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session, raiseload
+from sqlalchemy.orm import Session, lazyload, raiseload
 
 from vitrina_core.catalog import compute_bounds
 from vitrina_core.orders import OrderStatus as S
@@ -89,6 +89,9 @@ def listing_stats(db: Session, listing: Listing) -> dict:
 
 # For a query of a page of listings: their photos are read by with_light_media, never one by one through the ORM.
 LIGHT = raiseload(Listing.media)
+# A listing read only for its title and cover: no photos or sizes through the ORM (~43 rows a listing), and lazy
+# rather than raising should anything else still ask for them.
+BARE = (lazyload(Listing.media), lazyload(Listing.sizes))
 
 
 def with_light_media(db: Session, listings: list[Listing]) -> list[Listing]:
@@ -328,14 +331,34 @@ def ordered_photos(order: Order) -> list[dict] | None:
     return json.loads(order.listing_photos) if order.listing_photos else None
 
 
+def preload_orders(db: Session, orders: list[Order]) -> None:
+    """Reads what a list of orders shows (listings, sizes, sellers) in a few queries for the whole list; order_summary
+    then finds them here instead of reading three rows an order."""
+    if not orders:
+        return
+    for name, model, ids in (("order_listing", Listing, {o.listing_id for o in orders}),
+                             ("order_size", ListingSize, {o.size_id for o in orders}),
+                             ("seller", User, {o.seller_id for o in orders})):
+        memo = db.info.setdefault(name, {})
+        query = select(model).where(model.id.in_(ids - memo.keys()))
+        if model is Listing:
+            query = query.options(*BARE)
+        for row in db.scalars(query):
+            memo[row.id] = row
+    # Orders from before the cover was kept on the order take it from the listing's photos, all in one query.
+    memo = db.info["order_listing"]
+    with_light_media(db, [memo[i] for i in {o.listing_id for o in orders if not o.listing_cover} if i in memo])
+
+
 def order_summary(db: Session, order: Order) -> dict:
     """Order plus what a list row needs to be recognisable: the item's title, size and photo."""
-    listing = db.get(Listing, order.listing_id)
-    size = db.get(ListingSize, order.size_id)
+    listing = per_request(db, "order_listing", order.listing_id, lambda: db.get(Listing, order.listing_id))
+    size = per_request(db, "order_size", order.size_id, lambda: db.get(ListingSize, order.size_id))
+    seller = per_request(db, "seller", order.seller_id, lambda: db.get(User, order.seller_id))
     cover = order.listing_cover or listing_cover(listing)
     return {**order_out(order), "listing_title": order.listing_title or listing.title, "listing_cover": cover,
             "size_label": size.label, "size_cm": mm_to_cm(size.insole_mm),
-            "seller_name": db.get(User, order.seller_id).shop_name, "created_at": services.aware(order.created_at).isoformat()}
+            "seller_name": seller.shop_name, "created_at": services.aware(order.created_at).isoformat()}
 
 
 def away_until(user: User | None):

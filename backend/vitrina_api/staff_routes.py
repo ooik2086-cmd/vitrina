@@ -1,6 +1,8 @@
 """The staff console: moderation, disputes, reports, evidence and the audit log."""
 from __future__ import annotations
 
+from collections import defaultdict
+
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
@@ -14,7 +16,8 @@ from .deps import get_db, get_private, get_settings, staff_user
 from .errors import ApiError
 from .models import AuditLog, AuthProof, ListingReport, Listing, Order, OrderEvent, OrderEvidence, User, utcnow
 from .schemas import EvidenceRequestIn, ReasonIn, ReportCloseIn, ResolveIn
-from .serializers import listing_out, moderation_out, order_out, order_summary, ordered_details, ordered_photos
+from .serializers import (listing_out, moderation_out, order_out, order_summary, ordered_details, ordered_photos,
+                          preload_orders)
 from .saved_search_routes import announce
 from .storage import Storage, private_link
 from .listing_routes import split_codes
@@ -143,8 +146,13 @@ def admin_orders(status: str | None = None, staff: User = Depends(staff_user), d
     evidence = {oid: (n, at) for oid, n, at in db.execute(
         select(OrderEvidence.order_id, func.count(OrderEvidence.id), func.max(OrderEvidence.created_at))
         .where(OrderEvidence.order_id.in_([o.id for o in rows])).group_by(OrderEvidence.order_id)).all()}
+    preload_orders(db, rows)
+    history = defaultdict(list)
+    for e in db.scalars(select(OrderEvent).where(OrderEvent.order_id.in_([o.id for o in rows]))
+                        .order_by(OrderEvent.id)):
+        history[e.order_id].append(e)
     for o in rows:
-        events = db.scalars(select(OrderEvent).where(OrderEvent.order_id == o.id).order_by(OrderEvent.id)).all()
+        events = history[o.id]
         n, last = evidence.get(o.id, (0, None))
         items.append({**order_summary(db, o), "evidence_count": n,
                       "last_evidence_at": services.aware(last).isoformat() if last else None, "history": [

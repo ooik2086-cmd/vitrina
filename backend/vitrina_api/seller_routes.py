@@ -8,9 +8,9 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import Response
-from sqlalchemy import case, func, or_, select
+from sqlalchemy import String, case, cast, func, literal, or_, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from vitrina_core.orders import OrderStatus as S
 
@@ -59,19 +59,26 @@ def my_earnings(user: User = Depends(current_user), db: Session = Depends(get_db
     from vitrina_core.money import PLATFORM_FEE, escrow, seller_payable
     from .models import LedgerEntry, LedgerTx
     orders = {o.id: o for o in db.scalars(select(Order).where(Order.seller_id == user.id)).all()}
-    held = sum(services.balance(db, escrow(str(oid))) for oid in orders)
+    # Every order's escrow account in one sum, not one query an order.
+    escrows = select(literal(escrow("")) + cast(Order.id, String)).where(Order.seller_id == user.id)
+    held = int(db.scalar(select(func.coalesce(func.sum(LedgerEntry.credit - LedgerEntry.debit), 0))
+                         .where(LedgerEntry.account.in_(escrows))) or 0)
     items = []
     if orders:
         txs = db.scalars(select(LedgerTx).where(LedgerTx.order_id.in_(orders),
                                                 LedgerTx.idempotency_key.like("settle:%"))
+                         .options(selectinload(LedgerTx.entries))
                          .order_by(LedgerTx.id.desc()).limit(100)).all()
+        untitled = {orders[tx.order_id].listing_id for tx in txs if not orders[tx.order_id].listing_title}
+        titles = dict(db.execute(select(Listing.id, Listing.title).where(Listing.id.in_(untitled))).all()) \
+            if untitled else {}
         mine = seller_payable(str(user.id))
         for tx in txs:
             net = sum(e.credit - e.debit for e in tx.entries if e.account == mine)
             fee = sum(e.credit - e.debit for e in tx.entries if e.account == PLATFORM_FEE)
             order = orders[tx.order_id]
             items.append({"order_id": order.id, "kind": tx.kind, "at": services.aware(tx.at).isoformat(),
-                          "listing_title": order.listing_title or db.get(Listing, order.listing_id).title,
+                          "listing_title": order.listing_title or titles[order.listing_id],
                           "net_tiyn": net, "fee_tiyn": fee})
     fees = db.scalar(select(func.coalesce(func.sum(LedgerEntry.credit - LedgerEntry.debit), 0))
                      .join(LedgerTx, LedgerTx.id == LedgerEntry.tx_id)
