@@ -301,7 +301,7 @@ class _CatalogScreenState extends State<CatalogScreen> {
                             icon: const Icon(Icons.photo_camera_outlined),
                             onPressed: _searchByPhoto,
                           ),
-                          hintText: tr('Nike, қара етік, балалар сандалы…'),
+                          hintText: tr('Nike, қара етік…'),
                           border: OutlineInputBorder(borderRadius: BorderRadius.circular(99)),
                           enabledBorder: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(99),

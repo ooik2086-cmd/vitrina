@@ -458,7 +458,7 @@ class _OfferTile extends StatelessWidget {
               const SizedBox(width: 12),
               Expanded(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(o.listingTitle, maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.titleSmall),
+                  Text(o.listingTitle, maxLines: 3, overflow: TextOverflow.ellipsis, style: theme.textTheme.titleSmall),
                   const SizedBox(height: 2),
                   Text(trf('Өлшем {0} · бағасы {1}', [o.sizeLabel, formatTenge(o.listPriceTiyn)]),
                       style: theme.textTheme.bodySmall),

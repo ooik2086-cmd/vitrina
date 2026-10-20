@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -9,6 +10,9 @@ import 'package:image_picker_platform_interface/image_picker_platform_interface.
 import 'package:vitrina/api.dart';
 import 'package:vitrina/screens/listing_editor_screen.dart';
 import 'package:vitrina/session.dart';
+import 'package:vitrina/theme.dart';
+
+import 'support/screens.dart' show loadFonts;
 
 /// Every pick hands back the same small photo, as if taken with the camera.
 class _FakePicker extends ImagePickerPlatform {
@@ -53,7 +57,11 @@ void main() {
 
   /// Opens the editor from a screen underneath, as the app does, and records what reaches the server.
   Future<List<String>> open(WidgetTester tester,
-      {Listing? template, List<Map<String, dynamic>>? sent, int? uploadsOk, Future<void>? failLater}) async {
+      {Listing? template,
+      List<Map<String, dynamic>>? sent,
+      int? uploadsOk,
+      Future<void>? failLater,
+      double width = 500}) async {
     final calls = <String>[];
     var uploads = 0;
     final api = Api(
@@ -71,12 +79,13 @@ void main() {
           sent?.add(jsonDecode(req.body) as Map<String, dynamic>);
           return jsonResponse(listingJson(), 201);
         }));
-    tester.view.physicalSize = const Size(500, 2200);
+    tester.view.physicalSize = Size(width, 2200);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     await tester.pumpWidget(SessionScope(
         session: Session(api),
         child: MaterialApp(
+            theme: buildTheme(Brightness.light),
             home: Scaffold(
                 body: Builder(
                     builder: (context) => TextButton(
@@ -121,8 +130,7 @@ void main() {
     expect(step(tester), 'Фото');
     expect(find.text('1-қадам, барлығы 3'), findsOneWidget);
     // A screen reader hears each step as it opens.
-    expect(tester.getSemantics(find.byKey(const Key('step-title'))),
-        isSemantics(isHeader: true, isLiveRegion: true));
+    expect(tester.getSemantics(find.byKey(const Key('step-title'))), isSemantics(isHeader: true, isLiveRegion: true));
     expect(find.widgetWithText(TextFormField, 'Атауы'), findsNothing); // one thing at a time
 
     // Photos first: the four sides are needed before anything else is asked.
@@ -318,6 +326,24 @@ void main() {
     await tester.pumpAndSettle();
     expect(step(tester), 'Фото');
     expect(sent, isEmpty);
+  });
+
+  testWidgets('on a usual phone the size rows keep their words whole', (tester) async {
+    await loadFonts(tester); // the app's own font: the test font is far wider
+    await open(tester, width: 360);
+    await pickSides(tester);
+    await next(tester);
+    await fillDetails(tester);
+    await next(tester);
+    expect(step(tester), 'Бағасы мен өлшемі');
+    await tester.tap(find.text('Өлшем қосу'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('remove-size-1')), findsOneWidget); // a second size can be taken away again
+    final cut = [
+      for (final e in find.byType(RichText).evaluate())
+        if ((e.renderObject! as RenderParagraph).didExceedMaxLines) (e.widget as RichText).text.toPlainText(),
+    ];
+    expect(cut, isEmpty);
   });
 
   testWidgets('a similar listing starts from the details of another, without its photos', (tester) async {

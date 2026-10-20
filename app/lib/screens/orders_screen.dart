@@ -161,8 +161,9 @@ class _OrderListState extends State<_OrderList> {
                                   errorBuilder: (_, __, ___) => const Icon(Icons.image_outlined)),
                         ),
                       ),
+                      // Up to three lines: pairs of one model differ by the colour at the end of the title.
                       title: Text(o.listingTitle ?? trf('Тапсырыс №{0}', [o.id]),
-                          maxLines: 1, overflow: TextOverflow.ellipsis),
+                          maxLines: 3, overflow: TextOverflow.ellipsis),
                       subtitle: Text.rich(TextSpan(children: [
                         TextSpan(text: label(orderStatuses, o.status)),
                         if (waits)

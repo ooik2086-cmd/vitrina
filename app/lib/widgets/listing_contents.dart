@@ -76,21 +76,18 @@ class ListingNameFields extends StatelessWidget {
         validator: (v) => (v ?? '').trim().length < 3 ? tr('Атауы кемінде 3 әріп болсын') : null,
       ),
       const SizedBox(height: 12),
-      Row(children: [
-        Expanded(
-            child: TextFormField(
-                key: const Key('edit-brand'),
-                controller: brand,
-                enabled: fresh,
-                decoration: InputDecoration(labelText: tr('Бренді (міндетті емес)')))),
-        const SizedBox(width: 12),
-        Expanded(
-            child: TextFormField(
-                key: const Key('edit-model'),
-                controller: model,
-                enabled: fresh,
-                decoration: InputDecoration(labelText: tr('Моделі')))),
-      ]),
+      // One under the other: side by side, «(міндетті емес)» was cut off on a usual phone.
+      TextFormField(
+          key: const Key('edit-brand'),
+          controller: brand,
+          enabled: fresh,
+          decoration: InputDecoration(labelText: tr('Бренді (міндетті емес)'))),
+      const SizedBox(height: 12),
+      TextFormField(
+          key: const Key('edit-model'),
+          controller: model,
+          enabled: fresh,
+          decoration: InputDecoration(labelText: tr('Моделі'))),
       const SizedBox(height: 12),
       ColorField(controller: color),
       if (fresh) ...[

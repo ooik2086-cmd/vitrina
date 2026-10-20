@@ -576,7 +576,9 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
         ]),
         const SizedBox(height: 16),
         Text(tr('Өлшемдер'), style: theme.textTheme.titleMedium),
-        for (final (i, s) in _sizes.indexed)
+        // Each size on two lines: in one row of four, «Ұлтарақ, см» and «Саны» were cut off on a usual phone.
+        for (final (i, s) in _sizes.indexed) ...[
+          const SizedBox(height: 8),
           Row(children: [
             Expanded(
                 child: TextFormField(
@@ -590,20 +592,26 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
                 validator: insoleCheck,
               ),
             ),
-            const SizedBox(width: 8),
+          ]),
+          const SizedBox(height: 8),
+          Row(children: [
             SizedBox(
-              width: 56,
+              width: 120,
               child: TextFormField(
                   controller: s.qty,
                   keyboardType: TextInputType.number,
                   decoration: InputDecoration(labelText: tr('Саны'))),
             ),
-            IconButton(
-              tooltip: tr('Өшіру'),
-              onPressed: _sizes.length > 1 ? () => setState(() => _sizes.removeAt(i).dispose()) : null,
-              icon: const Icon(Icons.remove_circle_outline),
-            ),
+            const Spacer(),
+            if (_sizes.length > 1)
+              TextButton.icon(
+                key: ValueKey('remove-size-$i'),
+                onPressed: () => setState(() => _sizes.removeAt(i).dispose()),
+                icon: const Icon(Icons.remove_circle_outline),
+                label: Text(tr('Өшіру')),
+              ),
           ]),
+        ],
         Align(
           alignment: Alignment.centerLeft,
           child: TextButton.icon(

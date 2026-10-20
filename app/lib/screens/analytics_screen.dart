@@ -100,7 +100,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
             for (final t in a.top)
               ListTile(
                 contentPadding: EdgeInsets.zero,
-                title: Text(t.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+                title: Text(t.title, maxLines: 3, overflow: TextOverflow.ellipsis), // the colour ends the title
                 subtitle: Text(trf('{0} қаралым · {1} тапсырыс · {2}',
                     [t.views, t.orders, tr(listingStatuses[t.status] ?? t.status)])),
                 trailing: const Icon(Icons.chevron_right),

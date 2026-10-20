@@ -273,10 +273,11 @@ class ListingTile extends StatelessWidget {
         const SizedBox(height: 10),
         PriceLine(listing: listing, style: weight(theme.textTheme.titleMedium!, 750)),
         const SizedBox(height: 2),
-        Text(listing.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: theme.textTheme.bodyMedium),
+        Text(listing.title,
+            maxLines: titleLines(context), overflow: TextOverflow.ellipsis, style: theme.textTheme.bodyMedium),
         const SizedBox(height: 2),
         Text(label(conditions, listing.condition),
-            maxLines: 1,
+            maxLines: conditionLines(context),
             overflow: TextOverflow.ellipsis,
             style: theme.textTheme.labelMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
       ]),
@@ -359,7 +360,7 @@ class Badge360 extends StatelessWidget {
   }
 }
 
-/// Height of the lines under a [ListingTile]'s photo at the current text size: price, two title lines, condition.
+/// Height of the lines under a [ListingTile]'s photo at the current text size: price, the title's lines, condition.
 double listingTileTextExtent(BuildContext context) {
   final t = Theme.of(context).textTheme;
   final scaler = MediaQuery.textScalerOf(context);
@@ -367,8 +368,20 @@ double listingTileTextExtent(BuildContext context) {
   final price = line(t.titleMedium, 16, 1.5);
   // With large text a sale price and the crossed-out one no longer fit side by side.
   final priceLines = scaler.scale(16) > 20 ? 2 : 1;
-  return 10 + price * priceLines + 2 + 2 * line(t.bodyMedium, 14, 1.43) + 2 + line(t.labelMedium, 12, 1.33) + 4;
+  return 10 +
+      price * priceLines +
+      2 +
+      titleLines(context) * line(t.bodyMedium, 14, 1.43) +
+      2 +
+      conditionLines(context) * line(t.labelMedium, 12, 1.33) +
+      4;
 }
+
+/// With large text a tile's title gets a third line: the colour, which tells pairs of one model apart, ends it.
+int titleLines(BuildContext context) => MediaQuery.textScalerOf(context).scale(14) > 16 ? 3 : 2;
+
+/// The condition under a tile's title takes a second line once text is set any larger, so «Киілген, өте жақсы» is read whole.
+int conditionLines(BuildContext context) => MediaQuery.textScalerOf(context).scale(12) > 12.5 ? 2 : 1;
 
 /// Listing tiles up to 240 wide, each row as tall as a square photo plus the lines under it at the current text
 /// size, so large text never makes one tile run into the next (a fixed aspect ratio did).

@@ -111,7 +111,8 @@ const en = <String, String>{
   'Міндетті емес, бірақ сатып алушы тауарды жан-жағынан көреді. Аяқкиімді аздап бұрып, {0} шақты кадр түсіріңіз.':
       'Optional, but buyers will see the item from every side. Turn the shoe slightly and take about {0} frames.',
   'Кейбір кадрлар жүктелмеді. Қайта түсіріңіз.': 'Some frames didn\'t upload. Retake them.',
-  'Кейбір фото жүктелмеді. Белгісі бар фотоны қайта түсіріңіз.': 'Some photos didn\'t upload. Retake the ones with the mark.',
+  'Кейбір фото жүктелмеді. Белгісі бар фотоны қайта түсіріңіз.':
+      'Some photos didn\'t upload. Retake the ones with the mark.',
   'Ақау фотосы жүктелмеді. Қайта қосыңыз.': 'The defect photo didn\'t upload. Add it again.',
   'Түсіру': 'Shoot',
   'Галереядан': 'From gallery',
@@ -1048,5 +1049,5 @@ const en = <String, String>{
   'Кімге арналған': 'For whom',
   'Кімге арналғанын таңдаңыз': 'Choose whom this pair is for',
   'Түрін таңдаңыз': 'Choose the kind of footwear',
-  'Nike, қара етік, балалар сандалы…': 'Nike, black boots, kids’ sandals…',
+  'Nike, қара етік…': 'Nike, black boots…',
 };

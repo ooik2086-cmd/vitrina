@@ -202,7 +202,8 @@ class _EarningsScreenState extends State<EarningsScreen> {
               for (final i in e.items)
                 ListTile(
                   contentPadding: EdgeInsets.zero,
-                  title: Text(i.listingTitle, maxLines: 1, overflow: TextOverflow.ellipsis),
+                  title:
+                      Text(i.listingTitle, maxLines: 3, overflow: TextOverflow.ellipsis), // the colour ends the title
                   subtitle: Text('№${i.orderId} · ${tr(_kinds[i.kind] ?? i.kind)} · '
                       '${i.at.toLocal().day.toString().padLeft(2, '0')}.${i.at.toLocal().month.toString().padLeft(2, '0')}'
                       '${i.feeTiyn > 0 ? ' · комиссия ${formatTenge(i.feeTiyn)}' : ''}'),
