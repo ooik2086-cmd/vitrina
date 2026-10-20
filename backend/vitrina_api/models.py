@@ -338,8 +338,12 @@ class Conversation(Base):
 
 class Message(Base):
     __tablename__ = "messages"
+    # A chat's newest message and its unread ones are read from the first index alone, however long the chat; the
+    # second answers the per-minute send limit without reading every message ever sent.
+    __table_args__ = (Index("ix_messages_conversation_id_id", "conversation_id", "id"),
+                      Index("ix_messages_sender_created", "sender_id", "created_at"))
     id: Mapped[int] = mapped_column(primary_key=True)
-    conversation_id: Mapped[int] = mapped_column(ForeignKey("conversations.id"), index=True)
+    conversation_id: Mapped[int] = mapped_column(ForeignKey("conversations.id"))
     sender_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     body: Mapped[str] = mapped_column(Text)  # may be empty when the message is a photo
     photo_url: Mapped[str | None] = mapped_column(String(500))
