@@ -18,6 +18,7 @@ from . import services
 from .deps import current_user, get_db, get_private, staff_user
 from .errors import ApiError
 from .models import AuthProof, Listing, Order, User
+from .serializers import BARE, listing_cover, preload, with_light_media
 from .storage import MAX_UPLOAD_BYTES, Storage, normalize_image, private_link
 
 router = APIRouter(prefix="/api/v1")
@@ -26,8 +27,9 @@ MAX_PROOFS = 4
 UNVERIFIED, SELLER_EVIDENCE = Authenticity.UNVERIFIED.value, Authenticity.SELLER_EVIDENCE.value
 
 
-def proofs_out(db: Session, listing: Listing, files: Storage) -> dict:
-    rows = db.scalars(select(AuthProof).where(AuthProof.listing_id == listing.id).order_by(AuthProof.id)).all()
+def proofs_out(db: Session, listing: Listing, files: Storage, rows: list[AuthProof] | None = None) -> dict:
+    if rows is None:
+        rows = db.scalars(select(AuthProof).where(AuthProof.listing_id == listing.id).order_by(AuthProof.id)).all()
     return {"authenticity": listing.authenticity, "note": listing.authenticity_note,
             "proofs": [{"id": p.id, "url": private_link(files, p.url)} for p in rows]}
 
@@ -91,16 +93,22 @@ def delete_proof(listing_id: int, proof_id: int, user: User = Depends(current_us
 def admin_authenticity(staff: User = Depends(staff_user), db: Session = Depends(get_db),
                        files: Storage = Depends(get_private)):
     """Listings with proof waiting for staff, oldest first."""
-    rows = db.scalars(select(Listing).where(Listing.authenticity == SELLER_EVIDENCE,
-                                            Listing.status.in_(("published", "paused", "sold", "moderation")))
-                      .order_by(Listing.id)).all()
+    rows = with_light_media(db, db.scalars(
+        select(Listing).options(*BARE).where(Listing.authenticity == SELLER_EVIDENCE,
+                                             Listing.status.in_(("published", "paused", "sold", "moderation")))
+        .order_by(Listing.id)).all())
+    # Every waiting listing's proofs, sellers and cover in one query each, not several a listing.
+    proofs: dict[int, list[AuthProof]] = {}
+    for p in db.scalars(select(AuthProof).where(AuthProof.listing_id.in_([r.id for r in rows])).order_by(AuthProof.id)):
+        proofs.setdefault(p.listing_id, []).append(p)
+    sellers = preload(db, "seller", User, {r.seller_id for r in rows})
     items = []
     for listing in rows:
-        seller = db.get(User, listing.seller_id)
-        cover = next((m.processed_url or m.original_url for m in listing.media if m.angle != "frame"), None)
+        seller = sellers[listing.seller_id]
         items.append({"id": listing.id, "title": listing.title, "brand": listing.brand,
-                      "model_name": listing.model_name, "price_tiyn": listing.price_tiyn, "cover": cover,
-                      "shop_name": seller.shop_name, **proofs_out(db, listing, files)})
+                      "model_name": listing.model_name, "price_tiyn": listing.price_tiyn,
+                      "cover": listing_cover(listing),
+                      "shop_name": seller.shop_name, **proofs_out(db, listing, files, proofs.get(listing.id, []))})
     return {"items": items}
 
 

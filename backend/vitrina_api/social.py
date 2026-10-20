@@ -337,8 +337,8 @@ def size_fit(db: Session, listing: Listing) -> dict | None:
     return {"answers": answers, **counts}
 
 
-def review_out(db: Session, r: Review) -> dict:
-    buyer = db.get(User, r.buyer_id)
+def review_out(db: Session, r: Review, buyers: dict | None = None) -> dict:
+    buyer = (buyers or {}).get(r.buyer_id) or db.get(User, r.buyer_id)
     return {"id": r.id, "order_id": r.order_id, "rating": r.rating, "text": r.text, "seller_reply": r.seller_reply,
             "photos": json.loads(r.photos) if r.photos else [], "fit": r.fit,
             "buyer_name": buyer.display_name or "Сатып алушы", "created_at": services.aware(r.created_at).isoformat()}
@@ -411,9 +411,11 @@ def seller_reviews(seller_id: int, db: Session = Depends(get_db)):
     if seller is None or not seller.is_seller:
         raise ApiError(404, "not_found")
     rows = db.scalars(select(Review).where(Review.seller_id == seller_id).order_by(Review.id.desc()).limit(100)).all()
+    # Every reviewer of the page in one query, not one a review.
+    buyers = {u.id: u for u in db.scalars(select(User).where(User.id.in_({r.buyer_id for r in rows})))} if rows else {}
     return {"seller": {"id": seller.id, "shop_name": seller.shop_name, "city": seller.city,
                        **seller_rating(db, seller.id)},
-            "items": [review_out(db, r) for r in rows]}
+            "items": [review_out(db, r, buyers) for r in rows]}
 
 
 # ---------------------------------------------------------------- notifications

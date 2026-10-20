@@ -114,8 +114,19 @@ def sales_csv(days: int = Query(default=90, ge=1, le=366), user: User = Depends(
     from vitrina_core.money import PLATFORM_FEE, seller_payable
     from .models import LedgerTx
     since = now_utc() - timedelta(days=days)
-    orders = db.scalars(select(Order).where(Order.seller_id == user.id, Order.created_at >= since)
-                        .order_by(Order.id)).all()
+    mine_since = (Order.seller_id == user.id, Order.created_at >= since)
+    orders = db.scalars(select(Order).where(*mine_since).order_by(Order.id)).all()
+    # A year of orders is read in four queries, not six an order: titles, sizes and settlements for all of them.
+    picked = select(Order.id).where(*mine_since)
+    titles = dict(db.execute(select(Listing.id, Listing.title).where(
+        Listing.id.in_(select(Order.listing_id).where(*mine_since)))).all())
+    sizes = dict(db.execute(select(ListingSize.id, ListingSize.label).where(
+        ListingSize.id.in_(select(Order.size_id).where(*mine_since)))).all())
+    settlements = collections.defaultdict(list)
+    for tx in db.scalars(select(LedgerTx).where(LedgerTx.order_id.in_(picked),
+                                                LedgerTx.idempotency_key.like("settle:%"))
+                         .options(selectinload(LedgerTx.entries))):
+        settlements[tx.order_id].append(tx)
     mine = seller_payable(str(user.id))
     out = io.StringIO()
     w = csv.writer(out, delimiter=";", lineterminator="\r\n")
@@ -127,15 +138,14 @@ def sales_csv(days: int = Query(default=90, ge=1, le=366), user: User = Depends(
     w.writerow(["Тапсырыс", "Күні", "Күйі", "Тауар", "Өлшем", "Тауар бағасы, ₸", "Промокод", "Жеңілдік, ₸",
                 "Жеткізу, ₸", "Комиссия, ₸", "Сізге, ₸", "Алушы қаласы"])
     for o in orders:
-        settled = db.scalars(select(LedgerTx).where(LedgerTx.order_id == o.id,
-                                                    LedgerTx.idempotency_key.like("settle:%"))).all()
+        settled = settlements[o.id]
         fee = sum(e.credit - e.debit for tx in settled for e in tx.entries if e.account == PLATFORM_FEE)
         net = sum(e.credit - e.debit for tx in settled for e in tx.entries if e.account == mine)
-        size = db.get(ListingSize, o.size_id)
+        size = sizes.get(o.size_id)
         paid = o.status not in ADDRESS_HIDDEN_UNTIL_PAID  # the buyer's city only once they have paid
         w.writerow([o.id, services.aware(o.created_at).astimezone(ALMATY).strftime("%d.%m.%Y %H:%M"),
-                    STATUS_KK.get(o.status, o.status), cell(db.get(Listing, o.listing_id).title),
-                    cell(size.label) if size else "",
+                    STATUS_KK.get(o.status, o.status), cell(titles[o.listing_id]),
+                    cell(size) if size is not None else "",
                     tenge(o.item_price_tiyn), o.promo_code or "", tenge(o.promo_discount_tiyn) if o.promo_code else "",
                     tenge(o.delivery_price_tiyn), tenge(fee) if settled else "", tenge(net) if settled else "",
                     cell(o.delivery_city or "") if paid else ""])

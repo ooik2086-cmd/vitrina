@@ -16,8 +16,8 @@ from .deps import get_db, get_private, get_settings, staff_user
 from .errors import ApiError
 from .models import AuditLog, AuthProof, ListingReport, Listing, Order, OrderEvent, OrderEvidence, User, utcnow
 from .schemas import EvidenceRequestIn, ReasonIn, ReportCloseIn, ResolveIn
-from .serializers import (listing_out, moderation_out, order_out, order_summary, ordered_details, ordered_photos,
-                          preload_orders)
+from .serializers import (LIGHT, listing_out, moderation_out, order_out, order_summary, ordered_details,
+                          ordered_photos, preload_orders, preload_sellers, with_light_media)
 from .saved_search_routes import announce
 from .storage import Storage, private_link
 from .listing_routes import split_codes
@@ -227,10 +227,14 @@ def admin_reports(staff: User = Depends(staff_user), db: Session = Depends(get_d
     by_listing: dict[int, list[ListingReport]] = {}
     for r in rows:
         by_listing.setdefault(r.listing_id, []).append(r)
-    items = [{"listing": listing_out(db, db.get(Listing, lid)),
+    # The reported listings in one query, their photos as plain rows: not three reads a listing.
+    listings = {row.id: row for row in with_light_media(db, db.scalars(
+        select(Listing).options(LIGHT).where(Listing.id.in_(list(by_listing)))).all())}
+    preload_sellers(db, {row.seller_id for row in listings.values()})  # reported listings are from many shops
+    items = [{"listing": listing_out(db, listings[lid]),
               "reports": [{"id": r.id, "reason": r.reason, "text": r.text, "reporter_id": r.reporter_id,
                            "at": services.aware(r.created_at).isoformat()} for r in reports]}
-             for lid, reports in by_listing.items()]
+             for lid, reports in by_listing.items() if lid in listings]
     items.sort(key=lambda i: -len(i["reports"]))
     return {"items": items}
 

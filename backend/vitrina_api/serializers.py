@@ -18,7 +18,7 @@ from . import moderation
 from .deps import now_utc
 from .errors import ApiError
 from .social import seller_rating
-from .models import PriceChange, Favorite, Listing, ListingSize, Media, Order, User
+from .models import PriceChange, Favorite, Listing, ListingSize, Media, Order, Review, User
 from .api_common import ALMATY
 from .storage import private_link
 
@@ -331,29 +331,60 @@ def ordered_photos(order: Order) -> list[dict] | None:
     return json.loads(order.listing_photos) if order.listing_photos else None
 
 
+def preload(db: Session, name: str, model, ids, *options) -> dict:
+    """Rows a page names by id, read in one query into the per_request memo `name` (only those not there yet)."""
+    memo = db.info.setdefault(name, {})
+    missing = set(ids) - memo.keys()
+    if missing:
+        for row in db.scalars(select(model).options(*options).where(model.id.in_(missing))):
+            memo[row.id] = row
+    return memo
+
+
+def preload_bare_listings(db: Session, ids, covers: bool = True) -> dict:
+    """Listings a row shows only by title and cover: no ORM photos or sizes, the cover's photos as plain rows."""
+    memo = preload(db, "bare_listing", Listing, ids, *BARE)
+    if covers:
+        with_light_media(db, [memo[i] for i in set(ids) if i in memo and "_light_media" not in memo[i].__dict__])
+    return memo
+
+
+def preload_sellers(db: Session, ids) -> dict:
+    """Sellers a page shows, with their rating, in two queries for the page: listing_out then finds both."""
+    sellers = preload(db, "seller", User, ids)
+    ratings = db.info.setdefault("seller_rating", {})
+    missing = set(ids) - ratings.keys()
+    if missing:
+        ratings.update({i: {"rating": None, "reviews": 0} for i in missing})
+        for seller_id, avg, count in db.execute(select(Review.seller_id, func.avg(Review.rating), func.count(Review.id))
+                                                .where(Review.seller_id.in_(missing)).group_by(Review.seller_id)):
+            ratings[seller_id] = {"rating": round(float(avg), 1) if avg is not None else None, "reviews": int(count)}
+    return sellers
+
+
+def bare_listing(db: Session, listing_id: int) -> Listing:
+    return per_request(db, "bare_listing", listing_id, lambda: db.get(Listing, listing_id))
+
+
+def size_row(db: Session, size_id: int) -> ListingSize | None:
+    return per_request(db, "size", size_id, lambda: db.get(ListingSize, size_id))
+
+
 def preload_orders(db: Session, orders: list[Order]) -> None:
     """Reads what a list of orders shows (listings, sizes, sellers) in a few queries for the whole list; order_summary
     then finds them here instead of reading three rows an order."""
     if not orders:
         return
-    for name, model, ids in (("order_listing", Listing, {o.listing_id for o in orders}),
-                             ("order_size", ListingSize, {o.size_id for o in orders}),
-                             ("seller", User, {o.seller_id for o in orders})):
-        memo = db.info.setdefault(name, {})
-        query = select(model).where(model.id.in_(ids - memo.keys()))
-        if model is Listing:
-            query = query.options(*BARE)
-        for row in db.scalars(query):
-            memo[row.id] = row
+    preload(db, "size", ListingSize, {o.size_id for o in orders})
+    preload(db, "seller", User, {o.seller_id for o in orders})
     # Orders from before the cover was kept on the order take it from the listing's photos, all in one query.
-    memo = db.info["order_listing"]
-    with_light_media(db, [memo[i] for i in {o.listing_id for o in orders if not o.listing_cover} if i in memo])
+    preload_bare_listings(db, {o.listing_id for o in orders}, covers=False)
+    preload_bare_listings(db, {o.listing_id for o in orders if not o.listing_cover})
 
 
 def order_summary(db: Session, order: Order) -> dict:
     """Order plus what a list row needs to be recognisable: the item's title, size and photo."""
-    listing = per_request(db, "order_listing", order.listing_id, lambda: db.get(Listing, order.listing_id))
-    size = per_request(db, "order_size", order.size_id, lambda: db.get(ListingSize, order.size_id))
+    listing, size = bare_listing(db, order.listing_id), size_row(db, order.size_id)
     seller = per_request(db, "seller", order.seller_id, lambda: db.get(User, order.seller_id))
     cover = order.listing_cover or listing_cover(listing)
     return {**order_out(order), "listing_title": order.listing_title or listing.title, "listing_cover": cover,

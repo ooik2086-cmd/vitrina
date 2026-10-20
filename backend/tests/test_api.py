@@ -589,6 +589,108 @@ class WeightTests(ApiTestCase):
             detail = self.c.get(f"/api/v1/orders/{o['id']}", headers=self.h(self.buyer)).json()
             self.assertEqual([e["status"] for e in o["history"]], [e["status"] for e in detail["history"]], o["id"])
 
+    def test_offers_reviews_reports_proofs_and_the_sales_file_read_the_same_few_rows_however_long(self):
+        """The other lists that grew a read or more a row: offers, a shop's reviews, support's reports and proofs
+        queues, and the seller's sales file. Each row still shows its own listing, size, reviewer and proofs."""
+        from sqlalchemy import event
+        staff = self.make_staff()
+        reporter = self.login("+77010000007")
+        other = self.login("+77010000008")
+        theirs = []  # each round another shop's listing is reported and has proof waiting too
+        seller_id = self.c.get("/api/v1/me", headers=self.h(self.seller)).json()["id"]
+        made, title_of, offers, reviews, settled = 0, {}, {}, {}, set()
+
+        def grow(n):
+            nonlocal made
+            for _ in range(n):
+                k = made
+                made += 1
+                buyer = (self.buyer, other)[k % 2]
+                listing = self.publish(title=f"Аяқкиім {k}")
+                lid, sid = listing["id"], listing["sizes"][0]["id"]
+                title_of[lid] = listing["title"]
+                offer = self.post(f"/listings/{lid}/offers", buyer,
+                                  {"size_id": sid, "amount_tiyn": listing["price_tiyn"] * 8 // 1000 * 100}).json()
+                offers[offer["id"]] = (buyer, listing["title"], listing["sizes"][0]["label"])
+                self.assertEqual(self.post(f"/listings/{lid}/report", reporter, {"reason": "fake"}).status_code, 201)
+                shop = self.login(f"+770100002{k:02d}")
+                self.post("/me/seller", shop, {"shop_name": f"Дүкен {k}", "city": "Алматы"})
+                their = self.post("/listings", shop, {**LISTING, "title": f"Басқа {k}"}).json()
+                self.post(f"/listings/{their['id']}/publish", shop)
+                self.assertEqual(self.post(f"/listings/{their['id']}/report", reporter, {"reason": "fake"}).status_code,
+                                 201)
+                self.assertEqual(self.c.post(f"/api/v1/listings/{their['id']}/proofs", headers=self.h(shop),
+                                             files={"file": ("r.jpg", jpeg(), "image/jpeg")}).status_code, 201)
+                theirs.append((their["id"], f"Дүкен {k}"))
+                for _ in range(k % 2 + 1):  # one or two proofs a listing
+                    self.assertEqual(self.c.post(f"/api/v1/listings/{lid}/proofs", headers=self.h(self.seller),
+                                                 files={"file": ("r.jpg", jpeg(), "image/jpeg")}).status_code, 201)
+                # Each order by its own buyer, as reviews come from different people; one in three not settled.
+                reviewer = self.login(f"+770100001{k:02d}")
+                self.c.patch("/api/v1/me", json={"display_name": f"Алушы {k}"}, headers=self.h(reviewer))
+                order = self.post("/orders", reviewer, {"listing_id": lid, "size_id": sid},
+                                  **{"Idempotency-Key": f"o{k}"}).json()
+                self.post(f"/orders/{order['id']}/pay", reviewer)
+                self.assertEqual(self.pay(order, event_id=f"p{k}").json()["status"], "PAID")
+                if k % 3 == 2:  # paid and not settled: its money is still held
+                    continue
+                self.post(f"/orders/{order['id']}/accept", self.seller)
+                self.post(f"/orders/{order['id']}/ship", self.seller, {"tracking_number": f"KZ{k}"})
+                self.deliver(f"KZ{k}", event_id=f"d{k}")
+                self.assertEqual(self.post(f"/orders/{order['id']}/confirm", reviewer).json()["status"], "COMPLETED")
+                r = self.post(f"/orders/{order['id']}/review", reviewer, {"rating": 5, "text": f"Жақсы {k}"})
+                self.assertEqual(r.status_code, 201, r.text)
+                reviews[order["id"]] = (f"Жақсы {k}", f"Алушы {k}")
+                settled.add(listing["title"])
+
+        def reads(path, token):
+            engine = self.app.state.sessions.kw["bind"]
+            asked = []
+            listen = lambda *a: asked.append(a[2])  # noqa: E731
+            event.listen(engine, "before_cursor_execute", listen)
+            try:
+                r = self.c.get(f"/api/v1{path}", headers=self.h(token))
+            finally:
+                event.remove(engine, "before_cursor_execute", listen)
+            self.assertEqual(r.status_code, 200, r.text)
+            return len(asked), r
+
+        pages = [("/offers", self.buyer), ("/offers?role=seller", self.seller), (f"/sellers/{seller_id}/reviews", other),
+                 ("/admin/reports", staff), ("/admin/authenticity", staff), ("/me/sales.csv", self.seller)]
+        grow(2)
+        few = [reads(path, token)[0] for path, token in pages]
+        grow(4)
+        got = {}
+        for (path, token), n in zip(pages, few):
+            m, got[path] = reads(path, token)
+            self.assertEqual(m, n, path)
+        rows = got["/offers?role=seller"].json()["items"]
+        self.assertEqual({o["id"]: (o["listing_title"], o["size_label"]) for o in rows},
+                         {i: (t, size) for i, (_, t, size) in offers.items()})
+        self.assertTrue(all(o["listing_cover"] for o in rows))
+        self.assertEqual(len(got["/offers"].json()["items"]), sum(b == self.buyer for b, *_ in offers.values()))
+        self.assertEqual({r["order_id"]: (r["text"], r["buyer_name"])
+                          for r in got[f"/sellers/{seller_id}/reviews"].json()["items"]}, reviews)
+        reported = got["/admin/reports"].json()["items"]
+        self.assertEqual(sorted(i["listing"]["id"] for i in reported), sorted([*title_of, *(i for i, _ in theirs)]))
+        self.assertEqual({i["listing"]["id"]: i["listing"]["seller"]["shop_name"] for i in reported
+                          if i["listing"]["id"] not in title_of}, dict(theirs))
+        self.assertEqual({(i["listing"]["seller"]["rating"], i["listing"]["seller"]["reviews"]) for i in reported},
+                         {(5.0, len(reviews)), (None, 0)})
+        queue = got["/admin/authenticity"].json()["items"]
+        self.assertEqual({q["id"]: (len(q["proofs"]), q["shop_name"]) for q in queue},
+                         {**{lid: (k % 2 + 1, "Qadam Store") for k, lid in enumerate(sorted(title_of))},
+                          **{lid: (1, shop) for lid, shop in theirs}})
+        self.assertTrue(all(q["cover"] for q in queue))
+        for q in queue:  # in the order they were sent, as the seller's own page lists them
+            ids = [p["id"] for p in q["proofs"]]
+            self.assertEqual(ids, sorted(ids))
+        lines = got["/me/sales.csv"].text.lstrip("\ufeff").splitlines()[1:]
+        self.assertEqual(sorted(line.split(";")[3] for line in lines), sorted(title_of.values()))
+        self.assertTrue(all(line.split(";")[4] == LISTING["sizes"][0]["label"] for line in lines))
+        # What the seller got is filled in for the settled orders only, each on its own row.
+        self.assertEqual({line.split(";")[3] for line in lines if line.split(";")[10]}, settled)
+
     def test_price_bands_are_read_again_only_when_prices_change(self):
         from sqlalchemy import event, insert, update
         from vitrina_api.models import Listing

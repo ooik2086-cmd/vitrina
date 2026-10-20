@@ -18,6 +18,7 @@ from .config import Settings
 from .deps import current_user, get_db, get_settings, now_utc
 from .errors import ApiError
 from .models import Listing, ListingSize, Offer, User
+from .serializers import bare_listing, listing_cover, preload, preload_bare_listings, size_row
 
 router = APIRouter(prefix="/api/v1")
 
@@ -50,10 +51,10 @@ def price(offer: Offer) -> int:
 
 
 def offer_out(db: Session, offer: Offer) -> dict:
-    listing = db.get(Listing, offer.listing_id)
-    size = db.get(ListingSize, offer.size_id)
-    cover = next((m.original_url for m in listing.media if m.angle != "frame"), None)
-    return {"id": offer.id, "listing_id": listing.id, "listing_title": listing.title, "listing_cover": cover,
+    listing, size = bare_listing(db, offer.listing_id), size_row(db, offer.size_id)
+    # The same cover as an order or chat of this listing shows (the cut-out once there is one).
+    return {"id": offer.id, "listing_id": listing.id, "listing_title": listing.title,
+            "listing_cover": listing_cover(listing),
             "list_price_tiyn": listing.price_tiyn, "size_id": size.id, "size_label": size.label,
             "amount_tiyn": offer.amount_tiyn, "counter_tiyn": offer.counter_tiyn, "price_tiyn": price(offer),
             "status": state(offer), "buyer_id": offer.buyer_id, "seller_id": offer.seller_id,
@@ -121,6 +122,8 @@ def list_offers(role: str = "buyer", listing_id: int | None = None, user: User =
     if listing_id is not None:
         stmt = stmt.where(Offer.listing_id == listing_id)
     rows = db.scalars(stmt).all()
+    preload_bare_listings(db, {o.listing_id for o in rows})
+    preload(db, "size", ListingSize, {o.size_id for o in rows})
     items = [offer_out(db, o) for o in rows]
     waiting = sum(1 for o in rows if state(o) == ("pending" if role == "seller" else "countered"))
     return {"items": items, "waiting": waiting}
