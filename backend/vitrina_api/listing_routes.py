@@ -442,8 +442,9 @@ def create_listing(body: ListingIn, request: Request, background: BackgroundTask
     if 0 < frames < MIN_SPIN_FRAMES:
         raise ApiError(422, "too_few_frames")
     listing = Listing(
-        seller_id=user.id, title=body.title, category=body.category, brand=body.brand, model_name=body.model_name,
-        color=body.color, condition=body.condition.value, defects=body.defects, description=body.description,
+        seller_id=user.id, title=body.title, category=body.category, audience=body.audience, brand=body.brand,
+        model_name=body.model_name, color=body.color, condition=body.condition.value, defects=body.defects,
+        description=body.description,
         price_tiyn=body.price_tiyn, delivery_price_tiyn=body.delivery_price_tiyn,
         showcase_style=body.showcase_style,
         search_text=search_text(body.title, body.brand, body.model_name, body.color, body.category),
@@ -596,7 +597,9 @@ def edit_contents(db: Session, cfg: Settings, storage: Storage, listing: Listing
     fresh = listing.announced_at is None  # never on sale, whatever its status says now
     if not fresh and (body.category is not None and body.category != listing.category
                       or body.brand is not None and (body.brand.strip() or None) != listing.brand
-                      or body.model_name is not None and (body.model_name.strip() or None) != listing.model_name):
+                      or body.model_name is not None and (body.model_name.strip() or None) != listing.model_name
+                      # whom it is for may be filled in on a pair listed before it was asked, not changed
+                      or body.audience is not None and listing.audience not in (None, body.audience)):
         raise ApiError(409, "listing_locked")
     if (not fresh and body.condition is not None
             and CONDITION_ORDER.index(body.condition.value) < CONDITION_ORDER.index(listing.condition)):
@@ -616,6 +619,8 @@ def edit_contents(db: Session, cfg: Settings, storage: Storage, listing: Listing
     if body.category is not None and body.category != listing.category:
         listing.category = body.category
         changed.add("name")
+    if body.audience is not None:  # a fact about the pair, not words or photos to check again: it stays on sale
+        listing.audience = body.audience
     if body.condition is not None and body.condition.value != listing.condition:
         listing.condition = body.condition.value
         changed.add("text")

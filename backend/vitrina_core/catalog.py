@@ -101,3 +101,63 @@ def normalize_query(query: str) -> str:
     q = " ".join(query.lower().split())
     q = _ALIAS_RE.sub(lambda m: BRAND_SYNONYMS[m.group(1)], q)
     return transliterate(q)
+
+
+# Words people type for a kind of footwear or for whom it is made, in Kazakh, Russian and English. A stem matches
+# any word starting with it ("етік" finds "етіктер"); a word ending in "=" matches only itself, being too short to
+# be a stem ("ер" is not "еркін"). A listing titled "Қара бәтеңке" is found by "ботинки", and one marked for women
+# by "женские", though neither word is in its title.
+_CATEGORY_WORDS = {
+    "sneakers": ("кроссовк", "кроссовок", "кед", "sneaker", "trainer"),
+    "sport": ("спорт", "бутс", "sport", "football", "running", "жүгіру"),
+    "classic": ("туфл", "классик", "оксфорд", "лофер", "мокасин", "дерби", "oxford", "loafer", "moccasin"),
+    "boots_winter": ("етік", "сапог", "угг", "ugg", "дутик", "валенк", "қысқы", "зимн", "winter", "snow"),
+    "boots": ("етік", "сапог", "бәтеңке", "ботин", "ботильон", "челси", "берц", "boot", "chelsea"),
+    "heels": ("өкше", "каблук", "шпильк", "лодочк", "туфл", "heel", "pump"),  # туфли may have heels
+    "sandals": ("сандал", "босоножк", "шлепан", "шлёпан", "сланц", "сабо", "sandal", "flip", "slide"),
+    "slippers": ("тәпішке", "тапоч", "тапк", "үй=", "домашн", "slipper"),
+    "work": ("жұмыс", "арнайы", "спецобув", "рабоч", "защитн", "қорғаныш", "work", "safety"),
+    "kids": ("балалар", "бала=", "балаға", "детск", "ребен", "ребён", "kid", "child", "baby"),
+}
+_AUDIENCE_WORDS = {
+    "men": ("ерлер", "ер=", "ерге", "мужск", "мужчин", "men=", "mens", "men's", "man="),
+    "women": ("әйел", "женск", "женщин", "women", "woman", "lady", "ladies"),
+    "kids": _CATEGORY_WORDS["kids"] + ("мальчик", "девоч", "boy", "girl"),
+}
+
+
+# Words that ask for nothing a listing must contain: little words ("туфли на каблуке") and the word for footwear
+# itself ("женская обувь", "балалар аяқкиімі", "kids shoes"), which every pair is. Kazakh "мен" (with) is not one:
+# spelt in Latin it is "men", which asks for men's pairs.
+FILLER_WORDS = frozenset(transliterate(w) for w in (
+    "на", "для", "с", "со", "и", "в", "во", "из", "по", "от", "до", "без", "және", "үшін", "арналған",
+    "for", "the", "and", "with", "of", "a", "пара", "жұп", "pair", "аяқ", "киім"))
+_FOOTWEAR_STEMS = tuple(transliterate(w) for w in ("обув", "аяқкиім", "shoe", "footwear"))
+
+
+def is_filler(token: str) -> bool:
+    """A normalized query word that names nothing to look for (see FILLER_WORDS)."""
+    return (token in FILLER_WORDS or token.startswith(_FOOTWEAR_STEMS)) and not audiences_for(token)
+
+
+def _stems(words):
+    return [(transliterate(w.rstrip("=").lower()), w.endswith("=")) for w in words]
+
+
+_KINDS = {k: _stems(v) for k, v in _CATEGORY_WORDS.items()}
+_WHOM = {k: _stems(v) for k, v in _AUDIENCE_WORDS.items()}
+
+
+def _matching(table, token: str) -> list[str]:
+    return [key for key, stems in table.items()
+            if any(token == stem if exact else token.startswith(stem) for stem, exact in stems)]
+
+
+def categories_for(token: str) -> list[str]:
+    """The categories a normalized query word names: "sapogi" (сапоги) -> boots and winter boots."""
+    return _matching(_KINDS, token)
+
+
+def audiences_for(token: str) -> list[str]:
+    """Whom a normalized query word names: "zhenskie" (женские) -> women."""
+    return _matching(_WHOM, token)

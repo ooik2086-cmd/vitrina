@@ -133,7 +133,11 @@ class DemoClient extends http.BaseClient {
 
   /// The server's catalog filters, applied to the recorded listings.
   List<Map<String, dynamic>> _catalog(Map<String, String> q) {
-    final words = (q['q'] ?? '').toLowerCase().split(RegExp(r'\s+')).where((w) => w.isNotEmpty);
+    // Words that ask for nothing, as on the server: little words and the word for footwear itself.
+    const filler = {'на', 'для', 'с', 'и', 'в', 'үшін', 'арналған', 'for', 'and', 'pair', 'пара', 'жұп', 'аяқ', 'киім'};
+    final words = (q['q'] ?? '').toLowerCase().split(RegExp(r'\s+')).where(
+        (w) => w.isNotEmpty && !filler.contains(w) && !['обув', 'аяқкиім', 'shoe', 'footwear'].any(w.startsWith));
+    final whom = q['audience'];
     final conditions = q['condition']?.split(',').toSet();
     final colors = q['color']?.split(',').map((c) => c.trim()).where((c) => c.isNotEmpty).toSet();
     final minP = int.tryParse(q['min_price_tiyn'] ?? ''), maxP = int.tryParse(q['max_price_tiyn'] ?? '');
@@ -143,6 +147,10 @@ class DemoClient extends http.BaseClient {
       final price = l['price_tiyn'] as int;
       if (!words.every(text.contains)) return false;
       if (q['category'] != null && l['category'] != q['category']) return false;
+      // Whom for, as the server decides; the recorded demo pairs were listed for anyone.
+      final theirs = l['audience'] as String? ?? 'unisex';
+      if (whom == 'kids' && theirs != 'kids' && l['category'] != 'kids') return false;
+      if ((whom == 'men' || whom == 'women') && theirs != whom && theirs != 'unisex') return false;
       if (q['seller_id'] != null && '${(l['seller'] as Map)['id']}' != q['seller_id']) return false;
       if (q['sale'] == 'true' && l['was_price_tiyn'] == null) return false;
       if (conditions != null && !conditions.contains(l['condition'])) return false;

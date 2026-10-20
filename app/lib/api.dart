@@ -101,7 +101,8 @@ class SavedSearch {
         minPriceTiyn = j['min_price_tiyn'] as int?,
         maxPriceTiyn = j['max_price_tiyn'] as int?,
         sizeCm = j['size_cm'] as String?,
-        color = j['color'] as String?;
+        color = j['color'] as String?,
+        audience = j['audience'] as String?;
   final int id;
   final String? q;
   final String? category;
@@ -112,6 +113,9 @@ class SavedSearch {
 
   /// The stored colour names, comma-separated, in the server's order.
   final String? color;
+
+  /// Whom the pairs are for (men, women, unisex, kids); null for anyone.
+  final String? audience;
 
   /// The same filters as the catalog sends, for saving and comparing.
   static Map<String, Object> body(
@@ -124,6 +128,7 @@ class SavedSearch {
         if (filter.minPriceTiyn != null) 'min_price_tiyn': filter.minPriceTiyn!,
         if (filter.maxPriceTiyn != null) 'max_price_tiyn': filter.maxPriceTiyn!,
         if (filter.colors.isNotEmpty) 'color': (filter.colors.toList()..sort()).join(','),
+        if (filter.audience != null) 'audience': filter.audience!,
       };
 
   /// The colours of [color] as a set, for the catalog filter.
@@ -137,7 +142,8 @@ class SavedSearch {
           conditions: {...?condition?.split(',').where((c) => c.isNotEmpty)},
           minPriceTiyn: minPriceTiyn,
           maxPriceTiyn: maxPriceTiyn,
-          colors: colors));
+          colors: colors,
+          audience: audience));
 }
 
 /// A buyer's price offer on one size; `priceTiyn` is what they pay once it is accepted.
@@ -394,8 +400,10 @@ class CatalogFilter {
       this.minPriceTiyn,
       this.maxPriceTiyn,
       this.city,
-      this.colors = const {}});
+      this.colors = const {},
+      this.audience});
   final String sort; // new | price_asc | price_desc
+  final String? audience; // men | women | unisex | kids: whom the pairs are for; null for anyone
   final String? city; // the seller's city: nearby pairs come sooner and cost less to send
   final Set<String> conditions;
   final int? minPriceTiyn;
@@ -410,7 +418,8 @@ class CatalogFilter {
       minPriceTiyn: minPriceTiyn,
       maxPriceTiyn: maxPriceTiyn,
       city: city,
-      colors: picked);
+      colors: picked,
+      audience: audience);
 
   /// How many refinements differ from the default, for the badge on the filter button.
   int get active =>
@@ -418,7 +427,8 @@ class CatalogFilter {
       (conditions.isNotEmpty ? 1 : 0) +
       (minPriceTiyn != null || maxPriceTiyn != null ? 1 : 0) +
       (city != null ? 1 : 0) +
-      (colors.isNotEmpty ? 1 : 0);
+      (colors.isNotEmpty ? 1 : 0) +
+      (audience != null ? 1 : 0);
 
   Map<String, String> get query => {
         if (sort != 'new') 'sort': sort,
@@ -427,6 +437,7 @@ class CatalogFilter {
         if (maxPriceTiyn != null) 'max_price_tiyn': '$maxPriceTiyn',
         if (city != null) 'city': city!,
         if (colors.isNotEmpty) 'color': (colors.toList()..sort()).join(','),
+        if (audience != null) 'audience': audience!,
       };
 }
 
@@ -457,6 +468,7 @@ class Listing {
         status = j['status'] as String,
         title = j['title'] as String,
         category = j['category'] as String,
+        audience = j['audience'] as String?,
         brand = j['brand'] as String?,
         color = j['color'] as String,
         priceTiyn = j['price_tiyn'] as int,
@@ -511,6 +523,9 @@ class Listing {
   final String? photosVersion;
   final String title;
   final String category;
+
+  /// men | women | unisex | kids; null on a pair listed before it was asked.
+  final String? audience;
   final String? brand;
   final String? modelName;
   final String color;
@@ -1120,6 +1135,7 @@ class Api {
           String? modelName,
           String? color,
           String? category,
+          String? audience,
           String? condition,
           List<Map<String, String>>? photos,
           List<Map<String, String>>? addPhotos,
@@ -1140,6 +1156,7 @@ class Api {
         if (modelName != null) 'model_name': modelName,
         if (color != null) 'color': color,
         if (category != null) 'category': category,
+        if (audience != null) 'audience': audience,
         if (condition != null) 'condition': condition,
         if (photos != null) 'photos': photos,
         if (addPhotos != null) 'add_photos': addPhotos,

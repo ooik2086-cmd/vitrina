@@ -1,19 +1,22 @@
 """Saved searches, the catalog filter they share with search, and telling followers about a new listing."""
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from vitrina_core.catalog import normalize_query
+from vitrina_core.catalog import audiences_for, categories_for, is_filler, normalize_query
 from vitrina_core.colors import PARTS, color_list, color_query, matching_colors
 
 from . import services
 from . import promo
 from .deps import current_user, get_db, now_utc
 from .errors import ApiError
+from .api_common import AUDIENCES
 from .models import Follow, SavedSearch, Favorite, Listing, ListingSize, User
 from .serializers import LIGHT, cm_to_mm, listing_out, with_light_media
 
@@ -23,14 +26,15 @@ router = APIRouter(prefix="/api/v1")
 
 def catalog_filter(stmt, *, q: str | None = None, category: str | None = None, brand: str | None = None,
                    condition: str | None = None, min_price_tiyn: int | None = None,
-                   max_price_tiyn: int | None = None, size_cm: str | None = None, color: str | None = None):
+                   max_price_tiyn: int | None = None, size_cm: str | None = None, color: str | None = None,
+                   audience: str | None = None):
     """The catalog's filters, shared by search and by saved-search alerts so both agree on what matches."""
     if q:
-        # Colour words become the stored Kazakh name first: "черные" and "black" find "қара".
-        for token in normalize_query(color_query(q)).split():
-            stmt = stmt.where(Listing.search_text.contains(token))
+        stmt = stmt.where(*query_words(q))
     if category:
         stmt = stmt.where(Listing.category == category)
+    if audience:
+        stmt = stmt.where(or_(*for_whom(audience)))
     if brand:
         stmt = stmt.where(Listing.search_text.contains(normalize_query(brand)))
     if condition:  # one value or a comma-separated list
@@ -49,8 +53,44 @@ def catalog_filter(stmt, *, q: str | None = None, category: str | None = None, b
     return stmt
 
 
+def for_whom(audience: str) -> list:
+    """Pairs for this audience: a unisex pair is also men's and women's, and a pair in the children's category is
+    children's whether or not the seller said so."""
+    if audience == "kids":
+        return [Listing.audience == "kids", Listing.category == "kids"]
+    return [Listing.audience.in_((audience, "unisex") if audience in ("men", "women") else (audience,))]
+
+
+def query_words(q: str) -> list:
+    """What the words typed ask for, every one of them. Colour words become the stored Kazakh name first: "черные"
+    and "black" find "қара". A word for a kind of footwear or for whom it is made also finds the pairs filed so,
+    though their titles do not say it: "сапоги" finds a pair titled "Етік" in the boots category. Words for kinds
+    are alternatives to each other ("рабочие ботинки": work shoes, or boots), as are words for whom; the two sets
+    narrow each other ("детские сандалии": sandals, for children). Words that ask for nothing are left out."""
+    kinds: dict[str, list[str]] = {}
+    whom: dict[str, list[str]] = {}
+    found = []
+    for token in normalize_query(color_query(q)).split():
+        if is_filler(token):
+            continue
+        if audiences := audiences_for(token):
+            whom[token] = audiences
+        elif categories := categories_for(token):
+            kinds[token] = categories
+        else:
+            found.append(Listing.search_text.contains(token))
+    if kinds:
+        found.append(or_(Listing.category.in_({c for cs in kinds.values() for c in cs}),
+                         *[Listing.search_text.contains(t) for t in kinds]))
+    if whom:
+        found.append(or_(*[w for a in {a for aa in whom.values() for a in aa} for w in for_whom(a)],
+                         *[Listing.search_text.contains(t) for t in whom]))
+    return found
+
+
 MAX_SAVED_SEARCHES = 10
-SEARCH_FIELDS = ("q", "category", "brand", "condition", "min_price_tiyn", "max_price_tiyn", "size_cm", "color")
+SEARCH_FIELDS = ("q", "category", "brand", "condition", "min_price_tiyn", "max_price_tiyn", "size_cm", "color",
+                 "audience")
 
 
 class SavedSearchIn(BaseModel):
@@ -62,6 +102,7 @@ class SavedSearchIn(BaseModel):
     max_price_tiyn: int | None = Field(default=None, ge=0)
     size_cm: str | None = Field(default=None, max_length=8)
     color: str | None = Field(default=None, max_length=300)
+    audience: Literal[AUDIENCES] | None = None  # type: ignore[valid-type]
 
     # In one spelling before the length is checked: a Kazakh name can be longer than the word typed for it.
     _color = field_validator("color", mode="before")(
@@ -106,7 +147,11 @@ def announce(db: Session, listing: Listing) -> None:
         or_(SavedSearch.max_price_tiyn.is_(None), SavedSearch.max_price_tiyn >= listing.price_tiyn),
         # A colour search names this colour or one it is made of (a looser test; the exact one is below).
         or_(SavedSearch.color.is_(None), SavedSearch.color == "",
-            *[SavedSearch.color.contains(c, autoescape=True) for c in {listing.color, *PARTS.get(listing.color, ())}]))
+            *[SavedSearch.color.contains(c, autoescape=True) for c in {listing.color, *PARTS.get(listing.color, ())}]),
+        # A search for whom names one this pair is for (as for_whom decides).
+        or_(SavedSearch.audience.is_(None), SavedSearch.audience.in_(
+            {listing.audience, *(("men", "women") if listing.audience == "unisex" else ()),
+             *(("kids",) if listing.category == "kids" else ())} - {None})))
     for saved in db.scalars(candidates.order_by(SavedSearch.id)).all():
         if saved.user_id in told:
             continue

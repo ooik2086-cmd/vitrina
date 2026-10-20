@@ -692,6 +692,13 @@ class _ListingScreenState extends State<ListingScreen> {
                                   name: tr('Жағдайы'),
                                   value: label(conditions, l.condition)),
                               const Divider(),
+                              if (l.audience != null) ...[
+                                _Fact(
+                                    icon: Icons.person_outline,
+                                    name: tr('Кімге арналған'),
+                                    value: label(audiences, l.audience)),
+                                const Divider(),
+                              ],
                               _Fact(
                                   icon: Icons.verified_outlined,
                                   name: tr('Түпнұсқалығы'),

@@ -33,8 +33,10 @@ class ListingNameFields extends StatelessWidget {
     required this.model,
     required this.color,
     required this.category,
+    required this.audience,
     required this.condition,
     required this.onCategory,
+    required this.onAudience,
     required this.onCondition,
   });
   final Listing listing;
@@ -43,8 +45,10 @@ class ListingNameFields extends StatelessWidget {
   final TextEditingController model;
   final TextEditingController color;
   final String category;
+  final String? audience;
   final String condition;
   final ValueChanged<String> onCategory;
+  final ValueChanged<String> onAudience;
   final ValueChanged<String> onCondition;
 
   @override
@@ -97,6 +101,18 @@ class ListingNameFields extends StatelessWidget {
           decoration: InputDecoration(labelText: tr('Санаты')),
           items: [for (final e in categories.entries) DropdownMenuItem(value: e.key, child: Text(tr(e.value)))],
           onChanged: (v) => onCategory(v ?? category),
+        ),
+      ],
+      // Whom it is for stays once said and on sale; a pair listed before it was asked can still be told.
+      if (fresh || listing.audience == null) ...[
+        const SizedBox(height: 12),
+        DropdownButtonFormField<String>(
+          key: const Key('edit-audience'),
+          initialValue: audience,
+          isExpanded: true,
+          decoration: InputDecoration(labelText: tr('Кімге арналған')),
+          items: [for (final e in audiences.entries) DropdownMenuItem(value: e.key, child: Text(tr(e.value)))],
+          onChanged: (v) => v == null ? null : onAudience(v),
         ),
       ],
       const SizedBox(height: 12),

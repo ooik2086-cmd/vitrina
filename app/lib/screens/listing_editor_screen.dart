@@ -64,8 +64,9 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
   final _description = TextEditingController();
   final _price = TextEditingController();
   final _delivery = TextEditingController(text: '0');
-  String _category = 'sneakers';
+  String? _category; // chosen, or filled in from a photo: a default would file boots as sneakers
   String _condition = 'new_with_box';
+  String? _audience; // asked, never assumed: a men's default would hide a women's pair from women
   String _style = 'clean';
   final _sizes = [_SizeRow()];
   final Map<String, _Upload> _photos = {};
@@ -98,6 +99,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
     _price.text = '${t.priceTiyn ~/ 100}';
     _delivery.text = '${t.deliveryPriceTiyn ~/ 100}';
     _category = t.category;
+    _audience = t.audience;
     _style = t.showcaseStyle;
     if (t.condition != 'defective') _condition = t.condition; // a defect belongs to one pair, with its own photos
     _suggestAsked = true; // brand and model are known already
@@ -130,6 +132,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
   String _snapshot() => [
         for (final c in [_title, _brand, _color, _defects, _description, _price, _delivery]) c.text.trim(),
         _category,
+        _audience,
         _condition,
         _style,
         for (final r in _sizes) '${r.label.text.trim()}|${r.cm.text.trim()}|${r.qty.text.trim()}',
@@ -275,7 +278,8 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
       ];
       final listing = await _api.createListing({
         'title': _title.text.trim(),
-        'category': _category,
+        'category': _category!,
+        if (_audience != null) 'audience': _audience,
         if (_brand.text.trim().isNotEmpty) 'brand': _brand.text.trim(),
         if (_modelName != null) 'model_name': _modelName,
         'color': _color.text.trim(),
@@ -423,7 +427,17 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
               isExpanded: true, // long names in large text are cut short instead of running off the screen
               decoration: InputDecoration(labelText: tr('Санаты')),
               items: [for (final e in categories.entries) DropdownMenuItem(value: e.key, child: Text(tr(e.value)))],
+              validator: (v) => v == null ? tr('Түрін таңдаңыз') : null,
               onChanged: (v) => setState(() => _category = v!),
+            ),
+            DropdownButtonFormField<String>(
+              key: const Key('audience'),
+              initialValue: _audience,
+              isExpanded: true,
+              decoration: InputDecoration(labelText: tr('Кімге арналған')),
+              items: [for (final e in audiences.entries) DropdownMenuItem(value: e.key, child: Text(tr(e.value)))],
+              validator: (v) => v == null ? tr('Кімге арналғанын таңдаңыз') : null,
+              onChanged: (v) => setState(() => _audience = v),
             ),
             TextFormField(controller: _brand, decoration: InputDecoration(labelText: tr('Бренді (міндетті емес)'))),
             ColorField(controller: _color),

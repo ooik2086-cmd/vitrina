@@ -138,7 +138,7 @@ def listing_out(db: Session, listing: Listing, *, owner: bool = False) -> dict:
     # otherwise read the seller again for every one.
     seller = per_request(db, "seller", listing.seller_id, lambda: db.get(User, listing.seller_id))
     return {
-        "id": listing.id, "status": listing.status, "title": listing.title, "category": listing.category,
+        "id": listing.id, "status": listing.status, "title": listing.title, "category": listing.category, "audience": listing.audience,
         "brand": listing.brand, "model_name": listing.model_name, "color": listing.color,
         "price_tiyn": listing.price_tiyn, "was_price_tiyn": was_price(listing),
         "delivery_price_tiyn": listing.delivery_price_tiyn,

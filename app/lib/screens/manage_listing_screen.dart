@@ -53,6 +53,7 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
   late final _model = TextEditingController(text: _l.modelName ?? '');
   late final _color = TextEditingController(text: _l.color);
   late String _category = _l.category;
+  late String? _audience = _l.audience;
   late String _condition = _l.condition;
   late final Map<int, int> _stock = {for (final s in _l.sizes) s.id: _count(s)};
 
@@ -156,6 +157,7 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
           modelName: fresh ? _edited(_model, _l.modelName) : null,
           color: _edited(_color, _l.color),
           category: fresh && _category != _l.category ? _category : null,
+          audience: _audience != _l.audience ? _audience : null,
           condition: _condition != _l.condition ? _condition : null),
       tr('Сақталды'),
     );
@@ -395,8 +397,10 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
                     model: _model,
                     color: _color,
                     category: _category,
+                    audience: _audience,
                     condition: _condition,
                     onCategory: (v) => setState(() => _category = v),
+                    onAudience: (v) => setState(() => _audience = v),
                     onCondition: (v) => setState(() => _condition = v),
                   ),
                   const SizedBox(height: 24),

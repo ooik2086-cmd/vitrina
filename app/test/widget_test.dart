@@ -420,6 +420,45 @@ void main() {
     expect(fit(0, 3, 2).verdict, 'large');
   });
 
+  test('whom a pair is for goes to the server when it is told, and only then', () async {
+    final sent = <Object?>[];
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async {
+          sent.add(jsonDecode(req.body));
+          return jsonResponse({...listingJson(), 'audience': 'women'});
+        }));
+    expect((await api.editListing(7, audience: 'women')).audience, 'women');
+    await api.editListing(7, priceTiyn: 100);
+    expect(sent, [
+      {'audience': 'women'},
+      {'price_tiyn': 100}
+    ]);
+  });
+
+  testWidgets('product page says whom the pair is for, and nothing when the seller never said', (tester) async {
+    String? audience = 'women';
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async {
+          if (req.url.path.endsWith('/similar')) return jsonResponse({'items': []});
+          return jsonResponse({...listingJson(), 'audience': audience});
+        }));
+    tester.view.physicalSize = const Size(400, 1800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester
+        .pumpWidget(SessionScope(session: Session(api), child: const MaterialApp(home: ListingScreen(listingId: 7))));
+    await tester.pumpAndSettle();
+    expect(find.text('Кімге арналған'), findsOneWidget);
+    expect(find.text('Әйелдерге'), findsOneWidget);
+    audience = null;
+    await tester
+        .pumpWidget(SessionScope(session: Session(api), child: const MaterialApp(home: ListingScreen(listingId: 8))));
+    await tester.pumpAndSettle();
+    expect(find.text('Кімге арналған'), findsNothing);
+  });
+
   testWidgets('product page shows real demand only when the server sends it', (tester) async {
     Map<String, dynamic>? popularity = {'sold_30d': 2, 'favorites': 5};
     final api = Api(
@@ -842,6 +881,11 @@ void main() {
     expect(black, isNotEmpty);
     expect(black.every((l) => l.color == 'қара' || l.color == 'қара-ақ'), isTrue); // black-and-white is black too
     expect(black.length, lessThan(all.length));
+    // Whom for, as the server: the recorded pairs are for anyone, so men and women see them, children do not;
+    // the word for footwear asks for nothing more.
+    expect((await api.search(filter: const CatalogFilter(audience: 'women'))).length, all.length);
+    expect(await api.search(filter: const CatalogFilter(audience: 'kids')), isEmpty);
+    expect((await api.search(q: 'обувь')).length, all.length);
   });
 
   test('the demo offers each colour as the server would: closest condition, the same order on every colour', () async {
@@ -1291,17 +1335,20 @@ void main() {
         q: '  nike ',
         category: 'sneakers',
         sizeCm: '26,5',
-        filter: const CatalogFilter(conditions: {'used_good', 'new_with_box'}, maxPriceTiyn: 5000000));
+        filter:
+            const CatalogFilter(conditions: {'used_good', 'new_with_box'}, maxPriceTiyn: 5000000, audience: 'women'));
     expect(body, {
       'q': 'nike',
       'category': 'sneakers',
       'size_cm': '26,5',
       'condition': 'new_with_box,used_good',
       'max_price_tiyn': 5000000,
+      'audience': 'women',
     });
     final saved = SavedSearch.fromJson({'id': 1, ...body});
     expect(saved.asBody, body);
-    expect(savedSearchLabel(saved), startsWith('«nike» · Кроссовкалар · 26,5 см · ${formatTenge(5000000)} дейін'));
+    expect(savedSearchLabel(saved),
+        startsWith('«nike» · Кроссовкалар · Әйелдерге · 26,5 см · ${formatTenge(5000000)} дейін'));
   });
 
   test('a saved search keeps its colours in one order and names them in the interface language', () {
@@ -1488,8 +1535,18 @@ void main() {
     expect(find.text('Толтырыңыз'), findsWidgets);
     expect(find.text('Бағаны енгізіңіз'), findsOneWidget);
     expect(find.text('Түсін таңдаңыз'), findsOneWidget); // the colour is picked, not left out
+    expect(find.text('Кімге арналғанын таңдаңыз'), findsOneWidget); // asked, never assumed
+    expect(find.text('Түрін таңдаңыз'), findsOneWidget); // boots are never filed as sneakers by default
 
     await tester.enterText(find.widgetWithText(TextFormField, 'Атауы'), 'Qadam Runner');
+    await tester.tap(find.byKey(const Key('audience')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Әйелдерге').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('category-null')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Етік, бәтеңке').last);
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('color-ақ')));
     await tester.enterText(find.widgetWithText(TextFormField, 'Бағасы'), '34900');
     await tester.enterText(find.widgetWithText(TextFormField, 'Өлшем'), '42');
@@ -1978,6 +2035,38 @@ void main() {
     expect(result!.maxPriceTiyn, 5000000);
     expect(result!.sort, 'price_asc');
     expect(result!.city, isNull);
+  });
+
+  testWidgets('filter sheet asks whom the pairs are for, and a unisex pair is left to men and women', (tester) async {
+    CatalogFilter? result;
+    var initial = const CatalogFilter();
+    await tester.pumpWidget(MaterialApp(
+      home: Builder(
+        builder: (context) => TextButton(
+          onPressed: () async => result = await showModalBottomSheet<CatalogFilter>(
+              context: context, isScrollControlled: true, builder: (_) => FilterSheet(initial: initial)),
+          child: const Text('open'),
+        ),
+      ),
+    ));
+    Future<CatalogFilter> pick(String key) async {
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('filter-audience-unisex')), findsNothing);
+      await tester.ensureVisible(find.byKey(Key(key)));
+      await tester.tap(find.byKey(Key(key)));
+      await tester.pump();
+      await tester.ensureVisible(find.byKey(const Key('apply-filter')));
+      await tester.tap(find.byKey(const Key('apply-filter')));
+      await tester.pumpAndSettle();
+      return result!;
+    }
+
+    final kids = await pick('filter-audience-kids');
+    expect((kids.audience, kids.active, kids.query['audience']), ('kids', 1, 'kids'));
+    initial = kids; // opened again with it chosen, it can be set back to everyone
+    final anyone = await pick('filter-audience-null');
+    expect((anyone.audience, anyone.active, anyone.query.containsKey('audience')), (null, 0, false));
   });
 
   testWidgets('filter sheet narrows the catalog to one seller city', (tester) async {

@@ -12,9 +12,10 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from vitrina_core.catalog import BRAND_SYNONYMS, normalize_query, transliterate
+from vitrina_core.catalog import BRAND_SYNONYMS, audiences_for, categories_for, is_filler, normalize_query, transliterate
 
 from . import delivery_eta, visual
+from .api_common import AUDIENCES
 from .deps import current_user, get_db, get_storage, now_utc
 from .errors import ApiError
 from .models import ListingEmbedding, Listing, ListingSize, User
@@ -49,11 +50,13 @@ def search_listings(q: str | None = None, category: str | None = None, brand: st
                     max_price_tiyn: int | None = None, size_cm: str | None = None,
                     sort: Literal["new", "price_asc", "price_desc"] = "new", seller_id: int | None = None,
                     sale: bool = False, city: str | None = Query(default=None, max_length=60),
-                    color: str | None = Query(default=None, max_length=300), limit: int = 20,
+                    color: str | None = Query(default=None, max_length=300),
+                    audience: Literal[AUDIENCES] | None = None,  # type: ignore[valid-type]
+                    limit: int = 20,
                     offset: int = 0, db: Session = Depends(get_db)):
     stmt = catalog_filter(select(Listing).where(Listing.status == "published"), q=q, category=category,
                           brand=brand, condition=condition, min_price_tiyn=min_price_tiyn,
-                          max_price_tiyn=max_price_tiyn, size_cm=size_cm, color=color)
+                          max_price_tiyn=max_price_tiyn, size_cm=size_cm, color=color, audience=audience)
     if seller_id is not None:
         stmt = stmt.where(Listing.seller_id == seller_id)
     if sale:
@@ -102,7 +105,8 @@ def did_you_mean(db: Session, q: str) -> str | None:
     vocab = search_vocabulary(db)
     words, changed = [], False
     for w in normalize_query(q).split():
-        if w in vocab or len(w) < 3:
+        # "сапоги" and "для" are words people use, not typos of something on sale
+        if w in vocab or len(w) < 3 or is_filler(w) or categories_for(w) or audiences_for(w):
             words.append(vocab.get(w, w))
             continue
         near = difflib.get_close_matches(w, list(vocab), n=1, cutoff=0.75)

@@ -1233,6 +1233,87 @@ class ReportTests(ApiTestCase):
                                    {"action": "dismiss", "reason": "again"}).status_code, 404)
 
 
+class FootwearKindsTests(ApiTestCase):
+    def test_every_kind_of_footwear_and_whom_it_is_for_is_found_in_the_words_people_use(self):
+        """Before, only sneakers fitted the categories, there was no saying whom a pair is for, and "сапоги" found only
+        listings with that very word in the title."""
+        def made(title, category, audience=None):
+            return self.publish(title=title, category=category, audience=audience, brand=None, model_name=None)["id"]
+        # A word for a kind is a word, not a typo of something on sale: no boots yet, and "сапоги" is not "Сапаги".
+        typo = made("Сапаги, жасыл", "sneakers", "unisex")
+        r = self.c.get("/api/v1/listings", params={"q": "сапоги"}).json()
+        self.assertEqual((r["items"], r.get("did_you_mean")), ([], None))
+        boots = made("Қара былғары, қысқа қонышты", "boots", "men")
+        heels = made("Қызыл, жіңішке өкшесі бар", "heels", "women")
+        slippers = made("Жұмсақ, сұр", "slippers", "unisex")
+        work = made("Болат тұмсықты, майға төзімді", "work", "men")
+        kids = made("Жазғы, жарық диодты", "sandals", "kids")
+        kids_old = made("Мектепке, қара", "kids")  # in the children's category, listed before whom was asked
+        old = made("Ақ, жеңіл", "sneakers")
+
+        def ids(**q):
+            r = self.c.get("/api/v1/listings", params=q)
+            self.assertEqual(r.status_code, 200, r.text)
+            return sorted(i["id"] for i in r.json()["items"])
+        # The word for the kind finds the pairs filed so, in Kazakh, Russian or English, though no title has it.
+        for q, want in (("сапоги", [boots]), ("етіктер", [boots]), ("ботинки", [boots]), ("boots", [boots]),
+                        ("туфли на каблуке", [heels]), ("тапочки", [slippers]), ("тәпішке", [slippers]),
+                        ("спецобувь", [work]), ("рабочие ботинки", sorted([boots, work])),
+                        ("детские", sorted([kids, kids_old])), ("балаларға сандал", [kids]),
+                        ("детские сандалии", [kids]), ("кроссовки", sorted([old, typo])),
+                        # the word for footwear asks for nothing more: every pair is footwear
+                        ("женская обувь", sorted([heels, slippers, typo])), ("kids shoes", sorted([kids, kids_old])),
+                        ("балалар аяқкиімі", sorted([kids, kids_old])), ("men boots", [boots]),
+                        ("сапоги для мужчин", [boots])):
+            self.assertEqual(ids(q=q), sorted(want), q)
+        # Whom it is for: a unisex pair is men's and women's; a pair in the children's category is children's.
+        self.assertEqual(ids(audience="men"), sorted([boots, slippers, work, typo]))
+        self.assertEqual(ids(audience="women"), sorted([heels, slippers, typo]))
+        self.assertEqual(ids(audience="kids"), sorted([kids, kids_old]))
+        self.assertEqual(ids(q="женские"), sorted([heels, slippers, typo]))
+        self.assertEqual(ids(q="мужские сапоги"), [boots])
+        self.assertEqual(self.c.get("/api/v1/listings", params={"audience": "teen"}).status_code, 422)
+        self.assertEqual(self.c.get(f"/api/v1/listings/{heels}").json()["audience"], "women")
+        # A word that finds nothing on sale is not "corrected" into another word.
+        self.assertIsNone(self.c.get("/api/v1/listings", params={"q": "валенки"}).json().get("did_you_mean"))
+
+        # A pair listed before it was asked can be told whom it is for once it is on sale, but not changed after.
+        patch = lambda lid, body: self.c.patch(f"/api/v1/listings/{lid}", json=body, headers=self.h(self.seller))
+        self.assertEqual(patch(old, {"audience": "women"}).status_code, 200)
+        self.assertEqual(patch(old, {"audience": "women"}).status_code, 200)  # the same again is no change
+        self.assertEqual(patch(old, {"audience": "men"}).json()["code"], "listing_locked")
+        self.assertEqual(patch(old, {"audience": "teen"}).status_code, 422)
+        self.assertEqual(ids(audience="women"), sorted([heels, slippers, typo, old]))
+        # Saying whom it is for is a fact, not words or photos to check again: the pair stays on sale.
+        self.assertEqual(self.c.get(f"/api/v1/listings/{old}").json()["status"], "published")
+
+        # A saved search for women's boots tells of a new pair for women, not of one for men.
+        r = self.post("/saved-searches", self.buyer, {"q": "сапоги", "audience": "women"})
+        self.assertEqual((r.status_code, r.json()["audience"]), (201, "women"))
+        self.assertEqual(self.post("/saved-searches", self.buyer, {"audience": "teen"}).status_code, 422)
+        made("Ұзын қонышты, күзгі", "boots", "men")
+        theirs = made("Ұзын қонышты, күзгі", "boots", "women")
+        told = [n["listing_id"] for n in self.c.get("/api/v1/notifications", headers=self.h(self.buyer)).json()["items"]
+                if n["kind"] == "saved_search"]
+        self.assertEqual(told, [theirs])
+
+
+class FootwearWordsTests(unittest.TestCase):
+    def test_short_words_match_only_themselves_and_stems_start_words(self):
+        from vitrina_core.catalog import audiences_for, categories_for, is_filler, normalize_query
+        word = lambda w: normalize_query(w)  # noqa: E731
+        self.assertEqual(audiences_for(word("ер")), ["men"])
+        self.assertEqual(audiences_for(word("еркін")), [])  # "free", not "men"
+        self.assertEqual(audiences_for(word("men")), ["men"])
+        self.assertEqual(audiences_for(word("menthol")), [])
+        self.assertEqual((audiences_for(word("men's")), audiences_for(word("women's"))), (["men"], ["women"]))
+        self.assertEqual(categories_for(word("үй")), ["slippers"])
+        self.assertEqual(categories_for(word("үйрену")), [])
+        self.assertEqual(categories_for(word("етіктер")), ["boots_winter", "boots"])
+        self.assertTrue(is_filler(word("обуви")) and is_filler(word("аяқкиімі")) and is_filler(word("для")))
+        self.assertFalse(is_filler(word("мен")))  # Kazakh "with", but also English "men"
+
+
 class ShopTests(ApiTestCase):
     def test_shop_profile_counts_and_seller_filter(self):
         _, order = self.delivered()
@@ -1888,6 +1969,13 @@ class ModerationTests(ApiTestCase):
         actions = [a["action"] for a in self.get("/admin/audit", staff).json()["items"]]
         self.assertIn("approve_listing", actions)
         self.assertIn("reject_listing", actions)
+
+    def test_saying_whom_a_pair_is_for_keeps_the_staff_approval(self):
+        lid = self.draft(description="www.qadam.kz дүкенімізде көбірек")
+        self.post(f"/listings/{lid}/publish", self.seller)
+        self.assertEqual(self.post(f"/admin/moderation/{lid}/approve", self.make_staff()).json()["status"], "published")
+        r = self.c.patch(f"/api/v1/listings/{lid}", json={"audience": "men"}, headers=self.h(self.seller))
+        self.assertEqual((r.status_code, r.json()["status"], r.json()["audience"]), (200, "published", "men"))
 
     def test_adding_a_phone_to_a_live_listing_sends_it_back_to_the_queue(self):
         listing = self.publish()

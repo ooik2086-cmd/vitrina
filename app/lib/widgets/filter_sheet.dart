@@ -20,6 +20,7 @@ class FilterSheet extends StatefulWidget {
 class _FilterSheetState extends State<FilterSheet> {
   late String _sort = widget.initial.sort;
   late String? _city = widget.initial.city;
+  late String? _audience = widget.initial.audience;
   late final Set<String> _conditions = {...widget.initial.conditions};
   late final Set<String> _colors = {...widget.initial.colors};
 
@@ -51,7 +52,13 @@ class _FilterSheetState extends State<FilterSheet> {
     Navigator.pop(
         context,
         CatalogFilter(
-            sort: _sort, conditions: _conditions, minPriceTiyn: min, maxPriceTiyn: max, city: _city, colors: _colors));
+            sort: _sort,
+            conditions: _conditions,
+            minPriceTiyn: min,
+            maxPriceTiyn: max,
+            city: _city,
+            colors: _colors,
+            audience: _audience));
   }
 
   @override
@@ -74,6 +81,19 @@ class _FilterSheetState extends State<FilterSheet> {
                         label: Text(tr(e.value)),
                         selected: _sort == e.key,
                         onSelected: (_) => setState(() => _sort = e.key)),
+                ]),
+                const SizedBox(height: 20),
+                Text(tr('Кімге'), style: theme.textTheme.titleSmall),
+                const SizedBox(height: 8),
+                // Unisex is not offered here: men and women both see unisex pairs.
+                Wrap(spacing: 8, runSpacing: 8, children: [
+                  for (final e in {null: 'Барлығына', ...audiences}.entries)
+                    if (e.key != 'unisex')
+                      ChoiceChip(
+                          key: Key('filter-audience-${e.key}'),
+                          label: Text(tr(e.value)),
+                          selected: _audience == e.key,
+                          onSelected: (_) => setState(() => _audience = e.key)),
                 ]),
                 const SizedBox(height: 20),
                 Text(tr('Баға, ₸'), style: theme.textTheme.titleSmall),

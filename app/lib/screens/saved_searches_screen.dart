@@ -13,6 +13,7 @@ String savedSearchLabel(SavedSearch s) {
   final parts = <String>[
     if (s.q != null) '«${s.q}»',
     if (s.category != null) tr(categories[s.category] ?? s.category!),
+    if (s.audience != null) tr(audiences[s.audience] ?? s.audience!),
     if (s.sizeCm != null) trf('{0} см', [s.sizeCm]),
     if (s.minPriceTiyn != null && s.maxPriceTiyn != null)
       '${formatTenge(s.minPriceTiyn!)} – ${formatTenge(s.maxPriceTiyn!)}'

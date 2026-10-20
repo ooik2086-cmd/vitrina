@@ -203,7 +203,8 @@ class _CatalogScreenState extends State<CatalogScreen> {
         conditions: {...?picked.condition?.split(',').where((c) => c.isNotEmpty)},
         minPriceTiyn: picked.minPriceTiyn,
         maxPriceTiyn: picked.maxPriceTiyn,
-        colors: picked.colors);
+        colors: picked.colors,
+        audience: picked.audience);
     _savedKey = jsonEncode(picked.asBody);
     _search();
   }
@@ -300,7 +301,7 @@ class _CatalogScreenState extends State<CatalogScreen> {
                             icon: const Icon(Icons.photo_camera_outlined),
                             onPressed: _searchByPhoto,
                           ),
-                          hintText: tr('Найк, nike, ақ кроссовка…'),
+                          hintText: tr('Nike, қара етік, балалар сандалы…'),
                           border: OutlineInputBorder(borderRadius: BorderRadius.circular(99)),
                           enabledBorder: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(99),

@@ -9,7 +9,10 @@ from vitrina_core.catalog import Condition
 from vitrina_core.orders import OrderStatus as S
 
 
-CATEGORIES = ("sneakers", "sport", "casual", "classic", "boots_winter", "sandals", "kids", "other")
+CATEGORIES = ("sneakers", "sport", "casual", "classic", "heels", "boots", "boots_winter", "sandals", "slippers", "work",
+              "kids", "other")
+# Whom a pair is made for; a unisex pair is shown to men and to women.
+AUDIENCES = ("men", "women", "unisex", "kids")
 PHONE_RE = re.compile(r"^\+7\d{10}$")
 log = logging.getLogger("vitrina.api")
 

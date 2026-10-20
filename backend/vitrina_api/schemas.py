@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, field_validator
 from vitrina_core.catalog import Condition
 from vitrina_core.colors import canonical_color
 
-from .api_common import CATEGORIES
+from .api_common import AUDIENCES, CATEGORIES
 
 
 class OtpRequest(BaseModel):
@@ -44,6 +44,7 @@ class PhotoIn(BaseModel):
 class ListingIn(BaseModel):
     title: str = Field(min_length=3, max_length=120)
     category: Literal[CATEGORIES]  # type: ignore[valid-type]
+    audience: Literal[AUDIENCES] | None = None  # type: ignore[valid-type]
     brand: str | None = Field(default=None, max_length=60)
     model_name: str | None = Field(default=None, max_length=80)
     color: str = Field(min_length=2, max_length=40)
@@ -83,6 +84,7 @@ class ListingPatch(BaseModel):
     model_name: str | None = Field(default=None, max_length=80)
     color: str | None = Field(default=None, min_length=2, max_length=40)
     category: Literal[CATEGORIES] | None = None  # type: ignore[valid-type]
+    audience: Literal[AUDIENCES] | None = None  # type: ignore[valid-type]
     condition: Condition | None = None
     photos: list[PhotoIn] | None = Field(default=None, max_length=60)  # the whole set, replacing the current one
     add_photos: list[PhotoIn] | None = Field(default=None, max_length=60)

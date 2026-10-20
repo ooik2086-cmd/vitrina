@@ -70,6 +70,7 @@ class Listing(Base):
     status: Mapped[str] = mapped_column(String(20), default="draft", index=True)  # draft|moderation|published|paused|sold|hidden|rejected|archived
     title: Mapped[str] = mapped_column(String(120))
     category: Mapped[str] = mapped_column(String(30), index=True)
+    audience: Mapped[str | None] = mapped_column(String(10))  # men|women|unisex|kids; None on pairs listed before it was asked
     brand: Mapped[str | None] = mapped_column(String(60), index=True)
     model_name: Mapped[str | None] = mapped_column(String(80))
     color: Mapped[str] = mapped_column(String(40))
@@ -400,6 +401,7 @@ class SavedSearch(Base):
     max_price_tiyn: Mapped[int | None] = mapped_column(BigInteger)
     size_cm: Mapped[str | None] = mapped_column(String(8))
     color: Mapped[str | None] = mapped_column(String(300))  # stored colour names, comma-separated
+    audience: Mapped[str | None] = mapped_column(String(10))  # men|women|unisex|kids
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 

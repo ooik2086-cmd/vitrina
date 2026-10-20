@@ -24,11 +24,23 @@ const categories = {
   'sneakers': 'Кроссовкалар',
   'sport': 'Спорт',
   'casual': 'Күнделікті',
-  'classic': 'Классика',
-  'boots_winter': 'Етік, қысқы',
+  'classic': 'Туфли, классика',
+  'heels': 'Өкшелі аяқкиім',
+  'boots': 'Етік, бәтеңке',
+  'boots_winter': 'Қысқы етік',
   'sandals': 'Сандалдар',
+  'slippers': 'Тәпішке, үй аяқкиімі',
+  'work': 'Жұмыс, арнайы аяқкиім',
   'kids': 'Балалар',
   'other': 'Басқа',
+};
+
+/// Whom a pair is made for. A unisex pair is shown to men and to women alike.
+const audiences = {
+  'men': 'Ерлерге',
+  'women': 'Әйелдерге',
+  'unisex': 'Ерлерге де, әйелдерге де',
+  'kids': 'Балаларға',
 };
 
 // Segment, condition and authenticity are separate facts; the UI never merges them into one "quality" badge.
