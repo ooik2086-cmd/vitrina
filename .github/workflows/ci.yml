@@ -6,7 +6,7 @@ on:
 
 jobs:
   backend:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: backend
@@ -20,7 +20,7 @@ jobs:
       - run: python -m unittest -v
 
   backend-postgres:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20  # a request stuck on a lock fails here, not after six hours
     services:
       postgres:
@@ -48,7 +48,7 @@ jobs:
 
   # The shared listing page's 360° turn in a real browser: its script under the page's own Content-Security-Policy.
   share-page-browser:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: backend
@@ -74,7 +74,7 @@ jobs:
       - run: python -m unittest tests.test_share_browser -v
 
   app:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: app
@@ -104,7 +104,10 @@ jobs:
           path: app/build/app/outputs/flutter-apk/app-debug.apk
 
   deploy:
-    runs-on: ubuntu-latest
+    # The release a server is set up on (deploy/README.md: Ubuntu 22.04 or 24.04), named rather than ubuntu-latest,
+    # which GitHub moves to a newer Ubuntu that setup.sh has not been tried on. The other jobs are pinned alike, so
+    # a change of runner image never turns them red unasked.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - run: shellcheck -s sh deploy/*.sh deploy/test/*.sh
@@ -134,7 +137,7 @@ jobs:
           }
 
   docker:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - run: docker compose build
