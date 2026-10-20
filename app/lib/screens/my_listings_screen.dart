@@ -168,7 +168,8 @@ class _MyListingsScreenState extends State<MyListingsScreen> {
                             ),
                             title: Text(l.title),
                             subtitle: Text('${tr(listingStatuses[l.status] ?? l.status)} · ${stockSummary(l)}'
-                                '${l.frames.isNotEmpty ? ' · 360°' : ''}'),
+                                '${l.frames.isNotEmpty ? ' · 360°' : ''}'
+                                '${l.photosPending ? ' · ${tr('фото өңделуде')}' : ''}'),
                             trailing: const Icon(Icons.chevron_right),
                             onTap: () async {
                               final changed = await Navigator.of(context)

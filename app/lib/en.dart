@@ -1006,4 +1006,8 @@ const en = <String, String>{
   'Тағы тауарлар': 'More shoes',
   'Сұрақтар жүктелмеді': "Questions didn't load",
   'Сақталған деректеме': 'Saved bank details',
+  'фото өңделуде': 'photos being prepared',
+  'Фотолар өңделуде': 'Photos being prepared',
+  'Фоны алынып, айналым дайындалып жатыр, бір тауарға бірнеше минут кетеді. Оған дейін сатып алушылар фотоларды түсірілген күйінде көреді.':
+      'We are removing the background and preparing the 360° view, which takes a few minutes per listing. Until then buyers see the photos as you took them.',
 };

@@ -772,7 +772,10 @@ class CutoutApiTests(MediaTests):
         old = self.post("/listings", self.seller, {**LISTING, "photos": first}).json()["id"]
         new = self.post("/listings", self.seller, {**LISTING, "photos": self.four((60, 90, 120))}).json()["id"]
         self.assertEqual([m["processed_url"] or m["thumb_url"] for m in self.mine(new)["media"]], [None] * 4)
+        self.assertTrue(self.mine(new)["photos_pending"])  # the seller is told the photos are being prepared
+        self.assertNotIn("photos_pending", self.c.get(f"/api/v1/listings/{new}").json())  # only the seller
         self.assertEqual(work.step(), old)  # sellers waiting are served in the order they came
+        self.assertFalse(self.mine(old)["photos_pending"])
         self.assertTrue(all(m["processed_url"] and m["thumb_url"] for m in self.mine(old)["media"]))
         self.assertIsNone(self.mine(new)["media"][0]["processed_url"])
         self.assertEqual(work.step(), new)
@@ -781,11 +784,23 @@ class CutoutApiTests(MediaTests):
         photos = self.four((200, 200, 40))  # new photos: due again, at once
         self.assertEqual(self.c.patch(f"/api/v1/listings/{old}", json={"photos": photos},
                                       headers=self.h(self.seller)).status_code, 200)
+        self.assertTrue(self.mine(old)["photos_pending"])
         self.assertEqual(work.step(), old)
         self.assertIsNone(work.step())
         self.assertEqual(self.c.patch(f"/api/v1/listings/{old}", json={"photos": first},
                                       headers=self.h(self.seller)).status_code, 200)
         self.assertEqual(work.step(), old)  # back to photos it had: worked at once, no wait left from before
+        from datetime import timedelta
+        from vitrina_api.models import Listing, Media
+        with self.app.state.sessions() as db:  # work that never got done is not "a few minutes" any more
+            db.query(Media).filter(Media.listing_id == old).update({"thumb_url": None})
+            db.get(Listing, old).photos_changed_at -= timedelta(hours=23)
+            db.commit()
+        self.assertTrue(self.mine(old)["photos_pending"])
+        with self.app.state.sessions() as db:
+            db.get(Listing, old).photos_changed_at -= timedelta(hours=2)
+            db.commit()
+        self.assertFalse(self.mine(old)["photos_pending"])
 
     def test_an_edited_listing_goes_before_older_work(self):
         from vitrina_api.models import Listing, Media

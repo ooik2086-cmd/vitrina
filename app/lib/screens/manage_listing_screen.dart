@@ -260,6 +260,18 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
                   const SizedBox(height: 16),
                   ModerationCard(listing: _l),
                 ],
+                if (_l.photosPending && !locked) ...[
+                  const SizedBox(height: 16),
+                  Card(
+                    key: const Key('photos-pending'),
+                    child: ListTile(
+                      leading: const Icon(Icons.hourglass_top_outlined),
+                      title: Text(tr('Фотолар өңделуде')),
+                      subtitle: Text(tr(
+                          'Фоны алынып, айналым дайындалып жатыр, бір тауарға бірнеше минут кетеді. Оған дейін сатып алушылар фотоларды түсірілген күйінде көреді.')),
+                    ),
+                  ),
+                ],
                 if (_l.stats != null) ...[
                   const SizedBox(height: 20),
                   _StatsRow(stats: _l.stats!),

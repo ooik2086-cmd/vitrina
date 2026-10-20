@@ -486,6 +486,7 @@ class Listing {
         colors = [for (final c in (j['colors'] as List?) ?? const []) Colorway.fromJson(c as Map<String, dynamic>)],
         modelName = j['model_name'] as String?,
         everOnSale = (j['ever_on_sale'] as bool?) ?? false,
+        photosPending = (j['photos_pending'] as bool?) ?? false,
         photosVersion = j['photos_version'] as String?;
 
   final int id;
@@ -493,6 +494,10 @@ class Listing {
 
   /// Owner view only: once on sale the shoe itself (brand, model, category, photos) is fixed for good.
   final bool everOnSale;
+
+  /// Owner view only: the photos just given are still being prepared (background removed, small copies, the 360°
+  /// start); buyers see them as taken until then.
+  final bool photosPending;
 
   /// Names the photo set shown; sent with an order so it is placed on the photos the buyer actually saw.
   final String? photosVersion;

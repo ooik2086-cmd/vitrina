@@ -140,7 +140,7 @@ def listing_out(db: Session, listing: Listing, *, owner: bool = False) -> dict:
                    **per_request(db, "seller_rating", seller.id, lambda: seller_rating(db, seller.id))},
         **({"stats": listing_stats(db, listing), "ever_on_sale": listing.announced_at is not None,
             "promo": {"state": listing.promo_state, "url": listing.promo_url},
-            "moderation": moderation_out(listing)} if owner else {}),
+            "moderation": moderation_out(listing), "photos_pending": photos_pending(listing)} if owner else {}),
     }
 
 
@@ -274,6 +274,19 @@ def angle_frames(listing: Listing) -> dict[str, str]:
 
 def listing_cover(listing: Listing) -> str | None:
     return next((m.processed_url or m.original_url for m in media_of(listing) if m.angle != "frame"), None)
+
+
+# Photo work takes a few minutes a listing; past this something went wrong, which the worker's log says, and the
+# seller is no longer told to wait.
+PHOTOS_PENDING_FOR = timedelta(days=1)
+
+
+def photos_pending(listing: Listing) -> bool:
+    """For the seller: the photos they just gave are still being prepared (cut out, small copies for scrolling, the
+    360° start), so buyers see them as taken for now. The small copies are made last, after the cut-outs."""
+    changed = services.aware(listing.photos_changed_at)
+    return (changed is not None and now_utc() - changed < PHOTOS_PENDING_FOR
+            and any(m.thumb_url is None for m in media_of(listing)))
 
 
 def photos_version(listing: Listing) -> str:
