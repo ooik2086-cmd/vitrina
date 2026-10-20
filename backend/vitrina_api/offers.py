@@ -8,7 +8,7 @@ from __future__ import annotations
 import math
 from datetime import timedelta, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -48,6 +48,12 @@ def state(offer: Offer) -> str:
 def price(offer: Offer) -> int:
     """What the buyer pays for the item once the offer is accepted."""
     return offer.counter_tiyn if offer.counter_tiyn is not None else offer.amount_tiyn
+
+
+def waiting_count(db: Session, mine: list, status: str) -> int:
+    """How many of these offers wait for an answer: in that status and not lapsed (as state() sees them)."""
+    return int(db.scalar(select(func.count(Offer.id)).where(*mine, Offer.status == status,
+                                                          Offer.expires_at > now_utc())) or 0)
 
 
 def offer_out(db: Session, offer: Offer) -> dict:
@@ -115,18 +121,26 @@ def make_offer(listing_id: int, body: OfferIn, user: User = Depends(current_user
 
 
 @router.get("/offers")
-def list_offers(role: str = "buyer", listing_id: int | None = None, user: User = Depends(current_user),
+def list_offers(role: str = "buyer", listing_id: int | None = None,
+                before: int | None = Query(default=None, ge=1, le=2**31 - 1),
+                limit: int = Query(default=100, ge=1, le=100), user: User = Depends(current_user),
                 db: Session = Depends(get_db)):
+    """Newest first, a page at a time by id (next_before: the cursor for the next page, null after the last). waiting
+    counts every offer that waits for this user's answer, not only those on this page; it comes with the first page
+    only (null on the others, the same for the whole list)."""
     column = Offer.seller_id if role == "seller" else Offer.buyer_id
-    stmt = select(Offer).where(column == user.id).order_by(Offer.id.desc()).limit(100)
-    if listing_id is not None:
-        stmt = stmt.where(Offer.listing_id == listing_id)
-    rows = db.scalars(stmt).all()
+    mine = [column == user.id] + ([Offer.listing_id == listing_id] if listing_id is not None else [])
+    q = select(Offer).where(*mine)
+    if before is not None:
+        q = q.where(Offer.id < before)
+    rows = db.scalars(q.order_by(Offer.id.desc()).limit(limit + 1)).all()
+    rows, more = rows[:limit], len(rows) > limit
     preload_bare_listings(db, {o.listing_id for o in rows})
     preload(db, "size", ListingSize, {o.size_id for o in rows})
     items = [offer_out(db, o) for o in rows]
-    waiting = sum(1 for o in rows if state(o) == ("pending" if role == "seller" else "countered"))
-    return {"items": items, "waiting": waiting}
+    waiting = waiting_count(db, mine, "pending" if role == "seller" else "countered") if before is None else None
+    return {"items": items, "waiting": waiting,
+            "next_before": rows[-1].id if more else None}
 
 
 def own_offer(db: Session, offer_id: int, user: User) -> Offer:

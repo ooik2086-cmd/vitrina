@@ -8,7 +8,7 @@ import time
 from datetime import timedelta
 from typing import Literal
 
-from fastapi import APIRouter, Depends, File, Form, Header, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Header, Query, Request, UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -137,12 +137,19 @@ def create_order(body: OrderIn, user: User = Depends(current_user), db: Session 
 
 
 @router.get("/orders")
-def list_orders(role: Literal["buyer", "seller"] = "buyer", user: User = Depends(current_user),
+def list_orders(role: Literal["buyer", "seller"] = "buyer", before: int | None = Query(default=None, ge=1, le=2**31 - 1),
+                limit: int = Query(default=100, ge=1, le=100), user: User = Depends(current_user),
                 db: Session = Depends(get_db)):
+    """Newest first, a page at a time by id (next_before: the cursor for the next page, null after the last), so a
+    shop with more than a page of orders still sees an old one that waits to be shipped."""
     column = Order.buyer_id if role == "buyer" else Order.seller_id
-    rows = db.scalars(select(Order).where(column == user.id).order_by(Order.id.desc()).limit(100)).all()
+    q = select(Order).where(column == user.id)
+    if before is not None:
+        q = q.where(Order.id < before)
+    rows = db.scalars(q.order_by(Order.id.desc()).limit(limit + 1)).all()
+    rows, more = rows[:limit], len(rows) > limit
     preload_orders(db, rows)
-    return {"items": [order_summary(db, o) for o in rows]}
+    return {"items": [order_summary(db, o) for o in rows], "next_before": rows[-1].id if more else None}
 
 
 @router.get("/orders/{order_id}")

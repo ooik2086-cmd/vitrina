@@ -306,6 +306,8 @@ class _OffersScreenState extends State<OffersScreen> {
         ),
         Expanded(
           child: FutureBuilder<List<Offer>>(
+            // A tab of its own: the other tab's offers are never shown with this tab's buttons while it loads.
+            key: ValueKey(_seller),
             future: _items,
             builder: (context, snap) {
               if (snap.hasError && snap.connectionState == ConnectionState.done) {

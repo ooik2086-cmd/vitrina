@@ -698,48 +698,91 @@ class WeightTests(ApiTestCase):
         # What the seller got is filled in for the settled orders only, each on its own row.
         self.assertEqual({line.split(";")[3] for line in lines if line.split(";")[10]}, settled)
 
+    def paged(self, path, token, between=None):
+        """Every page of a list, two to a page, by the next_before cursor; between() runs once after the first page,
+        as something that changes while the app reads. Returns the pages' ids and the first page's whole body."""
+        got, first, before = [], None, None
+        while True:
+            sep = "&" if "?" in path else "?"
+            r = self.c.get(f"/api/v1{path}{sep}limit=2" + (f"&before={before}" if before else ""), headers=self.h(token))
+            self.assertEqual(r.status_code, 200, r.text)
+            got.append([i["id"] for i in r.json()["items"]])
+            first, before = first or r.json(), r.json()["next_before"]
+            if before is None:
+                return got, first
+            if between:
+                between()
+                between = None
+
     def test_a_shop_and_favourites_longer_than_a_page_come_whole_page_by_page(self):
         """Before, a shop saw only its newest 200 listings and favourites came in no particular order, all at once."""
         made = [self.publish(title=f"Аяқкиім {i}")["id"] for i in range(5)]
         saved = [made[2], made[0], made[4], made[1], made[3]]  # not the order they were listed
         for lid in saved:
             self.assertEqual(self.post(f"/favorites/{lid}", self.buyer).status_code, 204)
-
-        def page(path, token, before=None):
-            r = self.c.get(f"/api/v1{path}?limit=2" + (f"&before={before}" if before else ""), headers=self.h(token))
-            self.assertEqual(r.status_code, 200, r.text)
-            return [i["id"] for i in r.json()["items"]], r.json()["next_before"]
-
-        def pages(path, token, between=None):
-            got, before = [], None
-            while True:
-                ids, before = page(path, token, before)
-                got.append(ids)
-                if before is None:
-                    return got
-                if between:  # something changes once, after the first page
-                    between()
-                    between = None
-
-        self.assertEqual(pages("/me/listings", self.seller), [made[4:2:-1], made[2:0:-1], made[:1]])
-        self.assertEqual(pages("/favorites", self.buyer), [saved[4:2:-1], saved[2:0:-1], saved[:1]])  # newest saved first
+        self.assertEqual(self.paged("/me/listings", self.seller)[0], [made[4:2:-1], made[2:0:-1], made[:1]])
+        self.assertEqual(self.paged("/favorites", self.buyer)[0], [saved[4:2:-1], saved[2:0:-1], saved[:1]])
         # A listing published, or a heart tapped, while the pages are read neither repeats one nor pushes one off.
         fresh = []
-        got = pages("/me/listings", self.seller, lambda: fresh.append(self.publish(title="Жаңа")["id"]))
-        self.assertEqual(sum(got, []), made[::-1])
-        self.assertNotIn(fresh[0], sum(got, []))
+        got = sum(self.paged("/me/listings", self.seller, lambda: fresh.append(self.publish(title="Жаңа")["id"]))[0], [])
+        self.assertEqual(got, made[::-1])
         self.assertEqual(self.post(f"/favorites/{fresh[0]}", self.buyer).status_code, 204)
-        got = pages("/favorites", self.buyer,
-                    lambda: self.c.delete(f"/api/v1/favorites/{saved[4]}", headers=self.h(self.buyer)))
+        got = self.paged("/favorites", self.buyer,
+                         lambda: self.c.delete(f"/api/v1/favorites/{saved[4]}", headers=self.h(self.buyer)))[0]
         self.assertEqual(sum(got, []), [fresh[0]] + saved[::-1])  # by offset, saved[3] would have been skipped
-        # One page by default, as an older app asks; at most 200 (a shop) and 100 (favourites) a page; a cursor
-        # bigger than any id is refused, not a server error.
-        self.assertIsNone(self.c.get("/api/v1/me/listings", headers=self.h(self.seller)).json()["next_before"])
-        for path, too_many in (("/me/listings", 201), ("/favorites", 101)):
-            r = self.c.get(f"/api/v1{path}?limit={too_many}", headers=self.h(self.seller))
-            self.assertEqual(r.status_code, 422, path)
-            r = self.c.get(f"/api/v1{path}?before={10**30}", headers=self.h(self.seller))
-            self.assertEqual(r.status_code, 422, path)
+        # Six in each now, three full pages: the list ends with the third, with no empty page after it.
+        self.assertEqual(self.post(f"/favorites/{saved[4]}", self.buyer).status_code, 204)
+        self.assertEqual(self.paged("/me/listings", self.seller)[0], [[fresh[0], made[4]], made[3:1:-1], made[1::-1]])
+        self.assertEqual(self.paged("/favorites", self.buyer)[0], [[saved[4], fresh[0]], saved[3:1:-1], saved[1::-1]])
+        self.assert_page_bounds(("/me/listings", 200), ("/favorites", 100))
+
+    def assert_page_bounds(self, *lists):
+        """One page by default, as an older app asks, and no bigger than the most a page holds; a cursor bigger than
+        any id is refused, not a server error."""
+        for path, most in lists:
+            self.assertIsNone(self.c.get(f"/api/v1{path}", headers=self.h(self.seller)).json()["next_before"], path)
+            sep = "&" if "?" in path else "?"
+            for bad in (f"limit={most + 1}", f"before={10**30}", "before=0"):
+                r = self.c.get(f"/api/v1{path}{sep}{bad}", headers=self.h(self.seller))
+                self.assertEqual(r.status_code, 422, f"{path} {bad}")
+
+    def test_orders_and_offers_longer_than_a_page_come_whole_and_count_every_offer_waiting(self):
+        """Before, only the newest 100 orders and offers came: an older order waiting to be shipped, or an offer
+        waiting for an answer, was left off, and the waiting count looked at those 100 only."""
+        orders = [self.ordered(key=f"k{i}")[1]["id"] for i in range(5)]
+        for path, token in (("/orders", self.buyer), ("/orders?role=seller", self.seller)):
+            self.assertEqual(self.paged(path, token)[0], [orders[4:2:-1], orders[2:0:-1], orders[:1]], path)
+        fresh = []
+        got = self.paged("/orders?role=seller", self.seller, lambda: fresh.append(self.ordered(key="new")[1]["id"]))[0]
+        self.assertEqual(sum(got, []), orders[::-1])  # an order made meanwhile is not read twice
+
+        offers, listings = [], []
+        for i in range(5):
+            listings.append(self.publish(title=f"Ұсыныс {i}"))
+            r = self.post(f"/listings/{listings[-1]['id']}/offers", self.buyer,
+                          {"size_id": listings[-1]["sizes"][0]["id"], "amount_tiyn": 3_800_000})
+            self.assertEqual(r.status_code, 201, r.text)
+            offers.append(r.json()["id"])
+        from sqlalchemy import update
+        # The oldest offer, on the last page, waits for the buyer; the next one has lapsed and waits for no one.
+        r = self.post(f"/offers/{offers[0]}/counter", self.seller, {"amount_tiyn": 4_200_000})
+        self.assertEqual(r.status_code, 200, r.text)
+        with self.db() as db:
+            db.execute(update(Offer).where(Offer.id == offers[1]).values(expires_at=datetime.now(timezone.utc) - timedelta(minutes=1)))
+            db.commit()
+        for path, token, waiting in (("/offers", self.buyer, 1), ("/offers?role=seller", self.seller, 3)):
+            got, first = self.paged(path, token)
+            self.assertEqual(got, [offers[4:2:-1], offers[2:0:-1], offers[:1]], path)
+            self.assertEqual(first["waiting"], waiting, path)  # counted on the first page, not only from its rows
+        got, first = self.paged(f"/offers?role=seller&listing_id={listings[3]['id']}", self.seller)
+        self.assertEqual((got, first["waiting"]), ([[offers[3]]], 1))  # that listing's own, not the shop's 3
+        second = self.c.get(f"/api/v1/offers?role=seller&limit=2&before={offers[3]}", headers=self.h(self.seller))
+        self.assertIsNone(second.json()["waiting"])  # counted once, on the first page
+        # Six orders now, three full pages: the list ends with the third, with no empty page after it.
+        self.assertEqual(self.paged("/orders?role=seller", self.seller)[0],
+                         [[fresh[0], orders[4]], orders[3:1:-1], orders[1::-1]])
+        self.assert_page_bounds(("/orders", 100), ("/orders?role=seller", 100), ("/offers", 100),
+                                ("/offers?role=seller", 100))
 
     def test_price_bands_are_read_again_only_when_prices_change(self):
         from sqlalchemy import event, insert, update

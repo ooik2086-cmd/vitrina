@@ -1196,19 +1196,20 @@ class Api {
 
   /// The whole shop, newest first: the server sends it a page at a time, and the screen's filters, counts and
   /// search need every listing, not only the newest page.
-  Future<List<Listing>> myListings() => _allPages('/me/listings');
+  Future<List<Listing>> myListings() => _allPages('/me/listings', Listing.fromJson, (l) => l.id);
 
   /// Every page of a list the server sends in pages: next_before is the cursor for the next one, null after the last
-  /// (an older server sends none, and its one page is the whole list). A listing already read is never added twice.
-  Future<List<Listing>> _allPages(String path) async {
-    final all = <Listing>[];
+  /// (an older server sends none, and its one page is the whole list). An item already read is never added twice.
+  Future<List<T>> _allPages<T>(String path, T Function(Map<String, dynamic>) parse, int Function(T) id,
+      {Map<String, String> query = const {}}) async {
+    final all = <T>[];
     final seen = <int>{};
     int? before;
     do {
-      final r = await _send('GET', path, query: before != null ? {'before': '$before'} : null) as Map;
+      final r = await _send('GET', path, query: {...query, if (before != null) 'before': '$before'}) as Map;
       for (final j in r['items'] as List) {
-        final l = Listing.fromJson(j as Map<String, dynamic>);
-        if (seen.add(l.id)) all.add(l);
+        final item = parse(j as Map<String, dynamic>);
+        if (seen.add(id(item))) all.add(item);
       }
       final next = r['next_before'] as int?;
       before = next != null && (before == null || next < before) ? next : null; // always further down, never a loop
@@ -1261,7 +1262,7 @@ class Api {
       Listing.fromJson(await _send('GET', '/listings/$id') as Map<String, dynamic>);
 
   /// Every favourite, the newest saved first (compare needs them all).
-  Future<List<Listing>> favorites() => _allPages('/favorites');
+  Future<List<Listing>> favorites() => _allPages('/favorites', Listing.fromJson, (l) => l.id);
 
   Future<void> setFavorite(int listingId, bool on) => _send(on ? 'POST' : 'DELETE', '/favorites/$listingId');
 
@@ -1294,11 +1295,10 @@ class Api {
       await _send('POST', '/listings/$listingId/offers', body: {'size_id': sizeId, 'amount_tiyn': amountTiyn})
           as Map<String, dynamic>);
 
-  Future<List<Offer>> offers({String role = 'buyer', int? listingId}) async {
-    final r =
-        await _send('GET', '/offers', query: {'role': role, if (listingId != null) 'listing_id': '$listingId'}) as Map;
-    return [for (final j in r['items'] as List) Offer.fromJson(j as Map<String, dynamic>)];
-  }
+  /// Every offer, newest first (read page by page): one still waiting for an answer is never left off.
+  Future<List<Offer>> offers({String role = 'buyer', int? listingId}) =>
+      _allPages('/offers', Offer.fromJson, (o) => o.id,
+          query: {'role': role, if (listingId != null) 'listing_id': '$listingId'});
 
   /// accept | decline | withdraw
   Future<Offer> answerOffer(int id, String action) async =>
@@ -1307,10 +1307,9 @@ class Api {
   Future<Offer> counterOffer(int id, int amountTiyn) async => Offer.fromJson(
       await _send('POST', '/offers/$id/counter', body: {'amount_tiyn': amountTiyn}) as Map<String, dynamic>);
 
-  Future<List<OrderInfo>> orders({String role = 'buyer'}) async {
-    final r = await _send('GET', '/orders', query: {'role': role}) as Map;
-    return [for (final j in r['items'] as List) OrderInfo.fromJson(j as Map<String, dynamic>)];
-  }
+  /// Every order, newest first (read page by page): an old one still waiting to be shipped is never left off.
+  Future<List<OrderInfo>> orders({String role = 'buyer'}) =>
+      _allPages('/orders', OrderInfo.fromJson, (o) => o.id, query: {'role': role});
 
   Future<OrderInfo> order(int id) async =>
       OrderInfo.fromJson(await _send('GET', '/orders/$id') as Map<String, dynamic>);

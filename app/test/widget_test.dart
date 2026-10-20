@@ -255,13 +255,28 @@ void main() {
     expect((await api.suggestDetails('http://x/media/1/b.jpg')).isEmpty, isTrue);
   });
 
-  test('a shop and favourites longer than a page are read whole, page by page', () async {
+  test('a shop, favourites, orders and offers longer than a page are read whole, page by page', () async {
     final asked = <String>[];
     // Each list has its own ids; a page is the two below the cursor, and the next cursor is the last id sent.
     const lists = {
       '/api/v1/me/listings': [5, 4, 3, 2, 1],
-      '/api/v1/favorites': [9, 7, 6]
+      '/api/v1/favorites': [9, 7, 6],
+      '/api/v1/orders': [8, 5, 3],
+      '/api/v1/offers': [6, 4, 2],
     };
+    Map<String, dynamic> item(String path, int id) => switch (path) {
+          '/api/v1/orders' => {
+              'id': id,
+              'status': 'PAID',
+              'listing_id': 7,
+              'buyer_id': 2,
+              'seller_id': 1,
+              'total_tiyn': 4650000,
+              'listing_title': 'Shoe $id',
+            },
+          '/api/v1/offers' => {...offerJson(), 'id': id},
+          _ => {...listingJson(), 'id': id},
+        };
     Api paged({List<int> Function(List<int> page)? tamper, int? Function(int? next)? cursor}) => Api(
         base: 'http://x/api/v1',
         client: MockClient((req) async {
@@ -275,9 +290,7 @@ void main() {
           final next = rest.length > 2 ? ids.last : null;
           return http.Response(
               jsonEncode({
-                'items': [
-                  for (final id in tamper?.call(ids) ?? ids) {...listingJson(), 'id': id}
-                ],
+                'items': [for (final id in tamper?.call(ids) ?? ids) item(req.url.path, id)],
                 'next_before': cursor != null ? cursor(next) : next,
               }),
               200,
@@ -289,6 +302,13 @@ void main() {
     asked.clear();
     expect([for (final l in await api.favorites()) l.id], [9, 7, 6]);
     expect(asked, ['/api/v1/favorites?', '/api/v1/favorites?before=7']);
+    // Orders and offers too, keeping what the list was asked for on every page.
+    asked.clear();
+    expect([for (final o in await api.orders(role: 'seller')) o.id], [8, 5, 3]);
+    expect(asked, ['/api/v1/orders?role=seller', '/api/v1/orders?role=seller&before=5']);
+    asked.clear();
+    expect([for (final o in await api.offers(role: 'seller', listingId: 7)) o.id], [6, 4, 2]);
+    expect(asked, ['/api/v1/offers?role=seller&listing_id=7', '/api/v1/offers?role=seller&listing_id=7&before=4']);
     // A listing the server sends twice is shown once.
     expect([
       for (final l in await paged(tamper: (ids) => [...ids, 5]).myListings()) l.id
@@ -1241,6 +1261,29 @@ void main() {
     expect(calls, contains('POST /api/v1/offers/11/counter {"amount_tiyn":4300000}'));
     expect(find.text('Сатушы баға ұсынды'), findsOneWidget);
     expect(find.byKey(const Key('accept-11')), findsNothing); // now it is the buyer's turn
+  });
+
+  testWidgets('while my own offers load, the offers sent to me and their buttons are gone', (tester) async {
+    final mine = Completer<http.Response>();
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async => req.url.queryParameters['role'] == 'seller'
+            ? jsonResponse({
+                'items': [offerJson()],
+                'waiting': 1
+              })
+            : mine.future))
+      ..token = 'tok';
+    await tester.pumpWidget(SessionScope(session: Session(api), child: const MaterialApp(home: OffersScreen())));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('accept-11')), findsOneWidget);
+    await tester.tap(find.text('Менің ұсыныстарым'));
+    await tester.pump();
+    expect(find.byKey(const Key('accept-11')), findsNothing); // a buyer is never shown the seller's answers
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    mine.complete(jsonResponse({'items': [], 'waiting': 0}));
+    await tester.pumpAndSettle();
+    expect(find.text('Сіз әлі баға ұсынбадыңыз.'), findsOneWidget);
   });
 
   test('saved search sends the catalog filters and reads back as one line', () {

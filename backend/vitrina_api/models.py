@@ -61,10 +61,12 @@ class AuthToken(Base):
 class Listing(Base):
     __tablename__ = "listings"
     # The catalog filters on status first, then category and price, and sorts by price or by newest.
+    # A shop's own listings are read newest first, a page at a time below an id: (seller_id, id).
     __table_args__ = (Index("ix_listings_status_category_price", "status", "category", "price_tiyn"),
-                      Index("ix_listings_status_price", "status", "price_tiyn"))
+                      Index("ix_listings_status_price", "status", "price_tiyn"),
+                      Index("ix_listings_seller_id_id", "seller_id", "id"))
     id: Mapped[int] = mapped_column(primary_key=True)
-    seller_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    seller_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     status: Mapped[str] = mapped_column(String(20), default="draft", index=True)  # draft|moderation|published|paused|sold|hidden|rejected|archived
     title: Mapped[str] = mapped_column(String(120))
     category: Mapped[str] = mapped_column(String(30), index=True)
@@ -144,7 +146,8 @@ class Media(Base):
 
 class Favorite(Base):
     __tablename__ = "favorites"
-    __table_args__ = (UniqueConstraint("user_id", "listing_id"),)
+    # (user_id, id): favourites are read newest saved first, a page at a time below an id.
+    __table_args__ = (UniqueConstraint("user_id", "listing_id"), Index("ix_favorites_user_id_id", "user_id", "id"))
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     listing_id: Mapped[int] = mapped_column(ForeignKey("listings.id"), index=True)  # "saved by N" on every page
@@ -152,11 +155,13 @@ class Favorite(Base):
 
 class Order(Base):
     __tablename__ = "orders"
+    # (buyer_id, id) and (seller_id, id): each side's orders are read newest first, a page at a time below an id.
     __table_args__ = (Index("ix_orders_listing_status", "listing_id", "status"),
-                      Index("ix_orders_seller_created", "seller_id", "created_at"))
+                      Index("ix_orders_seller_created", "seller_id", "created_at"),
+                      Index("ix_orders_buyer_id_id", "buyer_id", "id"), Index("ix_orders_seller_id_id", "seller_id", "id"))
     id: Mapped[int] = mapped_column(primary_key=True)
-    buyer_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
-    seller_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    buyer_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    seller_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     listing_id: Mapped[int] = mapped_column(ForeignKey("listings.id"))
     size_id: Mapped[int] = mapped_column(ForeignKey("listing_sizes.id"))
     # What the buyer ordered, as shown at that moment: the seller may later improve the listing's name or photos.
@@ -472,11 +477,13 @@ class Offer(Base):
     """A buyer's price offer on one size of a listing. The seller accepts, declines or names their own price;
     an accepted offer lets that buyer order at that price for a limited time."""
     __tablename__ = "offers"
+    # Each side's offers are read newest first, a page at a time below an id.
+    __table_args__ = (Index("ix_offers_buyer_id_id", "buyer_id", "id"), Index("ix_offers_seller_id_id", "seller_id", "id"))
     id: Mapped[int] = mapped_column(primary_key=True)
     listing_id: Mapped[int] = mapped_column(ForeignKey("listings.id"), index=True)
     size_id: Mapped[int] = mapped_column(ForeignKey("listing_sizes.id"))
-    buyer_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
-    seller_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    buyer_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    seller_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     amount_tiyn: Mapped[int] = mapped_column(BigInteger)          # what the buyer offered
     counter_tiyn: Mapped[int | None] = mapped_column(BigInteger)  # the seller's price, when they countered
     status: Mapped[str] = mapped_column(String(12), default="pending")  # pending|countered|accepted|declined|withdrawn|ordered
