@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
@@ -24,6 +26,9 @@ const optionalAngles = {
 /// Close-ups the showcase zooms into; they are uploaded larger so stitching and print stay sharp.
 const detailAngles = {'top', 'sole', 'detail', 'label'};
 const _defectRequired = {'used_good', 'defective'};
+const _resendPhotoText = 'Кейбір фото жүктелмеді. Белгісі бар фотоны басып, қайта жіберіңіз.';
+const _resendFramesText = 'Кейбір кадрлар жүктелмеді. Қайта түсірудің керегі жоқ, тек қайта жіберіңіз.';
+const _retakePhotoText = 'Фото қабылданбады. Белгісі бар фотоны басып, басқасын түсіріңіз.';
 
 class _SizeRow {
   final label = TextEditingController();
@@ -37,12 +42,54 @@ class _SizeRow {
   }
 }
 
-/// Uploads run as soon as a photo is picked, so the final save only sends URLs.
+/// Uploads run as soon as a photo is picked, so the final save only sends URLs. The photo is kept, so one that
+/// did not go is sent again with a tap, never taken again.
 class _Upload {
-  _Upload(this.future);
-  final Future<String> future;
+  _Upload(this.send);
+  final Future<String> Function() send;
+  late Future<String> future;
   String? url;
   Object? error;
+
+  /// Replaced by another photo, or the page was left: if still waiting its turn, it is not sent at all.
+  bool cancelled = false;
+
+  /// A failure that may pass (no connection, the server's trouble) is sent again; a refusal (too large, not a
+  /// photo) needs another photo.
+  bool get canResend => error is ApiException && (error! as ApiException).passing;
+}
+
+class _Cancelled implements Exception {
+  const _Cancelled();
+}
+
+/// Sends a few photos at a time: two dozen 360° frames at once choke weak mobile data, so the rest wait their turn.
+class _Pool {
+  _Pool(this.size);
+  final int size;
+  var _running = 0;
+  final _waiting = <Completer<void>>[];
+
+  /// [first] puts the job ahead of those waiting: a side photo is not held up behind two dozen 360° frames.
+  Future<T> run<T>(Future<T> Function() job, {bool first = false}) async {
+    if (_running < size) {
+      _running++;
+    } else {
+      final turn = Completer<void>();
+      first ? _waiting.insert(0, turn) : _waiting.add(turn);
+      await turn.future;
+    }
+    try {
+      return await job();
+    } finally {
+      // The place goes straight to the next in line, so no newcomer slips in between.
+      if (_waiting.isNotEmpty) {
+        _waiting.removeAt(0).complete();
+      } else {
+        _running--;
+      }
+    }
+  }
 }
 
 class ListingEditorScreen extends StatefulWidget {
@@ -75,6 +122,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
   bool _saving = false;
   int _step = 0; // photos, then the pair, then price and sizes
   final _picker = ImagePicker();
+  final _pool = _Pool(3);
   Suggestion? _suggestion;
   bool _suggestAsked = false;
   String? _modelName;
@@ -120,6 +168,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
 
   @override
   void dispose() {
+    _cancel([..._photos.values, ..._defectPhotos, ..._frames]); // nothing more is sent for a page that was left
     for (final c in [_title, _brand, _color, _defects, _description, _price, _delivery]) {
       c.dispose();
     }
@@ -160,17 +209,73 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
     if (leave == true && mounted) Navigator.pop(context);
   }
 
-  _Upload _startUpload(XFile file, {bool detail = false}) {
+  _Upload _startUpload(XFile file, {bool detail = false, bool frame = false}) {
+    final api = _api;
     late final _Upload u;
-    u = _Upload(file.readAsBytes().then((b) => _api.uploadPhoto(b, file.name, detail: detail)).then((url) {
-      if (mounted) setState(() => u.url = url);
-      return url;
-    }, onError: (Object e) {
-      if (mounted) setState(() => u.error = e);
-      throw e;
-    }));
+    u = _Upload(() => _pool.run(() async {
+          if (u.cancelled) throw const _Cancelled();
+          return api.uploadPhotoPatiently(await file.readAsBytes(), file.name, detail: detail);
+        }, first: !frame));
+    return _send(u);
+  }
+
+  /// Sends [u], again if it failed before: the tile turns back to waiting, then shows the photo or the failure.
+  _Upload _send(_Upload u) {
+    u
+      ..error = null
+      ..future = u.send().then((url) {
+        if (mounted) setState(() => u.url = url);
+        return url;
+      }, onError: (Object e) {
+        if (mounted) setState(() => u.error = e);
+        throw e;
+      });
     u.future.ignore(); // errors are shown on the tile and checked again at save time
     return u;
+  }
+
+  void _resend(Iterable<_Upload> uploads) =>
+      setState(() => uploads.where((u) => u.error != null).toList().forEach(_send));
+
+  /// A failed side photo: sent again when the failure may pass, otherwise another is taken.
+  void _retryAngle(String angle) {
+    final u = _photos[angle]!;
+    if (!u.canResend) {
+      _pickAngle(angle);
+      return;
+    }
+    _resend([u]);
+    if (!_suggestAsked && (angle == 'outer' || angle == 'front')) {
+      _suggestAsked = true;
+      _suggestFrom(u);
+    }
+  }
+
+  /// A failed defect photo: sent again when the failure may pass, otherwise it goes and another is taken.
+  void _retryDefect(_Upload d) {
+    if (d.canResend) {
+      _resend([d]);
+    } else {
+      setState(() => _defectPhotos.remove(d));
+      _addDefect();
+    }
+  }
+
+  /// What to say about failed uploads: the server's reason for a refused photo, or to send the rest again.
+  void _sayFailed(Iterable<_Upload> uploads, String resendText) {
+    final failed = uploads.where((u) => u.error != null).toList();
+    final refused = failed.where((u) => !u.canResend).firstOrNull;
+    showError(
+        context,
+        refused?.error is ApiException
+            ? refused!.error!
+            : ApiException(422, 'photo_failed', tr(refused == null ? resendText : _retakePhotoText)));
+  }
+
+  void _cancel(Iterable<_Upload> uploads) {
+    for (final u in uploads) {
+      u.cancelled = true;
+    }
   }
 
   Future<XFile?> _pick({double side = 2000}) async {
@@ -198,6 +303,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
     final file = await _pick(side: detail ? 3000 : 2000);
     if (file == null) return;
     final upload = _startUpload(file, detail: detail);
+    _photos[angle]?.cancelled = true;
     setState(() => _photos[angle] = upload);
     if (!_suggestAsked && (angle == 'outer' || angle == 'front')) {
       _suggestAsked = true;
@@ -237,7 +343,9 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
   Future<void> _captureSpin() async {
     final frames = await Navigator.of(context)
         .push<List<XFile>>(MaterialPageRoute(builder: (_) => const SpinCaptureScreen(), fullscreenDialog: true));
-    if (frames != null) setState(() => _frames = [for (final f in frames) _startUpload(f)]);
+    if (frames == null) return;
+    _cancel(_frames);
+    setState(() => _frames = [for (final f in frames) _startUpload(f, frame: true)]);
   }
 
   Future<void> _pickSpinFromGallery() async {
@@ -250,7 +358,8 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
       }
       return;
     }
-    setState(() => _frames = [for (final f in files) _startUpload(f)]);
+    _cancel(_frames);
+    setState(() => _frames = [for (final f in files) _startUpload(f, frame: true)]);
   }
 
   int? _tiyn(String text) {
@@ -337,14 +446,13 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
           context, ApiException(422, 'missing_required_photos', trf('Фото жетіспейді: {0}.', [missing.join(', ')])));
       return false;
     }
-    // A failed upload is found now, while the seller can still retake it, not at the last step.
+    // A failed upload is found now, while its tile is on screen to send again, not at the last step.
     if (_photos.values.any((u) => u.error != null)) {
-      showError(context,
-          ApiException(422, 'photo_failed', tr('Кейбір фото жүктелмеді. Белгісі бар фотоны қайта түсіріңіз.')));
+      _sayFailed(_photos.values, _resendPhotoText);
       return false;
     }
     if (_frames.any((f) => f.error != null)) {
-      showError(context, ApiException(422, 'photo_failed', tr('Кейбір кадрлар жүктелмеді. Қайта түсіріңіз.')));
+      _sayFailed(_frames, _resendFramesText);
       return false;
     }
     return true;
@@ -354,9 +462,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
   bool _detailsDone() {
     if (!_form.currentState!.validate()) return false;
     if (_defectPhotos.any((d) => d.error != null)) {
-      // A defect tile cannot be retaken in place, so a failed one goes and is added again.
-      setState(() => _defectPhotos.removeWhere((d) => d.error != null));
-      showError(context, ApiException(422, 'photo_failed', tr('Ақау фотосы жүктелмеді. Қайта қосыңыз.')));
+      _sayFailed(_defectPhotos, _resendPhotoText);
       return false;
     }
     if (_condition == 'defective' && _defectPhotos.isEmpty) {
@@ -453,7 +559,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
               label: tr(e.value),
               required: requiredAngles.containsKey(e.key),
               upload: _photos[e.key],
-              onTap: () => _pickAngle(e.key),
+              onTap: _photos[e.key]?.error != null ? () => _retryAngle(e.key) : () => _pickAngle(e.key),
             ),
         ]),
         const SizedBox(height: 16),
@@ -480,9 +586,17 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
                   for (final e in _photos.entries)
                     if (e.value.error == null) e.key
                 }, onPick: _pickAngle),
-              if (_frames.any((f) => f.error != null))
-                Text(tr('Кейбір кадрлар жүктелмеді. Қайта түсіріңіз.'),
-                    style: TextStyle(color: theme.colorScheme.error)),
+              if (_frames.any((f) => f.error != null)) ...[
+                Text(tr(_resendFramesText), style: TextStyle(color: theme.colorScheme.error)),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                      key: const Key('resend-frames'),
+                      onPressed: () => _resend(_frames),
+                      icon: const Icon(Icons.refresh),
+                      label: Text(tr('Кадрларды қайта жіберу'))),
+                ),
+              ],
               const SizedBox(height: 8),
               Wrap(spacing: 8, children: [
                 FilledButton.tonalIcon(
@@ -542,7 +656,8 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
           ),
           const SizedBox(height: 8),
           Wrap(spacing: 8, runSpacing: 8, children: [
-            for (final d in _defectPhotos) _PhotoSlot(label: tr('Ақау'), upload: d, onTap: null),
+            for (final d in _defectPhotos)
+              _PhotoSlot(label: tr('Ақау'), upload: d, onTap: d.error != null ? () => _retryDefect(d) : null),
             ActionChip(
                 avatar: const Icon(Icons.add_a_photo_outlined, size: 18),
                 label: Text(tr('Ақау фотосы')),
@@ -699,7 +814,8 @@ class _PhotoSlot extends StatelessWidget {
     if (u == null) {
       inner = Icon(Icons.add_a_photo_outlined, color: scheme.outline);
     } else if (u.error != null) {
-      inner = Icon(Icons.error_outline, color: scheme.error);
+      // Refresh: a tap sends it again; a refused photo is taken anew.
+      inner = Icon(u.canResend ? Icons.refresh : Icons.error_outline, color: scheme.error);
     } else if (u.url == null) {
       inner = const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2));
     } else {
@@ -713,7 +829,12 @@ class _PhotoSlot extends StatelessWidget {
     return Semantics(
       container: true,
       button: onTap != null,
-      label: trf('{0} фотосы', [label]),
+      label: u?.error != null ? trf('{0} фотосы жүктелмеді', [label]) : trf('{0} фотосы', [label]),
+      hint: u?.error == null
+          ? null
+          : u!.canResend
+              ? tr('Қайта жіберу үшін басыңыз')
+              : tr('Басқасын түсіру үшін басыңыз'),
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(12),

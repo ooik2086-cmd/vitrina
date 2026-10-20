@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -52,6 +53,12 @@ Map<String, dynamic> listingJson({String status = 'draft'}) => {
       'seller': {'id': 3, 'shop_name': 'Qadam Store', 'city': 'Алматы'},
     };
 
+/// The most photo uploads that were on their way at once, in the last editor opened.
+var maxInFlight = 0;
+
+/// The file names of photo uploads, in the order they reached the server.
+final uploadOrder = <String>[];
+
 void main() {
   setUp(() => ImagePickerPlatform.instance = _FakePicker());
 
@@ -59,26 +66,37 @@ void main() {
   Future<List<String>> open(WidgetTester tester,
       {Listing? template,
       List<Map<String, dynamic>>? sent,
-      int? uploadsOk,
+      bool Function(int upload)? fails,
+      int failStatus = 500,
       Future<void>? failLater,
+      Future<void>? hold,
+      List<Duration> waits = const [],
       double width = 500}) async {
     final calls = <String>[];
-    var uploads = 0;
+    var uploads = 0, inFlight = 0;
+    maxInFlight = 0;
+    uploadOrder.clear();
     final api = Api(
         base: 'http://x/api/v1',
         client: MockClient((req) async {
           calls.add('${req.method} ${req.url.path}');
           if (req.url.path.endsWith('/media')) {
-            if (uploadsOk != null && ++uploads > uploadsOk) await failLater;
-            return uploadsOk != null && uploads > uploadsOk
-                ? jsonResponse({}, 500)
-                : jsonResponse({'url': 'https://cdn/${calls.length}.jpg'}, 201);
+            final n = ++uploads;
+            uploadOrder.add(RegExp(r'filename="([^"]+)"').firstMatch(latin1.decode(req.bodyBytes))!.group(1)!);
+            maxInFlight = max(maxInFlight, ++inFlight);
+            await hold;
+            if (fails?.call(n) ?? false) await failLater;
+            inFlight--;
+            return fails?.call(n) ?? false
+                ? jsonResponse({}, failStatus)
+                : jsonResponse({'url': 'https://cdn/$n.jpg'}, 201);
           }
           if (req.url.path.endsWith('/suggest')) return jsonResponse({});
           if (req.url.path.endsWith('/publish')) return jsonResponse(listingJson(status: 'moderation'));
           sent?.add(jsonDecode(req.body) as Map<String, dynamic>);
           return jsonResponse(listingJson(), 201);
-        }));
+        }))
+      ..uploadWaits = waits;
     tester.view.physicalSize = Size(width, 2200);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -242,12 +260,115 @@ void main() {
     expect(find.byType(ListingEditorScreen), findsNothing);
   });
 
-  testWidgets('a photo that did not upload is caught on the photo step, where it can be retaken', (tester) async {
-    await open(tester, uploadsOk: 0);
+  testWidgets('a photo that did not upload is caught on the photo step and sent again with a tap, not retaken',
+      (tester) async {
+    final calls = await open(tester, fails: (n) => n <= 4);
     await pickSides(tester);
     await next(tester);
-    expect(find.text('Кейбір фото жүктелмеді. Белгісі бар фотоны қайта түсіріңіз.'), findsOneWidget);
+    expect(find.text('Кейбір фото жүктелмеді. Белгісі бар фотоны басып, қайта жіберіңіз.'), findsOneWidget);
     expect(step(tester), 'Фото');
+    for (final label in requiredAngles.values) {
+      await tester.tap(find.text('$label *'));
+      await tester.pumpAndSettle();
+    }
+    expect(find.text('Камерамен түсіру'), findsNothing); // no camera: the photo already taken goes again
+    expect(calls.where((c) => c.endsWith('/media')), hasLength(8));
+    await next(tester);
+    expect(step(tester), 'Тауар туралы');
+  });
+
+  testWidgets('weak mobile data: a photo that fails on the way is sent again by itself, a refusal is not',
+      (tester) async {
+    final calls = await open(tester, fails: (n) => n == 1, waits: const [Duration(seconds: 2)]);
+    await pick(tester, find.text('Алдынан *'));
+    await tester.pump(const Duration(seconds: 3));
+    await tester.pumpAndSettle();
+    expect(find.byType(Image), findsOneWidget); // failed once, went again by itself, no tap needed
+    expect(calls.where((c) => c.endsWith('/media')), hasLength(2));
+
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('discard')));
+    await tester.pumpAndSettle();
+    final refused = await open(tester, fails: (n) => true, failStatus: 413, waits: const [Duration(seconds: 2)]);
+    await pick(tester, find.text('Алдынан *'));
+    await tester.pump(const Duration(seconds: 3));
+    await tester.pumpAndSettle();
+    expect(refused.where((c) => c.endsWith('/media')), hasLength(1)); // too large stays too large
+  });
+
+  testWidgets('a 360° set goes three frames at a time, so weak mobile data is not choked', (tester) async {
+    final gate = Completer<void>();
+    final calls = await open(tester, hold: gate.future);
+    await tester.tap(find.text('Галереядан'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(maxInFlight, 3);
+    gate.complete();
+    await tester.pumpAndSettle();
+    expect(calls.where((c) => c.endsWith('/media')), hasLength(24));
+    expect(maxInFlight, 3);
+    expect(find.text('24/24'), findsOneWidget);
+  });
+
+  testWidgets('a side photo taken while a 360° set is uploading goes ahead of the frames still waiting',
+      (tester) async {
+    final gate = Completer<void>();
+    await open(tester, hold: gate.future);
+    await tester.tap(find.text('Галереядан'));
+    await tester.pump();
+    await tester.tap(find.text('Алдынан *'));
+    for (var i = 0; i < 5; i++) {
+      await tester.pump(const Duration(milliseconds: 200)); // the sheet slides up; the frames keep spinning
+    }
+    await tester.tap(find.text('Камерамен түсіру'));
+    for (var i = 0; i < 5; i++) {
+      await tester.pump(const Duration(milliseconds: 200));
+    }
+    gate.complete();
+    await tester.pumpAndSettle();
+    expect(uploadOrder, hasLength(25));
+    expect(uploadOrder.indexOf('p.jpg'), 3); // right after the three frames already on their way
+  });
+
+  testWidgets('a new 360° set replaces one still on its way: the old frames waiting their turn are not sent',
+      (tester) async {
+    final gate = Completer<void>();
+    final calls = await open(tester, hold: gate.future);
+    await tester.tap(find.text('Галереядан'));
+    await tester.pump();
+    await tester.tap(find.text('Галереядан'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    gate.complete();
+    await tester.pumpAndSettle();
+    expect(calls.where((c) => c.endsWith('/media')), hasLength(27)); // 3 already on their way + the new 24
+    expect(maxInFlight, 3);
+    expect(find.text('24/24'), findsOneWidget);
+
+    maxInFlight = 0; // a third set, after the others finished, still goes three at a time
+    await tester.tap(find.text('Галереядан'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+    expect(calls.where((c) => c.endsWith('/media')), hasLength(51));
+    expect(maxInFlight, 3);
+  });
+
+  testWidgets('a side photo the server refused is taken again with a tap, the camera opens', (tester) async {
+    final calls = await open(tester, fails: (n) => n == 1, failStatus: 413);
+    await pickSides(tester);
+    await next(tester);
+    expect(find.text('Фото қабылданбады. Белгісі бар фотоны басып, басқасын түсіріңіз.'), findsNothing);
+    expect(step(tester), 'Фото');
+    expect(find.bySemanticsLabel(RegExp('^Алдынан фотосы жүктелмеді')), findsOneWidget);
+    await tester.tap(find.text('Алдынан *'));
+    await tester.pumpAndSettle();
+    expect(find.text('Камерамен түсіру'), findsOneWidget); // refused stays refused: another photo is needed
+    await tester.tap(find.text('Камерамен түсіру'));
+    await tester.pumpAndSettle();
+    expect(calls.where((c) => c.endsWith('/media')), hasLength(5));
+    await next(tester);
+    expect(step(tester), 'Тауар туралы');
   });
 
   /// Fills the pair step with a worn pair, as a seller would.
@@ -280,33 +401,59 @@ void main() {
     expect(find.text('Жоба ретінде сақталды'), findsOneWidget);
   });
 
-  testWidgets('a defect photo that did not upload is taken away to be added again', (tester) async {
-    await open(tester, uploadsOk: 4);
+  testWidgets('a defect photo that did not upload is sent again with a tap on it', (tester) async {
+    await open(tester, fails: (n) => n == 5);
     await pickSides(tester);
     await next(tester);
     await fillDetails(tester, condition: 'Ақауы бар');
     await pick(tester, find.text('Ақау фотосы'));
     await next(tester);
-    expect(find.text('Ақау фотосы жүктелмеді. Қайта қосыңыз.'), findsOneWidget);
+    expect(find.text('Кейбір фото жүктелмеді. Белгісі бар фотоны басып, қайта жіберіңіз.'), findsOneWidget);
     expect(step(tester), 'Тауар туралы');
-    expect(find.text('Ақау'), findsNothing); // the failed tile is gone, and the button to add one is there
-    expect(find.text('Ақау фотосы'), findsOneWidget);
+    await tester.tap(find.text('Ақау'));
+    await tester.pumpAndSettle();
+    await next(tester);
+    expect(step(tester), 'Бағасы мен өлшемі');
   });
 
-  testWidgets('360° frames that did not upload are caught on the photo step', (tester) async {
-    await open(tester, uploadsOk: 4);
+  testWidgets('a defect photo the server refused goes, and another is asked for', (tester) async {
+    final calls = await open(tester, fails: (n) => n == 5, failStatus: 413);
+    await pickSides(tester);
+    await next(tester);
+    await fillDetails(tester, condition: 'Ақауы бар');
+    await pick(tester, find.text('Ақау фотосы'));
+    await tester.tap(find.text('Ақау'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Камерамен түсіру'));
+    await tester.pumpAndSettle();
+    expect(find.text('Ақау'), findsOneWidget); // the refused one is gone, the new one took its place
+    expect(calls.where((c) => c.endsWith('/media')), hasLength(6));
+    await next(tester);
+    expect(step(tester), 'Бағасы мен өлшемі');
+  });
+
+  testWidgets('360° frames that did not upload are caught on the photo step and sent again, not shot again',
+      (tester) async {
+    final calls = await open(tester, fails: (n) => n > 4 && n <= 16); // half the frames fail
     await pickSides(tester);
     await tester.tap(find.text('Галереядан'));
     await tester.pumpAndSettle();
     await next(tester);
-    expect(find.text('Кейбір кадрлар жүктелмеді. Қайта түсіріңіз.'), findsWidgets); // on the card, and as the reason
+    expect(find.text('Кейбір кадрлар жүктелмеді. Қайта түсірудің керегі жоқ, тек қайта жіберіңіз.'),
+        findsWidgets); // on the card, and as the reason
     expect(step(tester), 'Фото');
+    await tester.tap(find.byKey(const Key('resend-frames')));
+    await tester.pumpAndSettle();
+    expect(calls.where((c) => c.endsWith('/media')), hasLength(40)); // only the 12 that failed go again
+    expect(find.text('24/24'), findsOneWidget);
+    await next(tester);
+    expect(step(tester), 'Тауар туралы');
   });
 
-  testWidgets('a photo that fails after Next takes the seller back to the photos to retake it', (tester) async {
+  testWidgets('a photo that fails after Next takes the seller back to the photos to send it again', (tester) async {
     final upload = Completer<void>();
     final sent = <Map<String, dynamic>>[];
-    await open(tester, sent: sent, uploadsOk: 3, failLater: upload.future);
+    await open(tester, sent: sent, fails: (n) => n == 4, failLater: upload.future);
     for (final label in ['Алдынан', 'Сырт бүйірі', 'Ішкі бүйірі']) {
       await pick(tester, find.text('$label *'));
     }

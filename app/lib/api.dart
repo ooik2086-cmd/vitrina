@@ -965,6 +965,12 @@ class Api {
   static const timeout = Duration(seconds: 20);
   static const uploadTimeout = Duration(seconds: 60);
 
+  /// How long one photo may take: a minute, more for a large one, so weak mobile data (about 20 KB/s) can carry it.
+  static Duration uploadLimit(int bytes) => Duration(seconds: max(60, 30 + bytes ~/ 20000));
+
+  /// Waits before a photo upload is tried again: weak mobile data drops a large photo now and then.
+  List<Duration> uploadWaits = const [Duration(seconds: 2), Duration(seconds: 6)];
+
   static const _offlineText = 'Байланыс жоқ. Интернетті тексеріп, қайталап көріңіз.';
   static const _brokenText = 'Сервер уақытша жауап бермей тұр. Біраз кейін қайталап көріңіз.';
 
@@ -1102,8 +1108,21 @@ class Api {
     final req = http.MultipartRequest('POST', Uri.parse('$base/media${detail ? '?detail=true' : ''}'))
       ..headers.addAll({'Accept': 'application/json', if (token != null) 'Authorization': 'Bearer $token'})
       ..files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
-    final data = await _upload(req);
+    final data = await _upload(req, limit: uploadLimit(bytes.length));
     return (data as Map)['url'] as String;
+  }
+
+  /// [uploadPhoto], tried again after [uploadWaits] when the failure may pass; a refusal (too large, not a photo)
+  /// comes back at once. A lost answer may leave an unused copy on the server, which nothing points to.
+  Future<String> uploadPhotoPatiently(List<int> bytes, String filename, {bool detail = false}) async {
+    for (var i = 0;; i++) {
+      try {
+        return await uploadPhoto(bytes, filename, detail: detail);
+      } on ApiException catch (e) {
+        if (!e.passing || i >= uploadWaits.length) rethrow;
+        await Future<void>.delayed(uploadWaits[i]);
+      }
+    }
   }
 
   /// Listings that look like the photo, most similar first. The photo is not stored on the server.

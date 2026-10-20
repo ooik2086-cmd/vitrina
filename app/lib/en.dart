@@ -110,10 +110,16 @@ const en = <String, String>{
   '360° көрініс': '360° view',
   'Міндетті емес, бірақ сатып алушы тауарды жан-жағынан көреді. Аяқкиімді аздап бұрып, {0} шақты кадр түсіріңіз.':
       'Optional, but buyers will see the item from every side. Turn the shoe slightly and take about {0} frames.',
-  'Кейбір кадрлар жүктелмеді. Қайта түсіріңіз.': 'Some frames didn\'t upload. Retake them.',
-  'Кейбір фото жүктелмеді. Белгісі бар фотоны қайта түсіріңіз.':
-      'Some photos didn\'t upload. Retake the ones with the mark.',
-  'Ақау фотосы жүктелмеді. Қайта қосыңыз.': 'The defect photo didn\'t upload. Add it again.',
+  'Кейбір кадрлар жүктелмеді. Қайта түсірудің керегі жоқ, тек қайта жіберіңіз.':
+      'Some frames didn\'t upload. No need to retake them, just send them again.',
+  'Кейбір фото жүктелмеді. Белгісі бар фотоны басып, қайта жіберіңіз.':
+      'Some photos didn\'t upload. Tap a photo with the mark to send it again.',
+  'Фото қабылданбады. Белгісі бар фотоны басып, басқасын түсіріңіз.':
+      'The photo was not accepted. Tap the photo with the mark and take another.',
+  'Кадрларды қайта жіберу': 'Send frames again',
+  '{0} фотосы жүктелмеді': '{0} photo did not upload',
+  'Қайта жіберу үшін басыңыз': 'Tap to send again',
+  'Басқасын түсіру үшін басыңыз': 'Tap to take another',
   'Түсіру': 'Shoot',
   'Галереядан': 'From gallery',
   'Атауы': 'Title',

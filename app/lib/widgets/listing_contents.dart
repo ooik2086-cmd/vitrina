@@ -143,6 +143,11 @@ class ListingContentsCard extends StatefulWidget {
 class _ListingContentsCardState extends State<ListingContentsCard> {
   final _picker = ImagePicker();
   bool _busy = false;
+
+  /// A 360° set some of whose frames did not go: kept with the addresses of those that did, so only the rest are
+  /// sent again, never shot again.
+  List<XFile>? _spinFiles;
+  final _spinUrls = <int, String>{};
   final _strip = ScrollController();
   final _note = GlobalKey();
 
@@ -196,17 +201,27 @@ class _ListingContentsCardState extends State<ListingContentsCard> {
     }
   }
 
-  /// Uploads a few at a time: a 360° set is dozens of frames, one by one it takes minutes on mobile data.
-  Future<List<Map<String, String>>> _upload(Api api, List<XFile> files, String angle) async {
-    final urls = <String>[];
-    for (var i = 0; i < files.length; i += 4) {
-      urls.addAll(await Future.wait([
-        for (final f in files.skip(i).take(4))
-          f.readAsBytes().then((b) => api.uploadPhoto(b, f.name, detail: detailAngles.contains(angle))),
-      ]));
+  /// Uploads three at a time: a 360° set is dozens of frames, one by one it takes minutes on mobile data, and all at
+  /// once chokes it. Each address is put in [into] by the file's place as it comes, so a failure keeps the others.
+  Future<List<Map<String, String>>> _upload(Api api, List<XFile> files, String angle, {Map<int, String>? into}) async {
+    final urls = into ?? <int, String>{};
+    Object? failed;
+    final left = [
+      for (var i = 0; i < files.length; i++)
+        if (!urls.containsKey(i)) i
+    ];
+    for (var k = 0; k < left.length; k += 3) {
+      await Future.wait([
+        for (final i in left.skip(k).take(3))
+          files[i]
+              .readAsBytes()
+              .then((b) => api.uploadPhotoPatiently(b, files[i].name, detail: detailAngles.contains(angle)))
+              .then<void>((url) => urls[i] = url, onError: (Object e) => failed ??= e),
+      ]);
     }
+    if (failed != null) throw failed!;
     return [
-      for (final u in urls) {'url': u, 'angle': angle}
+      for (var i = 0; i < files.length; i++) {'url': urls[i]!, 'angle': angle}
     ];
   }
 
@@ -266,9 +281,18 @@ class _ListingContentsCardState extends State<ListingContentsCard> {
     final frames = await Navigator.of(context)
         .push<List<XFile>>(MaterialPageRoute(builder: (_) => const SpinCaptureScreen(), fullscreenDialog: true));
     if (frames == null || frames.isEmpty) return;
-    await _run((api) async => api.editListing(_l.id, addPhotos: await _upload(api, frames, 'frame')),
-        tr('360° көрініс қосылды'));
+    setState(() {
+      _spinFiles = frames;
+      _spinUrls.clear();
+    });
+    await _sendSpin();
   }
+
+  Future<void> _sendSpin() => _run((api) async {
+        final l = await api.editListing(_l.id, addPhotos: await _upload(api, _spinFiles!, 'frame', into: _spinUrls));
+        if (mounted) setState(() => _spinFiles = null);
+        return l;
+      }, tr('360° көрініс қосылды'));
 
   Future<void> _removePhoto(int index) async {
     final name = tr(photoAngles[_l.media[index].angle] ?? 'Фото');
@@ -454,6 +478,17 @@ class _ListingContentsCardState extends State<ListingContentsCard> {
           label: Text(tr('Өлшем қосу')),
         ),
       ]),
+      if (_spinFiles != null && !_busy) ...[
+        const SizedBox(height: 8),
+        Text(tr('Кейбір кадрлар жүктелмеді. Қайта түсірудің керегі жоқ, тек қайта жіберіңіз.'),
+            style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.error)),
+        TextButton.icon(
+          key: const Key('resend-spin'),
+          onPressed: _sendSpin,
+          icon: const Icon(Icons.refresh),
+          label: Text(tr('Кадрларды қайта жіберу')),
+        ),
+      ],
       if (_hasSpin) ...[
         const SizedBox(height: 8),
         Row(children: [
