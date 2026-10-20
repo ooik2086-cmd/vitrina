@@ -30,7 +30,7 @@ write_env() {
 		echo "$ENV_FILE exists: keeping it, domain $kept (its secrets are in use)"
 		return
 	fi
-	[ -n "$DOMAIN" ] && [ -n "$EMAIL" ] || die "usage: setup.sh DOMAIN EMAIL   (e.g. setup.sh vitrina.kz you@example.kz)"
+	if [ -z "$DOMAIN" ] || [ -z "$EMAIL" ]; then die "usage: setup.sh DOMAIN EMAIL   (e.g. setup.sh vitrina.kz you@example.kz)"; fi
 	printf '%s' "$DOMAIN" | grep -Eq '^[a-z0-9]([a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$' || die "not a domain name: $DOMAIN"
 	printf '%s' "$EMAIL" | grep -Eq '^[^@ ]+@[^@ ]+\.[^@ ]+$' || die "not an email: $EMAIL"
 	command -v openssl >/dev/null || die "openssl is missing"
