@@ -270,6 +270,45 @@ class WeightTests(ApiTestCase):
             event.remove(engine, "before_cursor_execute", listen)
         self.assertEqual(sum(re.search(r"\bFROM users\b", q) is not None for q in asked), 1, asked)
 
+    def test_a_page_reads_its_photos_once_and_shows_them_as_the_listing_page_does(self):
+        from sqlalchemy import event
+        made = [self.publish(title=f"Аяқкиім {i}") for i in range(3)]
+        turned = [{"url": m["original_url"], "angle": m["angle"]} for m in reversed(made[0]["media"])]
+        r = self.c.patch(f"/api/v1/listings/{made[0]['id']}", json={"photos": turned}, headers=self.h(self.seller))
+        self.assertEqual(r.status_code, 200, r.text)  # the same rows in a new order
+        for listing in made:
+            self.post(f"/favorites/{listing['id']}", self.buyer)
+        from vitrina_api.models import Media
+        engine = self.app.state.sessions.kw["bind"]
+        asked, built = [], []
+        listen = lambda *a: asked.append(a[2])  # noqa: E731
+        build = lambda target, _ctx: built.append(target)  # noqa: E731
+        pages = {}
+        for name, path, who in (("feed", "/api/v1/listings", None), ("favorites", "/api/v1/favorites", self.buyer),
+                                ("mine", "/api/v1/me/listings", self.seller)):
+            asked.clear()
+            event.listen(engine, "before_cursor_execute", listen)
+            event.listen(Media, "load", build)
+            try:
+                r = self.c.get(path, headers=self.h(who) if who else {})
+            finally:
+                event.remove(engine, "before_cursor_execute", listen)
+                event.remove(Media, "load", build)
+            self.assertEqual(r.status_code, 200, r.text)
+            pages[name] = r.json()["items"]
+            self.assertEqual(sum(re.search(r"\bFROM media\b", q) is not None for q in asked), 1, (name, asked))
+            self.assertEqual(built, [], name)  # photos are read as plain rows: ~43 objects a card cost a third of a page
+        for name, items in pages.items():
+            self.assertEqual(len(items), 3, name)
+            for item in items:
+                page = self.c.get(f"/api/v1/listings/{item['id']}",
+                                  headers=self.h(self.seller) if name == "mine" else {}).json()
+                self.assertTrue(item["media"], name)
+                for key in ("media", "cover_frame", "angle_frames", "photos_version"):
+                    self.assertEqual(item[key], page[key], (name, key))
+        first = next(i for i in pages["feed"] if i["id"] == made[0]["id"])
+        self.assertEqual([m["original_url"] for m in first["media"]], [p["url"] for p in turned])
+
 
 class EarningsTests(ApiTestCase):
     def test_seller_sees_held_then_payable_minus_commission(self):

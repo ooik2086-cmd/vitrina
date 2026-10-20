@@ -86,6 +86,24 @@ class ImageSearchApiTests(ApiTestCase):
         lonely = self.listing_with_photo((30, 40, 200))  # created without a model: no vector yet
         self.assertEqual(self.c.get(f"/api/v1/listings/{lonely}/similar").json()["items"], [])
 
+    def test_ranking_reads_only_the_listings_it_shows(self):
+        from sqlalchemy import event
+        from vitrina_api.models import Listing
+        self.app.state.embedder = colour_only_embedder
+        ids = [self.listing_with_photo(c) for c in ((200, 30, 30), (190, 40, 35), (20, 20, 20), (30, 40, 200))]
+        loaded = []
+        listen = lambda target, _ctx: loaded.append(target.id)  # noqa: E731
+        event.listen(Listing, "load", listen)
+        try:
+            similar = self.c.get(f"/api/v1/listings/{ids[0]}/similar", params={"limit": 1}).json()["items"]
+            self.assertEqual(([i["id"] for i in similar], sorted(set(loaded))), ([ids[1]], sorted(ids[:2])))
+            loaded.clear()
+            found = self.search((210, 40, 30), limit=2).json()["items"]
+            self.assertEqual(sorted(set(loaded)), sorted(i["id"] for i in found))
+            self.assertEqual(len(found), 2)
+        finally:
+            event.remove(Listing, "load", listen)
+
     def test_photo_search_is_rate_limited_per_client(self):
         from vitrina_api.app import IMAGE_SEARCH_PER_MINUTE
         self.app.state.embedder = colour_only_embedder

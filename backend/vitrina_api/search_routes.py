@@ -19,7 +19,7 @@ from .deps import current_user, get_db, get_storage, now_utc
 from .errors import ApiError
 from .models import ListingEmbedding, Listing, ListingSize, User
 from .storage import MAX_UPLOAD_BYTES, Storage, normalize_image
-from .serializers import cm_to_mm, listing_out
+from .serializers import LIGHT, cm_to_mm, listing_out, with_light_media
 from .saved_search_routes import catalog_filter
 
 
@@ -33,6 +33,14 @@ def sellers_in(db: Session, city: str) -> list[int]:
         return []
     rows = db.execute(select(User.id, User.city).where(User.is_seller.is_(True), User.city.is_not(None))).all()
     return [uid for uid, c in rows if delivery_eta.known_city(c) == want]
+
+
+def page_of(db: Session, scored: list[tuple[float, int]]) -> list[tuple[float, Listing]]:
+    """The listings of a ranked page, in its order. Ranking reads only ids and vectors: loading every listing on sale
+    with its photos to rank them read the whole catalog for each search."""
+    found = {listing.id: listing for listing in with_light_media(db, db.scalars(
+        select(Listing).options(LIGHT).where(Listing.id.in_([lid for _, lid in scored]))).all())}
+    return [(score, found[lid]) for score, lid in scored if lid in found]
 
 
 @router.get("/listings")
@@ -54,7 +62,8 @@ def search_listings(q: str | None = None, category: str | None = None, brand: st
         stmt = stmt.where(Listing.seller_id.in_(sellers_in(db, city)))
     order = {"new": (Listing.id.desc(),), "price_asc": (Listing.price_tiyn, Listing.id.desc()),
              "price_desc": (Listing.price_tiyn.desc(), Listing.id.desc())}[sort]
-    rows = db.scalars(stmt.order_by(*order).limit(max(1, min(limit, 50))).offset(max(0, offset))).all()
+    rows = with_light_media(db, db.scalars(stmt.options(LIGHT).order_by(*order).limit(max(1, min(limit, 50)))
+                                           .offset(max(0, offset))).all())
     out = {"items": [listing_out(db, r) for r in rows]}
     if not rows and q and offset == 0:
         out["did_you_mean"] = did_you_mean(db, q)
@@ -145,7 +154,7 @@ def search_by_image(request: Request, file: UploadFile = File(...), category: st
         raise ApiError(413, "file_too_large")
     import numpy as np
     query = embed(normalize_image(data))
-    stmt = (select(Listing, ListingEmbedding.vector).join(ListingEmbedding, ListingEmbedding.listing_id == Listing.id)
+    stmt = (select(Listing.id, ListingEmbedding.vector).join(ListingEmbedding, ListingEmbedding.listing_id == Listing.id)
             .where(Listing.status == "published", ListingEmbedding.model == visual.MODEL_NAME))
     if category:
         stmt = stmt.where(Listing.category == category)
@@ -154,9 +163,10 @@ def search_by_image(request: Request, file: UploadFile = File(...), category: st
         stmt = stmt.where(Listing.id.in_(select(ListingSize.listing_id).where(
             ListingSize.quantity > 0, ListingSize.insole_mm.between(mm - 5, mm + 5))))
     # Brute force is fine at MVP scale; move to pgvector once the catalogue passes ~50k listings.
-    scored = sorted(((float(np.frombuffer(vec, np.float32) @ query), listing) for listing, vec in db.execute(stmt)),
+    scored = sorted(((float(np.frombuffer(vec, np.float32) @ query), lid) for lid, vec in db.execute(stmt)),
                     key=lambda t: -t[0])[:max(1, min(limit, 50))]
-    return {"items": [{**listing_out(db, listing), "similarity": round(score, 3)} for score, listing in scored]}
+    return {"items": [{**listing_out(db, listing), "similarity": round(score, 3)}
+                      for score, listing in page_of(db, scored)]}
 
 
 SUGGEST_MIN_SHAPE = 0.70  # shape-only cosine; same model in another colour scores ~0.8, unrelated objects ~0.4
@@ -185,16 +195,16 @@ def suggest_details(body: SuggestIn, request: Request, user: User = Depends(curr
     full = embed(storage.read(body.photo_url))
     shape_dims = full.size - visual.COLOR_BINS
     query = full[:shape_dims] / (np.linalg.norm(full[:shape_dims]) + 1e-8)
-    rows = db.execute(select(Listing, ListingEmbedding.vector)
+    rows = db.execute(select(Listing.id, ListingEmbedding.vector)
                       .join(ListingEmbedding, ListingEmbedding.listing_id == Listing.id)
                       .where(Listing.status.in_(("published", "sold")), ListingEmbedding.model == visual.MODEL_NAME))
     scored = []
-    for listing, vec in rows:
+    for lid, vec in rows:
         shape = np.frombuffer(vec, np.float32)[:shape_dims]
         score = float(shape @ query) / (float(np.linalg.norm(shape)) + 1e-8)
         if score >= SUGGEST_MIN_SHAPE:
-            scored.append((score, listing))
-    near = sorted(scored, key=lambda t: -t[0])[:SUGGEST_NEIGHBOURS]
+            scored.append((score, lid))
+    near = page_of(db, sorted(scored, key=lambda t: -t[0])[:SUGGEST_NEIGHBOURS])
 
     def vote(get):
         tally: dict[str, float] = collections.defaultdict(float)
@@ -229,13 +239,13 @@ def similar_listings(listing_id: int, limit: int = 10, db: Session = Depends(get
     if own is None or own.model != visual.MODEL_NAME:
         return {"items": []}
     query = np.frombuffer(own.vector, np.float32)
-    rows = db.execute(select(Listing, ListingEmbedding.vector)
+    rows = db.execute(select(Listing.id, ListingEmbedding.vector)
                       .join(ListingEmbedding, ListingEmbedding.listing_id == Listing.id)
                       .where(Listing.status == "published", Listing.id != listing_id,
                              ListingEmbedding.model == visual.MODEL_NAME))
-    scored = sorted(((float(np.frombuffer(vec, np.float32) @ query), other) for other, vec in rows),
+    scored = sorted(((float(np.frombuffer(vec, np.float32) @ query), lid) for lid, vec in rows),
                     key=lambda t: -t[0])[:max(1, min(limit, 20))]
-    return {"items": [{**listing_out(db, other), "similarity": round(score, 3)} for score, other in scored]}
+    return {"items": [{**listing_out(db, other), "similarity": round(score, 3)} for score, other in page_of(db, scored)]}
 
 
 SUGGESTIONS = 8

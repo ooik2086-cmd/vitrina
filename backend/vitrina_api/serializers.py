@@ -3,11 +3,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections import defaultdict
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, raiseload
 
 from vitrina_core.catalog import compute_bounds
 from vitrina_core.orders import OrderStatus as S
@@ -17,7 +18,7 @@ from . import moderation
 from .deps import now_utc
 from .errors import ApiError
 from .social import seller_rating
-from .models import PriceChange, Favorite, Listing, ListingSize, Order, User
+from .models import PriceChange, Favorite, Listing, ListingSize, Media, Order, User
 from .api_common import ALMATY
 from .storage import private_link
 
@@ -72,6 +73,31 @@ def listing_stats(db: Session, listing: Listing) -> dict:
     }
 
 
+# For a query of a page of listings: their photos are read by with_light_media, never one by one through the ORM.
+LIGHT = raiseload(Listing.media)
+
+
+def with_light_media(db: Session, listings: list[Listing]) -> list[Listing]:
+    """Reads the photos of a page of listings in one query as plain rows. A card carries every 360° frame, ~43 rows
+    a listing, and making each an ORM object took a third of a catalog page. Load the page with options(LIGHT)."""
+    by_listing = defaultdict(list)
+    ids = [listing.id for listing in listings]
+    if ids:
+        for m in db.execute(select(Media.listing_id, Media.original_url, Media.processed_url, Media.thumb_url,
+                                   Media.angle, Media.position, Media.no_cutout)
+                            .where(Media.listing_id.in_(ids)).order_by(Media.listing_id, Media.position, Media.id)):
+            by_listing[m.listing_id].append(m)
+    for listing in listings:
+        listing._light_media = by_listing[listing.id]
+    return listings
+
+
+def media_of(listing: Listing) -> list:
+    """The listing's photos in order: as read by with_light_media for a page, else through the ORM."""
+    light = listing.__dict__.get("_light_media")
+    return listing.media if light is None else light
+
+
 def listing_out(db: Session, listing: Listing, *, owner: bool = False) -> dict:
     """owner=True adds stock counts and statistics, which only the seller sees."""
     # Held for the request: the session keeps only objects someone holds, so a page of one shop's listings would
@@ -93,7 +119,7 @@ def listing_out(db: Session, listing: Listing, *, owner: bool = False) -> dict:
                    "angle": m.angle,
                    # The seller is told so that they can take it again; a buyer only sees the photo as taken.
                    **({"no_shoe": m.no_cutout is not None} if owner else {})}
-                  for m in listing.media],
+                  for m in media_of(listing)],
         "photos_version": photos_version(listing),
         "seller": {"id": seller.id, "shop_name": seller.shop_name, "city": seller.city,  # never the phone
                    "away_until": away_out(seller),
@@ -176,14 +202,14 @@ def delivery_out(order: Order, viewer: User) -> dict | None:
 
 def cover_photo(listing: Listing):
     """The photo shown on cards: the first that is not a 360° frame."""
-    return next((m for m in listing.media if m.angle != "frame"), None)
+    return next((m for m in media_of(listing) if m.angle != "frame"), None)
 
 
 def cover_frame(listing: Listing) -> str | None:
     """The frame matching the cover, while both are still the listing's."""
     cover = cover_photo(listing)
     if (cover is None or listing.cover_frame is None or listing.cover_frame_of != cover.original_url
-            or not any(m.angle == "frame" and m.original_url == listing.cover_frame for m in listing.media)):
+            or not any(m.angle == "frame" and m.original_url == listing.cover_frame for m in media_of(listing))):
         return None
     return listing.cover_frame
 
@@ -212,7 +238,7 @@ def one_turn(media: list) -> tuple[list, bool]:
 
 def side_photo(listing: Listing, angle: str):
     """The listing's photo of one side (outer, front, inner or back), as the cover and the app pick it: the first."""
-    return next((m for m in listing.media if m.angle == angle), None)
+    return next((m for m in media_of(listing) if m.angle == angle), None)
 
 
 def angle_frames(listing: Listing) -> dict[str, str]:
@@ -222,7 +248,7 @@ def angle_frames(listing: Listing) -> dict[str, str]:
         stored = json.loads(listing.angle_frames or "{}")
     except ValueError:
         return {}
-    frames = {m.original_url for m in listing.media if m.angle == "frame"}
+    frames = {m.original_url for m in media_of(listing) if m.angle == "frame"}
     out = {}
     for angle, mark in stored.items() if isinstance(stored, dict) else ():
         photo = side_photo(listing, angle)
@@ -233,21 +259,21 @@ def angle_frames(listing: Listing) -> dict[str, str]:
 
 
 def listing_cover(listing: Listing) -> str | None:
-    return next((m.processed_url or m.original_url for m in listing.media if m.angle != "frame"), None)
+    return next((m.processed_url or m.original_url for m in media_of(listing) if m.angle != "frame"), None)
 
 
 def photos_version(listing: Listing) -> str:
     """Names the photo set and the text (condition, defects, description) a buyer is looking at. An order placed
     from an older version is refused, so the copy kept with the order is what the buyer actually saw, not an edit
     made while they were deciding."""
-    shown = sorted(listing.media, key=lambda m: m.position)
+    shown = sorted(media_of(listing), key=lambda m: m.position)
     lines = [f"{m.original_url} {m.angle}" for m in shown] + [details_snapshot(listing)]
     return hashlib.sha256("\n".join(lines).encode()).hexdigest()[:16]
 
 
 def photo_snapshot(listing: Listing) -> str:
     return json.dumps([{"url": m.processed_url or m.original_url, "original_url": m.original_url, "angle": m.angle}
-                       for m in sorted(listing.media, key=lambda m: m.position)], ensure_ascii=False)
+                       for m in sorted(media_of(listing), key=lambda m: m.position)], ensure_ascii=False)
 
 
 LISTING_DETAILS = ("title", "brand", "model_name", "color", "category", "condition", "defects", "description",

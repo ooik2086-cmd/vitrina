@@ -110,7 +110,8 @@ class Listing(Base):
     # selectin: a page of listings loads all their sizes and photos in one query each, not two per listing.
     sizes: Mapped[list[ListingSize]] = relationship(cascade="all, delete-orphan", order_by="ListingSize.id",
                                                     lazy="selectin")
-    media: Mapped[list[Media]] = relationship(cascade="all, delete-orphan", order_by="Media.position",
+    # Ties in position (none expected) go by id, as serializers.with_light_media reads them.
+    media: Mapped[list[Media]] = relationship(cascade="all, delete-orphan", order_by="[Media.position, Media.id]",
                                               lazy="selectin")
 
 

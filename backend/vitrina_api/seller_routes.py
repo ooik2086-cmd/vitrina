@@ -21,7 +21,7 @@ from .errors import ApiError
 from .social import reply_time, seller_rating
 from .models import Follow, Offer, ListingDailyViews, Favorite, Listing, ListingSize, Order, Question, User
 from .api_common import ALMATY
-from .serializers import ADDRESS_HIDDEN_UNTIL_PAID, away_out, listing_out
+from .serializers import ADDRESS_HIDDEN_UNTIL_PAID, LIGHT, away_out, listing_out, with_light_media
 
 
 router = APIRouter(prefix="/api/v1")
@@ -29,7 +29,8 @@ router = APIRouter(prefix="/api/v1")
 
 @router.get("/me/listings")
 def my_listings(user: User = Depends(current_user), db: Session = Depends(get_db)):
-    rows = db.scalars(select(Listing).where(Listing.seller_id == user.id).order_by(Listing.id.desc()).limit(200)).all()
+    rows = with_light_media(db, db.scalars(select(Listing).options(LIGHT).where(Listing.seller_id == user.id)
+                                           .order_by(Listing.id.desc()).limit(200)).all())
     preload_stats(db, [r.id for r in rows])
     return {"items": [listing_out(db, r, owner=True) for r in rows]}
 

@@ -15,7 +15,7 @@ from . import promo
 from .deps import current_user, get_db, now_utc
 from .errors import ApiError
 from .models import Follow, SavedSearch, Favorite, Listing, ListingSize, User
-from .serializers import cm_to_mm, listing_out
+from .serializers import LIGHT, cm_to_mm, listing_out, with_light_media
 
 
 router = APIRouter(prefix="/api/v1")
@@ -174,4 +174,6 @@ def remove_favorite(listing_id: int, user: User = Depends(current_user), db: Ses
 @router.get("/favorites")
 def list_favorites(user: User = Depends(current_user), db: Session = Depends(get_db)):
     ids = db.scalars(select(Favorite.listing_id).where(Favorite.user_id == user.id)).all()
-    return {"items": [listing_out(db, db.get(Listing, i)) for i in ids]}
+    found = {listing.id: listing for listing in with_light_media(db, db.scalars(
+        select(Listing).options(LIGHT).where(Listing.id.in_(ids))).all())}
+    return {"items": [listing_out(db, found[i]) for i in ids if i in found]}
