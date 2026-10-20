@@ -54,6 +54,13 @@ class Settings:
     # Listings may only reference photos uploaded through /media, so sellers cannot embed tracking pixels or hotlinks.
     allow_external_media: bool = field(default_factory=lambda: os.environ.get("VITRINA_ALLOW_EXTERNAL_MEDIA", "0") == "1")
     # Browser origins allowed to call the API (the Flutter web build during development). Empty = none.
+    # Where the photo work of new and edited listings runs (cut-outs take minutes of every core per listing):
+    # "inline" in the API process after answering, for development and tests; "worker" leaves it to
+    # `python -m vitrina_api.photo_worker`, which a live deployment runs so buyers are not slowed down.
+    photo_work: str = field(default_factory=lambda: os.environ.get("VITRINA_PHOTO_WORK", "inline"))
+    photo_worker_interval_s: float = field(
+        default_factory=lambda: float(os.environ.get("VITRINA_PHOTO_WORKER_INTERVAL", "5")))
+    photo_worker_nice: int = field(default_factory=lambda: int(os.environ.get("VITRINA_PHOTO_WORKER_NICE", "10")))
     # Path to a background-removal model (backend/models/README.md). Empty = keep original photos only.
     cutout_model: str = field(default_factory=lambda: os.environ.get("VITRINA_CUTOUT_MODEL", ""))
     # Search-by-photo model (backend/models/README.md). Empty = search by photo answers 503.
@@ -79,6 +86,9 @@ def production_problems(s: Settings) -> list[str]:
         problems.append("VITRINA_CORS_ORIGINS and VITRINA_PUBLIC_MEDIA_URL must use https")
     if "*" in s.cors_origins:
         problems.append("VITRINA_CORS_ORIGINS must list the app's origins, not *")
+    if s.photo_work != "worker":
+        problems.append("VITRINA_PHOTO_WORK must be worker, with `python -m vitrina_api.photo_worker` running: "
+                        "cutting out photos inside the API slows every buyer down for minutes")
     if s.allow_external_media:
         problems.append("VITRINA_ALLOW_EXTERNAL_MEDIA must be 0: listings could show images from any site")
     if not s.s3_bucket:

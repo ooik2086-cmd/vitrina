@@ -167,7 +167,6 @@ class CutoutApiTests(MediaTests):
             self.assertIsNotNone(db.get(ListingEmbedding, lid))
 
     def test_the_backfill_makes_small_copies_when_the_cut_outs_fail(self):
-        from scripts import cutout_backfill
         from vitrina_api.models import Media
         lid = self.post("/listings", self.seller, {**LISTING, "photos": self.four((120, 90, 60))}).json()["id"]
         with self.app.state.sessions() as db:  # from before the cut-outs and the small copies
@@ -175,13 +174,14 @@ class CutoutApiTests(MediaTests):
                 m.processed_url = m.thumb_url = None
             db.commit()
         self.with_segmenter()
-        real = cutout_backfill.cutout_listing
+        from vitrina_api import photo_work
+        real = photo_work.cutout_listing
 
         def broken(state, listing_id):
             raise RuntimeError("storage went away")
         broken.__name__ = "cutout_listing"
-        cutout_backfill.cutout_listing = broken
-        self.addCleanup(setattr, cutout_backfill, "cutout_listing", real)
+        photo_work.cutout_listing = broken
+        self.addCleanup(setattr, photo_work, "cutout_listing", real)
         with self.assertLogs(level="ERROR"):
             code, out = self.backfill("--without-models")
         self.assertEqual(code, 1)
@@ -702,16 +702,17 @@ class CutoutApiTests(MediaTests):
     def backfill(self, *args, thumbs=None):
         """Runs the backfill script on the test database and storage; thumbs stands in for its thumb job."""
         from scripts import cutout_backfill
-        real = cutout_backfill.Settings, cutout_backfill.make_storage, cutout_backfill.thumb_listing
+        from vitrina_api import photo_work
+        real = cutout_backfill.Settings, cutout_backfill.make_storage, photo_work.thumb_listing
         cutout_backfill.Settings, cutout_backfill.make_storage = (lambda: self.cfg), (lambda cfg: self.app.state.storage)
-        cutout_backfill.thumb_listing = thumbs or real[2]
+        photo_work.thumb_listing = thumbs or real[2]
         out = io.StringIO()
         try:
             with contextlib.redirect_stdout(out), self.assertRaises(SystemExit) as stop:
                 cutout_backfill.main(list(args))
                 raise SystemExit(0)
         finally:
-            cutout_backfill.Settings, cutout_backfill.make_storage, cutout_backfill.thumb_listing = real
+            cutout_backfill.Settings, cutout_backfill.make_storage, photo_work.thumb_listing = real
         return stop.exception.code, out.getvalue()
 
     def test_the_backfill_carries_on_past_a_listing_that_fails_and_says_so(self):
@@ -731,15 +732,15 @@ class CutoutApiTests(MediaTests):
             if lid == ids[1]:  # one photo's error is logged and the job carries on: still a failure here
                 logging.getLogger("vitrina_api.listing_routes").error("thumbnail failed for one photo")
             return thumb_listing(state, lid)
-        from scripts import cutout_backfill
         from vitrina_api.listing_routes import embed_listing
         embedded = []
 
         def embed(state, lid):
             embedded.append(lid)
             return embed_listing(state, lid)
-        cutout_backfill.embed_listing = embed
-        self.addCleanup(setattr, cutout_backfill, "embed_listing", embed_listing)
+        from vitrina_api import photo_work
+        photo_work.embed_listing = embed
+        self.addCleanup(setattr, photo_work, "embed_listing", embed_listing)
         self.with_embedder()
         with self.assertLogs(level="ERROR"):
             code, out = self.backfill("--without-models", thumbs=thumbs)
@@ -756,6 +757,86 @@ class CutoutApiTests(MediaTests):
         real = cutout_backfill.visual.load_embedder
         cutout_backfill.visual.load_embedder = lambda path: (lambda data: numpy.ones(4, numpy.float32))
         self.addCleanup(setattr, cutout_backfill.visual, "load_embedder", real)
+
+    def worker(self):
+        """The API leaves photo work to a photo worker, here on the test database and storage with a clock the
+        test moves."""
+        from vitrina_api.photo_work import Worker
+        self.cfg.photo_work = "worker"
+        self.now = [1000.0]
+        return Worker(self.app.state, clock=lambda: self.now[0])
+
+    def test_with_a_photo_worker_the_api_leaves_the_work_to_it_newest_first(self):
+        work = self.worker()
+        first = self.four((120, 90, 60))
+        old = self.post("/listings", self.seller, {**LISTING, "photos": first}).json()["id"]
+        new = self.post("/listings", self.seller, {**LISTING, "photos": self.four((60, 90, 120))}).json()["id"]
+        self.assertEqual([m["processed_url"] or m["thumb_url"] for m in self.mine(new)["media"]], [None] * 4)
+        self.assertEqual(work.step(), new)  # a seller waiting on a new listing goes before older work
+        self.assertTrue(all(m["processed_url"] and m["thumb_url"] for m in self.mine(new)["media"]))
+        self.assertIsNone(self.mine(old)["media"][0]["processed_url"])
+        self.assertEqual(work.step(), old)
+        self.assertTrue(all(m["processed_url"] and m["thumb_url"] for m in self.mine(old)["media"]))
+        self.assertIsNone(work.step())  # nothing left: no photo is read again
+        photos = self.four((200, 200, 40))  # new photos: due again, at once
+        self.assertEqual(self.c.patch(f"/api/v1/listings/{old}", json={"photos": photos},
+                                      headers=self.h(self.seller)).status_code, 200)
+        self.assertEqual(work.step(), old)
+        self.assertIsNone(work.step())
+        self.assertEqual(self.c.patch(f"/api/v1/listings/{old}", json={"photos": first},
+                                      headers=self.h(self.seller)).status_code, 200)
+        self.assertEqual(work.step(), old)  # back to photos it had: worked at once, no wait left from before
+
+    def test_a_listing_the_worker_cannot_finish_waits_longer_each_time(self):
+        from vitrina_api import photo_work
+        work = self.worker()
+        old = self.post("/listings", self.seller, {**LISTING, "photos": self.four((60, 90, 120))}).json()["id"]
+        lid = self.post("/listings", self.seller, {**LISTING, "photos": self.four((120, 90, 60))}).json()["id"]
+        real = photo_work.thumb_listing
+        tries = []
+
+        def down(state, listing_id):
+            if listing_id != lid:
+                return real(state, listing_id)
+            tries.append(listing_id)
+            raise ConnectionError("storage is down")
+        photo_work.thumb_listing = down
+        self.addCleanup(setattr, photo_work, "thumb_listing", real)
+        with self.assertLogs(level="ERROR"):
+            self.assertEqual(work.step(), lid)
+        self.assertEqual(work.step(), old)  # the newest is waiting: it does not hold up the rest
+        self.assertIsNone(work.step())  # still due, but waiting: the worker does not spin on it
+        self.now[0] += photo_work.FIRST_WAIT_S
+        with self.assertLogs(level="ERROR"):
+            self.assertEqual(work.step(), lid)
+        self.now[0] += photo_work.FIRST_WAIT_S  # the second wait is twice as long
+        self.assertIsNone(work.step())
+        self.now[0] += photo_work.FIRST_WAIT_S
+        with self.assertLogs(level="ERROR"):
+            self.assertEqual(work.step(), lid)
+        self.assertEqual(tries, [lid] * 3)
+        photo_work.thumb_listing = real  # the storage is back
+        self.now[0] += photo_work.LONGEST_WAIT_S
+        self.assertEqual(work.step(), lid)
+        self.assertTrue(all(m["thumb_url"] for m in self.mine(lid)["media"]))
+        self.assertIsNone(work.step())
+
+    def test_the_photo_worker_stops_when_asked_and_survives_a_failed_look(self):
+        from vitrina_api import photo_work
+        work = self.worker()
+        real = photo_work.due_work
+        looks = []
+
+        def flaky(state):
+            looks.append(1)
+            if len(looks) == 1:
+                raise ConnectionError("database restarting")
+            return real(state)
+        photo_work.due_work = flaky
+        self.addCleanup(setattr, photo_work, "due_work", real)
+        with self.assertLogs("vitrina_api.photo_work", level="ERROR"):
+            work.run(0, should_stop=lambda: len(looks) >= 3)
+        self.assertEqual(len(looks), 3)
 
     def with_segmenter(self):
         """The backfill gets the cut-out model the API has, as it would with VITRINA_CUTOUT_MODEL set."""

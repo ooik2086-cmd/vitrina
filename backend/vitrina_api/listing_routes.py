@@ -455,7 +455,8 @@ def create_listing(body: ListingIn, request: Request, background: BackgroundTask
     db.flush()
     db.add(PriceChange(listing_id=listing.id, price_tiyn=listing.price_tiyn))
     db.commit()
-    background.add_task(prepare_listing_media, request.app.state, listing.id)
+    if cfg.photo_work != "worker":  # else the photo worker finds the new listing (photo_work.py)
+        background.add_task(prepare_listing_media, request.app.state, listing.id)
     return listing_out(db, listing, owner=True)
 
 
@@ -553,7 +554,7 @@ def edit_listing(listing_id: int, body: ListingPatch, request: Request, backgrou
         # vector missing and makes it.
         db.execute(delete(ListingEmbedding).where(ListingEmbedding.listing_id == listing.id))
     db.commit()
-    if "photos" in changed:
+    if "photos" in changed and cfg.photo_work != "worker":
         background.add_task(prepare_listing_media, request.app.state, listing.id)
     return listing_out(db, listing, owner=True)
 

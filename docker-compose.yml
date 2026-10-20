@@ -24,7 +24,22 @@ services:
       VITRINA_DEBUG_OTP: "1"
       VITRINA_CORS_ORIGINS: http://localhost:5000
       VITRINA_JOBS_INTERVAL: "300"   # expire unpaid orders, refund ignored ones, auto-complete, review reminders
+      VITRINA_PHOTO_WORK: worker     # cut-outs and search vectors are made by the photos service below
     ports: ["8000:8000"]
+    volumes: [media:/data/media, private:/data/private]
+
+  # Cut-outs, small copies and search vectors of new and edited listings, out of the API so buyers are not slowed.
+  photos:
+    build: ./backend
+    command: ["python", "-m", "vitrina_api.photo_worker"]
+    depends_on:
+      api:
+        condition: service_healthy   # the API has run the migrations
+    environment:
+      VITRINA_DATABASE_URL: postgresql+psycopg://vitrina:vitrina@db:5432/vitrina
+      VITRINA_PUBLIC_MEDIA_URL: http://localhost:8000/media
+    healthcheck:
+      disable: true   # it answers no HTTP
     volumes: [media:/data/media, private:/data/private]
 
 volumes:
