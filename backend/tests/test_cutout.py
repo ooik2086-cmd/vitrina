@@ -773,7 +773,11 @@ class CutoutApiTests(MediaTests):
         new = self.post("/listings", self.seller, {**LISTING, "photos": self.four((60, 90, 120))}).json()["id"]
         self.assertEqual([m["processed_url"] or m["thumb_url"] for m in self.mine(new)["media"]], [None] * 4)
         self.assertTrue(self.mine(new)["photos_pending"])  # the seller is told the photos are being prepared
-        self.assertNotIn("photos_pending", self.c.get(f"/api/v1/listings/{new}").json())  # only the seller
+        self.assertEqual(self.post(f"/listings/{new}/publish", self.seller).status_code, 200)
+        for who in ({}, self.h(self.buyer)):  # only the seller is told
+            public = self.c.get(f"/api/v1/listings/{new}", headers=who)
+            self.assertEqual(public.status_code, 200)
+            self.assertNotIn("photos_pending", public.json())
         self.assertEqual(work.step(), old)  # sellers waiting are served in the order they came
         self.assertFalse(self.mine(old)["photos_pending"])
         self.assertTrue(all(m["processed_url"] and m["thumb_url"] for m in self.mine(old)["media"]))

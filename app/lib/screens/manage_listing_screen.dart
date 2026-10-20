@@ -54,6 +54,10 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
   late String _category = _l.category;
   late String _condition = _l.condition;
   late final Map<int, int> _stock = {for (final s in _l.sizes) s.id: _count(s)};
+
+  /// Whether the pending card found the photos ready, and for which photo set.
+  bool _photosReady = false;
+  String? _photosReadyFor;
   bool _busy = false;
   bool _changed = false;
   final _photos = GlobalKey();
@@ -260,16 +264,20 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
                   const SizedBox(height: 16),
                   ModerationCard(listing: _l),
                 ],
-                if (_l.photosPending && !locked) ...[
+                if (_l.photosPending && !(_photosReady && _photosReadyFor == _l.photosVersion) && !locked) ...[
                   const SizedBox(height: 16),
-                  Card(
-                    key: const Key('photos-pending'),
-                    child: ListTile(
-                      leading: const Icon(Icons.hourglass_top_outlined),
-                      title: Text(tr('Фотолар өңделуде')),
-                      subtitle: Text(tr(
-                          'Фоны алынып, айналым дайындалып жатыр, бір тауарға бірнеше минут кетеді. Оған дейін сатып алушылар фотоларды түсірілген күйінде көреді.')),
-                    ),
+                  PhotosPendingCard(
+                    listing: _l,
+                    // Only the card goes: the listing on screen is kept, so stock the seller is changing is still
+                    // compared with the counts they saw (a fresh copy would hide a pair sold meanwhile).
+                    onReady: () {
+                      setState(() {
+                        _photosReady = true;
+                        _photosReadyFor = _l.photosVersion;
+                        _changed = true;
+                      });
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr('Фотолар дайын'))));
+                    },
                   ),
                 ],
                 if (_l.stats != null) ...[
@@ -676,6 +684,78 @@ class ModerationCard extends StatelessWidget {
 
 /// Makes and hands out the 8-second promo video: the seller's 360° photos, the price and music,
 /// sized for Instagram, TikTok and WhatsApp statuses.
+/// Says the photos just given are still being prepared, and looks again now and then so it goes away by itself
+/// once they are ready.
+class PhotosPendingCard extends StatefulWidget {
+  const PhotosPendingCard(
+      {super.key, required this.listing, required this.onReady, this.pollEvery = const Duration(seconds: 20)});
+  final Listing listing;
+  final VoidCallback onReady;
+  final Duration pollEvery;
+
+  @override
+  State<PhotosPendingCard> createState() => _PhotosPendingCardState();
+}
+
+class _PhotosPendingCardState extends State<PhotosPendingCard> {
+  Timer? _poll;
+
+  @override
+  void initState() {
+    super.initState();
+    _schedule();
+  }
+
+  @override
+  void dispose() {
+    _poll?.cancel();
+    super.dispose();
+  }
+
+  void _schedule() {
+    _poll?.cancel();
+    _poll = Timer(widget.pollEvery, () async {
+      try {
+        final l = await SessionScope.of(context).api.listing(widget.listing.id);
+        if (!mounted) return;
+        if (l.photosPending) {
+          _schedule();
+        } else {
+          widget.onReady();
+        }
+      } catch (_) {
+        if (mounted) _schedule();
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      key: const Key('photos-pending'),
+      color: theme.colorScheme.surfaceContainerHighest,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Icon(Icons.auto_fix_high_rounded, size: 20),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(tr('Фотолар өңделуде'),
+                  style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
+            ),
+          ]),
+          const SizedBox(height: 8),
+          Text(
+              tr('Фотолардың фоны алынып жатыр, бұл біраз уақыт алуы мүмкін. Оған дейін сатып алушылар фотоларды түсірілген күйінде көреді.'),
+              style: theme.textTheme.bodySmall),
+        ]),
+      ),
+    );
+  }
+}
+
 class PromoCard extends StatefulWidget {
   const PromoCard(
       {super.key, required this.listing, required this.onChanged, this.pollEvery = const Duration(seconds: 2)});

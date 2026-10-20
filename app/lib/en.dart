@@ -1008,6 +1008,7 @@ const en = <String, String>{
   'Сақталған деректеме': 'Saved bank details',
   'фото өңделуде': 'photos being prepared',
   'Фотолар өңделуде': 'Photos being prepared',
-  'Фоны алынып, айналым дайындалып жатыр, бір тауарға бірнеше минут кетеді. Оған дейін сатып алушылар фотоларды түсірілген күйінде көреді.':
-      'We are removing the background and preparing the 360° view, which takes a few minutes per listing. Until then buyers see the photos as you took them.',
+  'Фотолар дайын': 'Photos ready',
+  'Фотолардың фоны алынып жатыр, бұл біраз уақыт алуы мүмкін. Оған дейін сатып алушылар фотоларды түсірілген күйінде көреді.':
+      'We are removing the background from your photos, which can take a while. Until then buyers see the photos as you took them.',
 };
