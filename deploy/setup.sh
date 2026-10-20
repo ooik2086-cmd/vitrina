@@ -162,7 +162,7 @@ After=docker.service
 
 [Service]
 Type=oneshot
-Environment="VITRINA_COMPOSE_FILES=${VITRINA_COMPOSE_FILES:-}" "VITRINA_BACKUP_DIR=${VITRINA_BACKUP_DIR:-/var/backups/vitrina}"
+Environment="VITRINA_COMPOSE_FILES=${VITRINA_COMPOSE_FILES:-}" "VITRINA_BACKUP_DIR=${VITRINA_BACKUP_DIR:-/var/backups/vitrina}" "COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME:-vitrina}"
 ExecStart=/bin/sh $DEPLOY/backup.sh
 EOF
 cat > /etc/systemd/system/vitrina-backup.timer <<'EOF'
