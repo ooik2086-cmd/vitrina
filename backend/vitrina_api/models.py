@@ -103,6 +103,9 @@ class Listing(Base):
     was_price_tiyn: Mapped[int | None] = mapped_column(BigInteger)
     was_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     announced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # saved-search alerts sent
+    # When the seller last gave the listing photos (created, or photos replaced): the photo worker serves fresh
+    # changes first, in the order they came. None for listings from before it was kept.
+    photos_changed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     stale_nudged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # 'not selling' tip sent
     # The seller's own price before a shop-wide sale, put back when the sale ends (the crossed-out price may differ).
     pre_sale_price_tiyn: Mapped[int | None] = mapped_column(BigInteger)

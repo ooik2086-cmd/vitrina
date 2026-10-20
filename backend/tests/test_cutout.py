@@ -766,17 +766,17 @@ class CutoutApiTests(MediaTests):
         self.now = [1000.0]
         return Worker(self.app.state, clock=lambda: self.now[0])
 
-    def test_with_a_photo_worker_the_api_leaves_the_work_to_it_newest_first(self):
+    def test_with_a_photo_worker_the_api_leaves_the_work_to_it_in_the_order_given(self):
         work = self.worker()
         first = self.four((120, 90, 60))
         old = self.post("/listings", self.seller, {**LISTING, "photos": first}).json()["id"]
         new = self.post("/listings", self.seller, {**LISTING, "photos": self.four((60, 90, 120))}).json()["id"]
         self.assertEqual([m["processed_url"] or m["thumb_url"] for m in self.mine(new)["media"]], [None] * 4)
-        self.assertEqual(work.step(), new)  # a seller waiting on a new listing goes before older work
-        self.assertTrue(all(m["processed_url"] and m["thumb_url"] for m in self.mine(new)["media"]))
-        self.assertIsNone(self.mine(old)["media"][0]["processed_url"])
-        self.assertEqual(work.step(), old)
+        self.assertEqual(work.step(), old)  # sellers waiting are served in the order they came
         self.assertTrue(all(m["processed_url"] and m["thumb_url"] for m in self.mine(old)["media"]))
+        self.assertIsNone(self.mine(new)["media"][0]["processed_url"])
+        self.assertEqual(work.step(), new)
+        self.assertTrue(all(m["processed_url"] and m["thumb_url"] for m in self.mine(new)["media"]))
         self.assertIsNone(work.step())  # nothing left: no photo is read again
         photos = self.four((200, 200, 40))  # new photos: due again, at once
         self.assertEqual(self.c.patch(f"/api/v1/listings/{old}", json={"photos": photos},
@@ -787,11 +787,65 @@ class CutoutApiTests(MediaTests):
                                       headers=self.h(self.seller)).status_code, 200)
         self.assertEqual(work.step(), old)  # back to photos it had: worked at once, no wait left from before
 
+    def test_an_edited_listing_goes_before_older_work(self):
+        from vitrina_api.models import Listing, Media
+        work = self.worker()
+        ids = [self.post("/listings", self.seller, {**LISTING, "photos": self.four(c)}).json()["id"]
+               for c in ((120, 90, 60), (60, 90, 120), (90, 120, 60))]
+        while work.step() is not None:
+            pass
+        with self.app.state.sessions() as db:  # from before the change times were kept; the two newest need work
+            for lid in ids:                   # again, as after a new model: older work
+                db.get(Listing, lid).photos_changed_at = None
+            for m in db.query(Media).filter(Media.listing_id.in_(ids[1:])):
+                m.thumb_url = None
+            db.commit()
+        r = self.c.patch(f"/api/v1/listings/{ids[0]}", json={"photos": self.four((200, 200, 40))},
+                         headers=self.h(self.seller))
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual([work.step() for _ in range(4)], [ids[0], ids[2], ids[1], None])  # then newest first
+
+    def test_a_look_reads_only_listings_that_may_have_work(self):
+        from sqlalchemy import event
+        from vitrina_api import photo_work
+        from vitrina_api.models import Listing, Media
+        work = self.worker()
+        label = self.upload(self.seller, solid((240, 240, 240))).json()["url"]
+        done = self.post("/listings", self.seller, {**LISTING, "photos": self.four((120, 90, 60))
+                                                   + [{"url": label, "angle": "label"}]}).json()["id"]
+        odd = self.post("/listings", self.seller, {**LISTING, "photos": self.four((60, 90, 120))}).json()["id"]
+        self.no_shoe_in((5, 5, 5))  # photos the model found no shoe in are done too: they stay as taken
+        blank = self.post("/listings", self.seller, {**LISTING, "photos": self.four((5, 5, 5))}).json()["id"]
+        while work.step() is not None:
+            pass
+        with self.app.state.sessions() as db:  # a photo no job can do anything with: a candidate for good
+            db.add(Media(listing_id=odd, original_url="https://elsewhere.example/p.jpg", angle="detail", position=9))
+            db.commit()
+        loaded = []
+        listen = lambda target, _ctx: loaded.append(target.id)  # noqa: E731
+        event.listen(Listing, "load", listen)
+        self.addCleanup(event.remove, Listing, "load", listen)
+        self.assertIsNone(work.step())
+        self.assertEqual(loaded, [odd])  # the finished listing with an uncut label is not even read
+        loaded.clear()
+        self.assertEqual(photo_work.due_work(self.app.state), {})  # nor by a look that remembers nothing
+        self.assertEqual(loaded, [odd])
+        loaded.clear()
+        self.assertIsNone(work.step())
+        self.assertEqual(loaded, [])  # nor the odd one again, until something about its photos changes
+        with self.app.state.sessions() as db:
+            db.query(Media).filter(Media.listing_id == odd, Media.angle == "front").update({"thumb_url": None})
+            db.commit()
+        self.assertEqual(work.step(), odd)
+        self.assertNotIn(done, loaded)
+        self.assertNotIn(blank, loaded)
+        self.assertEqual(photo_work.due_work(self.app.state), {})  # the backfill's full look agrees
+
     def test_a_listing_the_worker_cannot_finish_waits_longer_each_time(self):
         from vitrina_api import photo_work
         work = self.worker()
-        old = self.post("/listings", self.seller, {**LISTING, "photos": self.four((60, 90, 120))}).json()["id"]
         lid = self.post("/listings", self.seller, {**LISTING, "photos": self.four((120, 90, 60))}).json()["id"]
+        other = self.post("/listings", self.seller, {**LISTING, "photos": self.four((60, 90, 120))}).json()["id"]
         real = photo_work.thumb_listing
         tries = []
 
@@ -804,17 +858,16 @@ class CutoutApiTests(MediaTests):
         self.addCleanup(setattr, photo_work, "thumb_listing", real)
         with self.assertLogs(level="ERROR"):
             self.assertEqual(work.step(), lid)
-        self.assertEqual(work.step(), old)  # the newest is waiting: it does not hold up the rest
+        self.assertEqual(work.step(), other)  # the first is waiting: it does not hold up the rest
         self.assertIsNone(work.step())  # still due, but waiting: the worker does not spin on it
-        self.now[0] += photo_work.FIRST_WAIT_S
-        with self.assertLogs(level="ERROR"):
-            self.assertEqual(work.step(), lid)
-        self.now[0] += photo_work.FIRST_WAIT_S  # the second wait is twice as long
-        self.assertIsNone(work.step())
-        self.now[0] += photo_work.FIRST_WAIT_S
-        with self.assertLogs(level="ERROR"):
-            self.assertEqual(work.step(), lid)
-        self.assertEqual(tries, [lid] * 3)
+        # A minute, doubling, up to an hour: each wait found by moving the clock to just before and just after it.
+        for wait in (60, 120, 240, 480, 960, 1920, 3600, 3600):
+            self.now[0] += wait - 1
+            self.assertIsNone(work.step(), wait)
+            self.now[0] += 1
+            with self.assertLogs(level="ERROR"):
+                self.assertEqual(work.step(), lid, wait)
+        self.assertEqual(len(tries), 9)
         photo_work.thumb_listing = real  # the storage is back
         self.now[0] += photo_work.LONGEST_WAIT_S
         self.assertEqual(work.step(), lid)
@@ -822,21 +875,85 @@ class CutoutApiTests(MediaTests):
         self.assertIsNone(work.step())
 
     def test_the_photo_worker_stops_when_asked_and_survives_a_failed_look(self):
+        import threading
         from vitrina_api import photo_work
         work = self.worker()
         real = photo_work.due_work
-        looks = []
+        looks, alive = [], []
 
-        def flaky(state):
+        def flaky(state, **kw):
             looks.append(1)
             if len(looks) == 1:
                 raise ConnectionError("database restarting")
-            return real(state)
+            if len(looks) == 3:
+                work.stop()
+            return real(state, **kw)
         photo_work.due_work = flaky
         self.addCleanup(setattr, photo_work, "due_work", real)
         with self.assertLogs("vitrina_api.photo_work", level="ERROR"):
-            work.run(0, should_stop=lambda: len(looks) >= 3)
-        self.assertEqual(len(looks), 3)
+            work.run(0, alive=lambda: alive.append(1))
+        self.assertEqual((len(looks), len(alive)), (3, 3))
+        # Idle, it waits for the next look; asked to stop meanwhile, it does not finish the wait.
+        idle = self.worker()
+        runs = threading.Thread(target=idle.run, args=(60,), kwargs={"alive": lambda: alive.append(2)})
+        runs.start()
+        while 2 not in alive:
+            runs.join(0.01)
+        idle.stop()
+        runs.join(5)
+        self.assertFalse(runs.is_alive())
+
+    def test_the_api_does_not_load_the_cut_out_model_when_a_worker_cuts_out(self):
+        from vitrina_api import app as api
+        from vitrina_api.config import Settings
+        real = api.cutout.load_segmenter
+        api.cutout.load_segmenter = lambda path: "model"
+        self.addCleanup(setattr, api.cutout, "load_segmenter", real)
+        for mode, segmenter in (("worker", None), ("inline", "model")):
+            cfg = Settings(database_url=f"sqlite:///{os.path.join(self.tmp.name, mode + '.db')}",
+                           media_dir=self.cfg.media_dir, photo_work=mode)
+            made = api.create_app(cfg)
+            self.assertEqual(made.state.segmenter, segmenter, mode)
+            made.state.sessions.kw["bind"].dispose()
+
+    def test_the_photo_worker_process_lowers_its_priority_and_stops_on_sigterm(self):
+        import signal
+        from vitrina_api import photo_worker
+        from vitrina_api.config import Settings
+        ran = []
+
+        class Fake:
+            def __init__(self, state):
+                self.state = state
+
+            def run(self, interval_s, alive):
+                ran.append(interval_s)
+                alive()
+                signal.getsignal(signal.SIGTERM)(signal.SIGTERM, None)
+
+            def stop(self):
+                ran.append("stopped")
+
+        def no_nice(n):
+            raise OSError("not permitted")
+        alive = os.path.join(self.tmp.name, "alive")
+        cfg = Settings(database_url=self.cfg.database_url, media_dir=self.cfg.media_dir, photo_worker_alive=alive,
+                       photo_worker_interval_s=7)
+        real = photo_worker.Worker, photo_worker.Settings, photo_worker.os.nice, signal.getsignal(signal.SIGTERM)
+        root = logging.getLogger()
+        self.addCleanup(setattr, root, "handlers", list(root.handlers))  # main() sets up logging for its process
+        self.addCleanup(root.setLevel, root.level)
+        photo_worker.Worker, photo_worker.Settings, photo_worker.os.nice = Fake, (lambda: cfg), no_nice
+        try:
+            with self.assertLogs("vitrina_api.photo_worker", level="WARNING") as said:
+                photo_worker.main()
+        finally:
+            photo_worker.Worker, photo_worker.Settings, photo_worker.os.nice = real[:3]
+            signal.signal(signal.SIGTERM, real[3])
+        self.assertEqual(ran, [7, "stopped"])
+        self.assertTrue(os.path.exists(alive))
+        self.assertTrue(any("priority" in line for line in said.output))
+        self.assertTrue(any("did not load" in line for line in said.output))  # no models in this test
 
     def with_segmenter(self):
         """The backfill gets the cut-out model the API has, as it would with VITRINA_CUTOUT_MODEL set."""

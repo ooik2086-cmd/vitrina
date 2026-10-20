@@ -1,7 +1,9 @@
 """Runs the photo work in its own process: `python -m vitrina_api.photo_worker` (see photo_work.py).
 
 Uses the same database, storage and model settings as the API. Runs at a lower priority than the API when both
-share a machine, so a seller's upload does not slow down buyers browsing.
+share a machine, so a seller's upload does not slow down buyers browsing. After every listing, and every look that
+found nothing to do, it touches VITRINA_PHOTO_WORKER_ALIVE: a file older than a few listings means it is stuck or
+down (the docker-compose health check reads it).
 """
 from __future__ import annotations
 
@@ -9,6 +11,7 @@ import logging
 import os
 import signal
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 from . import cutout, visual
@@ -35,11 +38,13 @@ def main() -> None:
                                   if m is None))
     state = SimpleNamespace(segmenter=segmenter, embedder=embedder, storage=make_storage(cfg),
                             sessions=make_session_factory(cfg.database_url, create_schema=False))
-    stop = []
-    # Stops after the listing it is on. Killed half way instead, that listing is simply still due when it starts.
-    signal.signal(signal.SIGTERM, lambda *_: stop.append(True))
+    worker = Worker(state)
+    # Stops after the listing it is on (a container needs a stop grace period of one listing, ~2 minutes). Killed
+    # half way instead, that listing is simply still due when it starts again.
+    signal.signal(signal.SIGTERM, lambda *_: worker.stop())
+    alive = Path(cfg.photo_worker_alive) if cfg.photo_worker_alive else None
     log.info("photo worker started")
-    Worker(state).run(cfg.photo_worker_interval_s, should_stop=lambda: bool(stop))
+    worker.run(cfg.photo_worker_interval_s, alive=(lambda: alive.touch()) if alive else (lambda: None))
     log.info("photo worker stopped")
 
 

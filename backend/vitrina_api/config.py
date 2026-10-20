@@ -61,6 +61,8 @@ class Settings:
     photo_worker_interval_s: float = field(
         default_factory=lambda: float(os.environ.get("VITRINA_PHOTO_WORKER_INTERVAL", "5")))
     photo_worker_nice: int = field(default_factory=lambda: int(os.environ.get("VITRINA_PHOTO_WORKER_NICE", "10")))
+    photo_worker_alive: str = field(
+        default_factory=lambda: os.environ.get("VITRINA_PHOTO_WORKER_ALIVE", "/tmp/photo_worker.alive"))
     # Path to a background-removal model (backend/models/README.md). Empty = keep original photos only.
     cutout_model: str = field(default_factory=lambda: os.environ.get("VITRINA_CUTOUT_MODEL", ""))
     # Search-by-photo model (backend/models/README.md). Empty = search by photo answers 503.

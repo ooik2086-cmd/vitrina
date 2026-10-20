@@ -450,6 +450,7 @@ def create_listing(body: ListingIn, request: Request, background: BackgroundTask
         authenticity=Authenticity.UNVERIFIED.value,
         sizes=[ListingSize(label=s.label, insole_mm=cm_to_mm(s.insole_cm), quantity=s.quantity) for s in body.sizes],
         media=[Media(original_url=p.url, angle=p.angle, position=i) for i, p in enumerate(body.photos)],
+        photos_changed_at=now_utc(),
     )
     db.add(listing)
     db.flush()
@@ -553,6 +554,7 @@ def edit_listing(listing_id: int, body: ListingPatch, request: Request, backgrou
         # new one the listing is not found by a photo it no longer has, and if the job fails the backfill sees the
         # vector missing and makes it.
         db.execute(delete(ListingEmbedding).where(ListingEmbedding.listing_id == listing.id))
+        listing.photos_changed_at = now_utc()
     db.commit()
     if "photos" in changed and cfg.photo_work != "worker":
         background.add_task(prepare_listing_media, request.app.state, listing.id)

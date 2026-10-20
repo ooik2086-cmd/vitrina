@@ -29,6 +29,7 @@ services:
     volumes: [media:/data/media, private:/data/private]
 
   # Cut-outs, small copies and search vectors of new and edited listings, out of the API so buyers are not slowed.
+  # Run one: two would cut out the same listing side by side.
   photos:
     build: ./backend
     command: ["python", "-m", "vitrina_api.photo_worker"]
@@ -38,9 +39,13 @@ services:
     environment:
       VITRINA_DATABASE_URL: postgresql+psycopg://vitrina:vitrina@db:5432/vitrina
       VITRINA_PUBLIC_MEDIA_URL: http://localhost:8000/media
-    healthcheck:
-      disable: true   # it answers no HTTP
-    volumes: [media:/data/media, private:/data/private]
+    restart: unless-stopped
+    stop_grace_period: 150s   # it finishes the listing it is on (~2 minutes) before stopping
+    healthcheck:   # it touches this file after every listing and every idle look
+      test: ["CMD-SHELL", "find /tmp/photo_worker.alive -mmin -10 | grep -q ."]
+      interval: 60s
+      start_period: 120s
+    volumes: [media:/data/media]   # public photos only: it never reads receipts or dispute evidence
 
 volumes:
   pgdata:

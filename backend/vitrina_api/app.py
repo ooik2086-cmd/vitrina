@@ -89,7 +89,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.sessions = make_session_factory(settings.database_url, create_schema=settings.auto_create_schema)
     app.state.storage = make_storage(settings)
     app.state.private = make_private_storage(settings)
-    app.state.segmenter = cutout.load_segmenter(settings.cutout_model)
+    # Only photo work cuts out, and with a photo worker that is not here: ~440 MB per API process saved.
+    app.state.segmenter = (None if settings.photo_work == "worker"
+                           else cutout.load_segmenter(settings.cutout_model))
     app.state.embedder = visual.load_embedder(settings.search_model)
     app.state.image_search_limiter = SlidingWindowLimiter(IMAGE_SEARCH_PER_MINUTE, 60)
     app.state.otp_limiter = SlidingWindowLimiter(OTP_REQUESTS_PER_ADDRESS_PER_HOUR, 3600)

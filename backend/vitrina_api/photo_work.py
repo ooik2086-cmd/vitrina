@@ -6,22 +6,29 @@ deployment it runs here, in its own process, and the API answers buyers meanwhil
     python -m vitrina_api.photo_worker
 
 What is due is read from the database each time (a photo not cut out, a small copy or a vector missing), so nothing
-is lost when either process restarts, and new or edited listings go first. scripts/cutout_backfill.py does the same
-work once over the whole catalogue.
+is lost when either process restarts. Photos sellers gave in the last day go first, in the order they came; older
+work after them. Run one worker: two would cut out the same listing side by side. scripts/cutout_backfill.py does
+the same work once over the whole catalogue.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
+import threading
 import time
+from datetime import datetime, timedelta
+from typing import NamedTuple
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import noload, selectinload
 
 from . import visual
-from .listing_routes import cutout_listing, embed_listing, embedded_photo, media_work, thumb_listing
+from .deps import now_utc
+from .listing_routes import (CUTOUT_ANGLES, cutout_listing, cutout_model, embed_listing, embedded_photo, media_work,
+                             thumb_listing)
 from .models import Listing, ListingEmbedding, Media
-from .serializers import photos_version
+from .services import aware
 
 log = logging.getLogger(__name__)  # under the root logger, where work_listing counts the jobs' errors too
 
@@ -37,23 +44,56 @@ class _Errors(logging.Handler):
         self.count += 1
 
 
-def due_work(state, chunk: int = 500) -> dict[int, tuple[list, str]]:
-    """The jobs each listing still needs and the photo set they are for, in id order. Only listings with something
-    to do, so a pass over listings that are done reads no photos: a label left as taken, or a photo the model found
-    no shoe in, is not cut out again. Worked out a chunk of listings at a time, so a big catalogue is never all
-    loaded."""
-    uncut = select(Media.listing_id).where(Media.processed_url.is_(None) | Media.thumb_url.is_(None))
+class Due(NamedTuple):
+    jobs: list
+    photos: str  # the photo set the jobs are for: a new set is new work, whatever happened to the old one
+    changed_at: datetime | None  # when the seller gave these photos
+
+
+def photo_set(listing: Listing) -> str:
+    """Names the photos and their sides, in order. Unlike photos_version not the text, so a seller fixing a typo
+    does not make a listing the worker is waiting on look like new work."""
+    shown = sorted(listing.media, key=lambda m: (m.position, m.id))
+    return hashlib.sha256("\n".join(f"{m.original_url} {m.angle}" for m in shown).encode()).hexdigest()[:16]
+
+
+def due_work(state, chunk: int = 500, known: dict | None = None) -> dict[int, Due]:
+    """The jobs each listing still needs, in id order. Only listings with something to do, so a pass over listings
+    that are done reads no photos: a label or a photo the model found no shoe in is never cut out, and is not
+    looked at again. Worked out a chunk of listings at a time, so a big catalogue is never all loaded.
+
+    The database picks the candidates; only they are read with their photos. A few are candidates for good with
+    nothing to do (a turn whose cover cannot be matched, say). Pass known, kept between calls, and such a listing
+    is read again only once something about its photos changes."""
+    work = Media.thumb_url.is_(None)
+    if state.segmenter is not None:
+        model = cutout_model(state.segmenter)
+        work |= (Media.processed_url.is_(None) & Media.angle.in_(sorted(CUTOUT_ANGLES))
+                 & (Media.no_cutout.is_(None) | (Media.no_cutout != model)))
+    uncut = select(Media.listing_id).where(work)
+    has_cutout = select(Media.listing_id).where(Media.processed_url.is_not(None))
     current = select(ListingEmbedding.listing_id).where(ListingEmbedding.model == visual.MODEL_NAME)
     turning = select(Media.listing_id).where(Media.angle == "frame")
     sided = select(Media.listing_id).where(Media.angle.in_(["outer", "front", "inner", "back"]))
     unmatched = Listing.id.in_(turning) & (Listing.cover_frame.is_(None)
                                            | Listing.angle_frames.is_(None) & Listing.id.in_(sided))
-    wanted = Listing.id.in_(uncut) | Listing.backdrop.is_(None) | unmatched
+    wanted = Listing.id.in_(uncut) | Listing.backdrop.is_(None) & Listing.id.in_(has_cutout) | unmatched
     if state.embedder is not None:
         wanted |= Listing.id.not_in(current)
-    due: dict[int, tuple[list, str]] = {}
+    due: dict[int, Due] = {}
     with state.sessions() as db:
         ids = db.scalars(select(Listing.id).where(wanted).order_by(Listing.id)).all()
+        if known is not None:
+            # What a listing's work depends on, cheaply: its photo rows and what the jobs write.
+            marks = {row[0]: tuple(row[1:]) for row in db.execute(
+                select(Listing.id, Listing.backdrop, Listing.cover_frame, Listing.angle_frames,
+                       Listing.id.in_(current), func.count(Media.id), func.max(Media.id),
+                       func.count(Media.processed_url), func.count(Media.thumb_url))
+                .outerjoin(Media, Media.listing_id == Listing.id).where(wanted)
+                .group_by(Listing.id, Listing.backdrop, Listing.cover_frame, Listing.angle_frames))}
+            for lid in [lid for lid in known if lid not in marks]:
+                del known[lid]
+            ids = [lid for lid in ids if known.get(lid) != marks.get(lid)]
     for at in range(0, len(ids), chunk):
         with state.sessions() as db:
             part = ids[at:at + chunk]
@@ -66,7 +106,11 @@ def due_work(state, chunk: int = 500) -> dict[int, tuple[list, str]]:
                 jobs = [job for job, needed in ((cutout_listing, cut), (thumb_listing, thumbs),
                                                 (embed_listing, vector)) if needed]
                 if jobs:
-                    due[listing.id] = (jobs, photos_version(listing))
+                    due[listing.id] = Due(jobs, photo_set(listing), listing.photos_changed_at)
+                    if known is not None:
+                        known.pop(listing.id, None)
+                elif known is not None:
+                    known[listing.id] = marks.get(listing.id)
     return due
 
 
@@ -101,23 +145,30 @@ def work_listing(state, listing_id: int, jobs: list) -> tuple[dict, list[str], b
 # A listing still due after its work (it failed, or something about it cannot be done) waits before the next try:
 # a minute, doubling up to an hour. Keyed by its photo set, so a seller who changes the photos is served at once.
 FIRST_WAIT_S, LONGEST_WAIT_S = 60.0, 3600.0
+# Photos given this recently are a seller waiting: served first, in the order they came. Older work (a catalogue
+# caught up on after a new model, listings from before photos_changed_at was kept) comes after, newest first.
+FRESH = timedelta(days=1)
 
 
 class Worker:
-    def __init__(self, state, clock=time.monotonic):
-        self.state, self.clock = state, clock
+    def __init__(self, state, clock=time.monotonic, wall=now_utc):
+        self.state, self.clock, self.wall = state, clock, wall
         self.waits: dict[tuple[int, str], tuple[float, int]] = {}  # (listing, photo set) -> (not before, tries)
+        self.known: dict = {}  # listings read and found with nothing to do, for due_work
+        self.stopping = threading.Event()
 
-    def next_listing(self) -> tuple[int, list, str] | None:
-        """The newest listing due and not waiting: a new or edited listing goes before an old one being caught
-        up on."""
-        due = due_work(self.state)
-        now = self.clock()
-        self.waits = {key: wait for key, wait in self.waits.items() if due.get(key[0], (None, None))[1] == key[1]}
-        for lid in sorted(due, reverse=True):
-            jobs, version = due[lid]
-            if self.waits.get((lid, version), (0.0, 0))[0] <= now:
-                return lid, jobs, version
+    def next_listing(self) -> tuple[int, Due] | None:
+        """The listing to work next and not waiting: fresh photos first, oldest first, then the rest."""
+        due = due_work(self.state, known=self.known)
+        now, since = self.clock(), self.wall() - FRESH
+        self.waits = {key: wait for key, wait in self.waits.items() if key[0] in due and due[key[0]].photos == key[1]}
+
+        def order(lid):
+            changed = due[lid].changed_at and aware(due[lid].changed_at)
+            return (0, changed.timestamp(), lid) if changed is not None and changed >= since else (1, 0.0, -lid)
+        for lid in sorted(due, key=order):
+            if self.waits.get((lid, due[lid].photos), (0.0, 0))[0] <= now:
+                return lid, due[lid]
         return None
 
     def step(self) -> int | None:
@@ -125,23 +176,30 @@ class Worker:
         found = self.next_listing()
         if found is None:
             return None
-        lid, jobs, version = found
+        lid, todo = found
         started = self.clock()
-        results, broke, photo_errors = work_listing(self.state, lid, jobs)
-        tries = self.waits.get((lid, version), (0.0, 0))[1] + 1
+        results, broke, photo_errors = work_listing(self.state, lid, todo.jobs)
+        tries = self.waits.get((lid, todo.photos), (0.0, 0))[1] + 1
         # Counted as a try whatever happened: when it is due again on the next look, it did not get done.
-        self.waits[(lid, version)] = (self.clock() + min(LONGEST_WAIT_S, FIRST_WAIT_S * 2 ** (tries - 1)), tries)
+        self.waits[(lid, todo.photos)] = (self.clock() + min(LONGEST_WAIT_S, FIRST_WAIT_S * 2 ** (tries - 1)), tries)
         log.info("listing %s: %s in %.0fs%s", lid, ", ".join(f"{name} {n}" for name, n in results.items()),
                  self.clock() - started, f"; failed: {', '.join(broke)}" if broke else
                  ("; an error on a photo, see above" if photo_errors else ""))
         return lid
 
-    def run(self, interval_s: float, should_stop=lambda: False) -> None:
-        while not should_stop():
+    def run(self, interval_s: float, alive=lambda: None) -> None:
+        """Works until stop(); alive() is called after every listing and every look that found nothing, for a
+        health check to see the worker is not stuck."""
+        while not self.stopping.is_set():
             try:
                 worked = self.step()
             except Exception:  # the database away for a moment: look again later
                 log.exception("photo work pass failed")
                 worked = None
+            alive()
             if worked is None:
-                time.sleep(interval_s)
+                self.stopping.wait(interval_s)
+
+    def stop(self) -> None:
+        """Stops after the listing it is on."""
+        self.stopping.set()
