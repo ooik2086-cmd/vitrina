@@ -81,8 +81,7 @@ Future<(Line, Popups, _Switch)> _listing(WidgetTester tester, {required bool sig
   await tester.pumpWidget(SessionScope(
       session: session, child: MaterialApp(navigatorObservers: [popups], home: const ListingScreen(listingId: 1))));
   await settle(tester);
-  await tester.scrollUntilVisible(find.text('42'), 300,
-      scrollable: find.byWidgetPredicate((w) => w is Scrollable && w.axis == Axis.vertical).first);
+  await scrollListingTo(tester, find.text('42'));
   await tester.pump();
   popups
     ..opened = 0

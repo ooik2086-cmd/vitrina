@@ -452,7 +452,7 @@ class ScrollShowcase extends StatefulWidget {
   State<ScrollShowcase> createState() => ScrollShowcaseState();
 }
 
-class ScrollShowcaseState extends State<ScrollShowcase> with SingleTickerProviderStateMixin {
+class ScrollShowcaseState extends State<ScrollShowcase> with TickerProviderStateMixin {
   late ShowcasePlan _plan;
   late bool _light;
   bool _settled = true;
@@ -509,6 +509,9 @@ class ScrollShowcaseState extends State<ScrollShowcase> with SingleTickerProvide
   void _setUp() {
     _plan = ShowcasePlan.of(widget.listing);
     if (_spinSim != null) _stopSpin();
+    _tiltBack.stop();
+    _tilt = 0;
+    _dropSharp(); // another listing or colour: the last one's copies would only take memory
     _light = widget.listing.backdrop != 'dark';
     _shown = (step: 0, frame: 0);
     _scale = 1;
@@ -565,6 +568,92 @@ class ScrollShowcaseState extends State<ScrollShowcase> with SingleTickerProvide
     return ResizeImage.resizeIfNeeded(math.min(2000, width), null, screenSize(step.cut ? m.url : m.originalUrl));
   }
 
+  /// The sharp copy shown while the shoe moves, once it is ready: the photo decoded at the shoe's size on screen (at
+  /// most 800 px), for the photos near the one shown. The 400 px small copies looked soft on a phone mid-turn and
+  /// only came sharp when the shoe stopped; a hundred photos at this size would not fit in memory, so only a window
+  /// round the shoe is kept and the rest show their small copy until the shoe comes near them.
+  ImageProvider _mid(MediaItem m, ShowcaseStep step) {
+    final side = (MediaQuery.sizeOf(context).width * MediaQuery.devicePixelRatioOf(context) * 0.8).round();
+    return ResizeImage.resizeIfNeeded(math.min(800, side), null, netImage(step.cut ? m.url : m.originalUrl));
+  }
+
+  /// Photos whose sharp moving copy is decoded, by their address, least recently wanted first.
+  final _sharp = <String, ImageProvider>{};
+  // 12 at 800 px is about 30 MB, which leaves the image cache room for a scan's hundred small copies.
+  static const sharpAhead = 4, _keepSharp = 12;
+
+  /// Gets the sharp moving copies of the photos [around] ready, and lets go of the oldest beyond what memory holds.
+  /// Only for the turn's own frames, and not while a flick coasts: then the frames pass too fast to see the
+  /// difference, and fetching each would cost data and decoding the phone needs for the turn itself.
+  void _sharpen(Iterable<({int step, int frame})> around) {
+    if (_spin.isTicking) return;
+    for (final at in around) {
+      if (at.step != 0) continue; // the stops' photos are 3200 px: their full photo shows once the shoe is still
+      final s = _plan.steps[at.step];
+      final m = s.media[at.frame];
+      if (!_small(m, s) || _failedSharp.contains(m.url)) continue;
+      final had = _sharp.remove(m.url);
+      if (had != null) {
+        _sharp[m.url] = had; // wanted again: kept longest
+        continue;
+      }
+      final mid = _mid(m, s);
+      _sharp[m.url] = mid; // claimed now so it is fetched once; shown only once decoded (see _shownCopy)
+      _pendingSharp.add(m.url);
+      bool mine() => identical(_sharp[m.url], mid); // not a later claim of the same photo after this one went
+      precacheImage(mid, context, onError: (_, __) {
+        if (!mine()) return;
+        _sharp.remove(m.url);
+        _failedSharp.add(m.url); // not asked again on every frame; its small copy stays
+      }).then((_) {
+        if (!mine()) return;
+        _pendingSharp.remove(m.url);
+        if (mounted && _shownUrl == m.url) setState(() {}); // the one on screen sharpens
+      });
+    }
+    while (_sharp.length > _keepSharp) {
+      final oldest = _sharp.keys.first;
+      _pendingSharp.remove(oldest);
+      _sharp.remove(oldest)!.evict();
+    }
+  }
+
+  final _pendingSharp = <String>{}, _failedSharp = <String>{};
+
+  void _dropSharp() {
+    for (final p in _sharp.values) {
+      p.evict();
+    }
+    _sharp.clear();
+    _pendingSharp.clear();
+    _failedSharp.clear();
+  }
+  String? _shownUrl;
+
+  /// The photos either way of [at] in showing order, and on the turn round it, as [_fetchNear] goes.
+  Iterable<({int step, int frame})> _near(({int step, int frame}) at, int ahead) sync* {
+    final all = _plan.photos;
+    final i = all.indexOf(at);
+    if (i < 0) return;
+    yield at;
+    final turn = _plan.turn;
+    for (var d = 1; d <= ahead; d++) {
+      if (at.step == 0 && at.frame < turn) {
+        yield (step: 0, frame: (at.frame + d) % turn);
+        yield (step: 0, frame: (at.frame - d + turn) % turn);
+      } else {
+        if (i + d < all.length) yield all[i + d];
+        if (i - d >= 0) yield all[i - d];
+      }
+    }
+  }
+
+  /// What the stage draws for [m] while it moves: its sharp copy once decoded, else its small one.
+  ImageProvider _shownCopy(MediaItem m, ShowcaseStep step) {
+    final mid = _sharp[m.url];
+    return mid != null && !_pendingSharp.contains(m.url) ? mid : _base(m, step);
+  }
+
   /// Whether the stage scrolls through [m]'s small copy rather than the photo itself.
   static bool _small(MediaItem m, ShowcaseStep step) => m.thumbUrl != null && (step.cut || m.processedUrl == null);
 
@@ -589,6 +678,7 @@ class ScrollShowcaseState extends State<ScrollShowcase> with SingleTickerProvide
       _fetchNear((step: i, frame: 0), ahead: 0);
     }
     _fetchNear(_plan.at(_progress));
+    _sharpen(_near(_plan.at(_progress), sharpAhead));
     final first = _plan.steps.first;
     if (!first.cut && first.media.isNotEmpty) _sampleEdge(_base(first.media.first, first));
   }
@@ -652,12 +742,15 @@ class ScrollShowcaseState extends State<ScrollShowcase> with SingleTickerProvide
   void dispose() {
     widget.scroll.removeListener(_onScroll);
     _spin.dispose();
+    _tiltBack.dispose();
+    _pageDrag = null; // the list's position ends its own drag as it goes
     _settle?.cancel();
     _stopSampling();
     if (_lockedOffset != null || _zoomed) widget.onLock?.call(false);
     for (final p in _recentFull) {
       p.evict();
     }
+    _dropSharp();
     super.dispose();
   }
 
@@ -682,6 +775,11 @@ class ScrollShowcaseState extends State<ScrollShowcase> with SingleTickerProvide
       if (widget.scroll.offset != _lockedOffset) widget.scroll.jumpTo(_lockedOffset!); // zooming: page stays
       return;
     }
+    // The page moved under a tilted shoe (its strips, a button, a screen reader): the stage follows the page again.
+    if (_tilt != 0 && !_tilting && !_tiltBack.isAnimating) {
+      _tilt = 0;
+      setState(() {});
+    }
     final now = _plan.at(_progress);
     _reportTop();
     if (now != _shown) {
@@ -693,7 +791,10 @@ class ScrollShowcaseState extends State<ScrollShowcase> with SingleTickerProvide
       }
       _shown = now;
       // Not for each frame a stop button's jump only passes: its landing was fetched when it was tapped.
-      if (!_jumping) _fetchNear(now);
+      if (!_jumping) {
+        _fetchNear(now);
+        _sharpen(_near(now, sharpAhead));
+      }
       // Small copies while turning; the full photo once the shoe has stopped on one frame for a moment.
       _settled = false;
       _settleSoon();
@@ -748,6 +849,8 @@ class ScrollShowcaseState extends State<ScrollShowcase> with SingleTickerProvide
   void _goTo(int step) {
     _resetZoom();
     _stopSpin();
+    _tiltBack.stop();
+    _setTilt(0);
     final target = _plan.startOf(step) * _travel + (step == 0 ? 0 : 1);
     _jumpingTo = step;
     _fetchNear(_plan.at((target / _travel).clamp(0.0, 1.0)));
@@ -783,14 +886,16 @@ class ScrollShowcaseState extends State<ScrollShowcase> with SingleTickerProvide
   /// Takes a pointer event from the Listener around the page's list; events outside the stage are ignored.
   void handlePointer(PointerEvent e) {
     // A finger or a mouse wheel anywhere on the page stops a spinning shoe: its spin would otherwise fight the scroll.
-    if (e is PointerDownEvent || e is PointerScrollEvent) _stopSpin();
+    if (e is PointerDownEvent || e is PointerScrollEvent) {
+      _stopSpin();
+      _tiltBack.stop();
+    }
     final box = _viewer.currentContext?.findRenderObject() as RenderBox?;
     if (box == null || !box.attached) return;
     final local = box.globalToLocal(e.position);
     if (e is PointerDownEvent) {
       if (!(Offset.zero & box.size).contains(local)) return;
       _pointers[e.pointer] = local;
-      _dragLast = null; // the drag's position is now another finger's, or the two together: not a move
       if (_pointers.length == 2) _startPinch();
     } else if (e is PointerMoveEvent) {
       final was = _pointers[e.pointer];
@@ -807,7 +912,6 @@ class ScrollShowcaseState extends State<ScrollShowcase> with SingleTickerProvide
       }
     } else if (e is PointerUpEvent || e is PointerCancelEvent) {
       if (_pointers.remove(e.pointer) == null) return;
-      _dragLast = null;
       if (_pointers.length < 2) _pinchStartDistance = 0;
       if (_pointers.isEmpty && !_zoomed) _setLock();
       if (_pointers.isEmpty && !_settled) _settleSoon(); // lifted: the sharp photo comes sooner
@@ -858,33 +962,34 @@ class ScrollShowcaseState extends State<ScrollShowcase> with SingleTickerProvide
   }
 
   double _dragFrame = 0;
-  Offset? _dragLast; // where the turning finger was: a sideways drag's own deltas leave out the up and down part
-  VelocityTracker? _dragSpeed; // the finger's speed both ways; the drag's own velocity counts sideways only
   late final Ticker _spin = createTicker(_spinTick);
   FrictionSimulation? _spinSim;
 
-  /// The scroll that turns the shoe once round: the turn's stretch of the page.
-  double get _spinTravel => (_plan.steps.length > 1 ? _plan.startOf(1) : 1) * _travel;
+  /// Frames the shoe turns for a finger moving [dx] sideways across a stage [width] wide: right turns it towards
+  /// the viewer's right, as turning it by hand.
+  double _framesFor(double dx, double width) => width <= 0 ? 0 : -dx / (width * ShowcasePlan.turnWidths) * _plan.turn;
 
-  /// Frames the shoe turns for a finger moving [dx] sideways across a stage [width] wide and [dy] up or down: right
-  /// turns it towards the viewer's right, as turning it by hand, and down as scrolling down does.
-  double _framesFor(double dx, double dy, double width) {
-    if (width <= 0 || _spinTravel <= 0) return 0;
-    return (-dx / (width * ShowcasePlan.turnWidths) - dy / _spinTravel) * _plan.turn;
-  }
+  /// Whether the stage shows the turn, where a drag on the shoe turns and tilts it.
+  bool get _onTurn => _shown.step == 0 && _shown.frame < _plan.turn;
 
-  /// A drag that sets off sideways turns the shoe, whichever way the finger then goes, round and round within one
-  /// turn (a scan's frames after the turn rise over the shoe, which a drag should not do).
+  /// A sideways drag turns the shoe round and round within one turn (a scan's frames after the turn rise over the
+  /// shoe, which a sideways drag should not do). A tilted shoe first comes back level, then turns.
   void _drag(DragUpdateDetails d, double width) {
-    final move = d.localPosition - (_dragLast ?? d.localPosition);
-    _dragLast = d.localPosition;
-    if (d.sourceTimeStamp case final t?) _dragSpeed?.addPosition(t, d.localPosition);
-    // Two fingers are a pinch, not a turn: the drag's position would jump to the other finger.
-    if (_pointers.length > 1 || _zoomed || _shown.step != 0 || !widget.scroll.hasClients) return;
+    // Two fingers are a pinch, not a turn.
+    if (_pointers.length > 1 || _zoomed || !_onTurn || !widget.scroll.hasClients) return;
     _stopSpin();
+    _tiltBack.stop();
+    var frames = _framesFor(d.delta.dx, width);
+    if (_tilt != 0) {
+      // Levelling takes as much finger as tilting did: the share of a full tilt the move is worth.
+      final level = frames.abs() / _plan.turn * ShowcasePlan.turnWidths * width / _tiltTravel;
+      if (level < _tilt.abs()) return _setTilt(_tilt - _tilt.sign * level);
+      frames *= 1 - _tilt.abs() / level;
+      _setTilt(0);
+    }
     final turn = _plan.turn;
-    if (_shown.frame >= turn || _dragFrame.floor() % turn != _shown.frame) _dragFrame = _shown.frame % turn * 1.0;
-    _showFrame(_dragFrame + _framesFor(move.dx, move.dy, width));
+    if (_dragFrame.floor() % turn != _shown.frame) _dragFrame = _shown.frame * 1.0;
+    _showFrame(_dragFrame + frames);
   }
 
   void _showFrame(double frame) {
@@ -896,15 +1001,12 @@ class ScrollShowcaseState extends State<ScrollShowcase> with SingleTickerProvide
 
   /// The finger lifted mid-turn: the shoe keeps turning and slows to a stop, as a thing spun by hand does.
   void _flick(DragEndDetails d, double width) {
-    _dragLast = null;
-    final tracked = _dragSpeed?.getVelocity();
-    _dragSpeed = null;
-    if (_pointers.isNotEmpty || _zoomed || _shown.step != 0 || !widget.scroll.hasClients || _reduceMotion) return;
-    // Measured both ways, as the turn moves both ways; the drag's own velocity is zero for a mostly vertical lift.
-    final v = (tracked ?? d.velocity).pixelsPerSecond;
+    if (_pointers.isNotEmpty || _zoomed || !_onTurn || _tilt != 0 || !widget.scroll.hasClients || _reduceMotion) {
+      return;
+    }
     // At most 4 turns a second, and no faster than about a frame per screen refresh: skipping frames looks jumpy.
     final top = math.min(4.0 * _plan.turn, 72.0);
-    final speed = _framesFor(v.dx, v.dy, width).clamp(-top, top);
+    final speed = _framesFor(d.velocity.pixelsPerSecond.dx, width).clamp(-top, top);
     if (speed.abs() < _plan.turn * 0.25) return; // a slow lift: it stops where the finger left it
     _stopSpin();
     // Keeping 15% of its speed each second, a hard flick goes about two turns and a light one half a turn.
@@ -914,7 +1016,7 @@ class ScrollShowcaseState extends State<ScrollShowcase> with SingleTickerProvide
 
   void _spinTick(Duration elapsed) {
     final sim = _spinSim;
-    if (sim == null || !widget.scroll.hasClients || _zoomed || _shown.step != 0) return _stopSpin();
+    if (sim == null || !widget.scroll.hasClients || _zoomed || !_onTurn) return _stopSpin();
     final t = elapsed.inMicroseconds / Duration.microsecondsPerSecond;
     _showFrame(sim.x(t));
     if (sim.isDone(t)) {
@@ -928,9 +1030,145 @@ class ScrollShowcaseState extends State<ScrollShowcase> with SingleTickerProvide
     _spinSim = null;
   }
 
+  // Tilting. On the turn, a finger moving up the shoe tips it towards its top and down towards its sole, through
+  // real photos only: on a scan, the frames where the camera rises over it and goes under it; otherwise the top and
+  // sole photos themselves. Off the turn, the same drag scrolls the page as before.
+
+  /// -1 (the sole) to 1 (the top); 0 is level, on the turn.
+  double _tilt = 0;
+
+  /// The turn's frame the shoe was tilted from.
+  int _tiltFrom = 0;
+
+  /// How far the finger goes up or down to tilt the shoe all the way.
+  double _tiltTravel = 300;
+
+  Drag? _pageDrag; // a vertical drag that started off the turn moves the page itself
+  late final AnimationController _tiltBack = AnimationController(
+      vsync: this, duration: const Duration(milliseconds: 260))
+    ..addListener(
+        () => _setTilt(_tiltFromValue + (_tiltTo - _tiltFromValue) * Curves.easeOutCubic.transform(_tiltBack.value)));
+  double _tiltFromValue = 0, _tiltTo = 0;
+
+  /// The photos from level to all the way over towards the top ([up]) or the sole, as (step, frame) of the plan.
+  /// From a side other than the turn's first, it turns there first, in a few frames, as a scan rises from there.
+  List<({int step, int frame})> _tiltPath(bool up) {
+    final kind = up ? 'top' : 'sole';
+    final at = _plan.steps.indexWhere((s) => s.kind == kind);
+    if (at < 0) return const [];
+    final from = (step: 0, frame: _tiltFrom);
+    if (!_plan.scan) return [from, (step: at, frame: 0)];
+    final turn = _plan.turn;
+    // The shorter way round to the turn's first frame, in at most 6 steps.
+    final back = _tiltFrom <= turn ~/ 2 ? -_tiltFrom : turn - _tiltFrom;
+    final steps = math.min(6, back.abs());
+    final round = [
+      for (var i = 0; i < steps; i++) (step: 0, frame: ((_tiltFrom + back * i / steps).round() % turn + turn) % turn)
+    ];
+    if (up) {
+      // The rise: the frames after the turn in the turn's step, up to the top's own frame.
+      return [
+        ...round,
+        for (var f = turn; f < _plan.steps[0].media.length; f++) (step: 0, frame: f),
+        (step: at, frame: 0)
+      ];
+    }
+    // Under the sole: from where the camera, past the top, is level with the shoe again, down to the sole's frame.
+    final over = _plan.steps[at - 1];
+    if (over.kind != 'top') return [...round, (step: at, frame: 0)];
+    return [
+      ...round,
+      (step: 0, frame: 0),
+      for (var f = over.media.length ~/ 2; f < over.media.length; f++) (step: at - 1, frame: f),
+      (step: at, frame: 0),
+    ];
+  }
+
+  // Both ways' photos, made when the shoe leaves level: they depend only on the frame it was tilted from.
+  List<({int step, int frame})> _pathUp = const [], _pathDown = const [];
+
+  ({int step, int frame})? get _tilted {
+    if (_tilt == 0) return null;
+    final path = _tilt > 0 ? _pathUp : _pathDown;
+    if (path.isEmpty) return null;
+    // Two photos (level and the stop): the stop shows from a third of the way, so it never waits on a long drag.
+    final i = path.length == 2 ? (_tilt.abs() >= 0.3 ? 1 : 0) : (_tilt.abs() * (path.length - 1)).round();
+    return path[i.clamp(0, path.length - 1)];
+  }
+
+  /// Whether the shoe can be tilted at all: a listing with neither a top nor a sole photo has nothing to tip to.
+  bool get _canTilt => _plan.steps.any((s) => s.kind == 'top' || s.kind == 'sole');
+
+  void _setTilt(double tilt) {
+    final was = _tilted;
+    if (_tilt == 0 && tilt != 0) {
+      _tiltFrom = _shown.frame;
+      _pathUp = _tiltPath(true);
+      _pathDown = _tiltPath(false);
+      _sharpen([..._pathUp.take(sharpAhead), ..._pathDown.take(sharpAhead)]);
+    }
+    // Only as far as there are photos that way.
+    _tilt = tilt.clamp(_pathDown.isEmpty ? 0.0 : -1.0, _pathUp.isEmpty ? 0.0 : 1.0);
+    if (_tilt.abs() < 1e-3) _tilt = 0;
+    if (_tilted != was) {
+      if (_tilted case final t?) {
+        final path = _tilt > 0 ? _pathUp : _pathDown;
+        final i = path.indexOf(t);
+        _sharpen(path.skip(math.max(0, i - 2)).take(sharpAhead + 2));
+      }
+      _settled = false;
+      _settleSoon();
+      setState(() {});
+      _reportTop();
+    }
+  }
+
+  bool _tilting = false; // a finger is tilting the shoe now
+
+  void _tiltStart(DragStartDetails d, double height) {
+    _tiltBack.stop();
+    _stopSpin();
+    _tiltTravel = math.max(120, height * 0.45);
+    if (_zoomed || !widget.scroll.hasClients) return;
+    // The page moves from the stage's top and bottom strips too, and wherever the shoe cannot tilt.
+    final edge = d.localPosition.dy < height * 0.15 || d.localPosition.dy > height * 0.85;
+    if (edge || (_tilt == 0 && (!_onTurn || !_canTilt || _hinting))) {
+      _pageDrag = widget.scroll.position.drag(d, () => _pageDrag = null);
+    } else {
+      _tilting = true;
+    }
+  }
+
+  void _tiltUpdate(DragUpdateDetails d) {
+    if (_pageDrag != null) return _pageDrag!.update(d);
+    if (!_tilting || _pointers.length > 1 || _zoomed) return;
+    _setTilt(_tilt - d.delta.dy / _tiltTravel); // the finger up tips the top towards the viewer
+  }
+
+  void _tiltEnd(DragEndDetails d) {
+    if (_pageDrag != null) return _pageDrag!.end(d);
+    _tilting = false;
+    if (_tilt == 0) return;
+    // A flick carries on to the far end, or back to level; an ordinary lift leaves the shoe as the finger did.
+    final v = -d.velocity.pixelsPerSecond.dy / _tiltTravel;
+    if (v.abs() < 3) return;
+    final to = v.sign == _tilt.sign ? _tilt.sign : 0.0;
+    if (_reduceMotion) return _setTilt(to);
+    _tiltFromValue = _tilt;
+    _tiltTo = to;
+    _tiltBack.forward(from: 0);
+  }
+
+  void _tiltCancel() {
+    _tilting = false;
+    _pageDrag?.cancel();
+    _pageDrag = null;
+  }
+
   Widget _photo(MediaItem m, ShowcaseStep step, double width) {
     final dpr = MediaQuery.devicePixelRatioOf(context);
-    final small = _base(m, step);
+    _shownUrl = m.url;
+    final small = _shownCopy(m, step);
     final base = Image(
       key: const ValueKey('showcase-base'),
       image: small,
@@ -958,7 +1196,7 @@ class ScrollShowcaseState extends State<ScrollShowcase> with SingleTickerProvide
     // A seller's cut-out turning on the floor stands on its shadow, made from the small copy. A scan has its own.
     final img = Stack(fit: StackFit.expand, children: [
       if (_shadowed(step) && !_onDark(step) && !_zoomed)
-        ContactShadow(image: small, fit: BoxFit.contain, gapless: true),
+        ContactShadow(image: _base(m, step), fit: BoxFit.contain, gapless: true),
       base,
       if (sharpen) full,
     ]);
@@ -977,7 +1215,7 @@ class ScrollShowcaseState extends State<ScrollShowcase> with SingleTickerProvide
     if (report == null || !mounted) return;
     final offset = widget.scroll.hasClients ? widget.scroll.offset : 0.0;
     final covers = offset < _travel + widget.stageHeight - MediaQuery.viewPaddingOf(context).top;
-    final now = _plan.at(_progress);
+    final now = _tilted ?? _plan.at(_progress);
     final top = !covers ? null : (_onDark(_plan.steps[now.step]) ? Brightness.dark : Brightness.light);
     if (_topReported && top == _top) return;
     _top = top;
@@ -1071,12 +1309,14 @@ class ScrollShowcaseState extends State<ScrollShowcase> with SingleTickerProvide
     final travel = _travel;
     final h = widget.stageHeight;
     final now = _plan.at(_progress);
-    final step = _plan.steps[now.step];
-    final media = step.media[now.frame];
+    final shown = _tilted ?? now;
+    final step = _plan.steps[shown.step];
+    final media = step.media[shown.frame];
     final ownBackdrop = widget.listing.backdrop != null && step.cut;
     final onDark = _onDark(step);
     final scene = onDark ? ShowcaseScene.dark : ShowcaseScene.light;
     final index = _photoIndex;
+    final shownIndex = _tilted == null ? index : math.max(0, _plan.photos.indexOf(shown)); // what is on screen
     final top = MediaQuery.paddingOf(context).top + kToolbarHeight; // the shoe stays clear of the app bar
     return SizedBox(
       height: h + travel,
@@ -1094,8 +1334,9 @@ class ScrollShowcaseState extends State<ScrollShowcase> with SingleTickerProvide
                     child: Semantics(
                       container: true,
                       slider: true,
-                      label: trf('360° көрініс: {0}. Бұру үшін саусақпен кез келген бағытқа сүйреңіз.', [step.label]),
-                      value: _describe(index),
+                      label: trf('360° көрініс: {0}. Оңға-солға сүйресе айналады, жоғары-төмен сүйресе еңкейеді.',
+                          [step.label]),
+                      value: _describe(shownIndex),
                       increasedValue: index < _plan.photos.length - 1 ? _describe(index + 1) : null,
                       decreasedValue: index > 0 ? _describe(index - 1) : null,
                       onIncrease: index < _plan.photos.length - 1 ? () => _nudge(1) : null,
@@ -1103,21 +1344,20 @@ class ScrollShowcaseState extends State<ScrollShowcase> with SingleTickerProvide
                       child: LayoutBuilder(
                         builder: (context, box) => GestureDetector(
                           key: _viewer,
+                          // The slider around it is what a screen reader uses; the drags' own scroll actions would
+                          // tilt the shoe at a jump.
+                          excludeFromSemantics: true,
                           behavior: HitTestBehavior.opaque,
                           onDoubleTapDown: (d) => _tapAt = d.localPosition,
                           onDoubleTap: () => _doubleTap(box.biggest),
                           dragStartBehavior: DragStartBehavior.down, // the shoe follows from the first pixel
-                          onHorizontalDragStart: (d) {
-                            _dragLast = d.localPosition;
-                            _dragSpeed = VelocityTracker.withKind(d.kind ?? PointerDeviceKind.touch);
-                            if (d.sourceTimeStamp case final t?) _dragSpeed!.addPosition(t, d.localPosition);
-                          },
-                          onHorizontalDragCancel: () {
-                            _dragLast = null;
-                            _dragSpeed = null;
-                          },
                           onHorizontalDragUpdate: (d) => _drag(d, box.maxWidth),
                           onHorizontalDragEnd: (d) => _flick(d, box.maxWidth),
+                          // Up and down on the shoe tilts it; the page scrolls from the stage's edges and controls.
+                          onVerticalDragStart: (d) => _tiltStart(d, box.maxHeight),
+                          onVerticalDragUpdate: _tiltUpdate,
+                          onVerticalDragEnd: _tiltEnd,
+                          onVerticalDragCancel: _tiltCancel,
                           // The soft light behind the shoe stays put while the shoe zooms, as on the approved demo page.
                           child: CustomPaint(
                             painter: ownBackdrop ? _Halo(scene.halo) : null,
@@ -1222,7 +1462,7 @@ class ScrollShowcaseState extends State<ScrollShowcase> with SingleTickerProvide
               // The stops on a thin line that fills as the shoe turns (Aza's choice: nothing written beside the
               // shoe). Each stop is a 48 dp button that jumps straight to its view; its name is read out and shown on
               // long press.
-              Center(child: _stops(scene, now)),
+              Center(child: _stops(scene, shown)),
               // How to use it, until the shoe starts turning; not on a short stage (a short screen, or large text making
               // the bar under it tall), where the shoe needs the room.
               if (h + MediaQuery.paddingOf(context).bottom >= 480)
@@ -1236,7 +1476,7 @@ class ScrollShowcaseState extends State<ScrollShowcase> with SingleTickerProvide
                         WidgetSpan(
                             alignment: PlaceholderAlignment.middle,
                             child: Icon(Icons.threesixty, size: 16, color: scene.muted)),
-                        TextSpan(text: ' ${tr('Саусақпен айналдырыңыз · екі саусақпен жақындатыңыз')}'),
+                        TextSpan(text: ' ${tr('Оңға-солға айналдырыңыз · жоғары-төмен еңкейтіңіз · екі саусақпен жақындатыңыз')}'),
                       ]),
                       key: const Key('showcase-hint'),
                       textAlign: TextAlign.center,

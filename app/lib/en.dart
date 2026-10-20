@@ -959,11 +959,11 @@ const en = <String, String>{
       'Evidence can be added until {0}. Then support decides.',
   'Ақау байқасаңыз, қазір түсіріп қойыңыз: қайтару сұрағанда сатушы бірден көреді.':
       'Spotted a defect? Photograph it now: the seller sees it as soon as you ask for a return.',
-  '360° көрініс: {0}. Бұру үшін саусақпен кез келген бағытқа сүйреңіз.':
-      '360° view: {0}. Drag in any direction to turn it.',
+  '360° көрініс: {0}. Оңға-солға сүйресе айналады, жоғары-төмен сүйресе еңкейеді.':
+      '360° view: {0}. Drag sideways to turn it, up or down to tilt it.',
   'Ашық фон': 'Light backdrop',
   'Бастапқы өлшем': 'Original size',
-  'Саусақпен айналдырыңыз · екі саусақпен жақындатыңыз': 'Drag to turn · pinch to zoom',
+  'Оңға-солға айналдырыңыз · жоғары-төмен еңкейтіңіз · екі саусақпен жақындатыңыз': 'Sideways to turn · up or down to tilt · pinch to zoom',
   'Жақыннан': 'Close-up',
   'Қараңғы фон': 'Dark backdrop',
   '360° айналымнан кейін сатып алушы үстін, табанын және жақын көріністі көреді. Бір-бір фото қосыңыз:':

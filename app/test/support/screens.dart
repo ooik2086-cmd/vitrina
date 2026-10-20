@@ -290,7 +290,13 @@ Future<List<String>> visit(WidgetTester tester, String lang, Size size, double s
   if (main != null && main.position.maxScrollExtent > 0) {
     final up = main.widget.axisDirection == AxisDirection.up; // a chat runs from the bottom
     for (var i = 0; i < 20 && main.mounted && main.position.pixels < main.position.maxScrollExtent; i++) {
-      await tester.dragFrom(tester.getCenter(find.byWidget(main.widget)), Offset(0, up ? 300 : -300));
+      // On a listing's stage the middle tilts the shoe, as people expect of it: the page moves from its buttons row.
+      var from = tester.getCenter(find.byWidget(main.widget));
+      final row = find.byKey(const Key('showcase-photos')).hitTestable();
+      if (row.evaluate().isNotEmpty && tester.getRect(find.byKey(const Key('showcase'))).contains(from)) {
+        from = Offset(from.dx, tester.getCenter(row).dy);
+      }
+      await tester.dragFrom(from, Offset(0, up ? 300 : -300));
       await tester.pump(const Duration(milliseconds: 200));
       await look?.call(tester, errors); // each screenful, not only the first and the last
     }
@@ -316,4 +322,19 @@ Future<List<String>> visit(WidgetTester tester, String lang, Size size, double s
     await tester.pump(const Duration(seconds: 2));
   }
   return errors.toSet().toList(); // one finding seen at several stops is one
+}
+
+/// Scrolls a listing page until [target] shows, as a person does: from the stage's buttons row while the stage is in
+/// view (its middle tilts the shoe), and from the middle of the page below it.
+Future<void> scrollListingTo(WidgetTester tester, Finder target) async {
+  final list = find.byWidgetPredicate((w) => w is Scrollable && w.axis == Axis.vertical).first;
+  for (var i = 0; i < 30 && target.hitTestable().evaluate().isEmpty; i++) {
+    var from = tester.getCenter(list);
+    final row = find.byKey(const Key('showcase-photos')).hitTestable();
+    if (row.evaluate().isNotEmpty && tester.getRect(find.byKey(const Key('showcase'))).contains(from)) {
+      from = Offset(from.dx, tester.getCenter(row).dy);
+    }
+    await tester.dragFrom(from, const Offset(0, -250));
+    await tester.pumpAndSettle();
+  }
 }

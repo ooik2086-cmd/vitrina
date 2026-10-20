@@ -48,8 +48,7 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     final (line, _) = await openFresh(tester, screens['listing1']!, null);
-    await tester.scrollUntilVisible(find.text('42'), 300,
-        scrollable: find.byWidgetPredicate((w) => w is Scrollable && w.axis == Axis.vertical).first);
+    await scrollListingTo(tester, find.text('42'));
     // Mid-screen, clear of the buy bar.
     Scrollable.ensureVisible(tester.element(find.text('42').first), alignment: 0.4);
     await tester.pump();

@@ -1104,16 +1104,16 @@ DEMO = Path(__file__).resolve().parents[2] / "app" / "demo"
 # CI checks out the whole repository, so there a missing demo is a failure, not a skip.
 @unittest.skipUnless((DEMO / "api.json").exists() or os.environ.get("CI"), "the app is not next to the backend here")
 class RealPhotoSideTests(unittest.TestCase):
-    """The side matching on real photos: the demo's turntable shoe (2, and 4 in another colour) and camera scan (1,
-    and 3 in another colour), whose sides were checked by eye on the phone (the toe faces the viewer at the front,
+    """The side matching on the demo's shoes: the camera scan (1, and 3 in another colour) and the rendered scan (2,
+    and 4 in another colour), whose sides were checked by eye on the phone (the toe faces the viewer at the front,
     the heel at the back). The demo's side photos are frames of the turn itself, so a seller's own shot is made from
     a frame a little off the side: smaller, moved, brighter and tilted."""
 
     CHECKED = {  # listing: side: frame of one turn
         1: {"outer": 36, "front": 14, "inner": 20, "back": 26},  # the camera goes round unevenly
-        2: {"outer": 0, "front": 9, "inner": 18, "back": 27},
+        2: {"outer": 39, "front": 10, "inner": 20, "back": 30},  # 9 degrees a frame; the outer side a frame before 0
         3: {"outer": 36, "front": 14, "inner": 20, "back": 26},
-        4: {"outer": 35, "front": 9, "inner": 18, "back": 27},
+        4: {"outer": 39, "front": 10, "inner": 20, "back": 30},
     }
 
     @staticmethod

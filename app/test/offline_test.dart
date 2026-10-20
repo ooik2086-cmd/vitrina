@@ -141,7 +141,7 @@ void main() {
       return _json({'items': []});
     }, down: (req) => down && req.url.path.endsWith('/offers')); // the page loads, the buyer's offer does not
     final line = find.byKey(const Key('offer-retry'));
-    await tester.scrollUntilVisible(line, 200, scrollable: find.byType(Scrollable).first);
+    await scrollListingTo(tester, line);
     expect(line, findsOneWidget);
     expect(find.byType(OfferStatusCard), findsNothing);
     // Mid-screen, clear of the buy bar.

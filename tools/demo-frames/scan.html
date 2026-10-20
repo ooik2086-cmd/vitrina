@@ -1,0 +1,82 @@
+<!doctype html><html><head><meta charset="utf-8">
+<script type="importmap">{"imports":{"three":"./three160/build/three.module.js","three/addons/":"./three160/examples/jsm/"}}</script>
+</head><body style="margin:0;background:transparent">
+<script type="module">
+// One continuous camera move round the shoe, as the approved Scroll 3D page's scans: 40 frames of the turn, then the
+// camera rises over the top (54), comes down level (64), goes under the sole (74), back up to the front quarter
+// (88) and in close on the stripes (102). Transparent background with the shoe's own contact shadow.
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+const S = +(new URLSearchParams(location.search).get('size') || 1600);
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+renderer.setSize(S, S); renderer.setPixelRatio(1); renderer.setClearColor(0x000000, 0);
+renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.0;
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(renderer), 0.04).texture;
+const key = new THREE.DirectionalLight(0xffffff, 1.2); key.position.set(2, 6, 3); key.castShadow = true;
+key.shadow.mapSize.set(2048, 2048); key.shadow.radius = 10; key.shadow.camera.near = 0.1; key.shadow.camera.far = 20;
+scene.add(key);
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(20, 20), new THREE.ShadowMaterial({ opacity: 0.35 }));
+ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
+const camera = new THREE.PerspectiveCamera(30, 1, 0.01, 100);
+const gltf = await new GLTFLoader().loadAsync('./shoe.glb');
+const parser = gltf.parser, json = parser.json;
+const variants = json.extensions.KHR_materials_variants.variants.map(v => v.name);
+const model = gltf.scene, meshes = [];
+model.traverse(o => { if (o.isMesh) { o.castShadow = true; meshes.push(o); } });
+const box = new THREE.Box3().setFromObject(model);
+const size = box.getSize(new THREE.Vector3()), center = box.getCenter(new THREE.Vector3());
+model.position.sub(new THREE.Vector3(center.x, box.min.y, center.z));
+const pivot = new THREE.Group(); pivot.add(model); scene.add(pivot);
+const r = Math.max(size.x, size.z);
+key.shadow.camera.left = -r; key.shadow.camera.right = r; key.shadow.camera.top = r; key.shadow.camera.bottom = -r;
+async function setVariant(idx) {
+  for (const m of meshes) {
+    const a = parser.associations.get(m); if (!a || a.meshes === undefined) continue;
+    const prim = json.meshes[a.meshes].primitives[a.primitives];
+    const hit = (prim.extensions?.KHR_materials_variants?.mappings || []).find(x => x.variants.includes(idx));
+    if (hit) m.material = await parser.getDependency('material', hit.material);
+  }
+}
+const P = window.P = { el0: 0.2, dist: 2.25, ty: 0.5, roll: 0.45, closeFov: 13, closeX: -0.12, closeY: 0.45 };
+const ease = t => t * t * (3 - 2 * t);
+const lerp = (a, b, t) => a + (b - a) * t;
+// Where the camera is at frame i: azimuth, elevation (radians), distance and look-at as shares of the shoe.
+function pose(i) {
+  let az = 0, el = P.el0, d = P.dist, fov = 30, tx = 0, ty = P.ty, spin = 0, roll = 0;
+  if (i < 40) spin = -i * 2 * Math.PI / 40;
+  else if (i <= 54) { const t = ease((i - 40) / 14); el = lerp(P.el0, Math.PI / 2 - 1e-3, t); roll = P.roll * t; ty = lerp(P.ty, 0.3, t); }
+  else if (i <= 64) { const t = ease((i - 54) / 10); el = lerp(Math.PI / 2 - 1e-3, P.el0, t); roll = P.roll * (1 - t); ty = lerp(0.3, P.ty, t); }
+  else if (i <= 74) { const t = ease((i - 64) / 10); el = lerp(P.el0, -Math.PI / 2 + 1e-3, t); roll = -P.roll * t; ty = lerp(P.ty, 0.3, t); }
+  else if (i <= 88) { const t = ease((i - 74) / 14); el = lerp(-Math.PI / 2 + 1e-3, 0.32, t); az = lerp(0, 0.75, t); roll = -P.roll * (1 - t); ty = lerp(0.3, P.ty, t); }
+  else { const t = ease((i - 88) / 14); el = 0.32 - 0.1 * t; az = lerp(0.75, 0.35, t); fov = lerp(30, P.closeFov, t); tx = lerp(0, P.closeX, t); ty = lerp(P.ty, P.closeY, t); d = lerp(P.dist, P.dist * 0.9, t); }
+  return { az, el, d, fov, tx, ty, spin, roll };
+}
+function place(i) {
+  const p = pose(i);
+  pivot.rotation.set(0, p.spin, 0);
+  const tgt = new THREE.Vector3(p.tx * r, p.ty * size.y, 0);
+  const dir = new THREE.Vector3(Math.cos(p.el) * Math.sin(p.az), Math.sin(p.el), Math.cos(p.el) * Math.cos(p.az));
+  camera.position.copy(tgt).addScaledVector(dir, p.d * r);
+  // Up along the way the camera climbs, so it goes over the top and under the sole without flipping.
+  const up = new THREE.Vector3(-Math.sin(p.el) * Math.sin(p.az), Math.cos(p.el), -Math.sin(p.el) * Math.cos(p.az));
+  up.applyAxisAngle(dir, p.roll);
+  camera.up.copy(up); camera.fov = p.fov; camera.updateProjectionMatrix(); camera.lookAt(tgt);
+  // The floor's shadow only while the camera looks across it: seen from high above it lay beside the shoe as a grey
+  // copy of it, and from below the shoe stands on nothing.
+  ground.visible = p.el > 0.02 && p.el < 0.9;
+  // Under the sole the light comes from below too, or the white sole reads as flat grey.
+  const under = Math.max(0, -Math.sin(p.el));
+  key.position.set(2, lerp(6, -6, under), 3);
+}
+window.info = { variants };
+window.frame = async (variant, i) => {
+  await setVariant(variant); place(i); renderer.render(scene, camera);
+  return renderer.domElement.toDataURL('image/png');
+};
+window.ready = true;
+</script></body></html>

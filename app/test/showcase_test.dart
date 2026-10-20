@@ -332,14 +332,16 @@ void main() {
           (w) => w is Image && w.key is ValueKey && '${(w.key as ValueKey).value}'.startsWith('showcase-full-')))
       .map((i) => urlOf(i.image));
   ScrollPosition page(WidgetTester tester) => tester.state<ScrollableState>(find.byType(Scrollable).first).position;
+
+  /// A point on the stage off the shoe, beside its buttons, where up and down scrolls the page.
+  Offset edge(WidgetTester tester) => Offset(4, tester.getCenter(find.byKey(const Key('showcase-photos'))).dy);
   Matrix4 zoom(WidgetTester tester) => tester.widget<Transform>(find.byKey(const Key('showcase-zoom'))).transform;
 
   showcaseTest('scrolling turns the shoe while the stage stays in place, and back turns it back', (tester) async {
     await pump(tester, listing());
     expect(page(tester).pixels, 0); // the first-show hint turned it a little and back
     expect(base(tester), 'https://cdn/f0-s.webp');
-    final list = find.byType(Scrollable).first;
-    await tester.drag(list, const Offset(0, -300));
+    await tester.dragFrom(edge(tester), const Offset(0, -300)); // off the shoe: the page itself
     await tester.pump();
     // While moving: only the small copy, and the stage still fills the screen from the top.
     expect(base(tester), isNot('https://cdn/f0-s.webp'));
@@ -352,7 +354,7 @@ void main() {
     // At rest the full cut-out is laid over the small copy, which stays underneath until it has loaded.
     expect(full(tester).single, base(tester).replaceAll('-s.webp', '.webp'));
     expect(find.byKey(const ValueKey('showcase-base')), findsOneWidget);
-    await tester.drag(list, const Offset(0, 300));
+    await tester.dragFrom(edge(tester), const Offset(0, 300));
     await tester.pump(const Duration(milliseconds: 200));
     expect(base(tester), 'https://cdn/f0-s.webp');
   });
@@ -541,13 +543,13 @@ void main() {
   showcaseTest('the full photo waits for the finger to lift, or for a long look', (tester) async {
     await pump(tester, listing());
     final finger = await tester.startGesture(tester.getCenter(find.byKey(const Key('showcase'))));
-    await finger.moveBy(const Offset(0, -40));
-    await finger.moveBy(const Offset(0, -60));
+    await finger.moveBy(const Offset(-40, 0));
+    await finger.moveBy(const Offset(-60, 0));
     await tester.pump(const Duration(milliseconds: 300)); // a short pause mid-drag: no decoding
     expect(full(tester), isEmpty);
     await tester.pump(const Duration(milliseconds: 200)); // holding still to look closely
     expect(full(tester), hasLength(1));
-    await finger.moveBy(const Offset(0, -60)); // turning on
+    await finger.moveBy(const Offset(-60, 0)); // turning on
     await tester.pump();
     expect(full(tester), isEmpty);
     await finger.up();
@@ -671,16 +673,16 @@ void main() {
     expect(base(tester), 'https://cdn/detail-s.webp');
   });
 
-  showcaseTest('a pinch started while the page is scrolling zooms, and the page stops there', (tester) async {
+  showcaseTest('a pinch started while one finger tilts the shoe zooms, and the page stays put', (tester) async {
     await pump(tester, listing());
     final at = tester.getCenter(find.byKey(const Key('showcase')));
     final a = await tester.startGesture(at, pointer: 1);
     for (var i = 0; i < 5; i++) {
-      await a.moveBy(const Offset(0, -20)); // the first finger is scrolling: the shoe is turning
+      await a.moveBy(const Offset(0, -20)); // the first finger is tilting the shoe
       await tester.pump();
     }
     final scrolled = page(tester).pixels;
-    expect(scrolled, greaterThan(0));
+    expect(scrolled, 0);
     final b = await tester.startGesture(at + const Offset(60, 0), pointer: 2);
     await tester.pump();
     for (var i = 1; i <= 10; i++) {
@@ -712,7 +714,7 @@ void main() {
     await tester.tap(find.byKey(const Key('showcase-reset-zoom')));
     await tester.pumpAndSettle();
     expect(zoom(tester).getMaxScaleOnAxis(), 1);
-    await tester.dragFrom(at, const Offset(0, -200));
+    await tester.dragFrom(edge(tester), const Offset(0, -200));
     await tester.pumpAndSettle();
     expect(page(tester).pixels, greaterThan(0));
   });
@@ -789,35 +791,121 @@ void main() {
     await tester.pumpAndSettle();
   });
 
-  showcaseTest('a drag that sets off sideways turns the shoe with its up and down part too', (tester) async {
+  showcaseTest('up and down on the shoe tips it to its top and its sole; the page stays', (tester) async {
     await pump(tester, listing());
     final at = tester.getCenter(find.byKey(const Key('showcase')));
     final g = await tester.startGesture(at);
-    await g.moveBy(const Offset(-30, 0)); // sideways first: this gesture is the shoe's, not the page's
-    await tester.pump(const Duration(milliseconds: 50));
-    await g.moveBy(const Offset(-30, 0));
-    await tester.pump(const Duration(milliseconds: 50));
-    final sideways = page(tester).pixels;
-    expect(sideways, greaterThan(0));
-    await g.moveBy(const Offset(0, -40)); // then down the page: the shoe turns on, it does not rise over the top
-    await tester.pump(const Duration(milliseconds: 50));
-    expect(page(tester).pixels, greaterThan(sideways));
-    await g.moveBy(const Offset(0, 40)); // and back
-    await tester.pump(const Duration(milliseconds: 50));
-    expect(page(tester).pixels, sideways);
+    for (var i = 0; i < 20; i++) {
+      await g.moveBy(const Offset(0, -20)); // up: the top comes towards the viewer
+      await tester.pump();
+    }
+    expect(base(tester), 'https://cdn/top-s.webp');
+    for (var i = 0; i < 40; i++) {
+      await g.moveBy(const Offset(0, 20)); // and down past level to the sole
+      await tester.pump();
+    }
+    expect(base(tester), 'https://cdn/sole-s.webp');
     await g.up();
     await tester.pumpAndSettle();
+    expect(page(tester).pixels, 0);
+    expect(base(tester), 'https://cdn/sole-s.webp'); // a slow lift leaves it tilted
   });
 
-  showcaseTest('a drag that ends moving up or down flicks the shoe too', (tester) async {
-    await pump(tester, listing());
-    final stage = find.byKey(const Key('showcase'));
-    await tester.fling(stage, const Offset(-30, -150), 2000); // sideways first, then fast down the page
-    await tester.pump(const Duration(milliseconds: 100));
-    final early = page(tester).pixels;
-    await tester.pump(const Duration(milliseconds: 300));
-    expect(page(tester).pixels, isNot(early)); // still turning
+  showcaseTest('on a scan the shoe tips through the frames where the camera rises over it and goes under it',
+      (tester) async {
+    await pump(tester, scan());
+    final at = tester.getCenter(find.byKey(const Key('showcase')));
+    final g = await tester.startGesture(at);
+    final seen = <String>{};
+    for (var i = 0; i < 25; i++) {
+      await g.moveBy(const Offset(0, -16));
+      await tester.pump();
+      seen.add(base(tester));
+    }
+    // The rise after the turn (frames 8 to 11), then the top's own frame: no jump straight to it.
+    expect(seen, containsAll(['https://cdn/f9-s.webp', 'https://cdn/f10-s.webp', 'https://cdn/f12-s.webp']));
+    seen.clear();
+    for (var i = 0; i < 50; i++) {
+      await g.moveBy(const Offset(0, 16));
+      await tester.pump();
+      seen.add(base(tester));
+    }
+    // Under the sole: from where the camera is level again past the top (frames 15 to 17) to the sole's frame.
+    expect(seen, containsAll(['https://cdn/f16-s.webp', 'https://cdn/f18-s.webp']));
+    expect(seen, isNot(contains('https://cdn/f20-s.webp'))); // never on to the close-up
+    await g.up();
     await tester.pumpAndSettle();
+    expect(page(tester).pixels, 0);
+  });
+
+  showcaseTest('a quick flick up tips the shoe all the way over, a quick one back levels it', (tester) async {
+    await pump(tester, listing());
+    final at = tester.getCenter(find.byKey(const Key('showcase')));
+    await tester.flingFrom(at, const Offset(0, -60), 1500);
+    await tester.pumpAndSettle();
+    expect(base(tester), 'https://cdn/top-s.webp');
+    await tester.flingFrom(at, const Offset(0, 60), 1500);
+    await tester.pumpAndSettle();
+    expect(base(tester), 'https://cdn/f0-s.webp');
+  });
+
+  showcaseTest('a sideways drag levels a tilted shoe first, then turns it', (tester) async {
+    await pump(tester, listing());
+    final at = tester.getCenter(find.byKey(const Key('showcase')));
+    await tester.dragFrom(at, const Offset(0, -400));
+    await tester.pumpAndSettle();
+    expect(base(tester), 'https://cdn/top-s.webp');
+    await tester.dragFrom(at, const Offset(-400, 0));
+    await tester.pumpAndSettle();
+    expect(base(tester), allOf(startsWith('https://cdn/f'), isNot('https://cdn/f0-s.webp')));
+  });
+
+  showcaseTest('off the turn, up and down on the shoe scrolls the page as before', (tester) async {
+    await pump(tester, listing());
+    await tester.tap(find.byKey(const Key('showcase-step-top')));
+    await tester.pumpAndSettle();
+    final before = page(tester).pixels;
+    await tester.dragFrom(tester.getCenter(find.byKey(const Key('showcase'))), const Offset(0, -150));
+    await tester.pumpAndSettle();
+    expect(page(tester).pixels, greaterThan(before));
+  });
+
+  showcaseTest('a tilted shoe comes level when the page moves or the first stop is tapped', (tester) async {
+    await pump(tester, listing());
+    final at = tester.getCenter(find.byKey(const Key('showcase')));
+    await tester.dragFrom(at, const Offset(0, -300));
+    await tester.pumpAndSettle();
+    expect(base(tester), 'https://cdn/top-s.webp');
+    await tester.tap(find.byKey(const Key('showcase-step-spin')));
+    await tester.pumpAndSettle();
+    expect(base(tester), 'https://cdn/f0-s.webp');
+    await tester.dragFrom(at, const Offset(0, -300));
+    await tester.pumpAndSettle();
+    await tester.dragFrom(edge(tester), const Offset(0, -60));
+    await tester.pumpAndSettle();
+    expect(base(tester), startsWith('https://cdn/f')); // the turn the page shows, not the top
+  });
+
+  showcaseTest('with no top or sole photo, up and down on the shoe scrolls the page', (tester) async {
+    await pump(tester, listing(details: false));
+    await tester.dragFrom(tester.getCenter(find.byKey(const Key('showcase'))), const Offset(0, -150));
+    await tester.pumpAndSettle();
+    expect(page(tester).pixels, greaterThan(0));
+  });
+
+  showcaseTest('a slow lift leaves the tilt where it is; only a flick carries it on', (tester) async {
+    await pump(tester, listing());
+    final at = tester.getCenter(find.byKey(const Key('showcase')));
+    await tester.timedDragFrom(at, const Offset(0, -40), const Duration(milliseconds: 400)); // 100 dp/s
+    await tester.pumpAndSettle();
+    expect(base(tester), 'https://cdn/f0-s.webp'); // under a third of the way: still level
+  });
+
+  showcaseTest('the page scrolls from the stage beside the buttons', (tester) async {
+    await pump(tester, listing());
+    await tester.dragFrom(edge(tester), const Offset(0, -150));
+    await tester.pumpAndSettle();
+    expect(page(tester).pixels, greaterThan(0));
   });
 
   showcaseTest('a touch on the stops row stops a spinning shoe', (tester) async {
@@ -852,8 +940,7 @@ void main() {
 
   showcaseTest('the sharp photo waits until the page stops coasting', (tester) async {
     await pump(tester, listing());
-    final list = find.byType(Scrollable).first;
-    await tester.fling(list, const Offset(0, -150), 1500);
+    await tester.flingFrom(edge(tester), const Offset(0, -150), 1500);
     await tester.pump(const Duration(milliseconds: 160)); // past the 140 ms rest, still coasting
     expect(page(tester).isScrollingNotifier.value, isTrue);
     expect(find.byWidgetPredicate((w) => w is Image && (w.key?.toString() ?? '').contains('showcase-full')),

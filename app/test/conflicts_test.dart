@@ -54,8 +54,7 @@ void main() {
       (tester) async {
     final asked = await _open(tester, const ListingScreen(listingId: 1),
         (req) => req.method == 'POST' && req.url.path.endsWith('/orders') ? _conflict('out_of_stock') : null);
-    await tester.scrollUntilVisible(find.text('42'), 300,
-        scrollable: find.byWidgetPredicate((w) => w is Scrollable && w.axis == Axis.vertical).first);
+    await scrollListingTo(tester, find.text('42'));
     Scrollable.ensureVisible(tester.element(find.text('42').first), alignment: 0.4);
     await tester.pump();
     await tester.tap(find.text('42').first);
@@ -159,8 +158,7 @@ void main() {
 
   /// Scrolls the listing to its sizes and picks 42, as a buyer would.
   Future<void> pick42(WidgetTester tester) async {
-    await tester.scrollUntilVisible(find.text('42'), 300,
-        scrollable: find.byWidgetPredicate((w) => w is Scrollable && w.axis == Axis.vertical).first);
+    await scrollListingTo(tester, find.text('42'));
     Scrollable.ensureVisible(tester.element(find.text('42').first), alignment: 0.4);
     await tester.pump();
     await tester.tap(find.text('42').first);
@@ -185,8 +183,7 @@ void main() {
     await pick42(tester);
     expect(find.byKey(const Key('make-offer')), findsNothing);
     // Where the promise of money held by VITRINA was, the honest line.
-    await tester.scrollUntilVisible(find.textContaining('Онлайн төлем әзірге қосылмаған'), 300,
-        scrollable: find.byWidgetPredicate((w) => w is Scrollable && w.axis == Axis.vertical).first);
+    await scrollListingTo(tester, find.textContaining('Онлайн төлем әзірге қосылмаған'));
     expect(find.textContaining('Ақшаңыз VITRINA-да сақталады'), findsNothing);
     await tester.tap(find.byKey(const Key('buy')));
     await settle(tester);
