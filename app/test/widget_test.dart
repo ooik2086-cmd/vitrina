@@ -255,6 +255,68 @@ void main() {
     expect((await api.suggestDetails('http://x/media/1/b.jpg')).isEmpty, isTrue);
   });
 
+  test('a shop and favourites longer than a page are read whole, page by page', () async {
+    final asked = <String>[];
+    // Each list has its own ids; a page is the two below the cursor, and the next cursor is the last id sent.
+    const lists = {
+      '/api/v1/me/listings': [5, 4, 3, 2, 1],
+      '/api/v1/favorites': [9, 7, 6]
+    };
+    Api paged({List<int> Function(List<int> page)? tamper, int? Function(int? next)? cursor}) => Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async {
+          asked.add('${req.url.path}?${req.url.query}');
+          final before = int.tryParse(req.url.queryParameters['before'] ?? '');
+          final rest = [
+            for (final id in lists[req.url.path]!)
+              if (before == null || id < before) id
+          ];
+          final ids = rest.take(2).toList();
+          final next = rest.length > 2 ? ids.last : null;
+          return http.Response(
+              jsonEncode({
+                'items': [
+                  for (final id in tamper?.call(ids) ?? ids) {...listingJson(), 'id': id}
+                ],
+                'next_before': cursor != null ? cursor(next) : next,
+              }),
+              200,
+              headers: {'content-type': 'application/json; charset=utf-8'});
+        }));
+    final api = paged();
+    expect([for (final l in await api.myListings()) l.id], [5, 4, 3, 2, 1]);
+    expect(asked, ['/api/v1/me/listings?', '/api/v1/me/listings?before=4', '/api/v1/me/listings?before=2']);
+    asked.clear();
+    expect([for (final l in await api.favorites()) l.id], [9, 7, 6]);
+    expect(asked, ['/api/v1/favorites?', '/api/v1/favorites?before=7']);
+    // A listing the server sends twice is shown once.
+    expect([
+      for (final l in await paged(tamper: (ids) => [...ids, 5]).myListings()) l.id
+    ], [
+      5,
+      4,
+      3,
+      2,
+      1
+    ]);
+    // A server that sends the same cursor again, or one that goes back up, is read once and not forever.
+    asked.clear();
+    expect([for (final l in await paged(cursor: (_) => 4).myListings()) l.id], [5, 4, 3, 2]);
+    expect(asked, ['/api/v1/me/listings?', '/api/v1/me/listings?before=4']);
+    // An older server sends one page and no next_before: that page is the whole list.
+    final old = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async => http.Response(
+            jsonEncode({
+              'items': [
+                {...listingJson(), 'id': 9}
+              ]
+            }),
+            200,
+            headers: {'content-type': 'application/json; charset=utf-8'})));
+    expect([for (final l in await old.myListings()) l.id], [9]);
+  });
+
   test('recently viewed keeps the newest first, without repeats, up to the limit', () async {
     SharedPreferences.setMockInitialValues({});
     await forgetRecent();

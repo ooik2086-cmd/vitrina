@@ -1,7 +1,7 @@
 """Saved searches, the catalog filter they share with search, and telling followers about a new listing."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
@@ -172,8 +172,19 @@ def remove_favorite(listing_id: int, user: User = Depends(current_user), db: Ses
 
 
 @router.get("/favorites")
-def list_favorites(user: User = Depends(current_user), db: Session = Depends(get_db)):
-    ids = db.scalars(select(Favorite.listing_id).where(Favorite.user_id == user.id)).all()
+def list_favorites(before: int | None = Query(default=None, ge=1, le=2**31 - 1),
+                   limit: int = Query(default=100, ge=1, le=100),
+                   user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """The newest saved first, a page at a time: a long list of favourites with every 360° frame is never one response.
+    next_before is the cursor for the next page (null after the last), by when it was saved, not by offset, so a heart
+    tapped meanwhile never repeats or skips one; a page may hold fewer items than it counted when a listing is gone."""
+    q = select(Favorite.id, Favorite.listing_id).where(Favorite.user_id == user.id)
+    if before is not None:
+        q = q.where(Favorite.id < before)
+    saved = db.execute(q.order_by(Favorite.id.desc()).limit(limit + 1)).all()
+    saved, more = saved[:limit], len(saved) > limit
+    ids = [s.listing_id for s in saved]
     found = {listing.id: listing for listing in with_light_media(db, db.scalars(
         select(Listing).options(LIGHT).where(Listing.id.in_(ids))).all())}
-    return {"items": [listing_out(db, found[i]) for i in ids if i in found]}
+    return {"items": [listing_out(db, found[i]) for i in ids if i in found],
+            "next_before": saved[-1].id if more else None}

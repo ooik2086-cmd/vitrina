@@ -698,6 +698,49 @@ class WeightTests(ApiTestCase):
         # What the seller got is filled in for the settled orders only, each on its own row.
         self.assertEqual({line.split(";")[3] for line in lines if line.split(";")[10]}, settled)
 
+    def test_a_shop_and_favourites_longer_than_a_page_come_whole_page_by_page(self):
+        """Before, a shop saw only its newest 200 listings and favourites came in no particular order, all at once."""
+        made = [self.publish(title=f"Аяқкиім {i}")["id"] for i in range(5)]
+        saved = [made[2], made[0], made[4], made[1], made[3]]  # not the order they were listed
+        for lid in saved:
+            self.assertEqual(self.post(f"/favorites/{lid}", self.buyer).status_code, 204)
+
+        def page(path, token, before=None):
+            r = self.c.get(f"/api/v1{path}?limit=2" + (f"&before={before}" if before else ""), headers=self.h(token))
+            self.assertEqual(r.status_code, 200, r.text)
+            return [i["id"] for i in r.json()["items"]], r.json()["next_before"]
+
+        def pages(path, token, between=None):
+            got, before = [], None
+            while True:
+                ids, before = page(path, token, before)
+                got.append(ids)
+                if before is None:
+                    return got
+                if between:  # something changes once, after the first page
+                    between()
+                    between = None
+
+        self.assertEqual(pages("/me/listings", self.seller), [made[4:2:-1], made[2:0:-1], made[:1]])
+        self.assertEqual(pages("/favorites", self.buyer), [saved[4:2:-1], saved[2:0:-1], saved[:1]])  # newest saved first
+        # A listing published, or a heart tapped, while the pages are read neither repeats one nor pushes one off.
+        fresh = []
+        got = pages("/me/listings", self.seller, lambda: fresh.append(self.publish(title="Жаңа")["id"]))
+        self.assertEqual(sum(got, []), made[::-1])
+        self.assertNotIn(fresh[0], sum(got, []))
+        self.assertEqual(self.post(f"/favorites/{fresh[0]}", self.buyer).status_code, 204)
+        got = pages("/favorites", self.buyer,
+                    lambda: self.c.delete(f"/api/v1/favorites/{saved[4]}", headers=self.h(self.buyer)))
+        self.assertEqual(sum(got, []), [fresh[0]] + saved[::-1])  # by offset, saved[3] would have been skipped
+        # One page by default, as an older app asks; at most 200 (a shop) and 100 (favourites) a page; a cursor
+        # bigger than any id is refused, not a server error.
+        self.assertIsNone(self.c.get("/api/v1/me/listings", headers=self.h(self.seller)).json()["next_before"])
+        for path, too_many in (("/me/listings", 201), ("/favorites", 101)):
+            r = self.c.get(f"/api/v1{path}?limit={too_many}", headers=self.h(self.seller))
+            self.assertEqual(r.status_code, 422, path)
+            r = self.c.get(f"/api/v1{path}?before={10**30}", headers=self.h(self.seller))
+            self.assertEqual(r.status_code, 422, path)
+
     def test_price_bands_are_read_again_only_when_prices_change(self):
         from sqlalchemy import event, insert, update
         from vitrina_api.models import Listing

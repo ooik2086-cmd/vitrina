@@ -28,11 +28,20 @@ router = APIRouter(prefix="/api/v1")
 
 
 @router.get("/me/listings")
-def my_listings(user: User = Depends(current_user), db: Session = Depends(get_db)):
-    rows = with_light_media(db, db.scalars(select(Listing).options(LIGHT).where(Listing.seller_id == user.id)
-                                           .order_by(Listing.id.desc()).limit(200)).all())
+def my_listings(before: int | None = Query(default=None, ge=1, le=2**31 - 1),
+                limit: int = Query(default=200, ge=1, le=200),
+                user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """Newest first, a page at a time: next_before is the id the next page starts below (null after the last), so a
+    shop with more than one page of listings sees all of them (the app reads every page; its filters and search work
+    on the whole shop). Paging by id, not by offset, so a listing published or removed meanwhile never shows twice
+    or pushes another off a page."""
+    q = select(Listing).options(LIGHT).where(Listing.seller_id == user.id)
+    if before is not None:
+        q = q.where(Listing.id < before)
+    rows = db.scalars(q.order_by(Listing.id.desc()).limit(limit + 1)).all()
+    rows, more = with_light_media(db, rows[:limit]), len(rows) > limit
     preload_stats(db, [r.id for r in rows])
-    return {"items": [listing_out(db, r, owner=True) for r in rows]}
+    return {"items": [listing_out(db, r, owner=True) for r in rows], "next_before": rows[-1].id if more else None}
 
 
 def preload_stats(db: Session, ids: list[int]) -> None:

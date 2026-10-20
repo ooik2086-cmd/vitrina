@@ -1194,9 +1194,26 @@ class Api {
 
   Future<Earnings> earnings() async => Earnings.fromJson(await _send('GET', '/me/earnings') as Map<String, dynamic>);
 
-  Future<List<Listing>> myListings() async {
-    final r = await _send('GET', '/me/listings') as Map;
-    return [for (final j in r['items'] as List) Listing.fromJson(j as Map<String, dynamic>)];
+  /// The whole shop, newest first: the server sends it a page at a time, and the screen's filters, counts and
+  /// search need every listing, not only the newest page.
+  Future<List<Listing>> myListings() => _allPages('/me/listings');
+
+  /// Every page of a list the server sends in pages: next_before is the cursor for the next one, null after the last
+  /// (an older server sends none, and its one page is the whole list). A listing already read is never added twice.
+  Future<List<Listing>> _allPages(String path) async {
+    final all = <Listing>[];
+    final seen = <int>{};
+    int? before;
+    do {
+      final r = await _send('GET', path, query: before != null ? {'before': '$before'} : null) as Map;
+      for (final j in r['items'] as List) {
+        final l = Listing.fromJson(j as Map<String, dynamic>);
+        if (seen.add(l.id)) all.add(l);
+      }
+      final next = r['next_before'] as int?;
+      before = next != null && (before == null || next < before) ? next : null; // always further down, never a loop
+    } while (before != null);
+    return all;
   }
 
   // catalog
@@ -1243,10 +1260,8 @@ class Api {
   Future<Listing> listing(int id) async =>
       Listing.fromJson(await _send('GET', '/listings/$id') as Map<String, dynamic>);
 
-  Future<List<Listing>> favorites() async {
-    final r = await _send('GET', '/favorites') as Map;
-    return [for (final j in r['items'] as List) Listing.fromJson(j as Map<String, dynamic>)];
-  }
+  /// Every favourite, the newest saved first (compare needs them all).
+  Future<List<Listing>> favorites() => _allPages('/favorites');
 
   Future<void> setFavorite(int listingId, bool on) => _send(on ? 'POST' : 'DELETE', '/favorites/$listingId');
 
