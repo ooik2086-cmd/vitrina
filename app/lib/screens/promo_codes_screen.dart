@@ -47,7 +47,7 @@ class _PromoCodesScreenState extends State<PromoCodesScreen> {
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Жабу'))),
           FilledButton(
-              key: const Key('confirm-end'), onPressed: () => Navigator.pop(context, true), child: Text(tr('Тоқтату'))),
+              key: const Key('confirm-end'), onPressed: () => Navigator.pop(context, true), child: Text(tr('Промокодты тоқтату'))),
         ],
       ),
     );
@@ -143,7 +143,7 @@ class _PromoCard extends StatelessWidget {
           ),
           IconButton(
             key: Key('end-${p.code}'),
-            tooltip: tr('Тоқтату'),
+            tooltip: tr('Промокодты тоқтату'),
             icon: const Icon(Icons.block_outlined),
             onPressed: onEnd,
           ),

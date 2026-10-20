@@ -169,7 +169,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('evidence-gallery')));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Бас тарту'));
+    await tester.tap(find.text('Болдырмау'));
     await tester.pumpAndSettle();
     expect(posts, 0);
   });

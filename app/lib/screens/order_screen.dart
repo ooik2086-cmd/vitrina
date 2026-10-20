@@ -43,7 +43,7 @@ class _Action {
 }
 
 List<_Action> _actionsFor(OrderInfo o, {required bool isBuyer}) {
-  final cancel = _Action(tr('Бас тарту'), 'cancel',
+  final cancel = _Action(tr('Тапсырыстан бас тарту'), 'cancel',
       destructive: true,
       ask: tr('Тапсырыстан бас тарту керек пе?'),
       explain: tr('Тапсырыс жойылады, өлшем басқаларға ашылады. Төлем өтіп кетсе, ақша сізге толық қайтарылады.'),
@@ -583,7 +583,7 @@ class _EvidenceCardState extends State<_EvidenceCard> {
           ]),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: Text(tr('Бас тарту'))),
+          TextButton(onPressed: () => Navigator.pop(context), child: Text(tr('Болдырмау'))),
           FilledButton(
               key: const Key('evidence-send'),
               onPressed: () => Navigator.pop(context, ctrl.text.trim()),

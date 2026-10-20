@@ -2700,6 +2700,17 @@ void main() {
     expect(find.text('Қайтаруға келіспеу'), findsNothing);
   });
 
+  testWidgets('in Russian a seller declines an order and a buyer cancels one, in words that say which', (tester) async {
+    addTearDown(() => appLanguage.value = 'kk');
+    appLanguage.value = 'ru';
+    await pumpOrder(tester, 'PAID', meId: 1);
+    expect(find.text('Отклонить'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+    await pumpOrder(tester, 'CREATED', meId: 2);
+    expect(find.text('Отменить заказ'), findsOneWidget);
+    expect(find.text('Отклонить'), findsNothing);
+  });
+
   testWidgets('a seller cannot decline once the pair has shipped', (tester) async {
     await pumpOrder(tester, 'SHIPPED', meId: 1);
     expect(find.text('Бас тарту'), findsNothing);
