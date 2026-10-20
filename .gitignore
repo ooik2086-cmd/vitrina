@@ -16,3 +16,4 @@ media-private-dev/
 
 # Server settings and secrets (deploy/setup.sh writes it)
 deploy/.env
+deploy/backup.env

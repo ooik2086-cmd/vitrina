@@ -49,6 +49,9 @@ class Settings:
     s3_private_bucket: str = field(default_factory=lambda: os.environ.get("VITRINA_S3_PRIVATE_BUCKET", ""))
     # Copies of the database (python -m vitrina_api.backup, deploy/backup.sh): a third bucket, not public either.
     s3_backup_bucket: str = field(default_factory=lambda: os.environ.get("VITRINA_S3_BACKUP_BUCKET", ""))
+    # Its own key, if the provider can scope one to that bucket (empty: the photos' key).
+    s3_backup_access_key: str = field(default_factory=lambda: os.environ.get("VITRINA_S3_BACKUP_ACCESS_KEY", ""))
+    s3_backup_secret_key: str = field(default_factory=lambda: os.environ.get("VITRINA_S3_BACKUP_SECRET_KEY", ""))
     private_media_dir: str = field(default_factory=lambda: os.environ.get("VITRINA_PRIVATE_MEDIA_DIR", "./media-private-dev"))
     # The API's own address as phones reach it, for links to private files kept on disk. Empty: the origin of
     # VITRINA_PUBLIC_MEDIA_URL, which is right while the API serves /media itself (no public bucket).

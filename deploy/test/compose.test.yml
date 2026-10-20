@@ -16,6 +16,7 @@ services:
   s3:
     image: vitrina-api
     command: ["python", "/test/fake_s3.py", "/tmp/s3"]
+    environment: {S3_PUBLIC: vitrina-photos}
     volumes: [./test/fake_s3.py:/test/fake_s3.py:ro]
     healthcheck: {disable: true}
     networks: [edge]

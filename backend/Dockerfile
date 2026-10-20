@@ -6,8 +6,8 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY . .
 
+RUN mkdir -p models
 # Background-removal model (Apache-2.0, see models/README.md). Build with --build-arg CUTOUT_MODEL= to skip it.
 ARG CUTOUT_MODEL=isnet-general-use
 ARG CUTOUT_SHA256=60920e99c45464f2ba57bee2ad08c919a52bbf852739e96947fbb4358c0d964a
@@ -25,6 +25,8 @@ RUN if [ -n "$SEARCH_MODEL" ]; then \
         "https://media.githubusercontent.com/media/onnx/models/main/validated/vision/classification/mobilenet/model/$SEARCH_MODEL.onnx" "models/$SEARCH_MODEL.onnx" \
       && echo "$SEARCH_SHA256  models/$SEARCH_MODEL.onnx" | sha256sum -c -; fi
 ENV VITRINA_SEARCH_MODEL=/app/models/${SEARCH_MODEL}.onnx
+# The code last, so a new version reuses the layers above (the models are not downloaded again).
+COPY . .
 
 # Run as an unprivileged user; uploaded photos, and receipts and dispute evidence (private), live in mounted volumes.
 RUN useradd --create-home vitrina && mkdir -p /data/media /data/private && chown -R vitrina /data

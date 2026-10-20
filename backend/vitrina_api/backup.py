@@ -2,30 +2,40 @@
 endpoint and keys as the photos): a server whose disk is lost takes its local copies with it. deploy/backup.sh
 makes a dump every night and hands it here; deploy/restore.sh brings one back.
 
-    python -m vitrina_api.backup put /backups/vitrina-20261020T020000Z.dump
+    python -m vitrina_api.backup put /backups/vitrina-20261020T213000Z-3f9a0c1d.dump
     python -m vitrina_api.backup list
-    python -m vitrina_api.backup get vitrina-20261020T020000Z.dump /backups/
+    python -m vitrina_api.backup get vitrina-20261020T213000Z-3f9a0c1d.dump /backups/
     python -m vitrina_api.backup prune --keep 30
+    python -m vitrina_api.backup check     # the three buckets work, and only the photos one is public
 
 Each copy goes under db/ with its SHA-256 beside it (db/NAME.sha256), and get refuses a copy that does not match,
 so a file cut short on the way is never restored. The bucket must not be public: a dump holds phone numbers and
-addresses. A dump is read whole into memory to sign it, which is fine while it is some hundreds of megabytes.
+addresses, so put refuses to go on when the copy it just wrote can be read without a key. The random part of the
+name keeps a copy from being found by its time alone.
+
+The backup bucket may have a key of its own (VITRINA_S3_BACKUP_ACCESS_KEY, VITRINA_S3_BACKUP_SECRET_KEY, kept in
+deploy/backup.env, which only backup.sh and restore.sh read): then a break-in through the API, which holds the
+photos' key, cannot delete the copies. A dump is read whole into memory to sign it, which is fine while it is some
+hundreds of megabytes.
 """
 from __future__ import annotations
 
 import argparse
 import hashlib
 import re
+import secrets
 import sys
 from pathlib import Path
 from xml.etree import ElementTree
+
+import httpx
 
 from .config import Settings
 from .storage import S3Storage
 
 PREFIX = "db/"
 # What backup.sh names a dump; nothing else is put, listed or pruned, so a stray file in the bucket is left alone.
-NAME_RE = re.compile(r"vitrina-\d{8}T\d{6}Z\.dump")
+NAME_RE = re.compile(r"vitrina-\d{8}T\d{6}Z-[0-9a-f]{8}\.dump")
 
 
 def bucket(settings: Settings, client=None) -> S3Storage:
@@ -34,13 +44,19 @@ def bucket(settings: Settings, client=None) -> S3Storage:
     if settings.s3_backup_bucket in (settings.s3_bucket, settings.s3_private_bucket):
         raise SystemExit("VITRINA_S3_BACKUP_BUCKET must be a bucket of its own, not the photos' or the private one")
     return S3Storage(endpoint=settings.s3_endpoint, bucket=settings.s3_backup_bucket, region=settings.s3_region,
-                     access_key=settings.s3_access_key, secret_key=settings.s3_secret_key, public_base="",
+                     access_key=settings.s3_backup_access_key or settings.s3_access_key,
+                     secret_key=settings.s3_backup_secret_key or settings.s3_secret_key, public_base="",
                      **({"client": client} if client is not None else {}))
+
+
+def readable_without_key(s3: S3Storage, key: str) -> bool:
+    """Whether anyone could read the object: a GET with no signature, as a stranger would send it."""
+    return s3.client.get(f"{s3.endpoint}/{s3.bucket}/{key}").status_code < 300
 
 
 def checked(name: str) -> str:
     if not NAME_RE.fullmatch(name):
-        raise SystemExit(f"not a backup name: {name!r} (vitrina-YYYYMMDDTHHMMSSZ.dump)")
+        raise SystemExit(f"not a backup name: {name!r} (vitrina-YYYYMMDDTHHMMSSZ-xxxxxxxx.dump)")
     return name
 
 
@@ -51,6 +67,9 @@ def put(s3: S3Storage, path: Path) -> str:
     digest = hashlib.sha256(data).hexdigest()
     s3._send("PUT", PREFIX + name, data, {"content-type": "application/octet-stream"})
     s3._send("PUT", PREFIX + name + ".sha256", digest.encode(), {"content-type": "text/plain"})
+    if readable_without_key(s3, PREFIX + name):
+        raise SystemExit(f"the backup bucket {s3.bucket} can be read without a key: anyone could download the "
+                         "database. Remove its public read access at the storage provider.")
     return digest
 
 
@@ -76,6 +95,7 @@ def get(s3: S3Storage, name: str, dest: Path) -> Path:
         raise SystemExit(f"{name}: the copy does not match its SHA-256, not restoring it")
     target = dest / name if dest.is_dir() else dest
     target.write_bytes(data)
+    target.with_name(target.name + ".sha256").write_text(f"{expected}  {target.name}\n")  # as sha256sum writes it
     return target
 
 
@@ -90,6 +110,36 @@ def prune(s3: S3Storage, keep: int) -> list[str]:
     return gone
 
 
+def check(settings: Settings, client=None) -> list[str]:
+    """Writes a small file to each bucket, reads it back the way the app does and deletes it: the photos bucket must
+    answer at VITRINA_PUBLIC_MEDIA_URL without a key, the other two must refuse a stranger. Returns what is wrong."""
+    from .storage import make_private_storage, make_storage
+    if not (settings.s3_bucket and settings.s3_private_bucket):
+        raise SystemExit("set VITRINA_S3_BUCKET and VITRINA_S3_PRIVATE_BUCKET: this checks the live storage")
+    problems = []
+    probe = b"vitrina storage check"
+    for label, store, public in (("VITRINA_S3_BUCKET", make_storage(settings), True),
+                                 ("VITRINA_S3_PRIVATE_BUCKET", make_private_storage(settings), False),
+                                 ("VITRINA_S3_BACKUP_BUCKET", bucket(settings), False)):
+        if client is not None:
+            store.client = client
+        key = f"check/{secrets.token_hex(8)}.txt"
+        try:
+            store._send("PUT", key, probe, {"content-type": "text/plain"})
+            if store._send("GET", key).content != probe:
+                problems.append(f"{label}: the file read back is not the one written")
+            if public:
+                url = f"{settings.public_media_url.rstrip('/')}/{key}"
+                if store.client.get(url).content != probe:
+                    problems.append(f"{label}: photos are not readable at VITRINA_PUBLIC_MEDIA_URL ({url})")
+            elif readable_without_key(store, key):
+                problems.append(f"{label}: can be read without a key; it must not be public")
+            store._send("DELETE", key)
+        except (RuntimeError, httpx.HTTPError) as e:
+            problems.append(f"{label}: {e} (check the endpoint, the keys and that the bucket exists)")
+    return problems
+
+
 def main(argv: list[str] | None = None, client=None) -> None:
     parser = argparse.ArgumentParser(prog="python -m vitrina_api.backup", description=__doc__.split("\n\n")[0])
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -99,7 +149,12 @@ def main(argv: list[str] | None = None, client=None) -> None:
     g.add_argument("name")
     g.add_argument("dest", type=Path)
     sub.add_parser("prune").add_argument("--keep", type=int, default=30)
+    sub.add_parser("check")
     args = parser.parse_args(argv)
+    if args.cmd == "check":
+        problems = check(Settings(), client)
+        print("\n".join(problems) or "storage ok: photos public, private and backup buckets closed")
+        raise SystemExit(1 if problems else 0)
     s3 = bucket(Settings(), client)
     if args.cmd == "put":
         print(f"{args.file.name} {put(s3, args.file)}")

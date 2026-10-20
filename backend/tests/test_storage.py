@@ -178,13 +178,16 @@ class ChoiceTests(unittest.TestCase):
 class BackupBucket:
     """The backup bucket: objects by key, ListObjectsV2 with a prefix, two keys a page."""
 
-    def __init__(self):
+    def __init__(self, key="key", public=()):
         self.objects: dict[str, bytes] = {}
+        self.key, self.public = key, public  # buckets anyone may read
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
-        if not request.headers.get("authorization", "").startswith("AWS4-HMAC-SHA256 Credential=key/"):
-            return httpx.Response(403)
-        key = request.url.path.removeprefix("/vitrina-backup").lstrip("/")
+        bucket, _, key = request.url.path.lstrip("/").partition("/")
+        if not request.headers.get("authorization", "").startswith(f"AWS4-HMAC-SHA256 Credential={self.key}/"):
+            if not (request.method == "GET" and bucket in self.public and key):
+                return httpx.Response(403)
+        key = f"{bucket}/{key}" if bucket != "vitrina-backup" else key
         if request.method == "GET" and not key:
             prefix, at = request.url.params.get("prefix", ""), int(request.url.params.get("continuation-token", 0))
             keys = sorted(k for k in self.objects if k.startswith(prefix))
@@ -226,44 +229,46 @@ class BackupTests(unittest.TestCase):
 
     def test_a_copy_goes_up_with_its_checksum_and_comes_back_the_same(self):
         import hashlib
-        digest = self.backup.put(self.s3, self.dump("vitrina-20261020T020000Z.dump", b"PGDMP one"))
+        digest = self.backup.put(self.s3, self.dump("vitrina-20261020T020000Z-0a1b2c3d.dump", b"PGDMP one"))
         self.assertEqual(digest, hashlib.sha256(b"PGDMP one").hexdigest())
-        self.assertEqual(self.store.objects["db/vitrina-20261020T020000Z.dump.sha256"], digest.encode())
+        self.assertEqual(self.store.objects["db/vitrina-20261020T020000Z-0a1b2c3d.dump.sha256"], digest.encode())
         back = self.dir / "back"
         back.mkdir()
-        got = self.backup.get(self.s3, "vitrina-20261020T020000Z.dump", back)
-        self.assertEqual((got.name, got.read_bytes()), ("vitrina-20261020T020000Z.dump", b"PGDMP one"))
+        got = self.backup.get(self.s3, "vitrina-20261020T020000Z-0a1b2c3d.dump", back)
+        self.assertEqual((got.name, got.read_bytes()), ("vitrina-20261020T020000Z-0a1b2c3d.dump", b"PGDMP one"))
+        self.assertEqual((back / (got.name + ".sha256")).read_text(),  # for restore.sh's sha256sum -c
+                         f"{digest}  vitrina-20261020T020000Z-0a1b2c3d.dump\n")
 
     def test_a_copy_that_does_not_match_its_checksum_is_not_restored(self):
-        self.backup.put(self.s3, self.dump("vitrina-20261020T020000Z.dump"))
-        self.store.objects["db/vitrina-20261020T020000Z.dump"] = b"PGDMP cut sho"
+        self.backup.put(self.s3, self.dump("vitrina-20261020T020000Z-0a1b2c3d.dump"))
+        self.store.objects["db/vitrina-20261020T020000Z-0a1b2c3d.dump"] = b"PGDMP cut sho"
         with self.assertRaises(SystemExit):
-            self.backup.get(self.s3, "vitrina-20261020T020000Z.dump", self.dir / "x.dump")
+            self.backup.get(self.s3, "vitrina-20261020T020000Z-0a1b2c3d.dump", self.dir / "x.dump")
         self.assertFalse((self.dir / "x.dump").exists())
 
     def test_prune_keeps_the_newest_and_leaves_other_files_alone(self):
         for day in range(1, 6):  # listed two a page, so every page has to be read
-            self.backup.put(self.s3, self.dump(f"vitrina-202610{day:02d}T020000Z.dump"))
+            self.backup.put(self.s3, self.dump(f"vitrina-202610{day:02d}T020000Z-0a1b2c3d.dump"))
         self.store.objects["db/notes.txt"] = b"left by hand"
         self.assertEqual(len(self.backup.names(self.s3)), 5)
         gone = self.backup.prune(self.s3, keep=2)
-        self.assertEqual(gone, [f"vitrina-202610{day:02d}T020000Z.dump" for day in (1, 2, 3)])
-        self.assertEqual(sorted(self.store.objects), ["db/notes.txt", "db/vitrina-20261004T020000Z.dump",
-                                                      "db/vitrina-20261004T020000Z.dump.sha256",
-                                                      "db/vitrina-20261005T020000Z.dump",
-                                                      "db/vitrina-20261005T020000Z.dump.sha256"])
+        self.assertEqual(gone, [f"vitrina-202610{day:02d}T020000Z-0a1b2c3d.dump" for day in (1, 2, 3)])
+        self.assertEqual(sorted(self.store.objects), ["db/notes.txt", "db/vitrina-20261004T020000Z-0a1b2c3d.dump",
+                                                      "db/vitrina-20261004T020000Z-0a1b2c3d.dump.sha256",
+                                                      "db/vitrina-20261005T020000Z-0a1b2c3d.dump",
+                                                      "db/vitrina-20261005T020000Z-0a1b2c3d.dump.sha256"])
         with self.assertRaises(SystemExit):
             self.backup.prune(self.s3, keep=0)
 
     def test_refuses_odd_names_empty_dumps_and_a_shared_bucket(self):
         from dataclasses import replace
-        for name in ("../etc.dump", "vitrina-latest.dump", "vitrina-20261020T020000Z.dump.sha256"):
+        for name in ("../etc.dump", "vitrina-latest.dump", "vitrina-20261020T020000Z-0a1b2c3d.dump.sha256"):
             with self.assertRaises(SystemExit):
                 self.backup.put(self.s3, self.dump(name.replace("/", "_")) if "/" in name else self.dump(name))
             with self.assertRaises(SystemExit):
                 self.backup.get(self.s3, name, self.dir)
         with self.assertRaises(SystemExit):
-            self.backup.put(self.s3, self.dump("vitrina-20261020T020000Z.dump", b""))
+            self.backup.put(self.s3, self.dump("vitrina-20261020T020000Z-0a1b2c3d.dump", b""))
         self.assertEqual(self.store.objects, {})
         for shared in ("", "vitrina", "vitrina-private"):
             with self.assertRaises(SystemExit):
@@ -277,7 +282,7 @@ class BackupTests(unittest.TestCase):
         env = {"VITRINA_S3_ENDPOINT": "https://s3.example.kz", "VITRINA_S3_REGION": "kz-1",
                "VITRINA_S3_ACCESS_KEY": "key", "VITRINA_S3_SECRET_KEY": "secret",
                "VITRINA_S3_BACKUP_BUCKET": "vitrina-backup"}
-        path = self.dump("vitrina-20261020T020000Z.dump")
+        path = self.dump("vitrina-20261020T020000Z-0a1b2c3d.dump")
         out = io.StringIO()
         with mock.patch.dict(os.environ, env), contextlib.redirect_stdout(out):
             self.backup.main(["put", str(path)], self.client)
@@ -285,5 +290,36 @@ class BackupTests(unittest.TestCase):
             path.unlink()
             self.backup.main(["get", path.name, str(self.dir)], self.client)
             self.backup.main(["prune", "--keep", "1"], self.client)
-        self.assertIn("vitrina-20261020T020000Z.dump\n", out.getvalue())
+        self.assertIn("vitrina-20261020T020000Z-0a1b2c3d.dump\n", out.getvalue())
         self.assertEqual(path.read_bytes(), b"PGDMP dump")
+
+    def test_a_backup_bucket_anyone_can_read_is_refused_loudly(self):
+        self.store.public = ("vitrina-backup",)
+        with self.assertRaises(SystemExit) as err:
+            self.backup.put(self.s3, self.dump("vitrina-20261020T020000Z-0a1b2c3d.dump"))
+        self.assertIn("without a key", str(err.exception))
+
+    def test_the_backup_bucket_can_have_a_key_of_its_own(self):
+        from dataclasses import replace
+        own = BackupBucket(key="backupkey")
+        s3 = self.backup.bucket(replace(self.settings, s3_backup_access_key="backupkey", s3_backup_secret_key="bs"),
+                                httpx.Client(transport=httpx.MockTransport(own)))
+        self.backup.put(s3, self.dump("vitrina-20261020T020000Z-0a1b2c3d.dump"))  # the photos' key would get 403
+        self.assertIn("db/vitrina-20261020T020000Z-0a1b2c3d.dump", own.objects)
+
+    def test_check_says_which_bucket_is_wrong(self):
+        from dataclasses import replace
+        settings = replace(self.settings, public_media_url="https://s3.example.kz/vitrina")
+        self.store.public = ("vitrina",)
+        self.assertEqual(self.backup.check(settings, self.client), [])
+        self.assertEqual(self.store.objects, {})  # the probes are deleted
+        self.store.public = ()
+        self.assertEqual([p.split(":")[0] for p in self.backup.check(settings, self.client)], ["VITRINA_S3_BUCKET"])
+        self.store.public = ("vitrina", "vitrina-private")
+        self.assertEqual([p.split(":")[0] for p in self.backup.check(settings, self.client)],
+                         ["VITRINA_S3_PRIVATE_BUCKET"])
+        self.store.public = ("vitrina",)
+        wrong = BackupBucket(key="other")
+        problems = self.backup.check(settings, httpx.Client(transport=httpx.MockTransport(wrong)))
+        self.assertEqual(len(problems), 3)
+        self.assertIn("HTTP 403", problems[0])

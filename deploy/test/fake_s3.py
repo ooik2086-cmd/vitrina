@@ -1,8 +1,10 @@
 """A stand-in S3 endpoint for the deploy smoke test only: path-style buckets kept in a folder, PUT, GET (public, as
-the photos bucket is), DELETE and ListObjectsV2 with a prefix. It does not check signatures; the API's signing is
-covered by the unit tests (tests/test_storage.py)."""
+the photos bucket is), DELETE and ListObjectsV2 with a prefix. Only the buckets named in S3_PUBLIC answer a GET
+that carries no signature, as a real provider would. Signatures are not verified; the API's signing is covered by
+the unit tests (tests/test_storage.py)."""
 from __future__ import annotations
 
+import os
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -10,6 +12,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 from xml.sax.saxutils import escape
 
 ROOT = Path(sys.argv[1] if len(sys.argv) > 1 else "/data")
+PUBLIC = set(os.environ.get("S3_PUBLIC", "").split(","))
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -41,6 +44,9 @@ class Handler(BaseHTTPRequestHandler):
         bucket, key, query = self.target()
         if bucket is None:
             return self.answer(400)
+        signed = "authorization" in self.headers or "X-Amz-Signature" in query
+        if not signed and not (key and bucket.name in PUBLIC):
+            return self.answer(403)
         if not key:
             prefix = query.get("prefix", [""])[0]
             keys = sorted(str(p.relative_to(bucket)) for p in bucket.rglob("*") if p.is_file()) if bucket.is_dir() else []

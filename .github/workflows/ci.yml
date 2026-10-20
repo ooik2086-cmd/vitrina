@@ -108,8 +108,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: shellcheck -s sh deploy/*.sh deploy/test/*.sh
-      - name: The live-server stack (deploy/compose.yml) end to end, with a stand-in S3
-        run: sh deploy/test/smoke.sh
+      - name: setup.sh on this fresh Ubuntu machine, then the live-server stack end to end, with a stand-in S3
+        run: sudo SMOKE_SETUP=1 sh deploy/test/smoke.sh
 
   docker:
     runs-on: ubuntu-latest

@@ -61,6 +61,9 @@ services:
       api: {condition: service_healthy}   # the API has run the migrations
     stop_grace_period: 150s   # it finishes the listing it is on (~2 minutes) before stopping
     mem_limit: 2500m
+    # In its own container its lower priority (nice) no longer yields to the API: a quarter of the API's CPU
+    # weight does, so buyers are answered first while a listing is cut out. Idle CPU it still uses in full.
+    cpu_shares: 256
     healthcheck:   # it touches this file after every listing and every idle look
       test: ["CMD-SHELL", "find /tmp/photo_worker.alive -mmin -10 | grep -q ."]
       interval: 60s
@@ -70,9 +73,13 @@ services:
   # Unpaid orders let go, ignored ones refunded, unconfirmed ones completed, reminders: every 5 minutes.
   jobs:
     <<: *app
-    command: ["sh", "-c", "while :; do python -m vitrina_api.jobs || echo 'jobs pass failed'; sleep 300; done"]
+    command: ["sh", "-c", "while :; do if python -m vitrina_api.jobs; then touch /tmp/jobs.ok; else echo 'jobs pass failed'; fi; sleep 300; done"]
     init: true   # so a stop ends the sleep at once
-    healthcheck: {disable: true}
+    healthcheck:   # unhealthy once no pass has worked for 15 minutes (three in a row failed)
+      test: ["CMD-SHELL", "find /tmp/jobs.ok -mmin -15 | grep -q ."]
+      interval: 60s
+      start_period: 60s
+      start_interval: 5s
     depends_on:
       api: {condition: service_healthy}
     networks: [inner]

@@ -5,8 +5,8 @@
 #   sh /opt/vitrina/deploy/setup.sh vitrina.kz you@example.kz
 #
 # It installs Docker, turns on the firewall (only ssh, 80 and 443), adds 2 GB of swap, turns on security updates,
-# writes deploy/.env with new random secrets (once: an existing .env is never overwritten), installs the nightly
-# backup and starts everything. Run it again after filling the S3 lines in deploy/.env; it is safe to repeat.
+# writes deploy/.env with new random secrets (once: an existing .env is never overwritten), checks the domain,
+# starts everything, checks the three buckets, makes the first backup and installs the nightly one. Run it again after filling the S3 lines in deploy/.env; it is safe to repeat.
 #
 #   sh deploy/setup.sh --env-only DOMAIN EMAIL   only writes deploy/.env (nothing installed or started)
 set -eu
@@ -23,7 +23,11 @@ die() { printf '\nERROR: %s\n' "$*" >&2; exit 1; }
 
 write_env() {
 	if [ -f "$ENV_FILE" ]; then
-		echo "$ENV_FILE exists: keeping it (its secrets are in use)"
+		kept=$(sed -n 's/^VITRINA_DOMAIN=//p' "$ENV_FILE")
+		if [ -n "$DOMAIN" ] && [ "$DOMAIN" != "$kept" ]; then
+			die "$ENV_FILE has VITRINA_DOMAIN=$kept, not $DOMAIN. To change it, edit VITRINA_DOMAIN and VITRINA_CORS_ORIGINS (and VITRINA_TLS for the email) there, keeping the secrets, then run: sh $0"
+		fi
+		echo "$ENV_FILE exists: keeping it, domain $kept (its secrets are in use)"
 		return
 	fi
 	[ -n "$DOMAIN" ] && [ -n "$EMAIL" ] || die "usage: setup.sh DOMAIN EMAIL   (e.g. setup.sh vitrina.kz you@example.kz)"
@@ -41,6 +45,40 @@ write_env() {
 		"$DEPLOY/.env.example" > "$ENV_FILE.tmp"
 	mv "$ENV_FILE.tmp" "$ENV_FILE"
 	echo "wrote $ENV_FILE (readable by root only); keep a copy of it somewhere safe"
+}
+
+# Settings only the backup scripts read, kept out of the running services.
+write_backup_env() {
+	[ ! -f "$DEPLOY/backup.env" ] || return 0
+	umask 077
+	cat > "$DEPLOY/backup.env" <<'EOF'
+# Read only by backup.sh and restore.sh, never by the running services (root only, never commit it).
+# A key of the backup bucket's own, if the provider can make one for that bucket alone (then take that bucket away
+# from the main key in .env): a break-in through the API can then not delete the copies. Empty: the main key.
+VITRINA_S3_BACKUP_ACCESS_KEY=
+VITRINA_S3_BACKUP_SECRET_KEY=
+# Called after every good backup, and at this address + /fail after a bad one (e.g. a free healthchecks.io check
+# that emails you when the call stops coming). Empty: nobody is told when a backup fails.
+VITRINA_BACKUP_PING_URL=
+EOF
+	echo "wrote $DEPLOY/backup.env"
+}
+
+# The domain's addresses against this server's, before Caddy asks Let's Encrypt (which fails while they differ).
+check_dns() {
+	domain=$(sed -n 's/^VITRINA_DOMAIN=//p' "$ENV_FILE")
+	ours=$(hostname -I 2> /dev/null || true)
+	four=$(getent ahostsv4 "$domain" 2> /dev/null | awk '{ print $1 }' | sort -u | tr '\n' ' ' || true)
+	six=$(getent ahostsv6 "$domain" 2> /dev/null | awk '$1 !~ /^::ffff:/ { print $1 }' | sort -u | tr '\n' ' ' || true)
+	if [ -z "$four" ]; then
+		echo "WARNING: $domain has no A record yet. Point it at this server; the site gets its certificate after."
+	else
+		echo "$domain points at: $four; this server's addresses: $ours"
+		for ip in $four; do
+			case " $ours " in *" $ip "*) ;; *) echo "WARNING: $ip is not one of this server's addresses (fine only behind a provider's NAT)" ;; esac
+		done
+	fi
+	[ -z "$six" ] || echo "WARNING: $domain also has an AAAA record ($six). Let's Encrypt tries it first: remove it unless it is this server."
 }
 
 # Lines of .env still empty or still the example's placeholders.
@@ -61,7 +99,9 @@ fi
 say "packages"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
-apt-get install -y -q ca-certificates curl openssl ufw unattended-upgrades
+apt-get install -y -q ca-certificates curl openssl tzdata ufw unattended-upgrades
+# Logs and timers in Kazakhstan time (UTC+5). The containers keep UTC.
+timedatectl set-timezone Asia/Almaty || echo "could not set the time zone (logs stay in UTC)"
 
 say "Docker"
 if ! docker compose version >/dev/null 2>&1; then
@@ -105,6 +145,7 @@ ufw --force enable
 
 say "settings"
 write_env
+write_backup_env
 missing=$(unfilled)
 if [ -n "$missing" ]; then
 	echo "Fill these in $ENV_FILE (from the storage provider), then run this script again:"
@@ -121,6 +162,7 @@ After=docker.service
 
 [Service]
 Type=oneshot
+Environment="VITRINA_COMPOSE_FILES=${VITRINA_COMPOSE_FILES:-}" "VITRINA_BACKUP_DIR=${VITRINA_BACKUP_DIR:-/var/backups/vitrina}"
 ExecStart=/bin/sh $DEPLOY/backup.sh
 EOF
 cat > /etc/systemd/system/vitrina-backup.timer <<'EOF'
@@ -139,14 +181,30 @@ EOF
 systemctl daemon-reload
 systemctl enable --now vitrina-backup.timer
 
+say "domain"
+check_dns
+
 say "start"
 cd "$DEPLOY"
-docker compose up -d --build --wait --wait-timeout 600 || {
-	docker compose ps
-	docker compose logs --tail 50 api
+C="docker compose ${VITRINA_COMPOSE_FILES:-}"
+$C up -d "${VITRINA_BUILD:---build}" --wait --wait-timeout 900 || {
+	$C ps
+	$C logs --tail 50 api
 	die "a service did not become healthy; the log above says why"
 }
-docker compose ps
+$C ps
+
+say "storage"
+# Each bucket written, read back and deleted: wrong keys, a missing bucket or one public by mistake show now.
+set -a
+# shellcheck source=/dev/null
+. "$DEPLOY/backup.env"
+set +a
+$C run --rm --no-deps -T -e VITRINA_S3_BACKUP_ACCESS_KEY -e VITRINA_S3_BACKUP_SECRET_KEY api \
+	python -m vitrina_api.backup check || die "fix VITRINA_S3_* in $ENV_FILE (what is wrong is said above), then run: sh $0"
+
+say "first backup"
+sh "$DEPLOY/backup.sh" || die "the first backup failed (see above)"
 
 DOMAIN=$(sed -n 's/^VITRINA_DOMAIN=//p' "$ENV_FILE")
 say "check"
@@ -154,6 +212,8 @@ if curl -fsS --max-time 20 "https://$DOMAIN/api/v1/health"; then
 	echo
 	echo "VITRINA is up at https://$DOMAIN"
 else
-	echo "https://$DOMAIN does not answer yet. Check that the domain's A record points at this server; Caddy"
-	echo "keeps asking for the certificate: docker compose -f $DEPLOY/compose.yml logs caddy"
+	echo "https://$DOMAIN does not answer yet. Check that the domain's A record points at this server (see the"
+	echo "domain step above). Caddy asks for the certificate again with longer and longer pauses, so once DNS is"
+	echo "right, make it ask now: docker compose -f $DEPLOY/compose.yml restart caddy"
+	echo "What Caddy says: docker compose -f $DEPLOY/compose.yml logs caddy"
 fi
