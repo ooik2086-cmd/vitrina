@@ -1187,6 +1187,12 @@ class Api {
         if (coverFrame != null) 'cover_frame': coverFrame,
       }) as Map<String, dynamic>);
 
+  /// One pair of [sizeId] sold outside the app (in the chat, paid in hand): it leaves the stock. Sent again with the
+  /// same [idempotencyKey] after a lost answer, it takes nothing more.
+  Future<Listing> markPairSold(int listingId, int sizeId, {required String idempotencyKey}) async => Listing.fromJson(
+      await _send('POST', '/listings/$listingId/sizes/$sizeId/sold', headers: {'Idempotency-Key': idempotencyKey})
+          as Map<String, dynamic>);
+
   Future<Suggestion> suggestDetails(String photoUrl) async => Suggestion.fromJson(
       await _send('POST', '/listings/suggest', body: {'photo_url': photoUrl}) as Map<String, dynamic>);
 

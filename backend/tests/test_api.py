@@ -1489,6 +1489,56 @@ class SellerEditTests(ApiTestCase):
         r = self.patch(lid, {"sizes": [{"id": size_id, "quantity": was + 5, "was": was}]})
         self.assertEqual((r.status_code, r.json()["code"]), (409, "stock_changed"), r.text)  # a real change stops
 
+    def test_a_pair_sold_in_the_chat_leaves_the_stock_once(self):
+        listing = self.publish(sizes=[{"label": "EU 42", "insole_cm": "26,5", "quantity": 2},
+                                      {"label": "EU 43", "insole_cm": "27,0", "quantity": 1}])
+        lid, (a, b) = listing["id"], [s["id"] for s in listing["sizes"]]
+        sold = lambda size, key, token=None: self.post(  # noqa: E731
+            f"/listings/{lid}/sizes/{size}/sold", token or self.seller, **{"Idempotency-Key": key})
+        r = sold(a, "sold-in-chat-1")
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual([s["quantity"] for s in r.json()["sizes"]], [1, 1])
+        again = sold(a, "sold-in-chat-1")  # the answer never reached the phone
+        self.assertEqual([s["quantity"] for s in again.json()["sizes"]], [1, 1])  # nothing more taken
+        r = self.post("/orders", self.buyer, {"listing_id": lid, "size_id": a},  # its other pair goes to an order
+                      **{"Idempotency-Key": "order-meanwhile"})
+        self.assertEqual(r.status_code, 201, r.text)
+        r = sold(b, "sold-in-chat-2")
+        self.assertEqual((r.json()["sizes"][1]["quantity"], r.json()["status"]), (0, "sold"))  # the last pair
+        r = sold(a, "sold-in-chat-3")
+        self.assertEqual((r.status_code, r.json()["code"]), (409, "out_of_stock"), r.text)  # never below nothing
+        self.assertEqual(sold(a, "sold-in-chat-4", self.buyer).status_code, 404)  # only the seller's own
+        self.assertEqual(sold(9999, "sold-in-chat-5").status_code, 404)
+        r = self.post(f"/listings/{lid}/sizes/{a}/sold", self.seller)
+        self.assertEqual((r.status_code, r.json()["code"]), (400, "idempotency_key_required"))  # a key is needed
+        with self.db() as db:
+            self.assertEqual([db.get(ListingSize, i).quantity for i in (a, b)], [0, 0])
+            from vitrina_api.models import AuditLog
+            self.assertEqual(db.scalar(select(func.count(AuditLog.id)).where(AuditLog.action == "mark_pair_sold")), 2)
+
+    def test_a_pair_cannot_be_marked_sold_on_a_listing_never_on_sale_or_hidden(self):
+        r = self.post("/listings", self.seller, LISTING)
+        lid, size = r.json()["id"], r.json()["sizes"][0]["id"]
+        r = self.post(f"/listings/{lid}/sizes/{size}/sold", self.seller, **{"Idempotency-Key": "draft-sold-1"})
+        self.assertEqual((r.status_code, r.json()["code"]), (409, "invalid_status"), r.text)
+        listing = self.publish()
+        lid, size = listing["id"], listing["sizes"][0]["id"]
+        self.post(f"/admin/listings/{lid}/hide", self.make_staff(), {"reason": "fake brand"})
+        r = self.post(f"/listings/{lid}/sizes/{size}/sold", self.seller, **{"Idempotency-Key": "hidden-sold-1"})
+        self.assertEqual((r.status_code, r.json()["code"]), (409, "invalid_status"), r.text)
+
+    def test_a_pair_can_be_marked_sold_on_a_paused_listing_or_one_back_in_moderation(self):
+        listing = self.publish(sizes=[{"label": "EU 42", "insole_cm": "26,5", "quantity": 3}])
+        lid, size = listing["id"], listing["sizes"][0]["id"]
+        self.assertEqual(self.post(f"/listings/{lid}/pause", self.seller).status_code, 200)
+        r = self.post(f"/listings/{lid}/sizes/{size}/sold", self.seller, **{"Idempotency-Key": "paused-sold-1"})
+        self.assertEqual((r.status_code, r.json()["sizes"][0]["quantity"], r.json()["status"]), (200, 2, "paused"))
+        with self.db() as db:
+            db.get(Listing, lid).status = "moderation"  # an edit sent it back to be checked
+            db.commit()
+        r = self.post(f"/listings/{lid}/sizes/{size}/sold", self.seller, **{"Idempotency-Key": "moderation-sold-1"})
+        self.assertEqual((r.status_code, r.json()["sizes"][0]["quantity"]), (200, 1), r.text)
+
     def test_seller_cannot_lift_moderation_hide(self):
         lid = self.publish()["id"]
         staff = self.make_staff()

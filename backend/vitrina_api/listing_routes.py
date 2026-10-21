@@ -593,6 +593,46 @@ def edit_listing(listing_id: int, body: ListingPatch, request: Request, backgrou
     return listing_out(db, listing, owner=True)
 
 
+@router.post("/listings/{listing_id}/sizes/{size_id}/sold")
+def mark_pair_sold(listing_id: int, size_id: int, user: User = Depends(current_user), db: Session = Depends(get_db),
+                   idempotency_key: str | None = Header(default=None, min_length=8, max_length=100)):
+    """One pair of a size sold outside the app, e.g. in the chat and paid in hand while online payment is off: it
+    leaves the stock, so the page stops offering it. Taken from the count as it is now, so a pair that went
+    meanwhile some other way is not put back. Sent again with the same Idempotency-Key (its answer lost on weak
+    mobile data), it takes nothing more."""
+    if not idempotency_key:
+        raise ApiError(400, "idempotency_key_required")  # without it a tap sent again would take a second pair
+    listing = own_listing(db, listing_id, user, lock=True)
+    scope = f"sold:{listing.id}"
+    if IdempotencyRecord.made(db, user.id, scope, idempotency_key):
+        db.rollback()  # nothing to write: let go of the row before the answer is put together
+        return listing_out(db, own_listing(db, listing_id, user), owner=True)
+    # Any listing that has been on sale, also one back in moderation after an edit: taking a pair off only makes it
+    # truer. Not a draft (never sold), nor one moderation hid or the seller archived.
+    if listing.announced_at is None or listing.status in ("hidden", "archived"):
+        raise ApiError(409, "invalid_status")
+    # Locked and read afresh, as an order does: two marks or a mark and an order at once each take their own pair.
+    size = db.scalar(select(ListingSize).where(ListingSize.id == size_id, ListingSize.listing_id == listing.id)
+                     .with_for_update().execution_options(populate_existing=True))
+    if size is None:
+        raise ApiError(404, "not_found")
+    if size.quantity <= 0:
+        raise ApiError(409, "out_of_stock")
+    size.quantity -= 1
+    db.add(IdempotencyRecord(user_id=user.id, scope=scope, key=idempotency_key, result_id=size.id))
+    settle_stock_status(listing)
+    services.audit(db, user.id, "mark_pair_sold", f"listing:{listing.id}", f"size:{size.id}")
+    try:
+        db.commit()
+    except IntegrityError:
+        # The same mark arrived twice at once and the other request took the pair: this one takes nothing.
+        db.rollback()
+        if not IdempotencyRecord.made(db, user.id, scope, idempotency_key):
+            raise
+        listing = own_listing(db, listing_id, user)
+    return listing_out(db, listing, owner=True)
+
+
 def settle_stock_status(listing: Listing) -> None:
     """The one place stock decides status: a live listing with nothing left is sold; a sold one restocked waits,
     paused, for the seller to put it back on sale."""

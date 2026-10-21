@@ -886,6 +886,20 @@ const en = <String, String>{
       'The page goes back to what is saved. All unsaved changes on it will be lost.',
   'Алып тастау': 'Discard',
   'Өзгерістер алып тасталды.': 'Changes discarded.',
+  'Бұл тауардың қалдығы жоқ.': 'This item has no stock left.',
+  'Бір жұп сатылды ма?': 'Was one pair sold?',
+  '{0} өлшемі: {1} жұп еді, {2} жұп қалады.': 'Size {0}: there were {1}, {2} will be left.',
+  'Бұл соңғы жұп. Тауар «Сатылды» деп белгіленеді, оны енді ешкім сатып ала алмайды.':
+      'This is the last pair. The item will be marked “Sold”, and no one can buy it any more.',
+  'Иә, сатылды': 'Yes, sold',
+  'Белгіленді: тауар түгел сатылды.': 'Marked: the item is sold out.',
+  'Белгіленді: {0} өлшемінен {1} жұп қалды.': 'Marked: {1} left in size {0}.',
+  'Қай өлшемі сатылды?': 'Which size was sold?',
+  'Қалдықтан бір жұп алынады.': 'One pair comes off the stock.',
+  'Қалды: {0}': 'Left: {0}',
+  'Бұл тауардың қалдығын қазір өзгерту мүмкін емес.': 'The stock of this item cannot be changed right now.',
+  'Байланыс жоқ. {0} өлшемінің белгісі сақталмаған болуы мүмкін.':
+      'No connection. The mark for size {0} may not have been saved.',
   'Байланыс жоқ. Фото жетпеген болуы мүмкін.': 'No connection. The photo may not have gone.',
   'Байланыс жоқ. Хабарлама жетпеген болуы мүмкін, мәтіні осы жерде тұр.':
       'No connection. The message may not have gone; its text is still here.',

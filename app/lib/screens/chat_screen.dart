@@ -160,6 +160,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   /// be a new one.
   _Photo? _unsentPhoto;
 
+  /// A pair marked sold from this chat whose answer did not come back. Sent again as it was, it is taken once.
+  _Sale? _pendingSale;
+  bool _marking = false;
+
   Api get _api => SessionScope.of(context).api;
 
   @override
@@ -378,6 +382,106 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
+  /// The seller sold a pair in this chat, paid in hand or by transfer: one pair of the chosen size leaves the stock,
+  /// so the page does not offer what is gone.
+  Future<void> _markSold() async {
+    final conv = _conversation;
+    if (!mounted || conv == null || _marking || _pendingSale != null) return;
+    setState(() => _marking = true);
+    try {
+      final listing = await _api.listing(conv.listingId);
+      if (!mounted) return;
+      if (!listing.everOnSale || listing.status == 'hidden' || listing.status == 'archived') {
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(SnackBar(content: Text(tr('Бұл тауардың қалдығын қазір өзгерту мүмкін емес.'))));
+        return;
+      }
+      final left = [
+        for (final x in listing.sizes)
+          if ((x.quantity ?? 0) > 0) x
+      ];
+      if (left.isEmpty) {
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(SnackBar(content: Text(tr('Бұл тауардың қалдығы жоқ.'))));
+        return;
+      }
+      final size = await showModalBottomSheet<ShoeSize>(
+        context: context,
+        isScrollControlled: true,
+        showDragHandle: true,
+        builder: (context) => _SoldSizeSheet(sizes: left),
+      );
+      if (size == null || !mounted) return;
+      final had = size.quantity!;
+      // The page shows it sold only when it was on sale; a paused one stays paused.
+      final last = left.length == 1 && had == 1 && listing.status == 'published';
+      final sure = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text(tr('Бір жұп сатылды ма?')),
+          content: Text([
+            trf('{0} өлшемі: {1} жұп еді, {2} жұп қалады.', [size.label, had, had - 1]),
+            if (last) tr('Бұл соңғы жұп. Тауар «Сатылды» деп белгіленеді, оны енді ешкім сатып ала алмайды.'),
+          ].join('\n\n')),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Болдырмау'))),
+            FilledButton(
+                key: const Key('sold-sure'),
+                onPressed: () => Navigator.pop(context, true),
+                child: Text(tr('Иә, сатылды'))),
+          ],
+        ),
+      );
+      if (sure != true || !mounted) return;
+      await _saveSale((listingId: listing.id, sizeId: size.id, label: size.label, key: newIdempotencyKey()));
+    } catch (e) {
+      if (mounted) showError(context, e);
+    } finally {
+      if (mounted) setState(() => _marking = false);
+    }
+  }
+
+  /// Takes the pair from the count as it is on the server; sent again with its key after a lost answer, it takes
+  /// nothing more. A mark that may have gone stays in a line above the field until it is sent again.
+  Future<void> _saveSale(_Sale sale) async {
+    try {
+      final l = await _api.markPairSold(sale.listingId, sale.sizeId, idempotencyKey: sale.key);
+      if (!mounted) return;
+      setState(() => _pendingSale = null);
+      _saleDone(sale, l.sizes);
+    } catch (e) {
+      if (!mounted) return;
+      // A lost connection or a failing server may still have taken the pair: kept with its key to send again.
+      final unsure = e is ApiException && e.passing;
+      setState(() => _pendingSale = unsure ? sale : null);
+      if (!unsure) showError(context, e);
+    }
+  }
+
+  Future<void> _resendSale() async {
+    final sale = _pendingSale;
+    if (!mounted || sale == null || _marking) return;
+    setState(() => _marking = true);
+    try {
+      await _saveSale(sale);
+    } finally {
+      if (mounted) setState(() => _marking = false);
+    }
+  }
+
+  void _saleDone(_Sale sale, List<ShoeSize> sizes) {
+    final left = sizes.where((x) => x.id == sale.sizeId).firstOrNull?.quantity ?? 0;
+    final gone = sizes.every((x) => (x.quantity ?? 0) == 0);
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(SnackBar(
+          content: Text(gone
+              ? tr('Белгіленді: тауар түгел сатылды.')
+              : trf('Белгіленді: {0} өлшемінен {1} жұп қалды.', [sale.label, left]))));
+  }
+
   /// Puts the kept photo aside; its words come back to the field, as they are the sender's to keep or send.
   void _dropPhoto(_Photo photo) {
     setState(() => _unsentPhoto = null);
@@ -457,7 +561,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                       },
                     ),
         ),
-        if (conv?.role == 'seller') _QuickReplies(onPick: _useReply, payments: _payments),
+        if (conv?.role == 'seller')
+          _QuickReplies(
+              onPick: _useReply, payments: _payments, onSold: _marking || _pendingSale != null ? null : _markSold),
+        if (_pendingSale case final sale?)
+          _NotSentLine(
+            key: const Key('sale-not-sent'),
+            text: trf('Байланыс жоқ. {0} өлшемінің белгісі сақталмаған болуы мүмкін.', [sale.label]),
+            retryKey: 'sale-resend',
+            onRetry: _marking ? null : _resendSale,
+          ),
         if (_unsentPhoto case final photo?)
           _NotSentLine(
             key: const Key('chat-photo-not-sent'),
@@ -522,6 +635,39 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 }
 
+/// One pair of a size marked sold, with the key that makes it count once.
+typedef _Sale = ({int listingId, int sizeId, String label, String key});
+
+/// Which size was sold: only sizes still in stock, each with what is left.
+class _SoldSizeSheet extends StatelessWidget {
+  const _SoldSizeSheet({required this.sizes});
+  final List<ShoeSize> sizes;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: SingleChildScrollView(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          ListTile(
+            title: Text(tr('Қай өлшемі сатылды?'), style: Theme.of(context).textTheme.titleMedium),
+            subtitle: Text(tr('Қалдықтан бір жұп алынады.')),
+          ),
+          for (final x in sizes)
+            ListTile(
+              key: Key('sold-size-${x.id}'),
+              minTileHeight: 56,
+              title: Text(x.label),
+              subtitle: Text(trf('Қалды: {0}', [x.quantity])),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.pop(context, x),
+            ),
+          const SizedBox(height: 8),
+        ]),
+      ),
+    );
+  }
+}
+
 /// A picked photo with what goes with it, as it was sent.
 typedef _Photo = ({Uint8List bytes, String name, String caption, String key});
 
@@ -529,8 +675,17 @@ typedef _Photo = ({Uint8List bytes, String name, String caption, String key});
 /// shown small, so it is clear which one, and can be put aside.
 class _NotSentLine extends StatelessWidget {
   const _NotSentLine(
-      {super.key, required this.text, required this.onRetry, this.photo, this.caption = '', this.onDrop});
+      {super.key,
+      required this.text,
+      required this.onRetry,
+      this.photo,
+      this.caption = '',
+      this.onDrop,
+      this.retryKey});
   final String text;
+
+  /// The retry button's key, where it is not the text's or the photo's.
+  final String? retryKey;
   final VoidCallback? onRetry;
   final Uint8List? photo;
 
@@ -576,7 +731,7 @@ class _NotSentLine extends StatelessWidget {
     ]);
     final buttons = [
       TextButton(
-        key: Key(photo == null ? 'chat-resend' : 'chat-photo-resend'),
+        key: Key(retryKey ?? (photo == null ? 'chat-resend' : 'chat-photo-resend')),
         onPressed: onRetry,
         style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
         child: Text(tr('Қайта көру')),
@@ -697,9 +852,12 @@ class _PhotoViewer extends StatelessWidget {
 }
 
 class _QuickReplies extends StatelessWidget {
-  const _QuickReplies({required this.onPick, required this.payments});
+  const _QuickReplies({required this.onPick, required this.payments, this.onSold});
   final ValueChanged<String> onPick;
   final bool payments;
+
+  /// Marks one pair sold; off while a mark is on its way.
+  final VoidCallback? onSold;
 
   @override
   Widget build(BuildContext context) {
@@ -714,7 +872,16 @@ class _QuickReplies extends StatelessWidget {
             scrollDirection: Axis.horizontal,
             padding: contentPadding(context, const EdgeInsets.fromLTRB(12, 6, 12, 6)),
             children: [
-              // First, so it is never scrolled out of reach.
+              // First, so they are never scrolled out of reach.
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: ActionChip(
+                  key: const Key('mark-sold'),
+                  avatar: const Icon(Icons.check_circle_outline, size: 16),
+                  label: Text(tr('Сатылды')),
+                  onPressed: onSold,
+                ),
+              ),
               Padding(
                 padding: const EdgeInsets.only(right: 8),
                 child: ActionChip(

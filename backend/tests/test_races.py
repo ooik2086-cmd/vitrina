@@ -129,6 +129,29 @@ class RaceTests(ApiTestCase):
         self.assertEqual(len({r.json()["id"] for r in rs}), 1)
         self.assertEqual(self.count(Message, Message.conversation_id == cid), 1)
 
+    def test_the_same_pair_marked_sold_many_times_at_once_is_taken_once(self):
+        listing = self.publish(sizes=[{"label": "EU 42", "insole_cm": "26,5", "quantity": 5}])
+        size = listing["sizes"][0]["id"]
+        rs = self.same(lambda: self.post(f"/listings/{listing['id']}/sizes/{size}/sold", self.seller,
+                                         **{"Idempotency-Key": "sold-in-chat"}))
+        self.assertEqual(self.codes(rs), [200] * N, [r.text[:120] for r in rs])
+        with self.db() as db:
+            self.assertEqual(db.get(ListingSize, size).quantity, 4)
+
+    def test_marks_and_orders_at_once_never_take_more_pairs_than_there_are(self):
+        listing = self.publish(sizes=[{"label": "EU 42", "insole_cm": "26,5", "quantity": 3}])
+        size = listing["sizes"][0]["id"]
+        buyers = [self.login(f"+7701000050{i}") for i in range(N // 2)]
+        marks = [lambda i=i: self.post(f"/listings/{listing['id']}/sizes/{size}/sold", self.seller,
+                                       **{"Idempotency-Key": f"sold-in-chat-{i}"}) for i in range(N // 2)]
+        orders = [lambda t=t: self.post("/orders", t, {"listing_id": listing["id"], "size_id": size},
+                                        **{"Idempotency-Key": "order-at-once"}) for t in buyers]
+        rs = self.race(*[c for pair in zip(marks, orders) for c in pair])
+        self.assertEqual(sum(r.status_code in (200, 201) for r in rs), 3, [r.text[:120] for r in rs])
+        self.assertTrue(all(r.status_code in (200, 201, 409) for r in rs), self.codes(rs))
+        with self.db() as db:
+            self.assertEqual(db.get(ListingSize, size).quantity, 0)
+
     def test_the_same_key_under_an_agreed_price_answers_every_tap_with_its_order(self):
         listing = self.publish(sizes=[{"label": "EU 42", "insole_cm": "26,5", "quantity": 5}])
         size = listing["sizes"][0]["id"]
