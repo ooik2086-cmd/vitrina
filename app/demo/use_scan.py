@@ -1,13 +1,14 @@
 """Puts the frames of the approved Scroll 3D demo page (https://claude.ai/artifact/JC3hb8S7YMjPaxL6jBS1TG) into the
 recorded demo answers, so the app's showcase shows exactly what that page shows: the blue shoe (listing 3) and the
-black one (listing 1), 103 frames of one scan each at 1600 px. The stops (outer, front, inner, back, top, sole,
-close-up) are frames of that same scan, the top, sole and close-up from its sharper renders.
+black one (listing 1), 205 frames of one scan each at 1600 px (the page's fourth version, which turns in 80 frames).
+The stops (outer, front, inner, back, top, sole, close-up) are frames of that same scan, the top, sole and close-up
+from its sharper renders.
 
     python3 app/demo/use_scan.py <folder with frames/blue and frames/black, as the page publishes them>
 
 The pink (beach) and black-and-pink (street) shoes of listings 4, 2 and 6 are scanned the same way from the same
-model by tools/demo-frames/scan.js (their 36-frame turns with separate top and sole photos jumped between views, and
-the cut-out model ate into their white soles):
+model by tools/demo-frames/scan.js, 103 frames each (their 36-frame turns with separate top and sole photos jumped
+between views, and the cut-out model ate into their white soles):
 
     python3 app/demo/use_scan.py <folder with frames/beach and frames/street> --only 2,4,6
 
@@ -17,6 +18,7 @@ Safe to run again. Afterwards run match_sides.py, which matches the side photos 
 """
 import hashlib
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -28,11 +30,19 @@ from vitrina_api import cutout  # noqa: E402
 HERE = Path(__file__).parent
 MEDIA = HERE / "media"
 BASE = "https://raw.githubusercontent.com/ooik2086-cmd/vitrina/claude/initial-code/app/demo/media/"
-FRAMES = 103
-# The page's photo views and its stops: the turn is frames 0-39, then the camera rises over the top (54), goes under
-# the sole (74) and comes in close (102).
-VIEWS = {"outer": 0, "front": 11, "inner": 20, "back": 30, "top": 54, "sole": 74, "detail": 102}
-SHARP = {54, 74, 102}  # the stops: the page has 3200 px copies for zooming in (the cover stays 1600 px, it is shown everywhere)
+# By the number of frames in a scan: its photo views and stops, and the frames of its turn. 103 frames: the turn is
+# frames 0-39, then the camera rises over the top (54), goes under the sole (74) and comes in close (102). 205 frames
+# (the page's fourth version, 4.5 degrees a frame): the turn is frames 0-79, then the rise over the top (108), under
+# the sole (148), back to the side and in close (204). The stops have 3200 px copies for zooming in (the cover stays
+# 1600 px, it is shown everywhere); "photos" are views whose photo, not the frame of the turn, is the 3200 px copy, so
+# the Photo tab zooms them as the demo page does while the turn fetches 1600 px.
+LAYOUTS = {
+    103: {"views": {"outer": 0, "front": 11, "inner": 20, "back": 30, "top": 54, "sole": 74, "detail": 102},
+          "sharp": {54, 74, 102}, "turn": 40},
+    205: {"views": {"outer": 0, "front": 22, "inner": 40, "back": 60, "top": 108, "sole": 148, "detail": 204},
+          "sharp": {108, 148, 204}, "photos": {22, 40}, "turn": 80},
+}
+VIEWS = set(LAYOUTS[103]["views"])
 # Listing: scan folder, and the colour the listing is renamed to (None keeps its own title and colour).
 SHOES = {3: ("blue", "көк"), 1: ("black", "қара"), 4: ("beach", None), 2: ("street", None), 6: ("street", None)}
 FIRST = {1, 3}  # the scans of the approved page; the rest are listed with --only
@@ -46,13 +56,29 @@ def put(data: bytes, ext: str) -> str:
 
 
 def media_of(folder: Path) -> list[dict]:
+    count = sum(1 for p in folder.iterdir() if re.fullmatch(r"f\d{3}\.webp", p.name))
+    layout = LAYOUTS.get(count)
+    if layout is None:
+        sys.exit(f"{folder}: {count} frames; a scan has {' or '.join(map(str, LAYOUTS))}")
+    sharp = layout["sharp"] | layout.get("photos", set())
+    missing = [n for n in [f"f{i:03d}.webp" for i in range(count)] + [f"u{i:03d}.webp" for i in sorted(sharp)]
+               if not (folder / n).is_file()]
+    if missing:  # checked before anything is written
+        sys.exit(f"{folder}: missing {', '.join(missing)}")
     frames = []
-    for i in range(FRAMES):
-        src = folder / (f"u{i:03d}.webp" if i in SHARP else f"f{i:03d}.webp")
+    for i in range(count):
+        # The turn's end shows the shoe exactly as its start (the same picture, encoded apart): the same file, so the
+        # app and the server see where one turn ends.
+        k = 0 if i == layout["turn"] else i
+        src = folder / (f"u{k:03d}.webp" if k in layout["sharp"] else f"f{k:03d}.webp")
         url = put(src.read_bytes(), "webp")
-        thumb = put(cutout.make_thumb((folder / f"f{i:03d}.webp").read_bytes()), "webp")
+        thumb = put(cutout.make_thumb((folder / f"f{k:03d}.webp").read_bytes()), "webp")
         frames.append({"original_url": url, "processed_url": url, "angle": "frame", "thumb_url": thumb})
-    photos = [{**frames[i], "angle": angle} for angle, i in VIEWS.items()]
+    photos = [{**frames[i], "angle": angle} for angle, i in layout["views"].items()]
+    for p in photos:
+        i = layout["views"][p["angle"]]
+        if i in layout.get("photos", ()):
+            p["original_url"] = p["processed_url"] = put((folder / f"u{i:03d}.webp").read_bytes(), "webp")
     return photos + frames
 
 

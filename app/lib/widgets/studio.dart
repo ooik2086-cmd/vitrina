@@ -185,26 +185,28 @@ class _ContactShadowState extends State<ContactShadow> {
   }
 }
 
+/// Draws [shadow] where its photo is drawn in [size] with [fit] (centred, as Image lays it out), a little lower.
+void paintShadow(Canvas canvas, Size size, MadeShadow shadow, BoxFit fit) {
+  final fitted = applyBoxFit(fit, shadow.photo, size);
+  final scale = fitted.destination.width / fitted.source.width;
+  final photo = Alignment.center.inscribe(shadow.photo * scale, Offset.zero & size);
+  final drop = math.min(photo.height * ContactShadow.drop, ContactShadow.maxDrop);
+  final img = shadow.image;
+  canvas
+    ..save()
+    ..clipRect(Offset.zero & size)
+    ..drawImageRect(img, Rect.fromLTWH(0, 0, img.width.toDouble(), img.height.toDouble()),
+        photo.shift(Offset(0, drop)), Paint()..filterQuality = FilterQuality.high) // drawn large, a soft edge
+    ..restore();
+}
+
 class _ShadowPainter extends CustomPainter {
   _ShadowPainter(this.shadow, this.fit);
   final MadeShadow shadow;
   final BoxFit fit;
 
   @override
-  void paint(Canvas canvas, Size size) {
-    // Where the whole photo is drawn with this fit, as Image lays it out (centred).
-    final fitted = applyBoxFit(fit, shadow.photo, size);
-    final scale = fitted.destination.width / fitted.source.width;
-    final photo = Alignment.center.inscribe(shadow.photo * scale, Offset.zero & size);
-    final drop = math.min(photo.height * ContactShadow.drop, ContactShadow.maxDrop);
-    final img = shadow.image;
-    canvas
-      ..save()
-      ..clipRect(Offset.zero & size)
-      ..drawImageRect(img, Rect.fromLTWH(0, 0, img.width.toDouble(), img.height.toDouble()),
-          photo.shift(Offset(0, drop)), Paint()..filterQuality = FilterQuality.high) // drawn large, a soft edge
-      ..restore();
-  }
+  void paint(Canvas canvas, Size size) => paintShadow(canvas, size, shadow, fit);
 
   @override
   bool shouldRepaint(_ShadowPainter old) => old.shadow != shadow || old.fit != fit;

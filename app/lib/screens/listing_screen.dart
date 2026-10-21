@@ -452,6 +452,8 @@ class _ListingScreenState extends State<ListingScreen> {
       view = next == null ? null : ScrollShowcase.carry(view, l, next);
     }
     final size = l.sizes.where((s) => s.id == _sizeId).firstOrNull?.label;
+    // This colour's small copies go before the next colour decodes its own; the shoe on the stage stays for the fade.
+    _showcase.currentState?.release();
     Navigator.of(context).pushReplacement(PageRouteBuilder(
       transitionDuration: const Duration(milliseconds: 200),
       reverseTransitionDuration: const Duration(milliseconds: 200),

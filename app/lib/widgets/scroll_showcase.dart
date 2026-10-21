@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
+import 'package:clock/clock.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart';
@@ -204,7 +205,9 @@ class TurnMap {
 
 /// Which photo shows at a given scroll position. Only real photos are shown: nothing is generated or blended.
 class ShowcasePlan {
-  /// How many widths of the shoe's picture a sideways drag goes to turn it once round, here and on the cards.
+  /// How many widths of the shoe's picture a sideways drag goes to turn a catalog card's shoe once round, and the
+  /// measure of a flick's coast on the listing page. The listing page's drag itself turns at the demo page's rate
+  /// (ScrollShowcaseState.turnDrag).
   static const turnWidths = 1.5;
 
   ShowcasePlan(this.steps, {this.scan = false, int? turn})
@@ -324,6 +327,16 @@ class ShowcasePlan {
   double centreOf(int step, int frame) =>
       startOf(step) + steps[step].weight * (frame + 0.5) / steps[step].media.length / total;
 
+  /// The share of the scroll one full turn of frames takes.
+  late final double turnShare =
+      total <= 0 || steps.first.media.isEmpty ? 0 : steps.first.weight * turn / steps.first.media.length / total;
+
+  /// The smallest share of the scroll one photo takes: the stage's glide stops within a fiftieth of it.
+  late final double photoShare = [
+    for (final s in steps)
+      if (s.media.isNotEmpty && total > 0) s.weight / s.media.length / total
+  ].fold(1.0, math.min);
+
   /// Every photo in showing order.
   late final List<({int step, int frame})> photos = [
     for (var i = 0; i < steps.length; i++)
@@ -398,7 +411,7 @@ class ScrollShowcase extends StatefulWidget {
     final step = plan.steps[shown.step];
     final m = step.media[shown.frame];
     if (m.thumbUrl == null || !(step.cut || m.processedUrl == null)) return null;
-    return ResizeImage.resizeIfNeeded(ScrollShowcaseState.thumbSide, null, netImage(m.thumbUrl!));
+    return ScrollShowcaseState.smallCopy(m.thumbUrl!, ScrollShowcaseState.smallSide(plan.photos.length));
   }
 
   /// [view] of [from] as [to] shows it: the same side of the turn when both turns' sides are known, else the
@@ -452,17 +465,35 @@ class ScrollShowcase extends StatefulWidget {
   State<ScrollShowcase> createState() => ScrollShowcaseState();
 }
 
-class ScrollShowcaseState extends State<ScrollShowcase> with TickerProviderStateMixin {
+class ScrollShowcaseState extends State<ScrollShowcase>
+    with TickerProviderStateMixin, WidgetsBindingObserver, AutomaticKeepAliveClientMixin {
+  // Kept while the page scrolls far down to the details, so coming back up finds its small copies decoded.
+  @override
+  bool get wantKeepAlive => true;
+
   late ShowcasePlan _plan;
   late bool _light;
   bool _settled = true;
   Timer? _settle;
+
+  /// The photo on the stage: the one at [_pos], which follows the page with a short glide.
   ({int step, int frame}) _shown = (step: 0, frame: 0);
+
+  /// Where the stage is, in scroll progress. Every screen refresh it eases toward where the page is, as on the demo
+  /// page, so uneven scroll events make an even turn; only real frames are drawn, the one at this place.
+  double _pos = 0;
+  late final Ticker _glide = createTicker(_glideTick);
+  Duration? _lastGlide;
+  bool _turning = false; // the page jumps because a finger turns the shoe on the stage: that glides too
+  bool _seam = false; // a finger took the shoe round its turn's end while the stage glides after it
+
+  /// Tells the stage's painter to draw again: the shoe moved on a frame, or a small copy it waited for arrived.
+  final _drawn = ValueNotifier<int>(0);
   bool _precached = false;
-  // The last few full photos shown, newest last. Older ones are dropped from memory so they cannot push the small
-  // scrolling copies out of the image cache, but going back to a photo just seen, or zooming out, finds it ready.
+  // The last full photos shown, newest last, as on the demo page. Older ones are dropped from memory, but going back
+  // to a photo just seen, or zooming out, finds it ready. The image cache's own limit still caps the memory.
   final _recentFull = <ImageProvider>[];
-  static const _keepFull = 3;
+  static const _keepFull = 24;
   int? _jumpingTo; // a stop button was tapped: tick once on arrival, not for every stop passed
   bool _jumping = false; // while a stop button's jump animates the page there
   /// How often the stage was built; tests check that scrolling within one frame does not rebuild it.
@@ -498,6 +529,8 @@ class ScrollShowcaseState extends State<ScrollShowcase> with TickerProviderState
   void initState() {
     super.initState();
     _spin; // made now, not on first touch: making it in dispose, after the widget left the tree, is not allowed
+    _glide;
+    WidgetsBinding.instance.addObserver(this);
     _setUp();
     widget.scroll.addListener(_onScroll);
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -511,9 +544,12 @@ class ScrollShowcaseState extends State<ScrollShowcase> with TickerProviderState
     if (_spinSim != null) _stopSpin();
     _tiltBack.stop();
     _tilt = 0;
-    _dropSharp(); // another listing or colour: the last one's copies would only take memory
+    _dropSmall(); // another listing or colour: the last one's copies would only take memory
     _light = widget.listing.backdrop != 'dark';
-    _shown = (step: 0, frame: 0);
+    if (_glide.isActive) _glide.stop();
+    _seam = false;
+    _pos = _progress;
+    _shown = _plan.at(_pos);
     _scale = 1;
     _pan = Offset.zero;
     _photoEdge = null;
@@ -530,6 +566,8 @@ class ScrollShowcaseState extends State<ScrollShowcase> with TickerProviderState
       old.scroll.removeListener(_onScroll);
       widget.scroll.addListener(_onScroll);
     }
+    // Another height (the phone turned, the window resized): the same scroll offset is another place in the turn.
+    if (old.stageHeight != widget.stageHeight) _land();
     // The listing was reloaded with other photos (the seller replaced them): show the new ones, not the old plan.
     if (_signature(old.listing) != _signature(widget.listing)) {
       _setUp();
@@ -543,14 +581,33 @@ class ScrollShowcaseState extends State<ScrollShowcase> with TickerProviderState
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    // Covered by another page: the ticker is muted, and the shoe would jump to the spin's end when it came back. Its
+    // small copies are let go meanwhile, and decoded again when it comes back.
+    final covered = !TickerMode.valuesOf(context).enabled;
+    if (covered) _stopSpin();
+    _setHidden(covered || _paused);
     _precache();
-    // Covered by another page: the ticker is muted, and the shoe would jump to the spin's end when it came back.
-    if (!TickerMode.valuesOf(context).enabled) _stopSpin();
   }
 
-  /// What the stage draws first for a photo: the small copy, or the photo decoded at screen size if there is none.
-  /// Precaching asks for exactly this provider, so the cache is hit.
-  static const thumbSide = 400;
+  /// How wide the small copies the stage draws while the shoe moves are decoded: 400 px as on the demo page, or
+  /// narrower when a very long scan's [photos] would not fit in about 140 MB (four bytes a pixel, square frames).
+  /// Once the phone has said it is short of memory, every stage keeps within about 64 MB instead (about 280 px for
+  /// a 205-frame scan), as the demo spec asks for weak phones.
+  static int smallSide(int photos) {
+    final budget = (shortOfMemory ? 64 : 140) << 20;
+    return photos <= 0 ? 400 : math.min(400, math.sqrt(budget / 4 / photos).floor());
+  }
+
+  /// Set when the phone reported memory pressure, for the rest of the app's run.
+  @visibleForTesting
+  static bool shortOfMemory = false;
+
+  /// A small copy as the stage decodes it, so fetching it ahead (ScrollShowcase.firstImageAt) is what it finds.
+  static ImageProvider smallCopy(String url, int side) => ResizeImage.resizeIfNeeded(side, null, smallSource(url));
+
+  /// Where the small copies come from; tests replace it with pictures that decode.
+  @visibleForTesting
+  static ImageProvider Function(String url) smallSource = netImage;
 
   /// Where a photo is fetched at screen size when it has no small copy to scroll with; tests replace it.
   @visibleForTesting
@@ -561,98 +618,275 @@ class ScrollShowcaseState extends State<ScrollShowcase> with TickerProviderState
   /// each, did not fit the image cache anyway: most were dropped again before they were shown.
   static const fullAhead = 3;
 
+  /// What the stage draws for a photo without a small copy: the photo decoded at screen size.
   ImageProvider _base(MediaItem m, ShowcaseStep step) {
-    // 400 px, as the demo page's scrolling copies: a scan's hundred or so frames then fit the image cache.
-    if (_small(m, step)) return ResizeImage.resizeIfNeeded(thumbSide, null, netImage(m.thumbUrl!));
     final width = (MediaQuery.sizeOf(context).width * MediaQuery.devicePixelRatioOf(context)).round();
     return ResizeImage.resizeIfNeeded(math.min(2000, width), null, screenSize(step.cut ? m.url : m.originalUrl));
   }
 
-  /// The sharp copy shown while the shoe moves, once it is ready: the photo decoded at the shoe's size on screen (at
-  /// most 800 px), for the photos near the one shown. The 400 px small copies looked soft on a phone mid-turn and
-  /// only came sharp when the shoe stopped; a hundred photos at this size would not fit in memory, so only a window
-  /// round the shoe is kept and the rest show their small copy until the shoe comes near them.
-  ImageProvider _mid(MediaItem m, ShowcaseStep step) {
-    final side = (MediaQuery.sizeOf(context).width * MediaQuery.devicePixelRatioOf(context) * 0.8).round();
-    return ResizeImage.resizeIfNeeded(math.min(800, side), null, netImage(step.cut ? m.url : m.originalUrl));
+  /// The small copies the stage draws while the shoe moves, by address: all decoded when the page opens and held
+  /// here, outside the image cache. The cache dropped some of a scan's frames to make room and decoded them again
+  /// mid-turn, which is where the turn stuttered; the sharper copies swapped in mid-turn made it flicker. They are let
+  /// go, all but the one on the stage, while another page covers this one, the app is in the background or the
+  /// phone is short of memory, and decoded again (from the copies kept on the phone) when it comes back.
+  final _smalls = <String, ui.Image>{};
+
+  /// The shadows a seller's cut-out turn stands on, made from those copies.
+  final _shadows = <String, MadeShadow>{};
+
+  /// Small copies still to ask for, by where each first comes in showing order, and those asked for now.
+  final _waiting = <String, int>{};
+  final _asking = <String>{};
+
+  /// How many at a time: the frames the buyer reaches next come first instead of sharing a weak connection with two
+  /// hundred others, as the catalog cards' turns do.
+  static const decodeAtOnce = 6;
+
+  /// Small copies that did not come, with how many tries and when the last one failed. Such a photo is drawn as one
+  /// without a small copy (the photo itself at screen size, or the missing-photo mark), never as another photo, and
+  /// is asked for again a few seconds later, and again whenever the shoe comes to it.
+  final _failedSmall = <String, ({int tries, DateTime at})>{};
+  Timer? _retry;
+  static const _retryAfter = [Duration(seconds: 2), Duration(seconds: 5), Duration(seconds: 15)];
+
+  int _smallsFor = 0; // the decoding under way: a reload or another colour starts again and the old one's are let go
+  int _side = 400;
+  String? _drawnUrl; // the small copy drawn last: it stays until the next one is there, so the shoe never blinks out
+  bool _hidden = false; // another page covers this one, or the app is in the background
+
+  /// Lets every small copy go but [keep]'s, and stops asking for more.
+  void _dropSmall({String? keep}) {
+    _smallsFor++;
+    _retry?.cancel();
+    _retry = null;
+    _waiting.clear();
+    _asking.clear();
+    _failedSmall.clear();
+    for (final e in _smalls.entries) {
+      if (e.key != keep) e.value.dispose();
+    }
+    for (final e in _shadows.entries) {
+      if (e.key != keep) e.value.image.dispose();
+    }
+    _smalls.removeWhere((url, _) => url != keep);
+    _shadows.removeWhere((url, _) => url != keep);
+    if (_drawnUrl != keep) _drawnUrl = null;
   }
 
-  /// Photos whose sharp moving copy is decoded, by their address, least recently wanted first.
-  final _sharp = <String, ImageProvider>{};
-  // 12 at 800 px is about 30 MB, which leaves the image cache room for a scan's hundred small copies.
-  static const sharpAhead = 4, _keepSharp = 12;
+  /// Lets the small copies go, all but the one on the stage so the page still shows its shoe: for another colour
+  /// opening in its place, whose own copies would otherwise be decoded while these are still held.
+  void release() => _dropSmall(keep: _drawnUrl ?? _smallUrl(_tilted ?? _shown));
 
-  /// Gets the sharp moving copies of the photos [around] ready, and lets go of the oldest beyond what memory holds.
-  /// Only for the turn's own frames, and not while a flick coasts: then the frames pass too fast to see the
-  /// difference, and fetching each would cost data and decoding the phone needs for the turn itself.
-  void _sharpen(Iterable<({int step, int frame})> around) {
-    if (_spin.isTicking) return;
-    for (final at in around) {
-      if (at.step != 0) continue; // the stops' photos are 3200 px: their full photo shows once the shoe is still
-      final s = _plan.steps[at.step];
-      final m = s.media[at.frame];
-      if (!_small(m, s) || _failedSharp.contains(m.url)) continue;
-      final had = _sharp.remove(m.url);
-      if (had != null) {
-        _sharp[m.url] = had; // wanted again: kept longest
-        continue;
-      }
-      final mid = _mid(m, s);
-      _sharp[m.url] = mid; // claimed now so it is fetched once; shown only once decoded (see _shownCopy)
-      _pendingSharp.add(m.url);
-      bool mine() => identical(_sharp[m.url], mid); // not a later claim of the same photo after this one went
-      precacheImage(mid, context, onError: (_, __) {
-        if (!mine()) return;
-        _sharp.remove(m.url);
-        _failedSharp.add(m.url); // not asked again on every frame; its small copy stays
-      }).then((_) {
-        if (!mine()) return;
-        _pendingSharp.remove(m.url);
-        if (mounted && _shownUrl == m.url) setState(() {}); // the one on screen sharpens
-      });
+  /// Asks for every small copy of the plan not held yet, a few at a time, nearest the shoe first.
+  void _decodeSmall() {
+    if (_hidden) return;
+    final photos = _plan.photos;
+    _side = smallSide(photos.length);
+    for (var i = photos.length - 1; i >= 0; i--) {
+      final s = _plan.steps[photos[i].step];
+      final m = s.media[photos[i].frame];
+      if (_small(m, s) && !_smalls.containsKey(m.thumbUrl)) _waiting[m.thumbUrl!] = i; // where it first comes
     }
-    while (_sharp.length > _keepSharp) {
-      final oldest = _sharp.keys.first;
-      _pendingSharp.remove(oldest);
-      _sharp.remove(oldest)!.evict();
-    }
+    _askMore();
   }
 
-  final _pendingSharp = <String>{}, _failedSharp = <String>{};
-
-  void _dropSharp() {
-    for (final p in _sharp.values) {
-      p.evict();
-    }
-    _sharp.clear();
-    _pendingSharp.clear();
-    _failedSharp.clear();
-  }
-  String? _shownUrl;
-
-  /// The photos either way of [at] in showing order, and on the turn round it, as [_fetchNear] goes.
-  Iterable<({int step, int frame})> _near(({int step, int frame}) at, int ahead) sync* {
-    final all = _plan.photos;
-    final i = all.indexOf(at);
-    if (i < 0) return;
-    yield at;
+  /// Starts the next small copies, each time the one nearest where the page is: a buyer who scrolls ahead, or a colour
+  /// opened part way round, gets the frames there first.
+  void _askMore() {
+    if (!mounted || _hidden) return;
+    final photos = _plan.photos;
+    final here = math.max(0, photos.indexOf(_target));
     final turn = _plan.turn;
-    for (var d = 1; d <= ahead; d++) {
-      if (at.step == 0 && at.frame < turn) {
-        yield (step: 0, frame: (at.frame + d) % turn);
-        yield (step: 0, frame: (at.frame - d + turn) % turn);
-      } else {
-        if (i + d < all.length) yield all[i + d];
-        if (i - d >= 0) yield all[i - d];
-      }
+    int apart(int i) {
+      final d = (i - here).abs();
+      // Round the turn too: its last frame is next to its first.
+      return here < turn && i < turn && photos[here].step == 0 && photos[i].step == 0 ? math.min(d, turn - d) : d;
+    }
+
+    final config = createLocalImageConfiguration(context);
+    while (_asking.length < decodeAtOnce && _waiting.isNotEmpty) {
+      final next = _waiting.keys.reduce((a, b) => apart(_waiting[a]!) <= apart(_waiting[b]!) ? a : b);
+      _waiting.remove(next);
+      _ask(next, config);
     }
   }
 
-  /// What the stage draws for [m] while it moves: its sharp copy once decoded, else its small one.
-  ImageProvider _shownCopy(MediaItem m, ShowcaseStep step) {
-    final mid = _sharp[m.url];
-    return mid != null && !_pendingSharp.contains(m.url) ? mid : _base(m, step);
+  void _ask(String url, ImageConfiguration config) {
+    final run = _smallsFor;
+    final shadowed = _shadowed(_plan.steps[_plan.photos[_indexOf(url)].step]);
+    final copy = smallCopy(url, _side);
+    final cache = PaintingBinding.instance.imageCache;
+    _asking.add(url);
+    void next() {
+      if (run != _smallsFor) return;
+      _asking.remove(url);
+      _askMore();
+    }
+
+    copy.obtainKey(config).then((key) {
+      if (!mounted || run != _smallsFor) return;
+      // A copy already in the cache is someone else's too (a catalog card turns the same frames): it stays there for
+      // them. One this stage brought in is let go there once held here, or it would count twice against the limit.
+      final theirs = cache.containsKey(key);
+      final stream = copy.resolve(config);
+      late final ImageStreamListener listener;
+      listener = ImageStreamListener((info, _) {
+        stream.removeListener(listener);
+        if (!theirs) cache.evict(key);
+        if (!mounted || run != _smallsFor) return info.dispose();
+        final image = _smalls[url] = info.image.clone();
+        info.dispose();
+        // It had failed before: the stage drew that photo itself, and now draws the copy again.
+        _failedSmall.remove(url) == null ? _arrived(url) : setState(() {});
+        next();
+        if (!shadowed) return;
+        silhouette(image).then((shadow) {
+          if (!mounted || run != _smallsFor || !_smalls.containsKey(url)) return shadow.dispose();
+          _shadows[url] = (image: shadow, photo: Size(image.width.toDouble(), image.height.toDouble()));
+          _arrived(url);
+        }, onError: (Object _) {});
+      }, onError: (_, __) {
+        stream.removeListener(listener);
+        cache.evict(key); // not kept failed: asked again, it is fetched again
+        if (!mounted || run != _smallsFor) return;
+        final tries = (_failedSmall[url]?.tries ?? 0) + 1;
+        _failedSmall[url] = (tries: tries, at: clock.now());
+        if (url == _smallUrlOf(_tilted ?? _shown)) setState(() {}); // drawn now as a photo without a small copy
+        if (tries <= _retryAfter.length) _retrySoon(_retryAfter[tries - 1]);
+        next();
+      });
+      stream.addListener(listener);
+    }, onError: (Object _) => next());
   }
+
+  /// Asks again, after [wait], for the small copies that failed fewer than three times.
+  void _retrySoon(Duration wait) {
+    if (_retry != null) return;
+    _retry = Timer(wait, () {
+      _retry = null;
+      if (!mounted) return;
+      _failedSmall.forEach((url, f) {
+        if (f.tries <= _retryAfter.length && !_asking.contains(url)) _waiting[url] = _indexOf(url);
+      });
+      _askMore();
+    });
+  }
+
+  /// A copy that failed every try is asked for again when the shoe comes to it, at most every 15 s.
+  void _retryShown() {
+    final url = _smallUrlOf(_tilted ?? _shown);
+    final failed = url == null ? null : _failedSmall[url];
+    if (failed == null || failed.tries <= _retryAfter.length || _asking.contains(url) || _waiting.containsKey(url)) {
+      return;
+    }
+    if (clock.now().difference(failed.at) < _retryAfter.last) return;
+    _waiting[url!] = _indexOf(url);
+    _askMore();
+  }
+
+  int _indexOf(String url) {
+    final photos = _plan.photos;
+    for (var i = 0; i < photos.length; i++) {
+      if (_plan.steps[photos[i].step].media[photos[i].frame].thumbUrl == url) return i;
+    }
+    return 0;
+  }
+
+  /// Comes back to the page: covered by another page, or not, as the ticker says.
+  void _setHidden(bool hidden) {
+    if (hidden == _hidden) return;
+    _hidden = hidden;
+    if (hidden) return release();
+    _decodeSmall();
+  }
+
+  @override
+  void didHaveMemoryPressure() {
+    // Smaller copies from now on, here and on every stage after: decoded again around the shoe at once.
+    shortOfMemory = true;
+    release();
+    _decodeSmall();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused) {
+      _paused = true;
+      _setHidden(true);
+    } else if (state == AppLifecycleState.resumed && _paused) {
+      _paused = false;
+      _setHidden(!TickerMode.valuesOf(context).enabled);
+    }
+  }
+
+  bool _paused = false;
+
+  /// A small copy came: the stage draws again if it is the one it wants, or it is drawing another one meanwhile.
+  void _arrived(String url) {
+    final want = _smallUrl(_tilted ?? _shown);
+    if (want == url || _drawnUrl != want) _redraw();
+  }
+
+  void _redraw() => _drawn.value++;
+
+  /// The address of the small copy for [at], or null when the stage draws that photo itself (it has none, or its
+  /// copy did not come).
+  String? _smallUrl(({int step, int frame}) at) {
+    final url = _smallUrlOf(at);
+    return url == null || _failedSmall.containsKey(url) ? null : url;
+  }
+
+  /// The address of [at]'s small copy, whether it came or not.
+  String? _smallUrlOf(({int step, int frame}) at) {
+    final s = _plan.steps[at.step];
+    final m = s.media[at.frame];
+    return _small(m, s) ? m.thumbUrl : null;
+  }
+
+  /// Whether the stage draws [m] from its small copy.
+  bool _drawsSmall(MediaItem m, ShowcaseStep s) => _small(m, s) && !_failedSmall.containsKey(m.thumbUrl);
+
+  /// The small copy the stage draws now, with its shadow: the photo's own, or while it is still on its way the
+  /// nearest one of the same step that is there, or the one drawn last.
+  ({ui.Image image, MadeShadow? shadow})? _drawable() {
+    final at = _tilted ?? _shown;
+    final s = _plan.steps[at.step];
+    String? there(int f) =>
+        f >= 0 && f < s.media.length && _smalls.containsKey(s.media[f].thumbUrl) ? s.media[f].thumbUrl : null;
+    var url = there(at.frame);
+    for (var d = 1; url == null && d < s.media.length; d++) {
+      url = there(at.frame - d) ?? there(at.frame + d);
+    }
+    url ??= _smalls.containsKey(_drawnUrl) ? _drawnUrl : null;
+    if (url == null) return null;
+    _drawnUrl = url;
+    return (image: _smalls[url]!, shadow: castsShadow ? _shadows[url] : null);
+  }
+
+  /// Whether the shoe on the stage now stands on a shadow of its own: a seller's cut-out turning on a light floor
+  /// (a shadow would not show on a dark one, a scan's frames have theirs in them, the sole stands on nothing).
+  @visibleForTesting
+  bool get castsShadow {
+    final s = _plan.steps[(_tilted ?? _shown).step];
+    return _shadowed(s) && !_onDark(s) && !_zoomed;
+  }
+
+  /// The small copies the stage holds decoded now, by address.
+  @visibleForTesting
+  Map<String, ui.Image> get smallImages => Map.unmodifiable(_smalls);
+
+  /// The address of the small copy the painter drew last.
+  @visibleForTesting
+  String? get paintedSmall => _drawnUrl;
+
+  /// The shadows made from the small copies, by address.
+  @visibleForTesting
+  Map<String, MadeShadow> get smallShadows => Map.unmodifiable(_shadows);
+
+  /// The address of the small copy the stage draws for the photo on it, even while that copy is on its way; null
+  /// when the stage draws the photo itself.
+  @visibleForTesting
+  String? get drawnSmall => _smallUrl(_tilted ?? _shown);
 
   /// Whether the stage scrolls through [m]'s small copy rather than the photo itself.
   static bool _small(MediaItem m, ShowcaseStep step) => m.thumbUrl != null && (step.cut || m.processedUrl == null);
@@ -666,19 +900,14 @@ class ScrollShowcaseState extends State<ScrollShowcase> with TickerProviderState
   void _precache() {
     if (_precached) return;
     _precached = true;
-    // The small copies scrolling shows are fetched first, in showing order. Of photos without one: the first of
-    // each stop, where scrolling on or a stop button lands (a stop is one photo, a scan's a few), and those near
-    // the shoe where the page actually is (a colour opened at the same side starts part way round).
-    for (final s in _plan.steps) {
-      for (final m in s.media) {
-        if (_small(m, s)) _fetch(m, s);
-      }
-    }
+    // The small copies scrolling shows are decoded first. Of photos without one: the first of each stop, where
+    // scrolling on or a stop button lands (a stop is one photo, a scan's a few), and those near the shoe where the
+    // page actually is (a colour opened at the same side starts part way round).
+    _decodeSmall();
     for (var i = 1; i < _plan.steps.length; i++) {
       _fetchNear((step: i, frame: 0), ahead: 0);
     }
     _fetchNear(_plan.at(_progress));
-    _sharpen(_near(_plan.at(_progress), sharpAhead));
     final first = _plan.steps.first;
     if (!first.cut && first.media.isNotEmpty) _sampleEdge(_base(first.media.first, first));
   }
@@ -689,7 +918,7 @@ class ScrollShowcaseState extends State<ScrollShowcase> with TickerProviderState
   void _fetchNear(({int step, int frame}) at, {int ahead = fullAhead}) {
     void fetch(int step, int frame) {
       final s = _plan.steps[step];
-      if (!_small(s.media[frame], s)) _fetch(s.media[frame], s);
+      if (!_drawsSmall(s.media[frame], s)) _fetch(s.media[frame], s);
     }
 
     final all = _plan.photos;
@@ -741,7 +970,9 @@ class ScrollShowcaseState extends State<ScrollShowcase> with TickerProviderState
   @override
   void dispose() {
     widget.scroll.removeListener(_onScroll);
+    WidgetsBinding.instance.removeObserver(this);
     _spin.dispose();
+    _glide.dispose();
     _tiltBack.dispose();
     _pageDrag = null; // the list's position ends its own drag as it goes
     _settle?.cancel();
@@ -750,7 +981,8 @@ class ScrollShowcaseState extends State<ScrollShowcase> with TickerProviderState
     for (final p in _recentFull) {
       p.evict();
     }
-    _dropSharp();
+    _dropSmall();
+    _drawn.dispose();
     super.dispose();
   }
 
@@ -780,48 +1012,113 @@ class ScrollShowcaseState extends State<ScrollShowcase> with TickerProviderState
       _tilt = 0;
       setState(() {});
     }
-    final now = _plan.at(_progress);
-    _reportTop();
-    if (now != _shown) {
-      if (now.step != _shown.step) {
-        if (_jumpingTo == null || _jumpingTo == now.step) {
-          HapticFeedback.selectionClick();
-          _jumpingTo = null;
-        }
-      }
-      _shown = now;
-      // Not for each frame a stop button's jump only passes: its landing was fetched when it was tapped.
-      if (!_jumping) {
-        _fetchNear(now);
-        _sharpen(_near(now, sharpAhead));
-      }
-      // Small copies while turning; the full photo once the shoe has stopped on one frame for a moment.
-      _settled = false;
-      _settleSoon();
-      setState(() {});
+    // The buyer scrolls, the page coasts or animates to a stop, or a finger turns the shoe: the stage glides after
+    // it. A jump nobody watched move (another colour opened at the same view, a screen reader's step) lands at once.
+    final want = _progress;
+    final glide = !_reduceMotion && (_turning || _scrolling);
+    if (!glide || (want - _pos).abs() < _plan.photoShare * 0.02) {
+      _land();
+    } else if (!_glide.isActive) {
+      _lastGlide = null;
+      _glide.start();
     }
+    _reportTop();
     // Otherwise only the stage's position changes, which _PinStage repaints without rebuilding anything. A screen
     // reader still needs the moved boxes, or its focus frames stay where the stage was.
     if (SemanticsBinding.instance.semanticsEnabled) _pin.currentContext?.findRenderObject()?.markNeedsSemanticsUpdate();
   }
 
-  /// The full photo once the shoe has stopped on one photo for a moment: 140 ms after the finger is lifted, or
-  /// 450 ms while it rests on the shoe. Decoding one at every short pause mid-drag made the turn stutter; a longer
-  /// pause is someone looking closely, who should get the sharp photo.
+  bool get _scrolling => widget.scroll.hasClients && widget.scroll.position.isScrollingNotifier.value;
+
+  /// One screen refresh of the glide: the stage closes a fifth of the way to the page every 16.7 ms (at any refresh
+  /// rate) and stops within a fiftieth of a photo.
+  void _glideTick(Duration elapsed) {
+    final last = _lastGlide;
+    _lastGlide = elapsed;
+    final dt = last == null ? 16.7 : math.min(64.0, (elapsed - last).inMicroseconds / 1000);
+    final want = _progress;
+    _pos += (want - _pos) * (1 - math.pow(0.8, dt / 16.7));
+    if ((want - _pos).abs() < _plan.photoShare * 0.02) return _land();
+    _show();
+  }
+
+  /// The stage comes to where the page is, at once.
+  void _land() {
+    if (_glide.isActive) _glide.stop();
+    _seam = false;
+    _pos = _progress;
+    _show();
+  }
+
+  /// A finger on the shoe takes it where it is seen: the page comes back to the frame the stage shows, so turning,
+  /// tilting or zooming starts from it, not from where the glide was heading.
+  void _holdShown() {
+    if (!_glide.isActive || !widget.scroll.hasClients) return;
+    _glide.stop();
+    _seam = false;
+    widget.scroll.jumpTo(_plan.centreOf(_shown.step, _shown.frame) * _travel);
+  }
+
+  /// Shows the photo at [_pos]. Moving on within the small copies only draws the stage again; the page is built
+  /// again when the step changes, when the full photo was showing, or for photos drawn without a small copy.
+  void _show() {
+    var at = _pos;
+    if (_seam) {
+      // Gone round the turn's end: the stage keeps its distance behind the finger and goes on round with it.
+      final turn = _plan.turnShare;
+      at = at < 0 ? at + turn : (at >= turn ? at - turn : at);
+    }
+    final now = _plan.at(at);
+    if (now == _shown) return;
+    final step = now.step != _shown.step;
+    if (step && (_jumpingTo == null || _jumpingTo == now.step)) {
+      HapticFeedback.selectionClick();
+      _jumpingTo = null;
+    }
+    // A screen reader reads the frame from the built page, so with one on every frame builds it.
+    final rebuild = step ||
+        _settled ||
+        _tilt != 0 ||
+        _zoomed ||
+        SemanticsBinding.instance.semanticsEnabled ||
+        _smallUrl(now) == null ||
+        _smallUrl(_shown) == null;
+    _shown = now;
+    _retryShown();
+    // Not for each frame a stop button's jump only passes: its landing was fetched when it was tapped.
+    if (!_jumping) _fetchNear(now);
+    // Small copies while turning; the full photo once the shoe has stopped on one frame for a moment.
+    _settled = false;
+    _settleSoon();
+    if (rebuild) {
+      setState(() {});
+      _reportTop();
+    } else {
+      _redraw();
+    }
+  }
+
+  /// The full photo once the shoe has stopped on one photo for a moment: 160 ms after the last frame change, as on
+  /// the demo page.
   void _settleSoon({int waited = 0}) {
     _settle?.cancel();
-    _settle = Timer(Duration(milliseconds: _pointers.isEmpty ? 140 : 450), () {
+    _settle = Timer(const Duration(milliseconds: 160), () {
       if (!mounted || _settled) return;
       // Still turning on its own (a flick, or the page coasting after a swipe): decoding now would make the last,
       // slow frames of the turn stutter. Once it stops, the next frame change or the end of the spin comes back here;
       // after 3 s of waiting the sharp photo comes anyway, in case the page never reports itself still.
-      if ((_spin.isTicking || _coasting) && waited < 20) return _settleSoon(waited: waited + 1);
+      // So does the glide while it is still on its way to another photo: its last frame can take longer than 160 ms.
+      final heading = _glide.isActive && _plan.at(_progress) != _shown;
+      if ((_spin.isTicking || _coasting || heading) && waited < 20) return _settleSoon(waited: waited + 1);
       setState(() => _settled = true);
     });
   }
 
   bool get _coasting =>
-      _pointers.isEmpty && widget.scroll.hasClients && widget.scroll.position.isScrollingNotifier.value;
+      _pagePointers.isEmpty && widget.scroll.hasClients && widget.scroll.position.isScrollingNotifier.value;
+
+  /// Fingers anywhere on the page: one resting on the page's controls holds the page still, it is not coasting.
+  final _pagePointers = <int>{};
 
   /// Which zoom each remembered full photo was decoded for.
   final _bucketOf = Expando<int>();
@@ -870,7 +1167,7 @@ class ScrollShowcaseState extends State<ScrollShowcase> with TickerProviderState
   void _nudge(int delta) {
     final i = (_photoIndex + delta).clamp(0, _plan.photos.length - 1);
     final p = _plan.photos[i];
-    widget.scroll.jumpTo(_plan.centreOf(p.step, p.frame) * _travel);
+    widget.scroll.jumpTo(_plan.centreOf(p.step, p.frame) * _travel); // lands at once: not a scroll to glide after
   }
 
   String _describe(int index) {
@@ -890,11 +1187,14 @@ class ScrollShowcaseState extends State<ScrollShowcase> with TickerProviderState
       _stopSpin();
       _tiltBack.stop();
     }
+    if (e is PointerDownEvent) _pagePointers.add(e.pointer);
+    if (e is PointerUpEvent || e is PointerCancelEvent) _pagePointers.remove(e.pointer);
     final box = _viewer.currentContext?.findRenderObject() as RenderBox?;
     if (box == null || !box.attached) return;
     final local = box.globalToLocal(e.position);
     if (e is PointerDownEvent) {
       if (!(Offset.zero & box.size).contains(local)) return;
+      if (_pointers.isEmpty) _holdShown();
       _pointers[e.pointer] = local;
       if (_pointers.length == 2) _startPinch();
     } else if (e is PointerMoveEvent) {
@@ -914,11 +1214,11 @@ class ScrollShowcaseState extends State<ScrollShowcase> with TickerProviderState
       if (_pointers.remove(e.pointer) == null) return;
       if (_pointers.length < 2) _pinchStartDistance = 0;
       if (_pointers.isEmpty && !_zoomed) _setLock();
-      if (_pointers.isEmpty && !_settled) _settleSoon(); // lifted: the sharp photo comes sooner
     }
   }
 
   void _startPinch() {
+    _holdShown();
     final p = _pointers.values.toList();
     _pinchStartDistance = (p[0] - p[1]).distance;
     _pinchStartScale = _scale;
@@ -953,6 +1253,7 @@ class ScrollShowcaseState extends State<ScrollShowcase> with TickerProviderState
 
   void _doubleTap(Size size) {
     if (_zoomed) return _resetZoom();
+    _holdShown();
     setState(() {
       _scale = 2.5;
       final at = _tapAt ?? size.center(Offset.zero);
@@ -965,12 +1266,20 @@ class ScrollShowcaseState extends State<ScrollShowcase> with TickerProviderState
   late final Ticker _spin = createTicker(_spinTick);
   FrictionSimulation? _spinSim;
 
-  /// Frames the shoe turns for a finger moving [dx] sideways across a stage [width] wide: right turns it towards
-  /// the viewer's right, as turning it by hand.
-  double _framesFor(double dx, double width) => width <= 0 ? 0 : -dx / (width * ShowcasePlan.turnWidths) * _plan.turn;
+  /// How far a finger goes sideways to turn the shoe once round: the demo page's 3 px a frame over its 80-frame
+  /// turn, so every turn goes round at that rate under the finger whatever its number of frames.
+  static const turnDrag = 240.0;
 
-  /// Whether the stage shows the turn, where a drag on the shoe turns and tilts it.
-  bool get _onTurn => _shown.step == 0 && _shown.frame < _plan.turn;
+  /// Frames the shoe turns for a finger moving [dx] sideways on a stage [width] wide: right turns it towards the
+  /// viewer's right, as turning it by hand. A wide stage (a tablet) takes 0.6 of its width, so a swipe across it
+  /// does not spin the shoe three times round.
+  double _framesFor(double dx, double width) => -dx / math.max(turnDrag, width * 0.6) * _plan.turn;
+
+  /// Where the page is: the photo the stage is gliding to.
+  ({int step, int frame}) get _target => _plan.at(_progress);
+
+  /// Whether the page is on the turn, where a drag on the shoe turns and tilts it.
+  bool get _onTurn => _target.step == 0 && _target.frame < _plan.turn;
 
   /// A sideways drag turns the shoe round and round within one turn (a scan's frames after the turn rise over the
   /// shoe, which a sideways drag should not do). A tilted shoe first comes back level, then turns.
@@ -982,21 +1291,34 @@ class ScrollShowcaseState extends State<ScrollShowcase> with TickerProviderState
     var frames = _framesFor(d.delta.dx, width);
     if (_tilt != 0) {
       // Levelling takes as much finger as tilting did: the share of a full tilt the move is worth.
-      final level = frames.abs() / _plan.turn * ShowcasePlan.turnWidths * width / _tiltTravel;
+      final level = d.delta.dx.abs() / _tiltTravel;
       if (level < _tilt.abs()) return _setTilt(_tilt - _tilt.sign * level);
       frames *= 1 - _tilt.abs() / level;
       _setTilt(0);
     }
     final turn = _plan.turn;
-    if (_dragFrame.floor() % turn != _shown.frame) _dragFrame = _shown.frame * 1.0;
+    if (_dragFrame.floor() % turn != _target.frame) _dragFrame = _target.frame * 1.0;
     _showFrame(_dragFrame + frames);
   }
 
-  void _showFrame(double frame) {
+  /// Turns the shoe to [frame] of the turn, gliding there; across the turn's ends (from its last frame to its first,
+  /// or back) it jumps, as on the demo page, instead of gliding back the whole way round.
+  ///
+  /// A flick's own spin is already even, a frame per screen refresh at most: it does not glide ([glide] false).
+  void _showFrame(double frame, {bool glide = true}) {
     final turn = _plan.turn;
+    final was = _dragFrame.floor() % turn;
     _dragFrame = frame % turn;
     // A tiny negative remainder rounds up to the turn itself, which is a frame past it.
-    widget.scroll.jumpTo(_plan.centreOf(0, _dragFrame.floor() % turn) * _travel);
+    final to = _dragFrame.floor() % turn;
+    if (glide && (to - was).abs() > turn / 2) {
+      // Round the turn's end: the stage keeps its distance behind the finger and goes on round (see _show).
+      _pos += to < was ? -_plan.turnShare : _plan.turnShare;
+      _seam = true;
+    }
+    _turning = glide;
+    widget.scroll.jumpTo(_plan.centreOf(0, to) * _travel);
+    _turning = false;
   }
 
   /// The finger lifted mid-turn: the shoe keeps turning and slows to a stop, as a thing spun by hand does.
@@ -1006,7 +1328,9 @@ class ScrollShowcaseState extends State<ScrollShowcase> with TickerProviderState
     }
     // At most 4 turns a second, and no faster than about a frame per screen refresh: skipping frames looks jumpy.
     final top = math.min(4.0 * _plan.turn, 72.0);
-    final speed = _framesFor(d.velocity.pixelsPerSecond.dx, width).clamp(-top, top);
+    // The coast keeps the feel it had before the demo's quicker drag: the finger's speed over one and a half widths of
+    // the stage a turn, so a careful lift (under about 150 px/s) still leaves the shoe where the finger did.
+    final speed = (-d.velocity.pixelsPerSecond.dx / (width * ShowcasePlan.turnWidths) * _plan.turn).clamp(-top, top);
     if (speed.abs() < _plan.turn * 0.25) return; // a slow lift: it stops where the finger left it
     _stopSpin();
     // Keeping 15% of its speed each second, a hard flick goes about two turns and a light one half a turn.
@@ -1018,7 +1342,7 @@ class ScrollShowcaseState extends State<ScrollShowcase> with TickerProviderState
     final sim = _spinSim;
     if (sim == null || !widget.scroll.hasClients || _zoomed || !_onTurn) return _stopSpin();
     final t = elapsed.inMicroseconds / Duration.microsecondsPerSecond;
-    _showFrame(sim.x(t));
+    _showFrame(sim.x(t), glide: false);
     if (sim.isDone(t)) {
       _stopSpin();
       _settleSoon(); // at rest now: the sharp photo
@@ -1102,20 +1426,14 @@ class ScrollShowcaseState extends State<ScrollShowcase> with TickerProviderState
   void _setTilt(double tilt) {
     final was = _tilted;
     if (_tilt == 0 && tilt != 0) {
-      _tiltFrom = _shown.frame;
+      _tiltFrom = _target.frame;
       _pathUp = _tiltPath(true);
       _pathDown = _tiltPath(false);
-      _sharpen([..._pathUp.take(sharpAhead), ..._pathDown.take(sharpAhead)]);
     }
     // Only as far as there are photos that way.
     _tilt = tilt.clamp(_pathDown.isEmpty ? 0.0 : -1.0, _pathUp.isEmpty ? 0.0 : 1.0);
     if (_tilt.abs() < 1e-3) _tilt = 0;
     if (_tilted != was) {
-      if (_tilted case final t?) {
-        final path = _tilt > 0 ? _pathUp : _pathDown;
-        final i = path.indexOf(t);
-        _sharpen(path.skip(math.max(0, i - 2)).take(sharpAhead + 2));
-      }
       _settled = false;
       _settleSoon();
       setState(() {});
@@ -1167,22 +1485,32 @@ class ScrollShowcaseState extends State<ScrollShowcase> with TickerProviderState
 
   Widget _photo(MediaItem m, ShowcaseStep step, double width) {
     final dpr = MediaQuery.devicePixelRatioOf(context);
-    _shownUrl = m.url;
-    final small = _shownCopy(m, step);
-    final base = Image(
-      key: const ValueKey('showcase-base'),
-      image: small,
-      fit: BoxFit.contain,
-      gaplessPlayback: true, // the last frame stays until the next is decoded: the shoe never blinks out
-      filterQuality: FilterQuality.medium,
-      errorBuilder: (_, __, ___) => const Center(child: Icon(Icons.broken_image_outlined, size: 48)),
-    );
+    final small = _drawsSmall(m, step);
+    const missing = Center(child: Icon(Icons.broken_image_outlined, size: 48));
+    // The small copies are drawn by a painter of their own: moving on a frame draws it again, nothing is rebuilt. Like
+    // an Image, it draws them inverted when the phone inverts its colours, so they show as the photos laid over them.
+    final invert =
+        MediaQuery.maybeInvertColorsOf(context) ?? SemanticsBinding.instance.accessibilityFeatures.invertColors;
+    final base = small
+        ? RepaintBoundary(
+            child: CustomPaint(
+                key: const ValueKey('showcase-base'),
+                painter: _FramePainter(_drawable, _drawn, invert: invert),
+                size: Size.infinite))
+        : Image(
+            key: const ValueKey('showcase-base'),
+            image: _base(m, step),
+            fit: BoxFit.contain,
+            gaplessPlayback: true, // the last frame stays until the next is decoded: the shoe never blinks out
+            filterQuality: FilterQuality.medium,
+            errorBuilder: (_, __, ___) => missing,
+          );
     // At rest: the full photo over the small copy, faded in once decoded, at the pixels the zoom needs.
     final bucket = _scale <= 1.05 ? 1 : (_scale <= 2 ? 2 : 3);
     final provider = ResizeImage.resizeIfNeeded(
         math.min(6000, (width * dpr * bucket).round()), null, netImage(step.cut ? m.url : m.originalUrl));
     // With no small copy the base is already this photo at screen size: nothing to lay over it, nothing to drop.
-    final sharpen = (_settled || _zoomed) && provider != small;
+    final sharpen = (_settled || _zoomed) && (small || provider != _base(m, step));
     if (sharpen) _remember(provider, bucket);
     final full = Image(
       image: provider,
@@ -1193,10 +1521,10 @@ class ScrollShowcaseState extends State<ScrollShowcase> with TickerProviderState
           sync || frame != null ? child : const SizedBox.shrink(), // until then the small copy shows through
       errorBuilder: (_, __, ___) => const SizedBox.shrink(),
     );
-    // A seller's cut-out turning on the floor stands on its shadow, made from the small copy. A scan has its own.
+    // A seller's cut-out turning on the floor stands on its shadow, made from the small copy (the painter draws it
+    // under a small copy). A scan has its own.
     final img = Stack(fit: StackFit.expand, children: [
-      if (_shadowed(step) && !_onDark(step) && !_zoomed)
-        ContactShadow(image: _base(m, step), fit: BoxFit.contain, gapless: true),
+      if (!small && castsShadow) ContactShadow(image: _base(m, step), fit: BoxFit.contain, gapless: true),
       base,
       if (sharpen) full,
     ]);
@@ -1215,7 +1543,7 @@ class ScrollShowcaseState extends State<ScrollShowcase> with TickerProviderState
     if (report == null || !mounted) return;
     final offset = widget.scroll.hasClients ? widget.scroll.offset : 0.0;
     final covers = offset < _travel + widget.stageHeight - MediaQuery.viewPaddingOf(context).top;
-    final now = _tilted ?? _plan.at(_progress);
+    final now = _tilted ?? _shown;
     final top = !covers ? null : (_onDark(_plan.steps[now.step]) ? Brightness.dark : Brightness.light);
     if (_topReported && top == _top) return;
     _top = top;
@@ -1244,7 +1572,6 @@ class ScrollShowcaseState extends State<ScrollShowcase> with TickerProviderState
   /// The line and the stops use the same measure, so the line reaches each stop as its view comes up.
   Widget _stops(ShowcaseScene scene, ({int step, int frame}) now) {
     const width = 240.0; // 48 dp between the closest stops, so their buttons do not overlap
-    final filled = _plan.along(now.step, now.frame);
     return SizedBox(
       width: width + 48,
       height: 48,
@@ -1256,14 +1583,21 @@ class ScrollShowcaseState extends State<ScrollShowcase> with TickerProviderState
           height: 3,
           child: DecoratedBox(decoration: BoxDecoration(color: scene.line, borderRadius: BorderRadius.circular(3))),
         ),
-        Positioned(
-          left: 24,
-          top: 22.5,
-          height: 3,
-          width: width * filled,
-          child: DecoratedBox(
-              key: const Key('showcase-line-fill'),
-              decoration: BoxDecoration(color: scene.glow, borderRadius: BorderRadius.circular(3))),
+        // Follows the shoe frame by frame, which draws the stage again without building it.
+        ListenableBuilder(
+          listenable: _drawn,
+          builder: (_, __) {
+            final at = _tilted ?? _shown;
+            return Positioned(
+              left: 24,
+              top: 22.5,
+              height: 3,
+              width: width * _plan.along(at.step, at.frame),
+              child: DecoratedBox(
+                  key: const Key('showcase-line-fill'),
+                  decoration: BoxDecoration(color: scene.glow, borderRadius: BorderRadius.circular(3))),
+            );
+          },
         ),
         for (var i = 0; i < _plan.steps.length; i++)
           Positioned(
@@ -1305,10 +1639,11 @@ class ScrollShowcaseState extends State<ScrollShowcase> with TickerProviderState
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     builds++;
     final travel = _travel;
     final h = widget.stageHeight;
-    final now = _plan.at(_progress);
+    final now = _shown;
     final shown = _tilted ?? now;
     final step = _plan.steps[shown.step];
     final media = step.media[shown.frame];
@@ -1462,7 +1797,8 @@ class ScrollShowcaseState extends State<ScrollShowcase> with TickerProviderState
               // The stops on a thin line that fills as the shoe turns (Aza's choice: nothing written beside the
               // shoe). Each stop is a 48 dp button that jumps straight to its view; its name is read out and shown on
               // long press.
-              Center(child: _stops(scene, shown)),
+              // Its own layer: the line fills frame by frame without the whole stage being painted again.
+              Center(child: RepaintBoundary(child: _stops(scene, shown))),
               // How to use it, until the shoe starts turning; not on a short stage (a short screen, or large text making
               // the bar under it tall), where the shoe needs the room.
               if (h + MediaQuery.paddingOf(context).bottom >= 480)
@@ -1476,7 +1812,9 @@ class ScrollShowcaseState extends State<ScrollShowcase> with TickerProviderState
                         WidgetSpan(
                             alignment: PlaceholderAlignment.middle,
                             child: Icon(Icons.threesixty, size: 16, color: scene.muted)),
-                        TextSpan(text: ' ${tr('Оңға-солға айналдырыңыз · жоғары-төмен еңкейтіңіз · екі саусақпен жақындатыңыз')}'),
+                        TextSpan(
+                            text:
+                                ' ${tr('Оңға-солға айналдырыңыз · жоғары-төмен еңкейтіңіз · екі саусақпен жақындатыңыз')}'),
                       ]),
                       key: const Key('showcase-hint'),
                       textAlign: TextAlign.center,
@@ -1515,6 +1853,31 @@ class _PinStage extends FlowDelegate {
 
   @override
   bool shouldRelayout(_PinStage old) => old.height != height;
+}
+
+/// Draws the small copy the stage shows now, with the shadow a seller's cut-out stands on, whenever [repaint] says
+/// the shoe moved or a copy arrived.
+class _FramePainter extends CustomPainter {
+  _FramePainter(this.frame, Listenable repaint, {this.invert = false}) : super(repaint: repaint);
+  final ({ui.Image image, MadeShadow? shadow})? Function() frame;
+  final bool invert;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final now = frame();
+    if (now == null) return;
+    if (now.shadow case final shadow?) paintShadow(canvas, size, shadow, BoxFit.contain);
+    paintImage(
+        canvas: canvas,
+        rect: Offset.zero & size,
+        image: now.image,
+        fit: BoxFit.contain,
+        filterQuality: FilterQuality.medium,
+        invertColors: invert);
+  }
+
+  @override
+  bool shouldRepaint(_FramePainter old) => true; // built again only when the step, tilt or zoom changed
 }
 
 class _RoundChip extends StatelessWidget {

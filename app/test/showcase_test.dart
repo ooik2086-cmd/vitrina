@@ -73,17 +73,29 @@ Map<String, dynamic> scan({String? backdrop = 'dark'}) => {
       ],
     };
 
+/// A one-pixel picture: the small copies the stage asks for in these tests, each address its own.
+final _pixel = [
+  137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 31, 21, 196, //
+  137, 0, 0, 0, 13, 73, 68, 65, 84, 120, 156, 99, 144, 239, 63, 254, 31, 0, 4, 187, 2, 117, 232, 219, 201, 232, 0, //
+  0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
+];
+
 /// The test binding answers every image request with HTTP 400. A photo that fails after the stage has already moved
 /// on to the next frame has nobody left to show its error, so Flutter logs it; that is expected here, not a fault.
+/// The small copies come from memory instead and stay on their way (nothing here decodes them), as on a slow
+/// connection: a copy that failed is drawn as its own photo, which the tests of failed copies check by themselves.
 void showcaseTest(String description, WidgetTesterCallback body) => testWidgets(description, (tester) async {
       final report = FlutterError.onError;
       FlutterError.onError = (d) {
         if (d.exception is! NetworkImageLoadException) report?.call(d);
       };
+      final bytes = <String, Uint8List>{};
+      ScrollShowcaseState.smallSource = (url) => MemoryImage(bytes.putIfAbsent(url, () => Uint8List.fromList(_pixel)));
       try {
         await body(tester);
       } finally {
         FlutterError.onError = report;
+        ScrollShowcaseState.smallSource = netImage;
       }
     });
 
@@ -325,12 +337,25 @@ void main() {
         ResizeImage(:final imageProvider) => urlOf(imageProvider),
         _ => '$p',
       };
-  // What the stage draws underneath (small copy) and, at rest, on top (full photo).
-  String base(WidgetTester tester) => urlOf(tester.widget<Image>(find.byKey(const ValueKey('showcase-base'))).image);
+  // What the stage draws underneath (the small copy its painter draws, or the photo itself) and, at rest, on top
+  // (full photo).
+  String base(WidgetTester tester) {
+    final w = tester.widget(find.byKey(const ValueKey('showcase-base')));
+    return w is Image ? urlOf(w.image) : tester.state<ScrollShowcaseState>(find.byType(ScrollShowcase)).drawnSmall!;
+  }
+
   Iterable<String> full(WidgetTester tester) => tester
       .widgetList<Image>(find.byWidgetPredicate(
           (w) => w is Image && w.key is ValueKey && '${(w.key as ValueKey).value}'.startsWith('showcase-full-')))
       .map((i) => urlOf(i.image));
+
+  /// Lets the stage glide after the page and come to rest, frame by frame as a phone draws them.
+  Future<void> rest(WidgetTester tester, {int ms = 1200}) async {
+    for (var t = 0; t < ms; t += 16) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+  }
+
   ScrollPosition page(WidgetTester tester) => tester.state<ScrollableState>(find.byType(Scrollable).first).position;
 
   /// A point on the stage off the shoe, beside its buttons, where up and down scrolls the page.
@@ -350,12 +375,12 @@ void main() {
     expect(tester.getTopLeft(find.byKey(const Key('showcase'))).dy, 0);
     expect(tester.getSize(find.byKey(const Key('showcase'))).height,
         800 - tester.getSize(find.byKey(const Key('buy'))).height - 24 - 1);
-    await tester.pump(const Duration(milliseconds: 200));
+    await rest(tester);
     // At rest the full cut-out is laid over the small copy, which stays underneath until it has loaded.
     expect(full(tester).single, base(tester).replaceAll('-s.webp', '.webp'));
     expect(find.byKey(const ValueKey('showcase-base')), findsOneWidget);
     await tester.dragFrom(edge(tester), const Offset(0, 300));
-    await tester.pump(const Duration(milliseconds: 200));
+    await rest(tester);
     expect(base(tester), 'https://cdn/f0-s.webp');
   });
 
@@ -532,29 +557,35 @@ void main() {
     final stage = tester.getSize(find.byKey(const Key('showcase'))).height;
     final list = find.byType(Scrollable).first;
     await tester.dragFrom(const Offset(200, 600), Offset(0, -stage * 0.6 + 2)); // a drag, no fling
-    await tester.pump(const Duration(milliseconds: 200));
+    await rest(tester);
     // Nearly the whole turn (the first few pixels of a drag only decide it is a drag), and not past it.
     expect(int.parse(RegExp(r'f(\d+)-s').firstMatch(base(tester))!.group(1)!), greaterThanOrEqualTo(21));
     await tester.drag(list, Offset(0, -stage * 0.3));
-    await tester.pump(const Duration(milliseconds: 200));
+    await rest(tester);
     expect(base(tester), 'https://cdn/top-s.webp');
   });
 
-  showcaseTest('the full photo waits for the finger to lift, or for a long look', (tester) async {
+  showcaseTest('the full photo comes 160 ms after the shoe stops on a frame, and goes while it moves', (tester) async {
     await pump(tester, listing());
     final finger = await tester.startGesture(tester.getCenter(find.byKey(const Key('showcase'))));
     await finger.moveBy(const Offset(-40, 0));
     await finger.moveBy(const Offset(-60, 0));
-    await tester.pump(const Duration(milliseconds: 300)); // a short pause mid-drag: no decoding
-    expect(full(tester), isEmpty);
-    await tester.pump(const Duration(milliseconds: 200)); // holding still to look closely
+    await rest(tester, ms: 600); // the shoe glides after the finger, then holds still under it
     expect(full(tester), hasLength(1));
     await finger.moveBy(const Offset(-60, 0)); // turning on
-    await tester.pump();
-    expect(full(tester), isEmpty);
+    await tester.pump(const Duration(milliseconds: 16));
+    expect(full(tester), isEmpty); // only the small copies while it moves
     await finger.up();
-    await tester.pump(const Duration(milliseconds: 200));
+    // Not before the last frame change is 160 ms old.
+    var since = 0;
+    for (var i = 0; i < 200 && full(tester).isEmpty; i++) {
+      final before = base(tester);
+      await tester.pump(const Duration(milliseconds: 16));
+      since = base(tester) == before ? since + 16 : 0;
+      expect(since, lessThan(160 + 32));
+    }
     expect(full(tester), hasLength(1));
+    expect(since, greaterThanOrEqualTo(160 - 16));
   });
 
   showcaseTest('without small copies the photo is drawn once, not twice', (tester) async {
@@ -645,13 +676,15 @@ void main() {
     expect(turn, moreOrLessEquals(stage * 0.6, epsilon: 1));
   });
 
-  showcaseTest('the full photo waits until the finger is lifted', (tester) async {
+  showcaseTest('a tilted shoe gets its full photo once it holds still, finger down or not', (tester) async {
     await pump(tester, listing());
     final finger = await tester.startGesture(tester.getCenter(find.byKey(const Key('showcase'))));
     await finger.moveBy(const Offset(0, -40));
     await finger.moveBy(const Offset(0, -60));
-    await tester.pump(const Duration(milliseconds: 400)); // the finger rests mid-drag
+    await tester.pump(const Duration(milliseconds: 100));
     expect(full(tester), isEmpty);
+    await tester.pump(const Duration(milliseconds: 100)); // the finger rests: 160 ms after the last change
+    expect(full(tester), hasLength(1));
     await finger.up();
     await tester.pump(const Duration(milliseconds: 200));
     expect(full(tester), hasLength(1));
@@ -930,9 +963,12 @@ void main() {
     final turned = page(tester).pixels;
     final b = await tester.startGesture(at + const Offset(150, 0));
     await tester.pump(const Duration(milliseconds: 50));
+    // The second finger holds the shoe at the frame it shows: the page waits there for it instead of gliding on.
+    final held = (base(tester), page(tester).pixels);
+    expect(held.$2, lessThanOrEqualTo(turned));
     await a.moveBy(const Offset(-30, 0)); // the pair's position jumps; the shoe must not
     await tester.pump(const Duration(milliseconds: 50));
-    expect(page(tester).pixels, turned);
+    expect((base(tester), page(tester).pixels), held);
     await b.up();
     await a.up();
     await tester.pumpAndSettle();
@@ -943,8 +979,8 @@ void main() {
     await tester.flingFrom(edge(tester), const Offset(0, -150), 1500);
     await tester.pump(const Duration(milliseconds: 160)); // past the 140 ms rest, still coasting
     expect(page(tester).isScrollingNotifier.value, isTrue);
-    expect(find.byWidgetPredicate((w) => w is Image && (w.key?.toString() ?? '').contains('showcase-full')),
-        findsNothing);
+    expect(
+        find.byWidgetPredicate((w) => w is Image && (w.key?.toString() ?? '').contains('showcase-full')), findsNothing);
     await tester.pumpAndSettle();
     await tester.pump(const Duration(milliseconds: 200));
     expect(find.byWidgetPredicate((w) => w is Image && (w.key?.toString() ?? '').contains('showcase-full')),
@@ -1060,12 +1096,17 @@ void main() {
       (scan(backdrop: 'light'), 0), // the scan's frames have their floor shadow in them
     ]) {
       await pump(tester, body);
-      expect(find.byType(ContactShadow), findsNWidgets(shadows), reason: '$body');
+      // Under the small copies the stage's painter draws it, made from the copy itself.
+      final state = tester.state<ScrollShowcaseState>(find.byType(ScrollShowcase));
+      expect(state.castsShadow ? 1 : 0, shadows, reason: '$body');
+      expect(find.byType(ContactShadow), findsNothing, reason: '$body');
     }
     await pump(tester, listing());
     await tester.tap(find.byKey(const Key('showcase-step-sole')));
     await tester.pumpAndSettle();
-    expect(find.byType(ContactShadow), findsNothing); // the sole stands on nothing
+    expect(tester.state<ScrollShowcaseState>(find.byType(ScrollShowcase)).castsShadow,
+        isFalse); // the sole stands on nothing
+    expect(find.byType(ContactShadow), findsNothing);
     expect(showcaseBackground('clean').gradient, studioGradient);
   });
 
@@ -1152,9 +1193,9 @@ void main() {
   Finder swatch(int id) =>
       find.descendant(of: find.byKey(const Key('showcase')), matching: find.byKey(Key('color-$id')));
   Finder screen(int id) => find.byWidgetPredicate((w) => w is ListingScreen && w.listingId == id);
-  String shownOn(WidgetTester tester, int id) => urlOf(tester
-      .widget<Image>(find.descendant(of: screen(id), matching: find.byKey(const ValueKey('showcase-base'))))
-      .image);
+  String shownOn(WidgetTester tester, int id) => tester
+      .state<ScrollShowcaseState>(find.descendant(of: screen(id), matching: find.byType(ScrollShowcase)))
+      .drawnSmall!;
 
   showcaseTest('a colour picked mid-turn fades in at the same angle, already loaded', (tester) async {
     final asked = await pumpOpened(tester, anchored, other: {...anchored, 'id': 8});
@@ -1174,6 +1215,7 @@ void main() {
     expect((tester.widget<Container>(find.byKey(const Key('color-ring-8'))).decoration as BoxDecoration).border,
         Border.all(color: ShowcaseScene.light.fg, width: 2));
     for (var i = 0; i < 5 && screen(8).evaluate().isEmpty; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20))); // its first frame decodes
       await tester.pump(const Duration(milliseconds: 20));
     }
     // Its very first frame: the same frame of the other turn, with no cover or spinner first.
@@ -1237,6 +1279,7 @@ void main() {
     await turnTo(tester, 0, 9);
     await tester.tap(swatch(8));
     for (var i = 0; i < 5 && screen(8).evaluate().isEmpty; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20))); // its first frame decodes
       await tester.pump(const Duration(milliseconds: 20));
     }
     expect(shownOn(tester, 8), 'https://cdn/f21-s.webp'); // its very first frame, fetched ahead
@@ -1297,6 +1340,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(ListingScreen), findsNothing);
     expect(find.text('catalog'), findsOneWidget);
+    await tester.pump(ListingScreen.switchBudget); // the other colour's first frame stops being waited for
   });
 
   showcaseTest('a colour picked under the title opens at the title, with the size the buyer picked', (tester) async {
@@ -1478,5 +1522,287 @@ void main() {
     await tester.pumpAndSettle();
     expect(base(tester), 'https://cdn/n0-s.webp');
     expect(find.byKey(const Key('showcase-step-sole')), findsNothing);
+  });
+
+  // The demo page's way of moving (scroll 3D v4): the stage glides after the page through real frames, drawn from
+  // small copies decoded once and held outside the image cache.
+  int frameOf(String url) => int.parse(RegExp(r'f(\d+)-s').firstMatch(url)!.group(1)!);
+
+  showcaseTest('a long scroll is not shown in one screen refresh: the shoe glides there through the frames between',
+      (tester) async {
+    await pump(tester, listing(details: false));
+    final plan = ShowcasePlan.of(Listing.fromJson(listing(details: false)));
+    final travel = ScrollShowcase.travelFor(tester.getSize(find.byKey(const Key('showcase'))).height, 1);
+    await tester.dragFrom(const Offset(200, 600), Offset(0, -travel * 0.8));
+    final want = plan.at(page(tester).pixels / travel).frame;
+    expect(want, greaterThan(12));
+    await tester.pump(const Duration(milliseconds: 16));
+    final first = frameOf(base(tester));
+    expect(first, inExclusiveRange(0, want)); // on its way, not there yet
+    var last = first;
+    for (var i = 0; i < 60; i++) {
+      await tester.pump(const Duration(milliseconds: 16));
+      final now = frameOf(base(tester));
+      expect(now, greaterThanOrEqualTo(last)); // only forward, frame by frame
+      last = now;
+    }
+    expect(last, want); // and it lands exactly where the page is
+  });
+
+  showcaseTest('a jump nobody watched lands at once, and so does every move with reduced motion', (tester) async {
+    await pump(tester, listing(details: false));
+    final plan = ShowcasePlan.of(Listing.fromJson(listing(details: false)));
+    final travel = ScrollShowcase.travelFor(tester.getSize(find.byKey(const Key('showcase'))).height, 1);
+    page(tester).jumpTo(plan.centreOf(0, 15) * travel); // as when another colour opens at the same view
+    await tester.pump();
+    expect(base(tester), 'https://cdn/f15-s.webp');
+
+    final scroll = ScrollController();
+    await tester.pumpWidget(MaterialApp(
+        home: MediaQuery(
+            data: const MediaQueryData(size: Size(400, 800), disableAnimations: true),
+            child: Scaffold(
+                body: ListView(controller: scroll, children: [
+              ScrollShowcase(listing: Listing.fromJson(listing(details: false)), scroll: scroll, stageHeight: 600),
+              const SizedBox(height: 2000),
+            ])))));
+    await tester.pumpAndSettle();
+    await tester.dragFrom(const Offset(200, 20), const Offset(0, -300)); // the stage's top strip scrolls the page
+    final want = plan.at(scroll.offset / ScrollShowcase.travelFor(600, 1)).frame;
+    expect(want, greaterThan(5));
+    await tester.pump(const Duration(milliseconds: 16));
+    expect(base(tester), 'https://cdn/f$want-s.webp');
+  });
+
+  showcaseTest('on a narrow phone a turn still takes 240 px of finger, not less', (tester) async {
+    await pump(tester, listing(details: false), size: const Size(300, 700));
+    await tester.dragFrom(tester.getCenter(find.byKey(const Key('showcase'))), const Offset(-120, 0));
+    await rest(tester);
+    expect(frameOf(base(tester)), inInclusiveRange(10, 12)); // half way round, less the touch slop
+  });
+
+  showcaseTest('a sideways drag glides frame by frame, but past the turn\'s end it jumps round', (tester) async {
+    await pump(tester, listing(details: false));
+    // 240 px of finger turn the shoe once round, the demo page's 3 px a frame over its 80 frames.
+    await tester.dragFrom(tester.getCenter(find.byKey(const Key('showcase'))), const Offset(-60, 0));
+    await tester.pump(const Duration(milliseconds: 16));
+    expect(frameOf(base(tester)), inExclusiveRange(0, 6));
+    await rest(tester);
+    expect(frameOf(base(tester)), inInclusiveRange(4, 6)); // a quarter of the way round, less the touch slop
+    await pump(tester, scan());
+    page(tester).jumpTo(0);
+    await tester.pumpAndSettle();
+    expect(base(tester), 'https://cdn/f0-s.webp');
+    await tester.drag(find.byKey(const Key('showcase')), const Offset(30, 0));
+    await tester.pump(const Duration(milliseconds: 16));
+    expect(base(tester), 'https://cdn/f7-s.webp'); // at once, not back through the turn
+    await rest(tester);
+  });
+
+  test('a long scan\'s small copies are decoded narrower, so a colour stays within about 140 MB', () {
+    expect(ScrollShowcaseState.smallSide(205), 400);
+    expect(ScrollShowcaseState.smallSide(1000), lessThan(400));
+    expect(1000 * math.pow(ScrollShowcaseState.smallSide(1000), 2) * 4, lessThanOrEqualTo(140 << 20));
+  });
+
+  testWidgets('every small copy is decoded once, held outside the image cache and let go with its photos',
+      (tester) async {
+    final png = (await tester.runAsync(() async {
+      final recorder = ui.PictureRecorder();
+      Canvas(recorder).drawRect(const Rect.fromLTWH(0, 0, 48, 48), Paint()..color = const Color(0xFF1F8FC7));
+      final image = await recorder.endRecording().toImage(48, 48);
+      return (await image.toByteData(format: ui.ImageByteFormat.png))!.buffer.asUint8List();
+    }))!;
+    final asked = <String>[];
+    ScrollShowcaseState.smallSource = (url) {
+      asked.add(url);
+      return MemoryImage(png);
+    };
+    addTearDown(() => ScrollShowcaseState.smallSource = netImage);
+    final cache = PaintingBinding.instance.imageCache..clear();
+    Future<void> decode() async {
+      for (var i = 0; i < 15; i++) {
+        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+        await tester.pump();
+      }
+    }
+
+    final scroll = ScrollController();
+    var body = listing();
+    late StateSetter set;
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: StatefulBuilder(builder: (context, setState) {
+      set = setState;
+      return ListView(controller: scroll, children: [
+        ScrollShowcase(listing: Listing.fromJson(body), scroll: scroll, stageHeight: 600),
+        const SizedBox(height: 2000),
+      ]);
+    }))));
+    await decode();
+    final state = tester.state<ScrollShowcaseState>(find.byType(ScrollShowcase));
+    // The 24 frames and the top, sole and close-up photos, each asked for once.
+    expect(asked.toSet().length, 27);
+    expect(asked.length, 27);
+    final held = state.smallImages.values.toList();
+    expect(held, hasLength(27));
+    expect(held.first.width, 48); // smaller than 400 px: decoded as it is
+    expect(cache.currentSize, 0); // not counted twice, and never dropped by the cache mid-turn
+    // Turning draws them without asking again.
+    scroll.jumpTo(200);
+    await tester.pump();
+    expect(asked.length, 27);
+    // Other photos: the old copies go from memory before the new ones come.
+    set(() => body = {
+          ...listing(details: false),
+          'media': [for (var i = 0; i < 8; i++) media('frame', 'n$i')],
+        });
+    await tester.pump();
+    expect(held.every((i) => i.debugDisposed), isTrue);
+    expect(state.smallImages, isEmpty);
+    await decode();
+    expect(state.smallImages, hasLength(8));
+    final now = state.smallImages.values.toList();
+    await tester.pumpWidget(const SizedBox());
+    expect(now.every((i) => i.debugDisposed), isTrue); // and all go when the page closes
+  });
+
+  group('small copies', () {
+    late Uint8List png;
+    late List<String> asked;
+    late ScrollController scroll;
+    Future<void> decode(WidgetTester tester, [int rounds = 15]) async {
+      for (var i = 0; i < rounds; i++) {
+        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+        await tester.pump();
+      }
+    }
+
+    Future<ScrollShowcaseState> open(WidgetTester tester,
+        {Set<String> broken = const {}, Future<void> Function()? before}) async {
+      png = (await tester.runAsync(() async {
+        final recorder = ui.PictureRecorder();
+        Canvas(recorder).drawRect(const Rect.fromLTWH(0, 0, 48, 48), Paint()..color = const Color(0xFF1F8FC7));
+        final image = await recorder.endRecording().toImage(48, 48);
+        return (await image.toByteData(format: ui.ImageByteFormat.png))!.buffer.asUint8List();
+      }))!;
+      asked = [];
+      final failOnce = {...broken};
+      final bytes = <String, Uint8List>{}; // each address its own picture, as from the server
+      ScrollShowcaseState.smallSource = (url) {
+        asked.add(url);
+        // A broken copy fails the first time only, as on a connection that drops for a moment.
+        return MemoryImage(failOnce.remove(url)
+            ? Uint8List.fromList([1, 2, 3, 4])
+            : bytes.putIfAbsent(url, () => Uint8List.fromList(png)));
+      };
+      addTearDown(() {
+        ScrollShowcaseState.smallSource = netImage;
+        ScrollShowcaseState.shortOfMemory = false;
+      });
+      PaintingBinding.instance.imageCache.clear();
+      await before?.call();
+      scroll = ScrollController();
+      await tester.pumpWidget(MaterialApp(
+          home: Scaffold(
+              body: ListView(controller: scroll, children: [
+        ScrollShowcase(listing: Listing.fromJson(listing()), scroll: scroll, stageHeight: 600),
+        const SizedBox(height: 2000),
+      ]))));
+      return tester.state<ScrollShowcaseState>(find.byType(ScrollShowcase));
+    }
+
+    testWidgets('come six at a time, the frames either side of the shoe first', (tester) async {
+      await open(tester);
+      expect(asked, hasLength(ScrollShowcaseState.decodeAtOnce));
+      // Round the turn: frame 23 is next to frame 0.
+      expect(asked, containsAll(['https://cdn/f0-s.webp', 'https://cdn/f1-s.webp', 'https://cdn/f23-s.webp']));
+      await decode(tester);
+      expect(asked, hasLength(27));
+    });
+
+    // Without a screen reader (which reads each frame from the built page, so builds it every frame).
+    testWidgets('a glide only paints the stage again, frame by frame, without building the page', (tester) async {
+      final state = await open(tester);
+      await decode(tester);
+      expect(state.paintedSmall, 'https://cdn/f0-s.webp');
+      final builds = state.builds;
+      await tester.dragFrom(const Offset(200, 20), const Offset(0, -300)); // the stage's top strip scrolls the page
+      final seen = <String>{};
+      for (var i = 0; i < 40; i++) {
+        await tester.pump(const Duration(milliseconds: 16));
+        seen.add(state.paintedSmall!);
+        expect(state.paintedSmall, state.drawnSmall); // the painter draws the frame the stage is on
+      }
+      expect(seen.length, greaterThan(5));
+      expect(state.builds - builds, lessThanOrEqualTo(2)); // once it comes to rest, for the full photo
+    }, semanticsEnabled: false);
+
+    testWidgets('one that did not come is drawn as its own photo, then asked for again', (tester) async {
+      final state = await open(tester, broken: {'https://cdn/f0-s.webp'});
+      await decode(tester);
+      expect(state.smallImages.containsKey('https://cdn/f0-s.webp'), isFalse);
+      expect(state.drawnSmall, isNull); // not another frame's copy in its place
+      expect(tester.widget(find.byKey(const ValueKey('showcase-base'))), isA<Image>());
+      await tester.pump(const Duration(seconds: 2));
+      await decode(tester);
+      expect(asked.where((u) => u == 'https://cdn/f0-s.webp'), hasLength(2));
+      expect(state.smallImages.containsKey('https://cdn/f0-s.webp'), isTrue);
+      expect(state.drawnSmall, 'https://cdn/f0-s.webp');
+    });
+
+    testWidgets('are let go while another page covers the shoe, and come back with it', (tester) async {
+      final state = await open(tester);
+      await decode(tester);
+      final held = state.smallImages.values.toList();
+      expect(held, hasLength(27));
+      Navigator.of(tester.element(find.byType(ScrollShowcase)))
+          .push(MaterialPageRoute<void>(builder: (_) => const Scaffold()));
+      await tester.pumpAndSettle();
+      expect(state.smallImages.keys, ['https://cdn/f0-s.webp']); // the shoe on the stage stays
+      expect(held.where((i) => i.debugDisposed), hasLength(26));
+      Navigator.of(tester.element(find.byType(Scaffold).last)).pop();
+      await tester.pumpAndSettle();
+      await decode(tester);
+      expect(state.smallImages, hasLength(27));
+    });
+
+    testWidgets('are made narrower once the phone is short of memory', (tester) async {
+      final state = await open(tester);
+      await decode(tester);
+      expect(ScrollShowcaseState.smallSide(205), 400);
+      state.didHaveMemoryPressure();
+      expect(ScrollShowcaseState.shortOfMemory, isTrue);
+      expect(ScrollShowcaseState.smallSide(205), lessThan(300));
+      expect(state.smallImages.length, lessThanOrEqualTo(1));
+      await decode(tester);
+      expect(state.smallImages, hasLength(27));
+    });
+
+    testWidgets('a seller\'s cut-out gets its shadow made from its small copy', (tester) async {
+      final state = await open(tester);
+      await decode(tester);
+      expect(state.castsShadow, isTrue);
+      expect(state.smallShadows.containsKey('https://cdn/f0-s.webp'), isTrue);
+    });
+
+    testWidgets('a copy already in the image cache for someone else stays there; its own are let go there',
+        (tester) async {
+      late Object key;
+      final state = await open(tester, before: () async {
+        // A catalog card holds frame 0 at the size the stage asks for.
+        final card = ScrollShowcaseState.smallCopy('https://cdn/f0-s.webp', 400);
+        key = (await tester.runAsync(() => card.obtainKey(ImageConfiguration.empty)))!;
+        card.resolve(ImageConfiguration.empty).addListener(ImageStreamListener((_, __) {}));
+        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+        asked.clear();
+      });
+      final cache = PaintingBinding.instance.imageCache;
+      expect(cache.containsKey(key), isTrue);
+      await decode(tester);
+      expect(state.smallImages, hasLength(27));
+      expect(cache.containsKey(key), isTrue);
+      final other = await tester.runAsync(
+          () => ScrollShowcaseState.smallCopy('https://cdn/f1-s.webp', 400).obtainKey(ImageConfiguration.empty));
+      expect(cache.containsKey(other!), isFalse);
+    });
   });
 }
