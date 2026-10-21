@@ -91,6 +91,9 @@ class _ListingScreenState extends State<ListingScreen> {
   final _sizesKey = GlobalKey();
   bool _scrollLocked = false; // the showcase is zoomed in or being pinched
   Brightness? _stageTop; // how dark the showcase stage under the status bar is, while it is there
+  // How dark the showcase stage over the bottom bar is, while it reaches down to it. Only the bar listens, so the
+  // page is not built again as the stage scrolls past.
+  final _stageBottom = ValueNotifier<Brightness?>(null);
   double? _darkPhotos; // the height of the Photo tab's dark scan photos, which run under the status bar too
   Offer? _offer; // the signed-in buyer's latest offer on this listing
   // One key per order attempt: a retried tap after a lost response returns the same order.
@@ -131,6 +134,7 @@ class _ListingScreenState extends State<ListingScreen> {
   @override
   void dispose() {
     _scroll.dispose();
+    _stageBottom.dispose();
     super.dispose();
   }
 
@@ -572,6 +576,9 @@ class _ListingScreenState extends State<ListingScreen> {
                           onStageTop: (top) {
                             if (mounted) setState(() => _stageTop = top);
                           },
+                          onStageBottom: (at) {
+                            if (mounted) _stageBottom.value = at;
+                          },
                           onColor: (c) => _openColor(l, c, atDetails: false),
                           pendingColor: _pendingColor,
                           onDetails: () => _toDetails(l))
@@ -888,82 +895,141 @@ class _ListingScreenState extends State<ListingScreen> {
           },
         ),
       ),
-      Material(
-        color: scheme.surface,
-        child: SafeArea(
-          top: false,
-          child: Container(
-            padding: contentPadding(context, const EdgeInsets.fromLTRB(20, 12, 20, 12)),
-            decoration: BoxDecoration(border: Border(top: BorderSide(color: scheme.outlineVariant))),
-            child: LayoutBuilder(builder: (context, box) {
-              final text = own
-                  ? tr('Бұл сіздің тауарыңыз')
-                  : l.status == 'sold'
-                      ? tr('Сатылған')
-                      : l.status != 'published'
-                          ? tr('Қазір сатылымда жоқ')
-                          : away != null
-                              ? trf('{0} бастап', [formatDay(away.add(const Duration(days: 1)))])
-                              : !_payments
-                                  ? tr('Сатушыға жазу')
-                                  : selected == null
-                                      ? tr('Өлшемді таңдаңыз')
-                                      : deal != null
-                                          ? tr('Келісілген бағамен алу')
-                                          : tr('Тапсырыс беру');
-              final label =
-                  Text(tr('Жиыны'), style: theme.textTheme.labelMedium?.copyWith(color: scheme.onSurfaceVariant));
-              final price = Text(formatTenge(itemPrice + l.deliveryPriceTiyn),
-                  key: const Key('total'), style: weight(theme.textTheme.titleLarge!, 800));
-              // When the button's words do not fit beside the total (large text, a narrow phone, a long label), the
-              // button goes under it, full width, so no word is broken or cut.
-              final big = !_buyFitsBeside(context, text, formatTenge(itemPrice + l.deliveryPriceTiyn), box.maxWidth);
-              final total = big
-                  // One line for the total, so the shoe keeps more of the screen.
-                  ? Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
-                      label,
-                      const SizedBox(width: 12),
-                      Expanded(child: FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerRight, child: price)),
-                    ])
-                  : ConstrainedBox(
-                      constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.4),
-                      child: FittedBox(
-                        fit: BoxFit.scaleDown,
-                        alignment: Alignment.centerLeft,
-                        child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [label, price]),
-                      ),
-                    );
-              final buy = FilledButton(
-                key: const Key('buy'),
-                style: FilledButton.styleFrom(backgroundColor: Brand.accentStrong, foregroundColor: Colors.white),
-                onPressed: l.status == 'published' && !own && !_ordering && away == null
-                    ? !_payments
-                        // The size picked goes with it, so the seller knows which pair the buyer means.
-                        ? () => _chat(l,
-                            draft: selected == null ? null : trf('Сәлеметсіз бе! {0} өлшемі бар ма?', [selected.label]))
-                        : selected != null
-                            ? () => _order(l)
-                            // No size yet: take the buyer to the sizes, past the showcase, instead of a dead button.
-                            : l.sizes.any((s) => s.available)
-                                ? () => _toSizes(l)
-                                : null
-                    : null,
-                child: Text(text, key: const Key('buy-text'), textAlign: TextAlign.center),
-              );
-              return big
-                  ? Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch, children: [total, const SizedBox(height: 8), buy])
-                  : Row(children: [total, const SizedBox(width: 16), Expanded(child: buy)]);
-            }),
-          ),
-        ),
+      // Under the 360° stage the bar takes the scene's panel colour, as on the demo page, and goes back to the page's
+      // own once the details come up; its button keeps the one colour every buy button has.
+      ValueListenableBuilder(
+        valueListenable: _stageBottom,
+        builder: (context, stage, child) {
+          // Only while the 360° view is what the page shows: not on the Photo tab, nor once a reload took it away.
+          final scene = hasSpin && !_showPhotos ? stage : null;
+          final barTheme = scene == null ? theme : sceneBarTheme(theme, scene);
+          final page = theme.extension<AppCanvas>()?.overlay ??
+              (theme.brightness == Brightness.dark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark);
+          return AnnotatedRegion<SystemUiOverlayStyle>(
+            // Android's own buttons under the bar take its colour too.
+            value: scene == null
+                ? page
+                : page.copyWith(
+                    systemNavigationBarColor: barTheme.colorScheme.surface,
+                    systemNavigationBarDividerColor: barTheme.colorScheme.outlineVariant,
+                    systemNavigationBarIconBrightness: scene == Brightness.dark ? Brightness.light : Brightness.dark),
+            // At once, as the stage above it changes: a fade would pass through grey words on a grey bar.
+            child: Theme(data: barTheme, child: child!),
+          );
+        },
+        child: Builder(builder: (context) {
+          final theme = Theme.of(context);
+          final scheme = theme.colorScheme;
+          return Material(
+            color: scheme.surface,
+            child: SafeArea(
+              top: false,
+              child: Container(
+                padding: contentPadding(context, const EdgeInsets.fromLTRB(20, 12, 20, 12)),
+                decoration: BoxDecoration(border: Border(top: BorderSide(color: scheme.outlineVariant))),
+                child: LayoutBuilder(builder: (context, box) {
+                  final text = own
+                      ? tr('Бұл сіздің тауарыңыз')
+                      : l.status == 'sold'
+                          ? tr('Сатылған')
+                          : l.status != 'published'
+                              ? tr('Қазір сатылымда жоқ')
+                              : away != null
+                                  ? trf('{0} бастап', [formatDay(away.add(const Duration(days: 1)))])
+                                  : !_payments
+                                      ? tr('Сатушыға жазу')
+                                      : selected == null
+                                          ? tr('Өлшемді таңдаңыз')
+                                          : deal != null
+                                              ? tr('Келісілген бағамен алу')
+                                              : tr('Тапсырыс беру');
+                  final label =
+                      Text(tr('Жиыны'), style: theme.textTheme.labelMedium?.copyWith(color: scheme.onSurfaceVariant));
+                  final price = Text(formatTenge(itemPrice + l.deliveryPriceTiyn),
+                      key: const Key('total'), style: weight(theme.textTheme.titleLarge!, 800));
+                  // When the button's words do not fit beside the total (large text, a narrow phone, a long label), the
+                  // button goes under it, full width, so no word is broken or cut.
+                  final big =
+                      !_buyFitsBeside(context, text, formatTenge(itemPrice + l.deliveryPriceTiyn), box.maxWidth);
+                  final total = big
+                      // One line for the total, so the shoe keeps more of the screen.
+                      ? Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
+                          label,
+                          const SizedBox(width: 12),
+                          Expanded(
+                              child: FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerRight, child: price)),
+                        ])
+                      : ConstrainedBox(
+                          constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.4),
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            alignment: Alignment.centerLeft,
+                            child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [label, price]),
+                          ),
+                        );
+                  final buy = FilledButton(
+                    key: const Key('buy'),
+                    style: FilledButton.styleFrom(backgroundColor: Brand.accentStrong, foregroundColor: Colors.white),
+                    onPressed: l.status == 'published' && !own && !_ordering && away == null
+                        ? !_payments
+                            // The size picked goes with it, so the seller knows which pair the buyer means.
+                            ? () => _chat(l,
+                                draft: selected == null
+                                    ? null
+                                    : trf('Сәлеметсіз бе! {0} өлшемі бар ма?', [selected.label]))
+                            : selected != null
+                                ? () => _order(l)
+                                // No size yet: take the buyer to the sizes, past the showcase, instead of a dead button.
+                                : l.sizes.any((s) => s.available)
+                                    ? () => _toSizes(l)
+                                    : null
+                        : null,
+                    child: Text(text, key: const Key('buy-text'), textAlign: TextAlign.center),
+                  );
+                  return big
+                      ? Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [total, const SizedBox(height: 8), buy])
+                      : Row(children: [total, const SizedBox(width: 16), Expanded(child: buy)]);
+                }),
+              ),
+            ),
+          );
+        }),
       ),
     ]);
   }
 }
+
+final _sceneBarThemes = Expando<Map<Brightness, ThemeData>>();
+
+/// The [page]'s theme in the 360° scene's colours, for the bottom bar while the stage reaches down to it. Only the
+/// colours change, so nothing else about the bar (its text, its buttons) moves.
+ThemeData sceneBarTheme(ThemeData page, Brightness b) => (_sceneBarThemes[page] ??= {}).putIfAbsent(b, () {
+      final scene = b == Brightness.dark ? ShowcaseScene.dark : ShowcaseScene.light;
+      return page.copyWith(
+        colorScheme: page.colorScheme.copyWith(
+            brightness: b,
+            surface: scene.panel,
+            onSurface: scene.fg,
+            onSurfaceVariant: scene.muted,
+            outlineVariant: scene.line),
+        textTheme: page.textTheme.apply(bodyColor: scene.fg, displayColor: scene.fg),
+        // A button that cannot be pressed, as the demo page's: the scene's line colour with its muted words, which
+        // read on the panel (the theme's faint default does not).
+        filledButtonTheme: FilledButtonThemeData(
+          style: (page.filledButtonTheme.style ?? const ButtonStyle()).copyWith(
+            backgroundColor:
+                WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.disabled) ? scene.line : null),
+            foregroundColor:
+                WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.disabled) ? scene.muted : null),
+          ),
+        ),
+      );
+    });
 
 /// Whether the buy button's [text] fits in two lines, no word broken, beside the [price] total in [width]: the total
 /// takes its width (up to 40%), a 16 gap, and the button pads its text 24 on each side (less with large text).

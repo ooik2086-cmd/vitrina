@@ -327,6 +327,10 @@ class ShowcasePlan {
   double centreOf(int step, int frame) =>
       startOf(step) + steps[step].weight * (frame + 0.5) / steps[step].media.length / total;
 
+  /// Where on the stop line the turn comes full round, when frames go on past it (a scan moving up to the top): the
+  /// demo page marks it with a stop of its own. Null when the turn is all the first step shows.
+  double? get turnEnd => turn > 0 && turn < steps.first.media.length ? along(0, turn) : null;
+
   /// The share of the scroll one full turn of frames takes.
   late final double turnShare =
       total <= 0 || steps.first.media.isEmpty ? 0 : steps.first.weight * turn / steps.first.media.length / total;
@@ -362,6 +366,7 @@ class ScrollShowcase extends StatefulWidget {
     this.onDetails,
     this.onLock,
     this.onStageTop,
+    this.onStageBottom,
     this.onColor,
     this.pendingColor,
   });
@@ -389,6 +394,10 @@ class ScrollShowcase extends StatefulWidget {
 
   /// How dark the stage under the status bar is; null when the stage has scrolled away from it.
   final ValueChanged<Brightness?>? onStageTop;
+
+  /// How dark the stage is while it reaches down to the page's bottom bar, so the bar can take the scene's panel
+  /// colour as on the demo page; null once the details below have come up under it.
+  final ValueChanged<Brightness?>? onStageBottom;
 
   /// How far the page scrolls while the stage stays in place: 0.6 of the stage for the whole turn, so one ordinary
   /// swipe turns the shoe once round (a full screen per turn felt slow and heavy under the finger), and 0.3 per stop.
@@ -496,6 +505,7 @@ class ScrollShowcaseState extends State<ScrollShowcase>
   static const _keepFull = 24;
   int? _jumpingTo; // a stop button was tapped: tick once on arrival, not for every stop passed
   bool _jumping = false; // while a stop button's jump animates the page there
+  bool _jumpingToEnd = false; // the jump goes to the turn's end mark, not to the start of [_jumpingTo]
   /// How often the stage was built; tests check that scrolling within one frame does not rebuild it.
   @visibleForTesting
   int builds = 0;
@@ -567,7 +577,13 @@ class ScrollShowcaseState extends State<ScrollShowcase>
       widget.scroll.addListener(_onScroll);
     }
     // Another height (the phone turned, the window resized): the same scroll offset is another place in the turn.
-    if (old.stageHeight != widget.stageHeight) _land();
+    if (old.stageHeight != widget.stageHeight) {
+      // This runs while the page is laid out, when the page must not be told to change: it hears once that is done.
+      _reportLater = true;
+      _land();
+      _reportLater = false;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _reportTop()); // the stage's stretch has a new length
+    }
     // The listing was reloaded with other photos (the seller replaced them): show the new ones, not the old plan.
     if (_signature(old.listing) != _signature(widget.listing)) {
       _setUp();
@@ -1071,9 +1087,16 @@ class ScrollShowcaseState extends State<ScrollShowcase>
     final now = _plan.at(at);
     if (now == _shown) return;
     final step = now.step != _shown.step;
+    // The turn's end mark lights up or goes out: a tick, as at every stop.
+    final turn = _plan.turnEnd == null ? null : _plan.turn;
+    final crossed = !step && now.step == 0 && turn != null && (now.frame >= turn) != (_shown.frame >= turn);
     if (step && (_jumpingTo == null || _jumpingTo == now.step)) {
       HapticFeedback.selectionClick();
-      _jumpingTo = null;
+      // A jump back to the turn's start comes in over the turn's end: one stop, one tick, so passing it stays quiet.
+      _jumpingTo = _jumpingTo == 0 && !_jumpingToEnd && turn != null && now.frame >= turn ? 0 : null;
+    } else if (crossed) {
+      if (_jumpingTo == null || _jumpingToEnd) HapticFeedback.selectionClick();
+      if (_jumpingTo == 0) _jumpingTo = null;
     }
     // A screen reader reads the frame from the built page, so with one on every frame builds it.
     final rebuild = step ||
@@ -1143,13 +1166,16 @@ class ScrollShowcaseState extends State<ScrollShowcase>
     }
   }
 
-  void _goTo(int step) {
+  /// Moves the page to a stop's view, or with [turnEnd] to where the turn comes full round.
+  void _goTo(int step, {bool turnEnd = false}) {
     _resetZoom();
     _stopSpin();
     _tiltBack.stop();
     _setTilt(0);
-    final target = _plan.startOf(step) * _travel + (step == 0 ? 0 : 1);
+    final target =
+        turnEnd ? _plan.centreOf(0, _plan.turn) * _travel : _plan.startOf(step) * _travel + (step == 0 ? 0 : 1);
     _jumpingTo = step;
+    _jumpingToEnd = turnEnd;
     _fetchNear(_plan.at((target / _travel).clamp(0.0, 1.0)));
     if (_reduceMotion) {
       widget.scroll.jumpTo(target);
@@ -1539,17 +1565,35 @@ class ScrollShowcaseState extends State<ScrollShowcase>
 
   /// Tells the page how dark the stage under the status bar is (null once scrolled past), so its icons can read.
   void _reportTop() {
-    final report = widget.onStageTop;
-    if (report == null || !mounted) return;
+    if (!mounted || _reportLater) return;
     final offset = widget.scroll.hasClients ? widget.scroll.offset : 0.0;
-    final covers = offset < _travel + widget.stageHeight - MediaQuery.viewPaddingOf(context).top;
     final now = _tilted ?? _shown;
-    final top = !covers ? null : (_onDark(_plan.steps[now.step]) ? Brightness.dark : Brightness.light);
-    if (_topReported && top == _top) return;
-    _top = top;
-    _topReported = true;
-    report(top);
+    final scene = _onDark(_plan.steps[now.step]) ? Brightness.dark : Brightness.light;
+    final report = widget.onStageTop;
+    if (report != null) {
+      final covers = offset < _travel + widget.stageHeight - MediaQuery.viewPaddingOf(context).top;
+      final top = covers ? scene : null;
+      if (!_topReported || top != _top) {
+        _top = top;
+        _topReported = true;
+        report(top);
+      }
+    }
+    final bottom = widget.onStageBottom;
+    if (bottom != null) {
+      // The stage is pinned, its foot on the bar, until the whole stretch has scrolled past.
+      final at = offset <= _travel + 0.5 ? scene : null;
+      if (!_bottomReported || at != _bottom) {
+        _bottom = at;
+        _bottomReported = true;
+        bottom(at);
+      }
+    }
   }
+
+  Brightness? _bottom;
+  bool _bottomReported = false;
+  bool _reportLater = false;
 
   /// The step's photos stand on a dark backdrop.
   bool _onDark(ShowcaseStep step) {
@@ -1570,6 +1614,19 @@ class ScrollShowcaseState extends State<ScrollShowcase>
 
   /// The stops on a line that fills as the shoe goes round, as on the demo page: a stop lights up once reached.
   /// The line and the stops use the same measure, so the line reaches each stop as its view comes up.
+  /// One stop's dot on the line: filled with the glow once reached.
+  Widget _stopDot(ShowcaseScene scene, bool on) => AnimatedContainer(
+        duration: _reduceMotion ? Duration.zero : const Duration(milliseconds: 180),
+        width: 14,
+        height: 14,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: on ? scene.glow : scene.ink,
+          // The muted ink, not the line's colour, so a stop not yet reached still shows (3:1).
+          border: Border.all(color: on ? scene.glow : scene.muted, width: 2),
+        ),
+      );
+
   Widget _stops(ShowcaseScene scene, ({int step, int frame}) now) {
     const width = 240.0; // 48 dp between the closest stops, so their buttons do not overlap
     return SizedBox(
@@ -1599,6 +1656,37 @@ class ScrollShowcaseState extends State<ScrollShowcase>
             );
           },
         ),
+        // The turn's end, as the demo page's second stop: lit once the shoe has gone round, and a tap goes there.
+        // It comes before the stops, so where its button meets the next stop's, the stop's wins.
+        if (_plan.turnEnd case final end?)
+          Positioned(
+            left: width * end,
+            top: 0,
+            width: 48,
+            height: 48,
+            child: Semantics(
+              button: true,
+              label: tr('Айналым соңы'),
+              child: Tooltip(
+                message: tr('Айналым соңы'),
+                excludeFromSemantics: true,
+                child: InkWell(
+                  key: const Key('showcase-turn-end'),
+                  customBorder: const CircleBorder(),
+                  onTap: () => _goTo(0, turnEnd: true),
+                  child: Center(
+                    child: ListenableBuilder(
+                      listenable: _drawn,
+                      builder: (_, __) {
+                        final at = _tilted ?? _shown;
+                        return _stopDot(scene, at.step > 0 || at.frame >= _plan.turn);
+                      },
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
         for (var i = 0; i < _plan.steps.length; i++)
           Positioned(
             left: width * _plan.along(i, 0),
@@ -1616,19 +1704,7 @@ class ScrollShowcaseState extends State<ScrollShowcase>
                   key: Key('showcase-step-${_plan.steps[i].kind}'),
                   customBorder: const CircleBorder(),
                   onTap: () => _goTo(i),
-                  child: Center(
-                    child: AnimatedContainer(
-                      duration: _reduceMotion ? Duration.zero : const Duration(milliseconds: 180),
-                      width: 14,
-                      height: 14,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: i <= now.step ? scene.glow : scene.ink,
-                        // The muted ink, not the line's colour, so a stop not yet reached still shows (3:1).
-                        border: Border.all(color: i <= now.step ? scene.glow : scene.muted, width: 2),
-                      ),
-                    ),
-                  ),
+                  child: Center(child: _stopDot(scene, i <= now.step)),
                 ),
               ),
             ),

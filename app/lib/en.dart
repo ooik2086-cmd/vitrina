@@ -1027,6 +1027,7 @@ const en = <String, String>{
   'Оңға-солға айналдырыңыз · жоғары-төмен еңкейтіңіз · екі саусақпен жақындатыңыз':
       'Sideways to turn · up or down to tilt · pinch to zoom',
   'Жақыннан': 'Close-up',
+  'Айналым соңы': 'End of the turn',
   'Қараңғы фон': 'Dark backdrop',
   '360° айналымнан кейін сатып алушы үстін, табанын және жақын көріністі көреді. Бір-бір фото қосыңыз:':
       'After the 360° turn buyers see the top, the sole and a close-up. Add one photo of each:',

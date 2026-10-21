@@ -15,6 +15,7 @@ import 'package:vitrina/api.dart';
 import 'package:vitrina/colors.dart';
 import 'package:vitrina/screens/listing_screen.dart';
 import 'package:vitrina/session.dart';
+import 'package:vitrina/theme.dart';
 import 'package:vitrina/widgets/color_choice.dart';
 import 'package:vitrina/widgets/common.dart';
 import 'package:vitrina/widgets/scroll_showcase.dart';
@@ -304,6 +305,12 @@ void main() {
       }
       expect({for (var i = 0; i <= 1000; i++) plan.at(i / 1000)}.length, 24); // every frame shows, in order
       expect(plan.turn, 8); // where the first frame comes round again
+    });
+
+    test('the turn\'s end has its own mark on the stop line when frames carry on past it, as on the demo page', () {
+      // Frame 8 is frame 0 again, on a line that runs to frame 23 (the close-up).
+      expect(ShowcasePlan.of(Listing.fromJson(scan())).turnEnd, closeTo(8 / 23, 1e-9));
+      expect(ShowcasePlan.of(Listing.fromJson(listing())).turnEnd, isNull); // the turn is all the first step shows
     });
 
     test('stop photos that are not frames of the turn stay separate photos', () {
@@ -1020,6 +1027,75 @@ void main() {
     expect(style(), isNull); // the page's own canvas: the theme decides
   });
 
+  showcaseTest('the bottom bar takes the scene\'s panel colours under the stage, the page\'s own past it',
+      (tester) async {
+    await pump(tester, scan());
+    final page = Theme.of(tester.element(find.byType(ListingScreen))).colorScheme;
+    final total = find.byKey(const Key('total'));
+    Color? bar() => tester.widget<Material>(find.ancestor(of: total, matching: find.byType(Material)).first).color;
+    Color? label() => tester.widget<Text>(find.text('Жиыны')).style?.color;
+    SystemUiOverlayStyle nav() => tester
+        .widget<AnnotatedRegion<SystemUiOverlayStyle>>(
+            find.ancestor(of: total, matching: find.byType(AnnotatedRegion<SystemUiOverlayStyle>)).first)
+        .value;
+    expect(bar(), ShowcaseScene.dark.panel);
+    expect(label(), ShowcaseScene.dark.muted);
+    expect(DefaultTextStyle.of(tester.element(total)).style.color, ShowcaseScene.dark.fg);
+    expect(nav().systemNavigationBarColor, ShowcaseScene.dark.panel); // Android's own buttons under it too
+    expect(nav().systemNavigationBarIconBrightness, Brightness.light);
+    await tester.tap(find.byKey(const Key('showcase-backdrop')));
+    await tester.pump();
+    expect(bar(), ShowcaseScene.light.panel); // at once, as the stage above it
+    expect(label(), ShowcaseScene.light.muted);
+    expect(nav().systemNavigationBarIconBrightness, Brightness.dark);
+    // The buy button keeps the one colour every buy button has.
+    expect(tester.widget<FilledButton>(find.byKey(const Key('buy'))).style?.backgroundColor?.resolve({}),
+        Brand.accentStrong);
+    // It stays on the scene while the stage's foot is on it, to the last pixel of the stage's stretch.
+    final scroll = tester.state<ScrollableState>(find.byType(Scrollable).first).position;
+    final travel = tester.getSize(find.byType(ScrollShowcase)).height - scroll.viewportDimension;
+    scroll.jumpTo(travel);
+    await tester.pumpAndSettle();
+    expect(bar(), ShowcaseScene.light.panel);
+    scroll.jumpTo(travel + 2); // the details start to come up under it
+    await tester.pump();
+    expect(bar(), page.surface); // at once: a fade would pass through grey words on a grey bar
+    expect(nav().systemNavigationBarColor, isNot(ShowcaseScene.light.panel));
+    scroll.jumpTo(0);
+    await tester.pumpAndSettle();
+    expect(bar(), ShowcaseScene.light.panel); // back under the stage
+    await tester.tap(find.byKey(const Key('showcase-photos')));
+    await tester.pumpAndSettle();
+    expect(bar(), page.surface); // the photos as taken stand on the page
+  });
+
+  showcaseTest('a stage that changes height (the phone turned) tells the bar its scene once laid out', (tester) async {
+    await pump(tester, scan());
+    tester.view.physicalSize = const Size(400, 640);
+    await tester.pump();
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(
+        tester
+            .widget<Material>(find.ancestor(of: find.byKey(const Key('total')), matching: find.byType(Material)).first)
+            .color,
+        ShowcaseScene.dark.panel);
+  });
+
+  for (final dark in [true, false]) {
+    showcaseTest('a buy button that cannot be pressed reads on the ${dark ? 'dark' : 'light'} scene\'s bar',
+        (tester) async {
+      await pump(tester, {...scan(backdrop: dark ? 'dark' : 'light'), 'status': 'sold'});
+      final scene = dark ? ShowcaseScene.dark : ShowcaseScene.light;
+      final button = find.descendant(of: find.byKey(const Key('buy')), matching: find.byType(Material));
+      expect(tester.widget<FilledButton>(find.byKey(const Key('buy'))).onPressed, isNull);
+      expect(tester.widget<Material>(button.first).color, scene.line);
+      final words = tester.renderObject<RenderParagraph>(
+          find.descendant(of: find.byKey(const Key('buy-text')), matching: find.byType(RichText)));
+      expect(words.text.style?.color, scene.muted);
+    });
+  }
+
   showcaseTest('a stage step that changes between light and dark updates the status bar at once', (tester) async {
     // The turn's photos as taken stand on the light studio; the cut-out top on the listing's dark scene.
     await pump(tester, listing(backdrop: 'dark', cutFrames: false));
@@ -1475,6 +1551,74 @@ void main() {
       }
     });
   }
+
+  showcaseTest('on a scan the turn\'s end mark sits on the line where the turn comes round and lights once passed',
+      (tester) async {
+    final ticks = <MethodCall>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+      if (call.method == 'HapticFeedback.vibrate') ticks.add(call);
+      return null;
+    });
+    await pump(tester, scan());
+    final plan = ShowcasePlan.of(Listing.fromJson(scan()));
+    final mark = find.byKey(const Key('showcase-turn-end'));
+    Color? dot() => (tester
+            .widget<AnimatedContainer>(find.descendant(of: mark, matching: find.byType(AnimatedContainer)))
+            .decoration! as BoxDecoration)
+        .color;
+    final first = tester.getCenter(find.byKey(const Key('showcase-step-spin'))).dx;
+    final last = tester.getCenter(find.byKey(const Key('showcase-step-close'))).dx;
+    expect(tester.getCenter(mark).dx, closeTo(first + (last - first) * plan.turnEnd!, 0.5));
+    expect(dot(), ShowcaseScene.dark.ink);
+    // A button like the stops, with its name for a screen reader.
+    expect(tester.getSemantics(mark), isSemantics(label: 'Айналым соңы', isButton: true, hasTapAction: true));
+    // Scrolled to frame 7, the turn's last: still out; one frame on (8, frame 0 again), lit, with one tick.
+    final scroll = tester.state<ScrollableState>(find.byType(Scrollable).first).position;
+    final travel = tester.getSize(find.byType(ScrollShowcase)).height - scroll.viewportDimension;
+    scroll.jumpTo(plan.centreOf(0, 7) * travel);
+    await tester.pumpAndSettle();
+    expect(dot(), ShowcaseScene.dark.ink);
+    ticks.clear();
+    scroll.jumpTo(plan.centreOf(0, 8) * travel);
+    await tester.pumpAndSettle();
+    expect(dot(), ShowcaseScene.dark.glow);
+    expect(ticks, hasLength(1));
+    // Back to the first stop from the sole: one tick on arrival, none for the turn's end passed on the way.
+    await tester.tap(find.byKey(const Key('showcase-step-sole')));
+    await tester.pumpAndSettle();
+    expect(dot(), ShowcaseScene.dark.glow);
+    ticks.clear();
+    await tester.tap(find.byKey(const Key('showcase-step-spin')));
+    await tester.pumpAndSettle();
+    expect(base(tester), 'https://cdn/f0-s.webp');
+    expect(dot(), ShowcaseScene.dark.ink);
+    expect(ticks, hasLength(1));
+    // A tap on the mark goes to where the turn comes round, with one tick there.
+    ticks.clear();
+    await tester.tap(mark);
+    await tester.pumpAndSettle();
+    expect(scroll.pixels, closeTo(plan.centreOf(0, 8) * travel, 1));
+    expect(dot(), ShowcaseScene.dark.glow);
+    expect(ticks, hasLength(1));
+    // And to it from the sole: one tick, on arrival.
+    await tester.tap(find.byKey(const Key('showcase-step-sole')));
+    await tester.pumpAndSettle();
+    ticks.clear();
+    await tester.tap(mark);
+    await tester.pumpAndSettle();
+    expect(scroll.pixels, closeTo(plan.centreOf(0, 8) * travel, 1));
+    expect(ticks, hasLength(1));
+    // Afterwards a stop passed by scrolling ticks as before.
+    ticks.clear();
+    scroll.jumpTo(plan.centreOf(1, 0) * travel);
+    await tester.pumpAndSettle();
+    expect(ticks, hasLength(1));
+  });
+
+  showcaseTest('with photo stops there is no turn\'s end mark', (tester) async {
+    await pump(tester, listing());
+    expect(find.byKey(const Key('showcase-turn-end')), findsNothing);
+  });
 
   showcaseTest('on a scan a sideways drag goes round within the turn, never up over the shoe', (tester) async {
     await pump(tester, scan());
