@@ -1106,13 +1106,15 @@ DEMO = Path(__file__).resolve().parents[2] / "app" / "demo"
 class RealPhotoSideTests(unittest.TestCase):
     """The side matching on the demo's shoes: the camera scan (1, and 3 in another colour) and the rendered scan (2,
     and 4 in another colour), whose sides were checked by eye on the phone (the toe faces the viewer at the front,
-    the heel at the back). The demo's side photos are frames of the turn itself, so a seller's own shot is made from
-    a frame a little off the side: smaller, moved, brighter and tilted."""
+    the heel at the back). A seller's own shot is made from a frame a little off the side checked: smaller, moved,
+    brighter and tilted."""
 
     CHECKED = {  # listing: side: frame of one turn
-        1: {"outer": 36, "front": 14, "inner": 20, "back": 26},  # the camera goes round unevenly
+        # The v4 camera scan, 80 frames a turn: toe on at 29 and heel on at 51 (its front and back stops show the
+        # shoe three-quarter on, at 22 and 60); the outer side square on a little before frame 0.
+        1: {"outer": 72, "front": 29, "inner": 40, "back": 51},
         2: {"outer": 39, "front": 10, "inner": 20, "back": 30},  # 9 degrees a frame; the outer side a frame before 0
-        3: {"outer": 36, "front": 14, "inner": 20, "back": 26},
+        3: {"outer": 72, "front": 29, "inner": 40, "back": 51},
         4: {"outer": 39, "front": 10, "inner": 20, "back": 30},
     }
 
@@ -1145,10 +1147,9 @@ class RealPhotoSideTests(unittest.TestCase):
             # What the phone shows is what was checked.
             self.assertEqual({side: urls.index(url) for side, url in listing["angle_frames"].items()}, checked)
             frames = [read(m.thumb_url) for m in turn]
-            stops = {side: urls.index(next(m for m in media if m.angle == side).original_url) for side in checked}
             for off in (-2, 2):
                 with self.subTest(listing=lid, off=off):
-                    found = side_frames({side: self.shot(frames[(k + off) % n]) for side, k in stops.items()}, frames)
+                    found = side_frames({side: self.shot(frames[(k + off) % n]) for side, k in checked.items()}, frames)
                     # The toe and the heel exactly; a side within a couple of frames, where the shoe is about as wide.
                     self.assertEqual((found["front"], found["back"]), (checked["front"], checked["back"]))
                     for side in ("outer", "inner"):
