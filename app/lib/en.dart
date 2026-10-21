@@ -905,6 +905,7 @@ const en = <String, String>{
   'Байланыс жоқ. {0} өлшемінің белгісі сақталмаған болуы мүмкін.':
       'No connection. The mark for size {0} may not have been saved.',
   'Байланыс жоқ. Фото жетпеген болуы мүмкін.': 'No connection. The photo may not have gone.',
+  'Фото жетпеген болуы мүмкін.': 'The photo may not have gone.',
   'Байланыс жоқ. Хабарлама жетпеген болуы мүмкін, мәтіні осы жерде тұр.':
       'No connection. The message may not have gone; its text is still here.',
   'Сақтамай шығу керек пе?': 'Leave without saving?',

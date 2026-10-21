@@ -1,13 +1,21 @@
 // On weak mobile data a chat photo can reach the other side while its answer is lost. Sent again, it must arrive
 // once, and a photo that may not have gone is kept, shown small, to send again or put aside.
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:clock/clock.dart';
 import 'package:image_picker_platform_interface/image_picker_platform_interface.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:vitrina/api.dart';
+import 'package:vitrina/chat_drafts.dart';
+import 'package:vitrina/chat_photos.dart';
+import 'package:vitrina/chat_photos_io.dart';
 import 'package:vitrina/screens/chat_screen.dart';
 import 'package:vitrina/session.dart';
 
@@ -29,6 +37,33 @@ class _FakePicker extends ImagePickerPlatform {
   }
 }
 
+/// The phone's kept photos, in memory.
+class _MemoryFiles implements PhotoFiles {
+  final files = <String, Uint8List>{};
+
+  /// When set, writing or reading waits for it, as a slow phone's storage does.
+  Completer<void>? writeGate, readGate;
+
+  @override
+  Future<bool> write(String name, Uint8List bytes) async {
+    await writeGate?.future;
+    return (files[name] = bytes).isNotEmpty;
+  }
+
+  @override
+  Future<Uint8List?> read(String name) async {
+    await readGate?.future;
+    return files[name];
+  }
+
+  @override
+  Future<void> drop(Set<String> names, {String? prefix, Set<String>? except, Duration olderThan = Duration.zero}) async =>
+      files.removeWhere((name, _) =>
+          names.contains(name) ||
+          (prefix != null && name.startsWith(prefix)) ||
+          (except != null && !except.contains(name)));
+}
+
 const _conv = {
   'id': 9,
   'listing_id': 7,
@@ -42,7 +77,15 @@ const _conv = {
 };
 
 void main() {
-  setUp(() => ImagePickerPlatform.instance = _FakePicker());
+  late _MemoryFiles phone;
+  Completer<void>? chatGate; // when set, reading the chat waits for it
+  setUp(() {
+    ImagePickerPlatform.instance = _FakePicker();
+    SharedPreferences.setMockInitialValues({});
+    ChatPhotos.files = phone = _MemoryFiles();
+    chatGate = null;
+  });
+  tearDown(() => ChatPhotos.files = files());
 
   /// Opens the chat over another page. Photo sends go into the list with their caption and key; [lost] says, by send,
   /// that the photo was posted but its answer never came back; [down] that it never left the phone.
@@ -51,15 +94,18 @@ void main() {
       bool Function(int send)? down,
       int? status,
       Duration slow = Duration.zero,
+      Duration answerAfter = Duration.zero,
+      List<Map<String, Object?>>? thread,
       Duration pollEvery = const Duration(hours: 1)}) async {
     final sent = <(String, String?, String?)>[]; // caption, key, file name: every try, also those that never left
-    final posted = <Map<String, Object?>>[];
+    final posted = thread ?? <Map<String, Object?>>[]; // the test may add to it, as another phone does
     final byKey = <String, Map<String, Object?>>{};
     var sends = 0;
     final api = Api(
         base: 'http://x/api/v1',
         client: MockClient((req) async {
           if (req.method == 'GET') {
+            await chatGate?.future;
             final after = int.tryParse(req.url.queryParameters['after_id'] ?? '') ?? 0;
             return _json({'conversation': _conv, 'items': posted.where((m) => (m['id'] as int) > after).toList()});
           }
@@ -70,7 +116,10 @@ void main() {
           final key = req.headers['Idempotency-Key'];
           sent.add((caption ?? '', key, RegExp(r'filename="([^"]*)"').firstMatch(form)?.group(1)));
           if (down?.call(n) ?? false) throw http.ClientException('no connection');
-          if (status != null) return _json({'code': 'file_too_large', 'message_kk': 'Файл тым үлкен.'}, status);
+          if (status != null) {
+            final code = status >= 500 ? 'server' : 'file_too_large';
+            return _json({'code': code, 'message_kk': status >= 500 ? 'Сервер қатесі.' : 'Файл тым үлкен.'}, status);
+          }
           var m = key == null ? null : byKey[key];
           if (m == null) {
             m = {
@@ -88,6 +137,7 @@ void main() {
             await Future<void>.delayed(slow);
             throw http.ClientException('answer lost');
           }
+          await Future<void>.delayed(answerAfter);
           return _json(m, 201);
         }));
     final session = Session(api)..me = Me.fromJson({'id': 3, 'phone': '+77010000003', 'is_seller': false});
@@ -247,5 +297,271 @@ void main() {
     expect(tester.getSize(find.text(notSent)).width, greaterThan(200));
     expect(tester.getRect(resend).top, greaterThanOrEqualTo(tester.getRect(find.text(notSent)).bottom));
     expect(tester.takeException(), isNull);
+  });
+
+  // Leaving the chat, or the phone closing the app, does not lose a photo that may not have gone.
+  group('kept on the phone', () {
+    Future<void> leave(WidgetTester tester) async {
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+    }
+
+    Future<void> reopen(WidgetTester tester) async {
+      await tester.tap(find.text('open'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+    }
+
+    Future<Map<String, dynamic>> kept() async =>
+        jsonDecode((await SharedPreferences.getInstance()).getString(ChatDrafts.key) ?? '{}') as Map<String, dynamic>;
+
+    testWidgets('a photo that never left comes back with its words and key, and goes once', (tester) async {
+      final sent = await open(tester, down: (n) => n == 1);
+      await sendPhoto(tester, caption: 'Табаны');
+      expect(phone.files, hasLength(1));
+      await leave(tester);
+      expect((await kept())['3:9']['photo'], containsPair('caption', 'Табаны'));
+      await reopen(tester);
+      // Brought back, it does not claim the connection is down now.
+      expect(find.text('Фото жетпеген болуы мүмкін.'), findsOneWidget);
+      expect(find.text(notSent), findsNothing);
+      expect(find.descendant(of: line, matching: find.byType(Image)), findsOneWidget);
+      expect(find.descendant(of: line, matching: find.text('«Табаны»')), findsOneWidget);
+      expect(canPick(tester), isFalse);
+      await tester.tap(resend);
+      await settle(tester);
+      expect(sent, hasLength(2));
+      expect(sent[1], sent[0]); // the same photo, words and key
+      expect(line, findsNothing);
+      expect(find.text('Табаны'), findsOneWidget);
+      expect(phone.files, isEmpty); // gone from the phone once it went
+      expect(await kept(), isEmpty);
+    });
+
+    testWidgets('a photo that went while its answer was lost is not brought back', (tester) async {
+      final sent = await open(tester, lost: (n) => n == 1);
+      await sendPhoto(tester, caption: 'Табаны');
+      expect(line, findsOneWidget);
+      await leave(tester);
+      await reopen(tester);
+      expect(find.text('Табаны'), findsOneWidget); // the thread shows it
+      expect(line, findsNothing);
+      expect(field('Табаны'), findsNothing);
+      expect(sent, hasLength(1));
+      await tester.pump();
+      expect(phone.files, isEmpty);
+      expect(await kept(), isEmpty);
+    });
+
+    testWidgets('a chat left while its photo is on the way keeps it until the answer', (tester) async {
+      await open(tester, lost: (n) => n == 1, slow: const Duration(seconds: 7));
+      await tester.tap(find.byKey(const Key('chat-photo')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Галерея'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      await leave(tester); // before any answer
+      expect(phone.files, hasLength(1));
+      expect((await kept())['3:9']['photo'], isNotNull);
+      await tester.pump(const Duration(seconds: 8)); // the answer is lost: it stays kept
+      expect(phone.files, hasLength(1));
+      expect((await kept())['3:9']['photo'], isNotNull);
+    });
+
+    testWidgets('a chat left while its photo is on the way lets it go when it arrives', (tester) async {
+      await open(tester, answerAfter: const Duration(seconds: 5));
+      await tester.enterText(find.byType(TextField), 'Табаны');
+      await tester.tap(find.byKey(const Key('chat-photo')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Галерея'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      await leave(tester); // before the answer
+      expect(phone.files, hasLength(1));
+      // Its words are kept with it, not again as words for the field.
+      expect((await kept())['3:9'], allOf(containsPair('text', ''), contains('photo')));
+      await tester.pump(const Duration(seconds: 6)); // the answer comes
+      expect(phone.files, isEmpty);
+      expect(await kept(), isEmpty); // nothing comes back into the field either
+    });
+
+    testWidgets('a photo put aside after coming back goes from the phone, its words to the field', (tester) async {
+      await open(tester, down: (n) => true);
+      await sendPhoto(tester, caption: 'Мынау');
+      await leave(tester);
+      await reopen(tester);
+      await tester.tap(drop);
+      await settle(tester);
+      expect(line, findsNothing);
+      expect(field('Мынау'), findsOneWidget);
+      expect(phone.files, isEmpty);
+      expect((await kept())['3:9']?['photo'], isNull);
+      await leave(tester);
+      await reopen(tester);
+      expect(line, findsNothing); // it does not come back
+    });
+
+    testWidgets('a photo the server refused is not kept', (tester) async {
+      await open(tester, status: 413);
+      await sendPhoto(tester, caption: 'Табаны');
+      await tester.pump();
+      expect(phone.files, isEmpty);
+      expect((await kept())['3:9']?['photo'], isNull);
+      expect((await kept())['3:9']?['text'], 'Табаны'); // the words stay, as words
+    });
+
+    testWidgets('a photo the server failed on is kept, with no claim that the connection is down', (tester) async {
+      await open(tester, status: 503);
+      await sendPhoto(tester, caption: 'Табаны');
+      expect(find.text('Фото жетпеген болуы мүмкін.'), findsOneWidget);
+      expect(find.text('Сервер қатесі.'), findsNothing);
+      expect(phone.files, hasLength(1));
+      expect((await kept())['3:9']['photo'], containsPair('caption', 'Табаны'));
+    });
+
+    testWidgets('a photo written to the phone only after it went is let go again', (tester) async {
+      await open(tester);
+      phone.writeGate = Completer();
+      await sendPhoto(tester, caption: 'Табаны');
+      expect(find.text('Табаны'), findsOneWidget); // it went
+      phone.writeGate!.complete();
+      await tester.pump();
+      await tester.pump();
+      expect(phone.files, isEmpty);
+      expect(await kept(), isEmpty);
+    });
+
+    testWidgets('an earlier photo with the same words does not count as the kept one', (tester) async {
+      await open(tester, down: (n) => n == 2);
+      await sendPhoto(tester, caption: 'Табаны'); // goes
+      await sendPhoto(tester, caption: 'Табаны'); // does not
+      expect(line, findsOneWidget);
+      await leave(tester);
+      await reopen(tester);
+      expect(line, findsOneWidget); // the first one, before it, is not it
+      expect(phone.files, hasLength(1));
+    });
+
+    testWidgets('a photo without words is not taken for another photo of mine', (tester) async {
+      final thread = <Map<String, Object?>>[];
+      await open(tester, down: (n) => n == 1, thread: thread);
+      await sendPhoto(tester);
+      await leave(tester);
+      thread.add({
+        'id': 50,
+        'sender_id': 3,
+        'body': '',
+        'photo_url': 'http://x/media/other.jpg',
+        'contact_warning': false,
+        'created_at': '2026-10-21T11:00:00Z',
+      }); // sent from another phone meanwhile
+      await reopen(tester);
+      expect(find.byType(Image), findsNWidgets(2)); // that one in the thread, and the kept one in its line
+      expect(line, findsOneWidget);
+      expect(phone.files, hasLength(1));
+    });
+
+    testWidgets('a photo brought back shows its line only once the chat has loaded', (tester) async {
+      await open(tester, down: (n) => n == 1);
+      await sendPhoto(tester, caption: 'Табаны');
+      await leave(tester);
+      chatGate = Completer();
+      await reopen(tester);
+      expect(line, findsNothing); // it may have gone meanwhile: the chat says
+      expect(canPick(tester), isFalse);
+      chatGate!.complete();
+      await settle(tester);
+      expect(find.text('Фото жетпеген болуы мүмкін.'), findsOneWidget);
+    });
+
+    testWidgets('words typed while the photo is read back from the phone do not lose it', (tester) async {
+      await open(tester, down: (n) => n == 1);
+      await sendPhoto(tester, caption: 'Табаны');
+      await leave(tester);
+      phone.readGate = Completer();
+      await reopen(tester);
+      expect(canPick(tester), isFalse); // a kept photo may still be coming back
+      await tester.enterText(find.byType(TextField), 'Сәлем');
+      await tester.pump(const Duration(seconds: 1)); // the words are kept meanwhile
+      expect((await kept())['3:9'], allOf(containsPair('text', 'Сәлем'), contains('photo')));
+      expect(phone.files, hasLength(1));
+      phone.readGate!.complete();
+      await settle(tester);
+      expect(line, findsOneWidget);
+      expect(field('Сәлем'), findsOneWidget);
+      expect(canPick(tester), isFalse); // one kept photo at a time
+    });
+
+    testWidgets('a kept photo whose file is gone is let go, and the chat opens as usual', (tester) async {
+      await open(tester, down: (n) => n == 1);
+      await sendPhoto(tester);
+      await leave(tester);
+      phone.files.clear(); // the phone cleared it
+      await reopen(tester);
+      expect(line, findsNothing);
+      expect(canPick(tester), isTrue);
+      await tester.pump();
+      expect(await kept(), isEmpty);
+    });
+  });
+
+  group('the files', () {
+    late Directory dir;
+    setUp(() => dir = Directory.systemTemp.createTempSync('chat_photos'));
+    tearDown(() => dir.deleteSync(recursive: true));
+    List<String> names() => dir.listSync().map((f) => f.uri.pathSegments.last).toList()..sort();
+
+    /// The files go a moment after the words, without anything waiting on the disk.
+    Future<void> settled(List<String> want) async {
+      for (var i = 0; i < 100 && names().join() != want.join(); i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      expect(names(), want);
+    }
+
+    test('are written whole, read back and let go by name or by person', () async {
+      final folder = '${dir.path}/chat_photos'; // made on the first photo
+      ChatPhotos.files = FolderPhotoFiles(() async => folder);
+      final a = await ChatPhotos.keep(3, 9, 'ab-12', Uint8List.fromList([1, 2, 3]));
+      final b = await ChatPhotos.keep(31, 9, 'cd', Uint8List.fromList([4]));
+      expect((a, b), ('3_9_ab12.photo', '31_9_cd.photo'));
+      dir = Directory('${dir.path}/chat_photos');
+      expect(names(), [a!, b!]..sort()); // no part file left
+      expect((await ChatPhotos.read(a)).bytes, [1, 2, 3]);
+      expect((await ChatPhotos.read('../$a')).bytes, isNull);
+      expect((await ChatPhotos.read('3_9_none.photo')).missing, isTrue);
+      await ChatPhotos.drop(prefix: ChatPhotos.prefixOf(3));
+      expect(names(), [b]); // the person 31's stays
+      await ChatPhotos.drop(names: [b]);
+      expect(names(), isEmpty);
+      dir = dir.parent;
+    });
+
+    test('one nobody names goes at start once it is ten minutes old; one an entry names stays', () async {
+      ChatPhotos.files = FolderPhotoFiles(() async => dir.path);
+      final now = DateTime.now();
+      await withClock(Clock.fixed(now), () async {
+        final named = await ChatPhotos.keep(3, 9, 'a', Uint8List.fromList([1]));
+        final loose = await ChatPhotos.keep(3, 8, 'b', Uint8List.fromList([2]));
+        await ChatDrafts.put(3, 9, {'text': '', 'photo': {'file': named, 'key': 'a', 'caption': '', 'name': 'p.png'}});
+        await ChatDrafts.sweep();
+        expect(names(), [loose, named]..sort()); // the loose one may still be on its way into an entry
+        await withClock(Clock.fixed(now.add(const Duration(minutes: 11))), ChatDrafts.sweep);
+        expect(names(), [named]);
+        // Past its seven days the entry goes, and its photo with it (any write lets stale entries go).
+        await withClock(Clock.fixed(now.add(const Duration(days: 8))), () => ChatDrafts.put(4, 1, {'text': 'а'}));
+        await settled([]);
+      });
+    });
+
+    test('an account deleted takes its photos, named in an entry or not yet', () async {
+      ChatPhotos.files = FolderPhotoFiles(() async => dir.path);
+      final named = await ChatPhotos.keep(3, 9, 'a', Uint8List.fromList([1]));
+      await ChatPhotos.keep(3, 8, 'b', Uint8List.fromList([2]));
+      final theirs = await ChatPhotos.keep(4, 9, 'c', Uint8List.fromList([3]));
+      await ChatDrafts.put(3, 9, {'text': '', 'photo': {'file': named, 'key': 'a', 'caption': '', 'name': 'p.png'}});
+      await ChatDrafts.forget(3);
+      await settled([theirs!]);
+    });
   });
 }

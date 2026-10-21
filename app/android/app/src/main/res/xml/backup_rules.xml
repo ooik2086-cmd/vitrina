@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 11 and older. Chat photos that may not have gone stay on this phone only: never in a backup that could
+     outlive the account being deleted. -->
+<full-backup-content>
+    <exclude domain="file" path="chat_photos/" />
+</full-backup-content>

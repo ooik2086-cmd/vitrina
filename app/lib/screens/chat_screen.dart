@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../chat_drafts.dart';
+import '../chat_photos.dart';
 import '../net_image.dart';
 import '../api.dart';
 import '../labels.dart';
@@ -219,8 +220,21 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   int? _restoredFor;
 
   /// A photo that may not have gone, kept with its caption and key: sent again it arrives once, picked again it would
-  /// be a new one.
+  /// be a new one. It is kept on the phone too ([_photoFile]) from the moment it is sent until its answer comes.
   _Photo? _unsentPhoto;
+  _Photo? _photoSending;
+  ({String key, String file})? _photoFile; // the copy on the phone, of the photo with that key
+  String? _photoWriting; // the key of the photo being written to the phone now, so it is written once
+  /// The last message on screen when the photo with [_photoAfterFor] was first sent: only a later one can be it.
+  /// -1 when the chat had not loaded yet: then nothing on screen can tell, and the line stays until it is sent again.
+  int _photoAfter = -1;
+  String? _photoAfterFor;
+  bool _photoKept =
+      false; // brought back from the phone, or the server's trouble: the line does not say "no connection"
+  bool _photoChecking = false;
+  bool _photoRestoring = true; // a photo kept on the phone may still be on its way back to the screen
+  final _photosDone = <String>{}; // keys of photos that went or were put aside: a file written late for one goes
+  bool _fetchedOnce = false; // a load of the chat has ended, with the thread or without it
 
   /// A pair marked sold from this chat whose answer did not come back. Sent again as it was, it is taken once.
   _Sale? _pendingSale;
@@ -239,7 +253,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   /// Keeps what this chat would lose if left now: the words in the field, whether they may already have gone (with
-  /// their key, also while their send waits for an answer) and a sale mark not yet answered. Nothing left to keep
+  /// their key, also while their send waits for an answer), a photo that may not have gone and a sale mark not yet
+  /// answered. Nothing left to keep
   /// lets the chat's entry go. Nothing is kept or let go while it is not known who is signed in.
   Future<void> _keep() async {
     _keepTimer?.cancel();
@@ -248,13 +263,25 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final text = _input.text;
     final sending = _sending && _sendKeyFor != null && text.trim() == _sendKeyFor;
     final sale = _pendingSale ?? _saleSending;
-    final entry = text.trim().isEmpty && sale == null
+    final photo = _unsentPhoto ?? _photoSending;
+    final file = photo != null && _photoFile?.key == photo.key ? _photoFile!.file : null;
+    // The words going with the photo are kept with it, not again as words in the field.
+    final words = photo != null && file != null && photo.caption.isNotEmpty && text.trim() == photo.caption ? '' : text;
+    final entry = words.trim().isEmpty && sale == null && file == null
         ? null
         : {
-            'text': text,
+            'text': words,
             if (_notSent || sending) ...{'not_sent': true, 'key': _sendKey, 'after': _notSentAfter},
             if (sale != null)
               'sale': {'listing_id': sale.listingId, 'size_id': sale.sizeId, 'label': sale.label, 'key': sale.key},
+            if (photo != null && file != null) // a kept photo the chat does not hold stays, see ChatDrafts.put
+              'photo': {
+                'file': file,
+                'name': photo.name,
+                'caption': photo.caption,
+                'key': photo.key,
+                'after': _photoAfter,
+              },
           };
     final mine = entry == null ? null : jsonEncode(entry);
     if (_keptOnce && mine == _lastKept) return; // nothing new since it was last kept
@@ -278,7 +305,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (me == null || _restoredFor != null) return;
     _restoredFor = me;
     final d = await ChatDrafts.read(me, widget.conversationId);
-    if (d == null || !mounted) return;
+    if (d == null || !mounted) return _photoRestored();
     try {
       final text = d['text'] as String? ?? '';
       final notSent = d['not_sent'] == true && d['key'] is String;
@@ -293,7 +320,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             _sendKeyFor = text.trim();
             _notSentAfter = d['after'] as int? ?? 0;
             _notSent = _notSentKept = true;
-            _checking = _conversation == null; // the first load says whether it arrived meanwhile
+            _checking = !_fetchedOnce; // the first load says whether it arrived meanwhile
           }
         }
         if (sale != null && _pendingSale == null) {
@@ -313,6 +340,35 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     } catch (_) {
       unawaited(ChatDrafts.put(me, widget.conversationId, null)); // kept by an older version in another shape
     }
+    // The photo after the words: reading it from the phone takes longer, and the words should not wait for it.
+    try {
+      final photo = d['photo'] as Map<String, dynamic>?;
+      if (photo == null) return;
+      final key = photo['key'] as String, file = photo['file'] as String;
+      final read = await ChatPhotos.read(file);
+      if (!mounted) return;
+      // Its file is gone: nothing to show or send. Could not be read this time: kept for the next visit.
+      if (read.missing) unawaited(ChatDrafts.settled(me, widget.conversationId, key));
+      final bytes = read.bytes;
+      if (bytes == null || _unsentPhoto != null || _photoSending != null) return;
+      setState(() {
+        _unsentPhoto = (bytes: bytes, name: photo['name'] as String, caption: photo['caption'] as String, key: key);
+        _photoFile = (key: key, file: file);
+        _photoAfter = photo['after'] as int? ?? -1;
+        _photoAfterFor = key;
+        _photoKept = true;
+        _photoChecking = !_fetchedOnce; // the first load says whether it arrived meanwhile
+      });
+      if (_unsentPhoto case final p? when _photoIn(_messages, p)) _photoWent(p);
+    } catch (_) {
+      // Kept by an older version in another shape: let it be, it goes with its entry in seven days.
+    } finally {
+      _photoRestored();
+    }
+  }
+
+  void _photoRestored() {
+    if (mounted && _photoRestoring) setState(() => _photoRestoring = false);
   }
 
   @override
@@ -388,11 +444,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       bool came(bool Function(ChatMessage m) same) =>
           !_sending && fresh.any((m) => !known.contains(m.id) && m.senderId == me && same(m));
       if (_notSent && came((m) => m.id > _notSentAfter && m.photoUrl == null && m.body == _sendKeyFor)) _input.clear();
-      final photo = _unsentPhoto;
-      final photoCame = photo != null && came((m) => m.photoUrl != null && m.body == photo.caption);
-      if (photoCame && _input.text.trim() == photo.caption) _input.clear();
+      // A kept photo is looked for whenever it is not going again itself (a text going meanwhile does not matter).
+      final photo = _photoSending == null ? _unsentPhoto : null;
+      final photoCame = photo != null && _photoIn(fresh.where((m) => !known.contains(m.id)), photo);
+      if (photoCame) _photoWent(photo);
       setState(() {
-        if (photoCame) _unsentPhoto = null;
         _conversation = conv;
         _loadError = null;
         _messages.addAll(fresh.where((m) => !known.contains(m.id)));
@@ -404,8 +460,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     } finally {
       // Every request ends within the API timeout, so a hung one cannot stop the polling for good.
       _loading = false;
-      // A message brought back from the phone that did not arrive: now the line may say so.
-      if (mounted && _checking) setState(() => _checking = false);
+      // A message or photo brought back from the phone that did not arrive: now the line may say so.
+      _fetchedOnce = true;
+      if (mounted && (_checking || _photoChecking)) setState(() => _checking = _photoChecking = false);
     }
   }
 
@@ -500,7 +557,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Future<void> _sendPhoto() async {
     if (_sending) return;
     final file = await pickPhoto(context);
-    if (file == null || !mounted) return;
+    // A photo brought back from the phone meanwhile goes first: its line is on screen now.
+    if (file == null || !mounted || _unsentPhoto != null || _sending) return;
     final Uint8List bytes;
     try {
       bytes = await file.readAsBytes();
@@ -526,28 +584,104 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Future<void> _postPhoto(_Photo photo) async {
     if (_sending) return;
     final before = _lastId;
-    setState(() => _sending = true);
+    final owner = _owner;
+    if (_photoAfterFor != photo.key) {
+      // Sent again, it is still the first time that counts.
+      _photoAfter = _conversation == null ? -1 : before;
+      _photoAfterFor = photo.key;
+    }
+    setState(() {
+      _sending = true;
+      _photoSending = photo;
+    });
+    // Onto the phone while it goes, not before: the chat or the app may close before the answer comes.
+    if (owner != null && _photoFile?.key != photo.key && _photoWriting != photo.key) _keepPhotoFile(owner, photo);
     try {
       final m = await _api.sendChatPhoto(widget.conversationId, photo.bytes, photo.name,
           caption: photo.caption, idempotencyKey: photo.key);
+      _photoDone(owner, photo); // also once closed
+      if (!mounted) return;
       if (_input.text.trim() == photo.caption) _input.clear(); // the caption went with the photo
       setState(() {
-        _unsentPhoto = null;
+        _unsentPhoto = _photoSending = null;
+        _photoFile = null;
+        _photoKept = false;
         if (!_messages.any((x) => x.id == m.id)) _messages.add(m);
       });
       _toBottom();
     } catch (e) {
-      if (!mounted) return;
-      // On a lost connection the photo is kept with its words in a line above the field, to go again with a tap,
-      // once. The words leave the field, so they are not sent again as a message of their own.
+      // On a lost connection, or the server's own trouble, the photo is kept with its words in a line above the
+      // field, to go again with a tap, once, and on the phone. The words leave the field, so they are not sent again
+      // as a message of their own. A refusal from the server is told in its own words, the photo is not kept, and its
+      // words stay in the field (or come back to it, for a photo brought back from the phone).
       final offline = e is ApiException && e.offline;
-      final went = offline && _cameWhileSending(before, (m) => m.photoUrl != null && m.body == photo.caption);
-      if (offline && _input.text.trim() == photo.caption) _input.clear();
-      setState(() => _unsentPhoto = offline && !went ? photo : null);
-      if (!offline) showError(context, e);
+      final unsure = e is ApiException && e.passing;
+      final went = mounted && unsure && _photoIn(_messages, photo);
+      if (!unsure || went) _photoDone(owner, photo);
+      if (!mounted) return;
+      if (unsure && _input.text.trim() == photo.caption) _input.clear();
+      if (!unsure && !went && _input.text.trim().isEmpty && photo.caption.isNotEmpty) _putBack(photo.caption);
+      setState(() {
+        _unsentPhoto = unsure && !went ? photo : null;
+        if (_unsentPhoto == null) _photoFile = null;
+        _photoKept = !offline; // with the connection down now the line says so; not for the server's trouble
+        _photoChecking = false;
+      });
+      if (!unsure) showError(context, e);
     } finally {
-      if (mounted) setState(() => _sending = false);
+      if (mounted) {
+        setState(() {
+          _sending = false;
+          _photoSending = null;
+        });
+        _keep();
+      }
     }
+  }
+
+  /// Writes [photo] to the phone and then names it in this chat's entry, unless it went or was put aside meanwhile:
+  /// then the file goes again. Also when the chat closed meanwhile, as the send it waits for may still be on its way.
+  void _keepPhotoFile(int owner, _Photo photo) {
+    _photoWriting = photo.key;
+    ChatPhotos.keep(owner, widget.conversationId, photo.key, photo.bytes).then((file) {
+      if (_photoWriting == photo.key) _photoWriting = null;
+      if (file == null) return;
+      if (_photosDone.contains(photo.key) || (_photoSending ?? _unsentPhoto)?.key != photo.key) {
+        unawaited(ChatPhotos.drop(names: [file]));
+        return;
+      }
+      _photoFile = (key: photo.key, file: file);
+      _keep();
+    });
+  }
+
+  /// [photo] went, or the server refused it, or it was put aside: what was kept of it on the phone goes.
+  void _photoDone(int? owner, _Photo photo) {
+    _photosDone.add(photo.key);
+    if (owner != null) unawaited(ChatDrafts.settled(owner, widget.conversationId, photo.key));
+  }
+
+  /// Whether [photo] is among [messages]: mine, after it was first sent ([_photoAfter], not known when -1).
+  bool _photoIn(Iterable<ChatMessage> messages, _Photo photo) {
+    final me = SessionScope.of(context).me?.id;
+    return _photoAfter >= 0 && messages.any((m) => m.id > _photoAfter && m.senderId == me && _isPhoto(m, photo));
+  }
+
+  /// Whether [m] is my message carrying [photo]: a photo with its words. A photo without words cannot be told from
+  /// another one of mine (sent from another phone, say): its line stays, and sent again it is the message the first
+  /// try made, as the server knows its key.
+  bool _isPhoto(ChatMessage m, _Photo photo) =>
+      m.photoUrl != null && photo.caption.isNotEmpty && m.body == photo.caption;
+
+  /// The kept [photo] is in the thread after all: its line, its words in the field and its copy on the phone go.
+  void _photoWent(_Photo photo) {
+    _photoDone(_owner, photo);
+    if (_input.text.trim() == photo.caption) _input.clear();
+    setState(() {
+      if (_unsentPhoto?.key == photo.key) _unsentPhoto = null;
+      _photoFile = null;
+      _photoKept = false;
+    });
   }
 
   /// The seller sold a pair in this chat, paid in hand or by transfer: one pair of the chosen size leaves the stock,
@@ -667,12 +801,17 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   /// Puts the kept photo aside; its words come back to the field, as they are the sender's to keep or send.
   void _dropPhoto(_Photo photo) {
-    setState(() => _unsentPhoto = null);
-    if (_input.text.trim().isEmpty && photo.caption.isNotEmpty) {
-      _input.value =
-          TextEditingValue(text: photo.caption, selection: TextSelection.collapsed(offset: photo.caption.length));
-    }
+    _photoDone(_owner, photo); // and from the phone
+    setState(() {
+      _unsentPhoto = null;
+      _photoFile = null;
+      _photoKept = false;
+    });
+    if (_input.text.trim().isEmpty && photo.caption.isNotEmpty) _putBack(photo.caption);
   }
+
+  void _putBack(String words) =>
+      _input.value = TextEditingValue(text: words, selection: TextSelection.collapsed(offset: words.length));
 
   @override
   Widget build(BuildContext context) {
@@ -756,10 +895,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             retryKey: 'sale-resend',
             onRetry: _marking ? null : _resendSale,
           ),
-        if (_unsentPhoto case final photo?)
+        if (_unsentPhoto case final photo? when !_photoChecking)
           _NotSentLine(
             key: const Key('chat-photo-not-sent'),
-            text: tr('Байланыс жоқ. Фото жетпеген болуы мүмкін.'),
+            // Brought back from the phone, it does not claim the connection is down now.
+            text: _photoKept ? tr('Фото жетпеген болуы мүмкін.') : tr('Байланыс жоқ. Фото жетпеген болуы мүмкін.'),
             photo: photo.bytes,
             caption: photo.caption,
             onRetry: _sending ? null : () => _postPhoto(photo),
@@ -786,7 +926,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   key: const Key('chat-photo'),
                   tooltip: tr('Фото жіберу'),
                   // One kept photo at a time: it goes again or is put aside before the next.
-                  onPressed: _sending || _unsentPhoto != null ? null : _sendPhoto,
+                  // And none while a kept one may still come back from the phone.
+                  onPressed:
+                      _sending || _unsentPhoto != null || (_photoRestoring && _owner != null) ? null : _sendPhoto,
                   icon: const Icon(Icons.add_photo_alternate_outlined),
                 ),
                 Expanded(
