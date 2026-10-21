@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
 
 import 'package:clock/clock.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../net_image.dart';
@@ -42,7 +44,7 @@ class ManageListingScreen extends StatefulWidget {
   State<ManageListingScreen> createState() => _ManageListingScreenState();
 }
 
-class _ManageListingScreenState extends State<ManageListingScreen> {
+class _ManageListingScreenState extends State<ManageListingScreen> with WidgetsBindingObserver {
   final _form = GlobalKey<FormState>();
   late Listing _l = widget.listing;
   late final _price = TextEditingController(text: '${_l.priceTiyn ~/ 100}');
@@ -70,12 +72,239 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
   /// The note that a Save found no connection, while it is on screen.
   ScaffoldFeatureController<SnackBar, SnackBarClosedReason>? _offlineBar;
 
+  Timer? _keepTimer;
+  bool _restored = false; // changes from before were put back: say so, with a way to drop them
+  int _skipped = 0; // kept changes not put back, as their value changed meanwhile
+  String? _lastKept; // what was last written, so the same is not written again
+  Session? _session; // held, as the page is still kept while it is being closed
+
   @override
   void initState() {
     super.initState();
     if (widget.showPhotos && !_locked(widget.listing)) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _bringPhotos());
     }
+    WidgetsBinding.instance.addObserver(this);
+    for (final (_, c, _) in _texts) {
+      c.addListener(_onText);
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) => _restore());
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _session = SessionScope.maybeOf(context);
+  }
+
+  /// A change to stock or a choice is kept like typing is.
+  @override
+  void setState(VoidCallback fn) {
+    super.setState(fn);
+    _keepSoon();
+  }
+
+  /// Typing is kept; while the note about changes from before shows, the page also looks again whether any are left.
+  void _onText() => _restored ? setState(() {}) : _keepSoon();
+
+  void _keepSoon() {
+    _keepTimer?.cancel();
+    _keepTimer = Timer(const Duration(seconds: 1), _keep);
+  }
+
+  /// Android may close an app in the background at any moment: what is on the page is kept right away.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.hidden || state == AppLifecycleState.paused) _keep();
+  }
+
+  /// The text fields, each with what the server holds for it.
+  List<(String, TextEditingController, String)> get _texts => [
+        ('price', _price, '${_l.priceTiyn ~/ 100}'),
+        ('delivery', _delivery, '${_l.deliveryPriceTiyn ~/ 100}'),
+        ('description', _description, _l.description ?? ''),
+        ('defects', _defects, _l.defects ?? ''),
+        ('title', _title, _l.title),
+        ('brand', _brand, _l.brand ?? ''),
+        ('model', _model, _l.modelName ?? ''),
+        ('color', _color, _l.color),
+      ];
+
+  /// The choices, each with what the server holds for it.
+  List<(String, String?, String?)> get _choices => [
+        ('category', _category, _l.category),
+        ('audience', _audience, _l.audience),
+        ('condition', _condition, _l.condition),
+      ];
+
+  /// Whether the page lets [value] be set for [key] now, as the name fields do: once on sale the shoe itself is
+  /// fixed (brand, model, category), whom it is for stays once said, and its condition can only get worse.
+  bool _canSet(String key, String? value) {
+    final fresh = !_l.everOnSale;
+    return switch (key) {
+      'brand' || 'model' || 'category' => fresh,
+      'audience' => fresh || _l.audience == null,
+      'condition' => fresh || conditions.keys.skipWhile((c) => c != _l.condition).contains(value),
+      _ => true,
+    };
+  }
+
+  /// Changes not saved are kept on the phone for a fortnight; after that they are likely stale, and dropped.
+  static const _editsLast = Duration(days: 14);
+
+  /// Every change not yet saved, each with the value it was changed from, so it is put back only on what the
+  /// seller saw: a value changed meanwhile (a sale, another phone) is left as the server has it.
+  Map<String, Object?> _edits() => {
+        'owner': _session?.me?.id,
+        'kept_at': clock.now().millisecondsSinceEpoch,
+        'texts': {
+          for (final (k, c, was) in _texts)
+            if (c.text != was) k: [c.text, was]
+        },
+        'choices': {
+          for (final (k, v, was) in _choices)
+            if (v != was) k: [v, was]
+        },
+        'stock': {
+          for (final e in _was.entries) '${e.key}': [_stock[e.key], e.value]
+        },
+      };
+
+  Future<Map<String, dynamic>> _allEdits(SharedPreferences prefs) async {
+    try {
+      return jsonDecode(prefs.getString(Session.listingEditsKey) ?? '{}') as Map<String, dynamic>;
+    } catch (_) {
+      return {}; // kept by an older version and no longer readable
+    }
+  }
+
+  /// Keeps the page's changes on the phone, or lets them go once there are none (saved, undone, or a hidden
+  /// listing that cannot be changed). Kept only for the person signed in, so no one else is ever shown them.
+  Future<void> _keep({bool drop = false}) async {
+    _keepTimer?.cancel();
+    final edits = !drop && !_locked(_l) && _session?.me != null && _dirty ? _edits() : null;
+    final mine = edits == null ? null : jsonEncode({...edits, 'kept_at': 0});
+    if (mine != null && mine == _lastKept) return; // nothing new since it was last kept
+    _lastKept = mine;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final all = await _allEdits(prefs);
+      final key = '${_l.id}';
+      // Changes long gone stale, for any listing, go too: the map does not grow for ever.
+      final now = clock.now().millisecondsSinceEpoch;
+      final before = all.length;
+      all.removeWhere((k, v) =>
+          k != key && (v is! Map || v['kept_at'] is! int || now - (v['kept_at'] as int) > _editsLast.inMilliseconds));
+      if (edits == null && !all.containsKey(key) && all.length == before) return;
+      edits == null ? all.remove(key) : all[key] = edits;
+      await prefs.setString(Session.listingEditsKey, jsonEncode(all));
+    } catch (_) {
+      // Nowhere to keep them (a full phone): the page still works, only an app closed now loses the changes.
+    }
+  }
+
+  /// Puts back the changes kept from before, on the values they were made to.
+  Future<void> _restore() async {
+    if (!mounted) return;
+    if (_locked(_l)) return _keep(drop: true); // hidden by a moderator: nothing on it can be changed
+    Map<String, dynamic>? d;
+    try {
+      d = (await _allEdits(await SharedPreferences.getInstance()))['${_l.id}'] as Map<String, dynamic>?;
+    } catch (_) {
+      return;
+    }
+    if (d == null || !mounted || _dirty) return; // the seller already began changing it: that wins
+    try {
+      final me = _session?.me?.id;
+      final keptAt = DateTime.fromMillisecondsSinceEpoch(d['kept_at'] as int);
+      if (me == null || d['owner'] != me || clock.now().difference(keptAt) > _editsLast) {
+        unawaited(_keep(drop: true)); // another person's changes on a shared phone, or long gone stale
+        return;
+      }
+      final texts = d['texts'] as Map<String, dynamic>;
+      final choices = d['choices'] as Map<String, dynamic>;
+      final stock = d['stock'] as Map<String, dynamic>;
+      // A change is put back only on the value it was made to, and only where the page still lets it be made.
+      var skipped = 0;
+      for (final (k, c, was) in _texts) {
+        if (texts[k] case [final String v, final String from]) {
+          if (from == was && _canSet(k, v)) {
+            c.text = v;
+          } else {
+            skipped++;
+          }
+        }
+      }
+      setState(() {
+        for (final (k, _, was) in _choices) {
+          if (choices[k] case [final String? v, final String? from]) {
+            if (from != was || v == null || !_canSet(k, v)) {
+              skipped++;
+              continue;
+            }
+            switch (k) {
+              case 'category':
+                _category = v;
+              case 'audience':
+                _audience = v;
+              case 'condition':
+                _condition = v;
+            }
+          }
+        }
+        for (final MapEntry(:key, :value) in stock.entries) {
+          final size = _l.sizes.where((s) => '${s.id}' == key).firstOrNull;
+          if (value case [final int v, final int from] when size != null && from == _count(size)) {
+            _stock[size.id] = v;
+          } else {
+            skipped++;
+          }
+        }
+        _restored = _dirty;
+        _skipped = skipped;
+      });
+      if (!_restored && skipped > 0) {
+        // Nothing could come back: said, so the seller does not look for changes that are not there.
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(tr('Өткен жолғы сақталмаған өзгерістер қайтарылмады: тауар осы уақытта өзгерген.'))));
+      }
+    } catch (_) {
+      unawaited(_keep(drop: true)); // not half of them
+    }
+  }
+
+  /// The seller would rather start from what is saved: every change on the page goes, once they say so.
+  Future<void> _dropRestored() async {
+    final drop = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(tr('Өзгерістерді алып тастау керек пе?')),
+        content: Text(tr('Бет сақталған күйіне қайтады. Бұл беттегі барлық сақталмаған өзгерістер жоғалады.')),
+        actions: [
+          TextButton(
+              key: const Key('drop-edits-sure'),
+              onPressed: () => Navigator.pop(context, true),
+              child: Text(tr('Алып тастау'))),
+          FilledButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Қалу'))),
+        ],
+      ),
+    );
+    if (drop != true || !mounted) return;
+    _offlineBar?.close(); // its changes are not on the page any more
+    for (final (_, c, was) in _texts) {
+      c.text = was;
+    }
+    setState(() {
+      _category = _l.category;
+      _audience = _l.audience;
+      _condition = _l.condition;
+      _stock
+        ..clear()
+        ..addAll({for (final s in _l.sizes) s.id: _count(s)});
+      _restored = false;
+    });
+    unawaited(_keep(drop: true));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr('Өзгерістер алып тасталды.'))));
   }
 
   void _bringPhotos() {
@@ -99,6 +328,8 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    if (_keepTimer?.isActive ?? false) unawaited(_keep()); // the last change, before the timer would have kept it
     _scroll.dispose();
     for (final c in [_price, _delivery, _description, _defects, _title, _brand, _model, _color]) {
       c.dispose();
@@ -191,7 +422,10 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
     );
     final soldMeanwhile = saved is ApiException && saved.code == 'stock_changed';
     if (!mounted || saved != null && !soldMeanwhile) return;
-    if (saved == null) _showStored();
+    if (saved == null) {
+      _showStored();
+      _restored = false; // saved now: the note about changes from before has done its work
+    }
     if (soldMeanwhile) {
       try {
         final l = await SessionScope.of(context).api.listing(_l.id);
@@ -268,6 +502,7 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
             true;
     if (leave && mounted) {
       _offlineBar?.close(); // its changes are not on a page any more
+      unawaited(_keep(drop: true)); // left without them on purpose: not offered again next time
       Navigator.pop(context, _changed);
     }
   }
@@ -349,6 +584,10 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
                     ]),
                   ),
                 ]),
+                if (_restored && _dirty && !locked) ...[
+                  const SizedBox(height: 16),
+                  _EditsBackNote(skipped: _skipped > 0, onDrop: _dropRestored),
+                ],
                 if (locked) ...[
                   const SizedBox(height: 16),
                   Card(
@@ -1112,6 +1351,46 @@ class QualityCard extends StatelessWidget {
               Text('+${t.points}', style: theme.textTheme.labelMedium?.copyWith(color: scheme.onSurfaceVariant)),
             ]),
           ],
+        ]),
+      ),
+    );
+  }
+}
+
+/// Changes not saved last time were put back on the page. One calm line, and a way to start from what is saved.
+class _EditsBackNote extends StatelessWidget {
+  const _EditsBackNote({required this.skipped, required this.onDrop});
+
+  /// Some kept changes were not put back, as their value changed meanwhile.
+  final bool skipped;
+  final VoidCallback onDrop;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      key: const Key('edits-back'),
+      color: theme.colorScheme.secondaryContainer,
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 14, 8, 6),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Icon(Icons.history_rounded, size: 20),
+            const SizedBox(width: 10),
+            Expanded(
+                child: Semantics(
+                    liveRegion: true, // put back a moment after the page opens: said, not just shown
+                    child: Text([
+                      tr('Өткен жолы сақталмаған өзгерістеріңізді бетке қайта қойдық. Оларды сақтау үшін «Сақтау» басыңыз.'),
+                      if (skipped) tr('Кейбірі қайтарылмады: олар осы уақытта өзгерген.'),
+                    ].join(' ')))),
+          ]),
+          Align(
+            alignment: AlignmentDirectional.centerEnd,
+            child: TextButton(
+                key: const Key('drop-edits'), onPressed: onDrop, child: Text(tr('Өзгерістерді алып тастау'))),
+          ),
         ]),
       ),
     );

@@ -15,6 +15,9 @@ class Session extends ChangeNotifier {
   /// lapsed sign-in does not lose it and another person signing in on the phone never sees it.
   static const editorDraftKey = 'vitrina_editor_draft';
 
+  /// Changes to the seller's own listings not yet saved, by listing, kept the same way: a closed app loses nothing.
+  static const listingEditsKey = 'vitrina_listing_edits';
+
   bool get signedIn => api.token != null;
 
   Future<void> restore() async {

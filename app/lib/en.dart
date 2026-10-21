@@ -875,6 +875,17 @@ const en = <String, String>{
   'Енгізген өзгерістер сақталмайды.': 'The changes you made will not be saved.',
   'Байланыс жоқ. Өзгерістер жоғалған жоқ, осы бетте тұр.':
       'No connection. Your changes are not lost; they are still on this page.',
+  'Өзгерістерді алып тастау': 'Discard changes',
+  'Өткен жолы сақталмаған өзгерістеріңізді бетке қайта қойдық. Оларды сақтау үшін «Сақтау» басыңыз.':
+      'We put back the changes you did not save last time. Tap Save to keep them.',
+  'Кейбірі қайтарылмады: олар осы уақытта өзгерген.': 'Some were not put back, as they changed meanwhile.',
+  'Өткен жолғы сақталмаған өзгерістер қайтарылмады: тауар осы уақытта өзгерген.':
+      'Your unsaved changes were not put back, as the listing changed meanwhile.',
+  'Өзгерістерді алып тастау керек пе?': 'Discard the changes?',
+  'Бет сақталған күйіне қайтады. Бұл беттегі барлық сақталмаған өзгерістер жоғалады.':
+      'The page goes back to what is saved. All unsaved changes on it will be lost.',
+  'Алып тастау': 'Discard',
+  'Өзгерістер алып тасталды.': 'Changes discarded.',
   'Сақтамай шығу керек пе?': 'Leave without saving?',
   'Сүзгіні тазарту': 'Clear filters',
   'Тапсырысты рәсімдеу · {0}': 'Place order · {0}',
