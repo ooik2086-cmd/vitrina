@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -1821,7 +1822,10 @@ void main() {
     }
 
     Future<ScrollShowcaseState> open(WidgetTester tester,
-        {Set<String> broken = const {}, Future<void> Function()? before}) async {
+        {Set<String> broken = const {},
+        bool Function(String url)? onTheWay,
+        Map<String, dynamic>? data,
+        Future<void> Function()? before}) async {
       png = (await tester.runAsync(() async {
         final recorder = ui.PictureRecorder();
         Canvas(recorder).drawRect(const Rect.fromLTWH(0, 0, 48, 48), Paint()..color = const Color(0xFF1F8FC7));
@@ -1833,13 +1837,16 @@ void main() {
       final bytes = <String, Uint8List>{}; // each address its own picture, as from the server
       ScrollShowcaseState.smallSource = (url) {
         asked.add(url);
+        if (onTheWay?.call(url) ?? false) return const _OnTheWay();
         // A broken copy fails the first time only, as on a connection that drops for a moment.
         return MemoryImage(failOnce.remove(url)
             ? Uint8List.fromList([1, 2, 3, 4])
             : bytes.putIfAbsent(url, () => Uint8List.fromList(png)));
       };
+      ScrollShowcaseState.fullSource = (url) => MemoryImage(bytes.putIfAbsent(url, () => Uint8List.fromList(png)));
       addTearDown(() {
         ScrollShowcaseState.smallSource = netImage;
+        ScrollShowcaseState.fullSource = netImage;
         ScrollShowcaseState.shortOfMemory = false;
       });
       PaintingBinding.instance.imageCache.clear();
@@ -1848,7 +1855,7 @@ void main() {
       await tester.pumpWidget(MaterialApp(
           home: Scaffold(
               body: ListView(controller: scroll, children: [
-        ScrollShowcase(listing: Listing.fromJson(listing()), scroll: scroll, stageHeight: 600),
+        ScrollShowcase(listing: Listing.fromJson(data ?? listing()), scroll: scroll, stageHeight: 600),
         const SizedBox(height: 2000),
       ]))));
       return tester.state<ScrollShowcaseState>(find.byType(ScrollShowcase));
@@ -1879,6 +1886,97 @@ void main() {
       expect(seen.length, greaterThan(5));
       expect(state.builds - builds, lessThanOrEqualTo(2)); // once it comes to rest, for the full photo
     }, semanticsEnabled: false);
+
+    // On a slow connection only the first frame's small copy has come: the stage draws it for the frame it is on, at
+    // another angle, and the full photo laid over it at rest let it show through round the shoe.
+    Future<ScrollShowcaseState> slow(WidgetTester tester) async {
+      final state = await open(tester, onTheWay: (url) => url != 'https://cdn/f0-s.webp');
+      await decode(tester);
+      scroll.jumpTo(60);
+      await tester.pump();
+      expect(state.drawnSmall, isNot('https://cdn/f0-s.webp')); // another frame...
+      await tester.pump(const Duration(milliseconds: 16));
+      expect(state.paintedSmall, 'https://cdn/f0-s.webp'); // ...drawn from the first one's copy while it turns
+      return state;
+    }
+
+    final fullPhoto = find.byWidgetPredicate((w) => w is Image && '${w.key}'.startsWith("[<'showcase-full-"));
+    // The painter's drawing: the shadow, and the small copy unless the full photo is over it.
+    Finder painted() => find.byKey(const ValueKey('showcase-base'));
+
+    testWidgets('at rest the shoe is drawn once: the small copy under the full photo goes once it is drawn',
+        (tester) async {
+      final state = await slow(tester);
+      expect(state.castsShadow, isTrue);
+      expect(state.smallHidden, isFalse);
+      expect(painted(), paintsExactlyCountTimes(#drawImageRect, 2)); // shadow and small copy
+      await tester.pump(const Duration(seconds: 4));
+      expect(fullPhoto, findsOneWidget);
+      expect(state.smallHidden, isFalse); // at rest, until the full photo is drawn: never an empty stage
+      await decode(tester);
+      expect(state.smallHidden, isTrue);
+      expect(painted(), paintsExactlyCountTimes(#drawImageRect, 1)); // the shadow stays under the photo
+      scroll.jumpTo(120); // turning again: the full photo goes, the small copies come back at once
+      await tester.pump();
+      expect(state.smallHidden, isFalse);
+      expect(fullPhoto, findsNothing);
+      expect(painted(), paintsExactlyCountTimes(#drawImageRect, 2));
+    });
+
+    testWidgets('back on a frame whose photo is no longer decoded, the small copy stays until it is', (tester) async {
+      final state = await slow(tester);
+      await tester.pump(const Duration(seconds: 4));
+      await decode(tester);
+      expect(state.smallHidden, isTrue);
+      scroll.jumpTo(120);
+      await tester.pump();
+      PaintingBinding.instance.imageCache.clear(); // the phone needed the memory
+      scroll.jumpTo(60);
+      await tester.pump(const Duration(seconds: 4));
+      expect(fullPhoto, findsOneWidget); // the same photo, decoding again
+      expect(state.smallHidden, isFalse);
+      await decode(tester);
+      expect(state.smallHidden, isTrue);
+    });
+
+    testWidgets('the phone turned sideways: the small copy stays until the photo is drawn at its new size',
+        (tester) async {
+      final state = await slow(tester);
+      await tester.pump(const Duration(seconds: 4));
+      await decode(tester);
+      expect(state.smallHidden, isTrue);
+      ScrollShowcaseState.fullSource = (_) => const _OnTheWay();
+      tester.view.physicalSize = const Size(1000, 600);
+      addTearDown(tester.view.reset);
+      await tester.pump(const Duration(seconds: 4));
+      expect(state.smallHidden, isFalse);
+    });
+
+    testWidgets('a full photo that does not come leaves the small copy drawn', (tester) async {
+      final state = await slow(tester);
+      ScrollShowcaseState.fullSource = (_) => MemoryImage(Uint8List.fromList([1, 2, 3, 4]));
+      await tester.pump(const Duration(seconds: 4));
+      await decode(tester);
+      expect(state.smallHidden, isFalse);
+      expect(painted(), paintsExactlyCountTimes(#drawImageRect, 2));
+    });
+
+    testWidgets('a scan\'s long turn comes every other frame first, then the frames between', (tester) async {
+      // 80 frames a turn, as the demo's scans: frame 80 is frame 0 again, then the top, the sole and in close.
+      final long = {
+        ...scan(),
+        'media': [
+          for (final (angle, i) in [('outer', 0), ('top', 100), ('sole', 110), ('detail', 119)]) media(angle, 'f$i'),
+          for (var i = 0; i < 120; i++) media('frame', i == 80 ? 'f0' : 'f$i'),
+        ],
+      };
+      await open(tester, data: long);
+      await decode(tester, 60);
+      final frames = [for (final u in asked) int.parse(RegExp(r'/f(\d+)-s').firstMatch(u)!.group(1)!)];
+      expect(frames.toSet(), hasLength(120 - 1)); // all of them, frame 80 being frame 0
+      expect(frames.take(40).every((f) => f < 80 && f.isEven), isTrue, reason: '$frames');
+      expect(frames.skip(40).take(40).every((f) => f < 80 && f.isOdd), isTrue, reason: '$frames');
+    });
 
     testWidgets('one that did not come is drawn as its own photo, then asked for again', (tester) async {
       final state = await open(tester, broken: {'https://cdn/f0-s.webp'});
@@ -1949,4 +2047,14 @@ void main() {
       expect(cache.containsKey(other!), isFalse);
     });
   });
+}
+
+/// A picture still on its way: it never comes.
+class _OnTheWay extends ImageProvider<_OnTheWay> {
+  const _OnTheWay();
+  @override
+  Future<_OnTheWay> obtainKey(ImageConfiguration configuration) => SynchronousFuture(this);
+  @override
+  ImageStreamCompleter loadImage(_OnTheWay key, ImageDecoderCallback decode) =>
+      OneFrameImageStreamCompleter(Completer<ImageInfo>().future);
 }

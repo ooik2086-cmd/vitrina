@@ -483,6 +483,18 @@ class ScrollShowcaseState extends State<ScrollShowcase>
   late ShowcasePlan _plan;
   late bool _light;
   bool _settled = true;
+
+  /// The full photo laid over the small copies now (null while the shoe moves or with no small copy under it), and
+  /// that same photo once it has been drawn: from then on the small copy under it is not drawn, its shadow is.
+  ImageProvider? _laid;
+  ImageProvider? _sharpDrawn;
+
+  /// Tells the small copies' painter the full photo over it came or went, without building anything.
+  final _cover = ValueNotifier<int>(0);
+
+  /// Whether the small copy under the full photo is left out now (its shadow stays).
+  @visibleForTesting
+  bool get smallHidden => _laid != null && _sharpDrawn == _laid;
   Timer? _settle;
 
   /// The photo on the stage: the one at [_pos], which follows the page with a short glide.
@@ -629,6 +641,10 @@ class ScrollShowcaseState extends State<ScrollShowcase>
   @visibleForTesting
   static ImageProvider Function(String url) screenSize = netImage;
 
+  /// Where the full photo laid over the stage at rest comes from; tests replace it.
+  @visibleForTesting
+  static ImageProvider Function(String url) fullSource = netImage;
+
   /// How many frames either side of the one shown are fetched ahead when they have no small copy. Fetching every
   /// one of them at screen size on arrival cost megabytes of mobile data, and the decoded photos, a few megabytes
   /// each, did not fit the image cache anyway: most were dropped again before they were shown.
@@ -719,9 +735,14 @@ class ScrollShowcaseState extends State<ScrollShowcase>
       return here < turn && i < turn && photos[here].step == 0 && photos[i].step == 0 ? math.min(d, turn - d) : d;
     }
 
+    // A scan turns in 80 frames, twice a plain turn's: every other frame of it comes first, so on a slow connection
+    // the whole turn is there in half the bytes (the nearest frame there is drawn in a gap) before the rest fill in.
+    final coarse = _plan.scan && turn >= 80;
+    int order(int i) => apart(i) + (coarse && i < turn && photos[i].step == 0 && i.isOdd ? turn ~/ 2 : 0);
+
     final config = createLocalImageConfiguration(context);
     while (_asking.length < decodeAtOnce && _waiting.isNotEmpty) {
-      final next = _waiting.keys.reduce((a, b) => apart(_waiting[a]!) <= apart(_waiting[b]!) ? a : b);
+      final next = _waiting.keys.reduce((a, b) => order(_waiting[a]!) <= order(_waiting[b]!) ? a : b);
       _waiting.remove(next);
       _ask(next, config);
     }
@@ -999,6 +1020,7 @@ class ScrollShowcaseState extends State<ScrollShowcase>
     }
     _dropSmall();
     _drawn.dispose();
+    _cover.dispose();
     super.dispose();
   }
 
@@ -1521,7 +1543,8 @@ class ScrollShowcaseState extends State<ScrollShowcase>
         ? RepaintBoundary(
             child: CustomPaint(
                 key: const ValueKey('showcase-base'),
-                painter: _FramePainter(_drawable, _drawn, invert: invert),
+                painter: _FramePainter(_drawable, Listenable.merge([_drawn, _cover]),
+                    invert: invert, imageHidden: () => smallHidden),
                 size: Size.infinite))
         : Image(
             key: const ValueKey('showcase-base'),
@@ -1534,21 +1557,41 @@ class ScrollShowcaseState extends State<ScrollShowcase>
     // At rest: the full photo over the small copy, faded in once decoded, at the pixels the zoom needs.
     final bucket = _scale <= 1.05 ? 1 : (_scale <= 2 ? 2 : 3);
     final provider = ResizeImage.resizeIfNeeded(
-        math.min(6000, (width * dpr * bucket).round()), null, netImage(step.cut ? m.url : m.originalUrl));
+        math.min(6000, (width * dpr * bucket).round()), null, fullSource(step.cut ? m.url : m.originalUrl));
     // With no small copy the base is already this photo at screen size: nothing to lay over it, nothing to drop.
     final sharpen = (_settled || _zoomed) && (small || provider != _base(m, step));
     if (sharpen) _remember(provider, bucket);
+    // Once the photo is drawn, the small copy under it is left out: the photos are cut out, so a small copy under them
+    // showed through round the shoe, and while the small copy of the frame shown is still on its way the stage draws
+    // the nearest one, at another angle, so the shoe was seen twice, one over the other. Counted from the photo
+    // actually drawn this time at this size (ResizeImage compares its width too), so coming back to a photo no longer
+    // decoded, or a new width, keeps the small copy until the photo is there. With no small copy the base is the same
+    // photo at screen size, so nothing else shows round it.
+    _laid = sharpen && small ? provider : null;
+    if (_laid == null) _sharpDrawn = null;
     final full = Image(
       image: provider,
       key: ValueKey('showcase-full-${m.url}-$bucket'),
       fit: BoxFit.contain,
       filterQuality: FilterQuality.high,
-      frameBuilder: (_, child, frame, sync) =>
-          sync || frame != null ? child : const SizedBox.shrink(), // until then the small copy shows through
-      errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+      frameBuilder: (_, child, frame, sync) {
+        if (!(sync || frame != null)) return const SizedBox.shrink(); // until then the small copy shows through
+        if (_laid == provider && _sharpDrawn != provider) {
+          _sharpDrawn = provider;
+          _cover.value++; // only the painter listens: it leaves the small copy out in this same frame
+        }
+        return child;
+      },
+      errorBuilder: (_, __, ___) {
+        if (_sharpDrawn == provider) {
+          _sharpDrawn = null;
+          _cover.value++;
+        }
+        return const SizedBox.shrink();
+      },
     );
     // A seller's cut-out turning on the floor stands on its shadow, made from the small copy (the painter draws it
-    // under a small copy). A scan has its own.
+    // under a small copy, also while the photo is over it). A scan has its own.
     final img = Stack(fit: StackFit.expand, children: [
       if (!small && castsShadow) ContactShadow(image: _base(m, step), fit: BoxFit.contain, gapless: true),
       base,
@@ -1934,15 +1977,20 @@ class _PinStage extends FlowDelegate {
 /// Draws the small copy the stage shows now, with the shadow a seller's cut-out stands on, whenever [repaint] says
 /// the shoe moved or a copy arrived.
 class _FramePainter extends CustomPainter {
-  _FramePainter(this.frame, Listenable repaint, {this.invert = false}) : super(repaint: repaint);
+  _FramePainter(this.frame, Listenable repaint, {this.invert = false, required this.imageHidden})
+      : super(repaint: repaint);
   final ({ui.Image image, MadeShadow? shadow})? Function() frame;
   final bool invert;
+
+  /// The full photo is drawn over it: only the shadow is drawn.
+  final bool Function() imageHidden;
 
   @override
   void paint(Canvas canvas, Size size) {
     final now = frame();
     if (now == null) return;
     if (now.shadow case final shadow?) paintShadow(canvas, size, shadow, BoxFit.contain);
+    if (imageHidden()) return;
     paintImage(
         canvas: canvas,
         rect: Offset.zero & size,

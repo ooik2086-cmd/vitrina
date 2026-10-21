@@ -1105,7 +1105,7 @@ DEMO = Path(__file__).resolve().parents[2] / "app" / "demo"
 @unittest.skipUnless((DEMO / "api.json").exists() or os.environ.get("CI"), "the app is not next to the backend here")
 class RealPhotoSideTests(unittest.TestCase):
     """The side matching on the demo's shoes: the camera scan (1, and 3 in another colour) and the rendered scan (2,
-    and 4 in another colour), whose sides were checked by eye on the phone (the toe faces the viewer at the front,
+    and 4 in another colour), whose sides were checked by eye (the toe faces the viewer at the front,
     the heel at the back). A seller's own shot is made from a frame a little off the side checked: smaller, moved,
     brighter and tilted."""
 
@@ -1113,9 +1113,11 @@ class RealPhotoSideTests(unittest.TestCase):
         # The v4 camera scan, 80 frames a turn: toe on at 29 and heel on at 51 (its front and back stops show the
         # shoe three-quarter on, at 22 and 60); the outer side square on a little before frame 0.
         1: {"outer": 72, "front": 29, "inner": 40, "back": 51},
-        2: {"outer": 39, "front": 10, "inner": 20, "back": 30},  # 9 degrees a frame; the outer side a frame before 0
+        # The rendered scan made the same way (tools/demo-frames/scan.js, 205 frames, the turn eased as v4's): toe on
+        # at 28, heel on at 52, the outer side square on a few frames before 0 (checked by eye on the renders).
+        2: {"outer": 76, "front": 28, "inner": 40, "back": 52},
         3: {"outer": 72, "front": 29, "inner": 40, "back": 51},
-        4: {"outer": 39, "front": 10, "inner": 20, "back": 30},
+        4: {"outer": 76, "front": 28, "inner": 40, "back": 52},
     }
 
     @staticmethod
