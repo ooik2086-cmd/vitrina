@@ -8,7 +8,7 @@ import unittest
 
 from sqlalchemy import func, select, text
 
-from tests.test_api import ADDRESS, LISTING, ApiTestCase, with_check_digit
+from tests.test_api import ADDRESS, LISTING, ApiTestCase, jpeg, with_check_digit
 from vitrina_api.models import (Conversation, LedgerTx, Listing, ListingSize, Message, Offer, Order, OrderEvent,
                                 Payout, Review)
 
@@ -114,6 +114,17 @@ class RaceTests(ApiTestCase):
         cid = self.post("/conversations", self.buyer, {"listing_id": listing["id"]}).json()["id"]
         rs = self.same(lambda: self.post(f"/conversations/{cid}/messages", self.buyer, {"body": "Бар ма?"},
                                          **{"Idempotency-Key": "weak-line-msg"}))
+        self.assertEqual(self.codes(rs), [201] * N, [r.text[:120] for r in rs])
+        self.assertEqual(len({r.json()["id"] for r in rs}), 1)
+        self.assertEqual(self.count(Message, Message.conversation_id == cid), 1)
+
+    def test_the_same_chat_photo_sent_many_times_at_once_is_posted_once(self):
+        listing = self.publish()
+        cid = self.post("/conversations", self.buyer, {"listing_id": listing["id"]}).json()["id"]
+        photo = jpeg()
+        rs = self.same(lambda: self.c.post(f"/api/v1/conversations/{cid}/photos", data={"caption": "Табаны"},
+                                           files={"file": ("p.jpg", photo, "image/jpeg")},
+                                           headers={**self.h(self.buyer), "Idempotency-Key": "weak-line-photo"}))
         self.assertEqual(self.codes(rs), [201] * N, [r.text[:120] for r in rs])
         self.assertEqual(len({r.json()["id"] for r in rs}), 1)
         self.assertEqual(self.count(Message, Message.conversation_id == cid), 1)

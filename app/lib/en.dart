@@ -886,6 +886,7 @@ const en = <String, String>{
       'The page goes back to what is saved. All unsaved changes on it will be lost.',
   'Алып тастау': 'Discard',
   'Өзгерістер алып тасталды.': 'Changes discarded.',
+  'Байланыс жоқ. Фото жетпеген болуы мүмкін.': 'No connection. The photo may not have gone.',
   'Байланыс жоқ. Хабарлама жетпеген болуы мүмкін, мәтіні осы жерде тұр.':
       'No connection. The message may not have gone; its text is still here.',
   'Сақтамай шығу керек пе?': 'Leave without saving?',

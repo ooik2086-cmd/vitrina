@@ -1394,9 +1394,15 @@ class Api {
           headers: {if (idempotencyKey != null) 'Idempotency-Key': idempotencyKey}) as Map<String, dynamic>);
 
   /// A photo in the chat, with an optional caption. Cleaned of metadata on the server like any upload.
-  Future<ChatMessage> sendChatPhoto(int conversationId, List<int> bytes, String filename, {String caption = ''}) async {
+  /// With [idempotencyKey], one per picked photo, the same photo sent again after a lost answer is posted once.
+  Future<ChatMessage> sendChatPhoto(int conversationId, List<int> bytes, String filename,
+      {String caption = '', String? idempotencyKey}) async {
     final req = http.MultipartRequest('POST', Uri.parse('$base/conversations/$conversationId/photos'))
-      ..headers.addAll({'Accept': 'application/json', if (token != null) 'Authorization': 'Bearer $token'})
+      ..headers.addAll({
+        'Accept': 'application/json',
+        if (token != null) 'Authorization': 'Bearer $token',
+        if (idempotencyKey != null) 'Idempotency-Key': idempotencyKey,
+      })
       ..fields['caption'] = caption
       ..files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
     return ChatMessage.fromJson(await _upload(req) as Map<String, dynamic>);

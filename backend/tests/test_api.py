@@ -1894,6 +1894,31 @@ class SocialTests(ApiTestCase):
                           headers=self.h(self.buyer))
         self.assertEqual(bad.json()["code"], "unsupported_media")
 
+    def test_a_chat_photo_sent_again_after_a_lost_answer_is_posted_and_stored_once(self):
+        listing = self.publish()
+        cid = self.post("/conversations", self.buyer, {"listing_id": listing["id"]}).json()["id"]
+        stored = lambda: sum(len(files) for _, _, files in os.walk(self.cfg.media_dir))  # noqa: E731
+        before = stored()
+        send = lambda token, key, caption="Табанының жақын фотосы": self.c.post(  # noqa: E731
+            f"/api/v1/conversations/{cid}/photos", files={"file": ("p.jpg", jpeg(), "image/jpeg")},
+            data={"caption": caption}, headers={**self.h(token), "Idempotency-Key": key})
+        first = send(self.buyer, "weak-line-photo-1")
+        again = send(self.buyer, "weak-line-photo-1")  # the answer never reached the phone
+        self.assertEqual((first.status_code, again.status_code), (201, 201), again.text)
+        self.assertEqual(again.json(), first.json())
+        self.assertEqual(stored(), before + 1)  # the file is kept once, not once per try
+        notes = [n["text"] for n in self.get("/notifications", self.seller).json()["items"]]
+        self.assertEqual(notes.count("Жаңа хабарлама: Табанының жақын фотосы"), 1)
+        # A key is the sender's own, and one chat's own: the same one elsewhere posts a new photo.
+        self.assertNotEqual(send(self.seller, "weak-line-photo-1").json()["id"], first.json()["id"])
+        other = self.post("/conversations", self.buyer, {"listing_id": self.publish()["id"]}).json()["id"]
+        there = self.c.post(f"/api/v1/conversations/{other}/photos", files={"file": ("p.jpg", jpeg(), "image/jpeg")},
+                            headers={**self.h(self.buyer), "Idempotency-Key": "weak-line-photo-1"})
+        self.assertEqual(there.status_code, 201, there.text)
+        self.assertNotEqual(there.json()["id"], first.json()["id"])
+        self.assertNotEqual(send(self.buyer, "weak-line-photo-2").json()["id"], first.json()["id"])  # a new photo
+        self.assertEqual(send(self.buyer, "short").status_code, 422)  # not a real key
+
     def test_contact_details_are_flagged_and_spam_limited(self):
         listing = self.publish()
         cid = self.post("/conversations", self.buyer, {"listing_id": listing["id"]}).json()["id"]

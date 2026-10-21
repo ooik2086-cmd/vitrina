@@ -32,6 +32,7 @@ void main() {
       {bool Function(int send)? lost,
       bool Function(int send)? down,
       int? status,
+      Duration slow = Duration.zero,
       Duration pollEvery = const Duration(hours: 1)}) async {
     final sent = <(String, String?)>[];
     final posted = <Map<String, Object?>>[];
@@ -62,7 +63,10 @@ void main() {
             posted.add(m);
             if (key != null) byKey[key] = m;
           }
-          if (lost?.call(n) ?? false) throw http.ClientException('answer lost');
+          if (lost?.call(n) ?? false) {
+            await Future<void>.delayed(slow);
+            throw http.ClientException('answer lost');
+          }
           return _json(m, 201);
         }));
     final session = Session(api)..me = Me.fromJson({'id': 3, 'phone': '+77010000003', 'is_seller': true});
@@ -147,6 +151,20 @@ void main() {
     await send(tester, 'Ертең жіберемін');
     expect(find.text(notSent), findsOneWidget);
     await tester.pump(const Duration(seconds: 5)); // the thread is read again
+    await tester.pump();
+    expect(find.text('Ертең жіберемін'), findsOneWidget); // in the thread, once
+    expect(field('Ертең жіберемін'), findsNothing);
+    expect(find.text(notSent), findsNothing);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('a message the thread showed while its answer was still on the way is not kept', (tester) async {
+    await open(tester, lost: (n) => n == 1, slow: const Duration(seconds: 7), pollEvery: const Duration(seconds: 5));
+    await tester.enterText(find.byType(TextField), 'Ертең жіберемін');
+    await tester.tap(find.byTooltip('Жіберу'));
+    await tester.pump(const Duration(seconds: 5)); // the thread is read while the send waits
+    await tester.pump(const Duration(seconds: 3)); // and then the send gives up
     await tester.pump();
     expect(find.text('Ертең жіберемін'), findsOneWidget); // in the thread, once
     expect(field('Ертең жіберемін'), findsNothing);

@@ -223,15 +223,20 @@ def send_message(conversation_id: int, body: MessageIn, user: User = Depends(cur
 @router.post("/conversations/{conversation_id}/photos", status_code=201)
 def send_photo(conversation_id: int, file: UploadFile = File(...), caption: str = Form("", max_length=2000),
                      user: User = Depends(current_user), db: Session = Depends(get_db),
-                     storage: Storage = Depends(get_storage)):
-    """A photo in the chat, e.g. a close-up the buyer asked for. Cleaned of metadata like any upload."""
+                     storage: Storage = Depends(get_storage),
+                     idempotency_key: str | None = Header(default=None, min_length=8, max_length=100)):
+    """A photo in the chat, e.g. a close-up the buyer asked for. Cleaned of metadata like any upload. Sent again with
+    the same Idempotency-Key (its answer lost on weak mobile data), it is the message the first one posted: not stored
+    or shown twice. Two at once may both store the file; the one not posted is swept with the other orphans."""
     conv = conversation_for(db, conversation_id, user)
+    if idempotency_key and (sent := message_sent_by(db, user, conv, idempotency_key)):
+        return message_out(sent)
     check_rate(db, user)
     data = file.file.read(MAX_UPLOAD_BYTES + 1)
     if len(data) > MAX_UPLOAD_BYTES:
         raise ApiError(413, "file_too_large")
     url = storage.put(normalize_image(data), owner_id=user.id)
-    return post_message(db, conv, user, caption.strip(), url)
+    return post_message(db, conv, user, caption.strip(), url, key=idempotency_key)
 
 
 @router.post("/conversations/{conversation_id}/block")

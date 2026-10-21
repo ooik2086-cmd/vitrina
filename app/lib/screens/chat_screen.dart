@@ -156,6 +156,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   /// The message in the field may not have gone: the line above the field says so while its text is unchanged.
   bool _notSent = false;
 
+  /// A photo that may not have gone, kept with its caption and key: sent again it arrives once, picked again it would
+  /// be a new one.
+  _Photo? _unsentPhoto;
+
   Api get _api => SessionScope.of(context).api;
 
   @override
@@ -222,12 +226,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       final known = {for (final m in _messages) m.id};
       final me = SessionScope.of(context).me?.id;
       // A send whose answer was lost may have gone after all: once it shows up here, it is not in the field.
-      if (_notSent &&
-          !_sending &&
-          fresh.any((m) => !known.contains(m.id) && m.senderId == me && m.body == _sendKeyFor)) {
-        _input.clear();
-      }
+      bool came(bool Function(ChatMessage m) same) =>
+          !_sending && fresh.any((m) => !known.contains(m.id) && m.senderId == me && same(m));
+      if (_notSent && came((m) => m.photoUrl == null && m.body == _sendKeyFor)) _input.clear();
+      final photo = _unsentPhoto;
+      final photoCame = photo != null && came((m) => m.photoUrl != null && m.body == photo.caption);
+      if (photoCame && _input.text.trim() == photo.caption) _input.clear();
       setState(() {
+        if (photoCame) _unsentPhoto = null;
         _conversation = conv;
         _loadError = null;
         _messages.addAll(fresh.where((m) => !known.contains(m.id)));
@@ -294,6 +300,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _sendKey = newIdempotencyKey();
       _sendKeyFor = text;
     }
+    final before = _lastId;
     setState(() => _sending = true);
     try {
       final m = await _api.sendMessage(widget.conversationId, text, idempotencyKey: _sendKey);
@@ -307,6 +314,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       // On a lost connection the text stays in the field with a line above it; the same message goes again with a
       // tap, and arrives once. A refusal from the server is told in its own words.
       final offline = e is ApiException && e.offline;
+      if (offline && _cameWhileSending(before, (m) => m.photoUrl == null && m.body == text)) {
+        if (_input.text.trim() == text) _input.clear(); // it went after all: the thread already shows it
+        return;
+      }
       setState(() => _notSent = offline && _input.text.trim() == text);
       if (!offline) showError(context, e);
     } finally {
@@ -318,19 +329,61 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (_sending) return;
     final file = await pickPhoto(context);
     if (file == null || !mounted) return;
+    final Uint8List bytes;
+    try {
+      bytes = await file.readAsBytes();
+    } catch (e) {
+      if (mounted) showError(context, e);
+      return;
+    }
+    if (mounted) {
+      await _postPhoto((bytes: bytes, name: file.name, caption: _input.text.trim(), key: newIdempotencyKey()));
+    }
+  }
+
+  /// The id of the last message on screen.
+  int get _lastId => _messages.isEmpty ? 0 : _messages.last.id;
+
+  /// Whether a message of mine like [same] reached the thread on screen after [before], while its send was waiting:
+  /// the poll read it then, so it never comes again as new.
+  bool _cameWhileSending(int before, bool Function(ChatMessage m) same) {
+    final me = SessionScope.of(context).me?.id;
+    return _messages.any((m) => m.id > before && m.senderId == me && same(m));
+  }
+
+  Future<void> _postPhoto(_Photo photo) async {
+    if (_sending) return;
+    final before = _lastId;
     setState(() => _sending = true);
     try {
-      final bytes = await file.readAsBytes();
-      final m = await _api.sendChatPhoto(widget.conversationId, bytes, file.name, caption: _input.text.trim());
-      _input.clear(); // the caption went with the photo, so a key kept for that text goes too
+      final m = await _api.sendChatPhoto(widget.conversationId, photo.bytes, photo.name,
+          caption: photo.caption, idempotencyKey: photo.key);
+      if (_input.text.trim() == photo.caption) _input.clear(); // the caption went with the photo
       setState(() {
+        _unsentPhoto = null;
         if (!_messages.any((x) => x.id == m.id)) _messages.add(m);
       });
       _toBottom();
     } catch (e) {
-      if (mounted) showError(context, e);
+      if (!mounted) return;
+      // On a lost connection the photo is kept with its words in a line above the field, to go again with a tap,
+      // once. The words leave the field, so they are not sent again as a message of their own.
+      final offline = e is ApiException && e.offline;
+      final went = offline && _cameWhileSending(before, (m) => m.photoUrl != null && m.body == photo.caption);
+      if (offline && _input.text.trim() == photo.caption) _input.clear();
+      setState(() => _unsentPhoto = offline && !went ? photo : null);
+      if (!offline) showError(context, e);
     } finally {
       if (mounted) setState(() => _sending = false);
+    }
+  }
+
+  /// Puts the kept photo aside; its words come back to the field, as they are the sender's to keep or send.
+  void _dropPhoto(_Photo photo) {
+    setState(() => _unsentPhoto = null);
+    if (_input.text.trim().isEmpty && photo.caption.isNotEmpty) {
+      _input.value =
+          TextEditingValue(text: photo.caption, selection: TextSelection.collapsed(offset: photo.caption.length));
     }
   }
 
@@ -405,7 +458,21 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     ),
         ),
         if (conv?.role == 'seller') _QuickReplies(onPick: _useReply, payments: _payments),
-        if (_notSent) _NotSentLine(onRetry: _sending ? null : _send),
+        if (_unsentPhoto case final photo?)
+          _NotSentLine(
+            key: const Key('chat-photo-not-sent'),
+            text: tr('Байланыс жоқ. Фото жетпеген болуы мүмкін.'),
+            photo: photo.bytes,
+            caption: photo.caption,
+            onRetry: _sending ? null : () => _postPhoto(photo),
+            onDrop: _sending ? null : () => _dropPhoto(photo),
+          ),
+        if (_notSent)
+          _NotSentLine(
+            key: const Key('chat-not-sent'),
+            text: tr('Байланыс жоқ. Хабарлама жетпеген болуы мүмкін, мәтіні осы жерде тұр.'),
+            onRetry: _sending ? null : _send,
+          ),
         Material(
           color: scheme.surface,
           child: SafeArea(
@@ -417,7 +484,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 IconButton(
                   key: const Key('chat-photo'),
                   tooltip: tr('Фото жіберу'),
-                  onPressed: _sending ? null : _sendPhoto,
+                  // One kept photo at a time: it goes again or is put aside before the next.
+                  onPressed: _sending || _unsentPhoto != null ? null : _sendPhoto,
                   icon: const Icon(Icons.add_photo_alternate_outlined),
                 ),
                 Expanded(
@@ -454,37 +522,85 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 }
 
-/// Says, above the field and not over it, that the message in it may not have gone, with a way to send it again.
+/// A picked photo with what goes with it, as it was sent.
+typedef _Photo = ({Uint8List bytes, String name, String caption, String key});
+
+/// Says, above the field and not over it, that a message may not have gone, with a way to send it again. A photo is
+/// shown small, so it is clear which one, and can be put aside.
 class _NotSentLine extends StatelessWidget {
-  const _NotSentLine({required this.onRetry});
+  const _NotSentLine(
+      {super.key, required this.text, required this.onRetry, this.photo, this.caption = '', this.onDrop});
+  final String text;
   final VoidCallback? onRetry;
+  final Uint8List? photo;
+
+  /// The words that go with the photo, shown as they will go.
+  final String caption;
+  final VoidCallback? onDrop;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final style = theme.textTheme.bodyMedium?.copyWith(color: scheme.onSurface);
+    final words = Row(children: [
+      Icon(Icons.cloud_off_outlined, size: 20, color: scheme.error),
+      const SizedBox(width: 8),
+      if (photo case final bytes?) ...[
+        ClipRRect(
+          borderRadius: BorderRadius.circular(6),
+          child: Image.memory(bytes,
+              width: 40,
+              height: 40,
+              cacheWidth: (40 * MediaQuery.devicePixelRatioOf(context)).round(), // a small preview, decoded small
+              fit: BoxFit.cover,
+              excludeFromSemantics: true,
+              gaplessPlayback: true,
+              errorBuilder: (_, __, ___) => const SizedBox(width: 40, height: 40)),
+        ),
+        const SizedBox(width: 8),
+      ],
+      Expanded(
+        child: Semantics(
+          liveRegion: true,
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(text, style: style),
+            if (caption.isNotEmpty)
+              Text('«$caption»',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant)),
+          ]),
+        ),
+      ),
+    ]);
+    final buttons = [
+      TextButton(
+        key: Key(photo == null ? 'chat-resend' : 'chat-photo-resend'),
+        onPressed: onRetry,
+        style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+        child: Text(tr('Қайта көру')),
+      ),
+      if (photo != null)
+        IconButton(
+          key: const Key('chat-photo-drop'),
+          tooltip: tr('Алып тастау'),
+          onPressed: onDrop,
+          icon: const Icon(Icons.close),
+        ),
+    ];
+    // With large text the words get the whole width and the buttons go under them.
+    final roomy = MediaQuery.textScalerOf(context).scale(14) <= 18;
     return Container(
-      key: const Key('chat-not-sent'),
       width: double.infinity,
       color: scheme.surfaceContainerHigh, // calm: it is said once, in words, with the way out beside it
       padding: contentPadding(context, const EdgeInsets.fromLTRB(16, 6, 8, 6)),
-      child: Row(children: [
-        Icon(Icons.cloud_off_outlined, size: 20, color: scheme.error),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Semantics(
-            liveRegion: true,
-            child: Text(tr('Байланыс жоқ. Хабарлама жетпеген болуы мүмкін, мәтіні осы жерде тұр.'),
-                style: theme.textTheme.bodyMedium?.copyWith(color: scheme.onSurface)),
-          ),
-        ),
-        TextButton(
-          key: const Key('chat-resend'),
-          onPressed: onRetry,
-          style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
-          child: Text(tr('Қайта көру')),
-        ),
-      ]),
+      child: roomy
+          ? Row(children: [Expanded(child: words), ...buttons])
+          : Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+              words,
+              Wrap(alignment: WrapAlignment.end, crossAxisAlignment: WrapCrossAlignment.center, children: buttons),
+            ]),
     );
   }
 }
