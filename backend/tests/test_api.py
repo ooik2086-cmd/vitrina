@@ -12,14 +12,15 @@ from datetime import date, datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
 from PIL import Image
-from sqlalchemy import create_engine, func, select
+from sqlalchemy import create_engine, delete, func, select
 
 os.environ.setdefault("VITRINA_LOG_LEVEL", "WARNING")  # keep test output to what failed
 
 from vitrina_api import promo
 from vitrina_api.app import create_app
 from vitrina_api.config import Settings
-from vitrina_api.models import Base, Conversation, Listing, ListingSize, Message, Offer, SavedSearch, User
+from vitrina_api.models import (Base, Conversation, Listing, ListingSize, Message, Offer, PriceChange, SavedSearch,
+                                User)
 from vitrina_api import jobs
 from vitrina_api.services import (balance, run_auto_complete, run_expire_orders, run_review_reminders,
                                    run_stale_listing_tips)
@@ -446,6 +447,53 @@ class ListingTests(ApiTestCase):
         self.assertEqual(len(self.c.get("/api/v1/listings", params={"q": "кроссовка nike"}).json()["items"]), 1)
         self.assertEqual(len(self.c.get("/api/v1/listings", params={"q": "найк", "size_cm": "26,7"}).json()["items"]), 1)
         self.assertEqual(len(self.c.get("/api/v1/listings", params={"size_cm": "28"}).json()["items"]), 0)
+
+    def test_the_same_tap_sent_again_gets_the_listing_it_made(self):
+        # Weak mobile data: the listing was made, its answer lost, and the app sends the same tap again.
+        first = self.post("/listings", self.seller, LISTING, **{"Idempotency-Key": "tap-0001"})
+        again = self.post("/listings", self.seller, {**LISTING, "title": "Басқа"}, **{"Idempotency-Key": "tap-0001"})
+        self.assertEqual((first.status_code, again.status_code), (201, 201))
+        self.assertEqual(again.json()["id"], first.json()["id"])
+        self.assertEqual(again.json()["title"], first.json()["title"])
+        mine = self.c.get("/api/v1/me/listings", headers=self.h(self.seller)).json()["items"]
+        self.assertEqual(len(mine), 1)
+        # A new tap makes a new listing; no key works as before the key existed.
+        self.assertNotEqual(self.post("/listings", self.seller, LISTING, **{"Idempotency-Key": "tap-0002"}).json()["id"],
+                            first.json()["id"])
+        self.assertEqual(self.post("/listings", self.seller, LISTING).status_code, 201)
+        self.assertEqual(len(self.c.get("/api/v1/me/listings", headers=self.h(self.seller)).json()["items"]), 3)
+
+    def test_a_key_belongs_to_its_seller_and_is_a_real_key(self):
+        mine = self.post("/listings", self.seller, LISTING, **{"Idempotency-Key": "tap-0001"}).json()
+        other = self.login("+77010000099")
+        self.post("/me/seller", other, {"shop_name": "Басқа дүкен", "city": "Астана"})
+        theirs = self.post("/listings", other, LISTING, **{"Idempotency-Key": "tap-0001"})
+        self.assertEqual(theirs.status_code, 201)
+        self.assertNotEqual(theirs.json()["id"], mine["id"])  # the same key from someone else is theirs alone
+        self.assertEqual(self.post("/listings", self.seller, LISTING, **{"Idempotency-Key": "tap-0001"}).json()["id"],
+                         mine["id"])
+        self.assertEqual(self.post("/listings", self.seller, LISTING, **{"Idempotency-Key": "x"}).status_code, 422)
+
+    def test_a_key_whose_listing_is_gone_makes_it_anew(self):
+        first = self.post("/listings", self.seller, LISTING, **{"Idempotency-Key": "tap-0001"}).json()
+        with self.db() as db:  # removed by staff; sellers cannot delete listings themselves
+            db.execute(delete(PriceChange).where(PriceChange.listing_id == first["id"]))
+            db.delete(db.get(Listing, first["id"]))
+            db.commit()
+        again = self.post("/listings", self.seller, LISTING, **{"Idempotency-Key": "tap-0001"})
+        self.assertEqual(again.status_code, 201, again.text)
+        self.assertEqual(len(self.c.get("/api/v1/me/listings", headers=self.h(self.seller)).json()["items"]), 1)
+        self.assertEqual(self.post("/listings", self.seller, LISTING, **{"Idempotency-Key": "tap-0001"}).json()["id"],
+                         again.json()["id"])
+
+    def test_an_order_and_a_listing_with_the_same_key_stay_apart(self):
+        listing = self.publish()
+        order = self.post("/orders", self.buyer, {"listing_id": listing["id"], "size_id": listing["sizes"][0]["id"]},
+                          **{"Idempotency-Key": "same-key-1"})
+        self.post("/me/seller", self.buyer, {"shop_name": "Екінші", "city": "Алматы"})
+        made = self.post("/listings", self.buyer, LISTING, **{"Idempotency-Key": "same-key-1"})
+        self.assertEqual((order.status_code, made.status_code), (201, 201))
+        self.assertEqual(made.json()["seller"]["shop_name"], "Екінші")
 
     def test_drafts_are_private(self):
         lid = self.post("/listings", self.seller, LISTING).json()["id"]

@@ -8,7 +8,7 @@ from datetime import timedelta
 from types import SimpleNamespace
 from typing import Literal
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Header, Request, UploadFile
 from PIL import Image
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, select, update
@@ -27,7 +27,7 @@ from .deps import current_user, get_db, get_settings, get_storage, now_utc, opti
 from .errors import ApiError
 from .social import size_fit
 from .models import (PriceChange, StockAlert, ListingDailyViews, ListingEmbedding, ListingReport, Favorite, Listing,
-                     ListingSize, Media, Order, User)
+                     IdempotencyRecord, ListingSize, Media, Order, User)
 from .storage import DETAIL_SIDE_PX, MAX_SIDE_PX, MAX_UPLOAD_BYTES, Storage, normalize_image
 from .api_common import ALMATY, DEFECT_REQUIRED, MAX_LISTING_MEDIA, MAX_LISTING_SIZES, MIN_SPIN_FRAMES, log
 from .schemas import ListingIn, ListingPatch, PhotoIn, ReportIn
@@ -430,12 +430,31 @@ def prepare_listing_media(state, listing_id: int) -> None:
                           listing_id)
 
 
+def listing_made_by(db: Session, user: User, key: str) -> Listing | None:
+    """The listing an earlier request with [key] made. One gone since (staff removed it) frees the key: saving
+    again makes the listing anew rather than failing for ever."""
+    seen = IdempotencyRecord.made(db, user.id, "create_listing", key)
+    if seen is None:
+        return None
+    listing = db.get(Listing, seen.result_id)
+    if listing is None:
+        db.delete(seen)
+        db.flush()
+    return listing
+
+
 @router.post("/listings", status_code=201)
 def create_listing(body: ListingIn, request: Request, background: BackgroundTasks,
                    user: User = Depends(current_user), db: Session = Depends(get_db),
-                   cfg: Settings = Depends(get_settings), storage: Storage = Depends(get_storage)):
+                   cfg: Settings = Depends(get_settings), storage: Storage = Depends(get_storage),
+                   idempotency_key: str | None = Header(default=None, min_length=8, max_length=100)):
+    """With an Idempotency-Key, one per new pair in the app, a save sent again (its answer lost on weak mobile
+    data) gets the listing the first one made, as it was made, never a second listing. The app compares it with what
+    it sent. Apps from before the key send none and work as they did."""
     if not user.is_seller:
         raise ApiError(403, "seller_required")
+    if idempotency_key and (made := listing_made_by(db, user, idempotency_key)):
+        return listing_out(db, made, owner=True)
     if not cfg.allow_external_media and not all(storage.owns(p.url, user.id) for p in body.photos):
         raise ApiError(422, "foreign_media")
     frames = sum(p.angle == "frame" for p in body.photos)
@@ -456,7 +475,17 @@ def create_listing(body: ListingIn, request: Request, background: BackgroundTask
     db.add(listing)
     db.flush()
     db.add(PriceChange(listing_id=listing.id, price_tiyn=listing.price_tiyn))
-    db.commit()
+    if idempotency_key:
+        db.add(IdempotencyRecord(user_id=user.id, scope="create_listing", key=idempotency_key, result_id=listing.id))
+    try:
+        db.commit()
+    except IntegrityError:
+        # The same tap arrived twice at once and the other request won: answer with its listing, make none.
+        db.rollback()
+        made = listing_made_by(db, user, idempotency_key) if idempotency_key else None
+        if made is None:
+            raise
+        return listing_out(db, made, owner=True)
     if cfg.photo_work != "worker":  # else the photo worker finds the new listing (photo_work.py)
         background.add_task(prepare_listing_media, request.app.state, listing.id)
     return listing_out(db, listing, owner=True)

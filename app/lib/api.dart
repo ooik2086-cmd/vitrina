@@ -1134,8 +1134,12 @@ class Api {
     return [for (final j in data['items'] as List) Listing.fromJson(j as Map<String, dynamic>)];
   }
 
-  Future<Listing> createListing(Map<String, dynamic> body) async =>
-      Listing.fromJson(await _send('POST', '/listings', body: body) as Map<String, dynamic>);
+  /// [idempotencyKey] stays the same while the seller tries the same new pair again, so an answer lost on weak
+  /// mobile data never leaves two listings: the server answers the second try with the first one's listing.
+  Future<Listing> createListing(Map<String, dynamic> body, {String? idempotencyKey}) async =>
+      Listing.fromJson(await _send('POST', '/listings',
+          body: body,
+          headers: {if (idempotencyKey != null) 'Idempotency-Key': idempotencyKey}) as Map<String, dynamic>);
 
   Future<Listing> publishListing(int id) async =>
       Listing.fromJson(await _send('POST', '/listings/$id/publish') as Map<String, dynamic>);

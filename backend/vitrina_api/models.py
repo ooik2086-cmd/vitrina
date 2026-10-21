@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 
 from sqlalchemy import (BigInteger, Boolean, Date, DateTime, ForeignKey, Index, Integer, LargeBinary, String, Text,
-                        UniqueConstraint, create_engine)
+                        UniqueConstraint, create_engine, select)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 
 
@@ -293,7 +293,15 @@ class IdempotencyRecord(Base):
     user_id: Mapped[int] = mapped_column(Integer)
     scope: Mapped[str] = mapped_column(String(40))
     key: Mapped[str] = mapped_column(String(100))
-    order_id: Mapped[int] = mapped_column(Integer)
+    # What the first request with this key made: an order for "create_order", a listing for "create_listing". The
+    # column keeps its first name, so the image before this one still runs on the same database after a rollback.
+    result_id: Mapped[int] = mapped_column("order_id", Integer)
+
+    @staticmethod
+    def made(db, user_id: int, scope: str, key: str) -> "IdempotencyRecord | None":
+        return db.scalar(select(IdempotencyRecord).where(IdempotencyRecord.user_id == user_id,
+                                                         IdempotencyRecord.scope == scope,
+                                                         IdempotencyRecord.key == key))
 
 
 class AuditLog(Base):

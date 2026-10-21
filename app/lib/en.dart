@@ -513,6 +513,7 @@ const en = <String, String>{
   'Алдыңғы жұмысыңыз сақталған, тоқтаған жерден жалғастырыңыз.': 'Your earlier work was kept. Carry on where you stopped.',
   'Барлығын өшіріп, жаңадан бастау керек пе?': 'Delete everything and start over?',
   'Толтырған мәліметтер мен фотолар өшіріледі.': 'The details and photos you added will be deleted.',
+  'Бұл тауар бұрын сақталған. Өзгерістерді «Менің тауарларым» бетінде енгізіңіз.': 'This listing was saved earlier. Make your changes in My listings.',
   'Жаңадан бастау': 'Start over',
   'Ұқсас тауар': 'Similar listing',
   'Ұқсас тауар қосу': 'Add similar listing',

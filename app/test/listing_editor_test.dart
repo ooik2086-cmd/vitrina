@@ -55,6 +55,19 @@ Map<String, dynamic> listingJson({String status = 'draft'}) => {
       'seller': {'id': 3, 'shop_name': 'Qadam Store', 'city': 'Алматы'},
     };
 
+/// The listing the server makes of what the editor sent, as the server answers it.
+Map<String, dynamic> madeFrom(Map<String, dynamic> body, String status) => {
+      ...listingJson(status: status),
+      for (final k in ['title', 'price_tiyn', 'delivery_price_tiyn', 'condition']) k: body[k],
+      'sizes': [
+        for (final (i, s) in (body['sizes'] as List).indexed)
+          {'id': i + 1, 'label': s['label'], 'insole_cm': s['insole_cm'], 'available': true, 'quantity': s['quantity']}
+      ],
+      'media': [
+        for (final p in body['photos'] as List) {'original_url': p['url'], 'angle': p['angle']}
+      ],
+    };
+
 /// The most photo uploads that were on their way at once, in the last editor opened.
 var maxInFlight = 0;
 
@@ -83,9 +96,13 @@ void main() {
       List<Duration> waits = const [],
       double width = 500,
       bool settle = true,
-      int? me}) async {
+      int? me,
+      List<String>? keys,
+      bool Function(int create)? createLost,
+      String madeStatus = 'draft'}) async {
     final calls = <String>[];
-    var uploads = 0, inFlight = 0;
+    var uploads = 0, inFlight = 0, creates = 0;
+    final made = <String, Map<String, dynamic>>{}; // what each key made: the server answers it again
     maxInFlight = 0;
     uploadOrder.clear();
     final api = Api(
@@ -106,7 +123,13 @@ void main() {
           if (req.url.path.endsWith('/suggest')) return jsonResponse({});
           if (req.url.path.endsWith('/publish')) return jsonResponse(listingJson(status: 'moderation'));
           sent?.add(jsonDecode(req.body) as Map<String, dynamic>);
-          return jsonResponse(listingJson(), 201);
+          keys?.add(req.headers['Idempotency-Key'] ?? '');
+          final key = req.headers['Idempotency-Key'];
+          final listing = (key == null ? null : made[key]) ?? madeFrom(jsonDecode(req.body), madeStatus);
+          if (key != null) made[key] = listing;
+          // The listing is made, but its answer is lost on the way back.
+          if (createLost?.call(++creates) ?? false) throw http.ClientException('connection reset');
+          return jsonResponse(listing, 201);
         }))
       ..uploadWaits = waits;
     tester.view.physicalSize = Size(width, 2200);
@@ -793,5 +816,106 @@ void main() {
     await next(tester);
     await tester.enterText(find.widgetWithText(TextFormField, 'Өлшем'), '38'); // the size row works
     await tester.pump();
+  });
+
+  /// Fills all three steps of a new pair and stops before saving.
+  Future<void> fillAll(WidgetTester tester) async {
+    await pickSides(tester);
+    await next(tester);
+    await fillDetails(tester);
+    await next(tester);
+    await tester.enterText(find.widgetWithText(TextFormField, 'Бағасы'), '20000');
+    await tester.enterText(find.widgetWithText(TextFormField, 'Өлшем'), '38');
+    await tester.enterText(find.widgetWithText(TextFormField, 'Ұлтарақ, см'), '24,5');
+  }
+
+  testWidgets('weak mobile data: Publish pressed again after a lost answer sends the same key, so one listing',
+      (tester) async {
+    final keys = <String>[];
+    final calls = await open(tester, keys: keys, createLost: (n) => n == 1);
+    await fillAll(tester);
+    await tester.tap(find.text('Жариялау'));
+    await tester.pumpAndSettle();
+    expect(find.text('Байланыс жоқ. Интернетті тексеріп, қайталап көріңіз.'), findsOneWidget);
+    expect(find.text('Жариялау'), findsOneWidget); // still on the page, nothing lost
+    await tester.tap(find.text('Жариялау'));
+    await tester.pumpAndSettle();
+    expect(keys, hasLength(2));
+    expect(keys.first, matches(RegExp(r'^[0-9a-f]{32}$')));
+    expect(keys.last, keys.first); // the server answers the second try with the listing the first one made
+    expect(calls.where((c) => c.endsWith('/publish')), hasLength(1));
+    expect(find.byType(ListingEditorScreen), findsNothing); // done: back on the page underneath
+  });
+
+  testWidgets('a pair changed after a lost answer is not made twice, nor published at the old price', (tester) async {
+    final keys = <String>[];
+    final calls = await open(tester, keys: keys, createLost: (n) => n == 1);
+    await fillAll(tester);
+    await tester.tap(find.text('Жариялау'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextFormField, 'Бағасы'), '18000');
+    tester.state<ScaffoldMessengerState>(find.byType(ScaffoldMessenger)).clearSnackBars(); // read and gone
+    await tester.tap(find.text('Жариялау'));
+    await tester.pumpAndSettle();
+    expect(keys, hasLength(2));
+    expect(keys.last, keys.first); // the same pair: the server answers with the listing it made the first time
+    expect(calls.where((c) => c.endsWith('/publish')), isEmpty); // made at 20 000, so not published from here
+    expect(find.text('Бұл тауар бұрын сақталған. Өзгерістерді «Менің тауарларым» бетінде енгізіңіз.'), findsOneWidget);
+    expect(find.byType(ListingEditorScreen), findsNothing);
+  });
+
+  testWidgets('saved as a draft with the answer lost, then published: one listing, published once', (tester) async {
+    final keys = <String>[];
+    final calls = await open(tester, keys: keys, createLost: (n) => n == 1);
+    await fillAll(tester);
+    await tester.tap(find.text('Жоба ретінде сақтау'));
+    await tester.pumpAndSettle();
+    expect(find.byType(ListingEditorScreen), findsOneWidget);
+    await tester.tap(find.text('Жариялау'));
+    await tester.pumpAndSettle();
+    expect(keys, hasLength(2));
+    expect(keys.last, keys.first);
+    expect(calls.where((c) => c.endsWith('/publish')), hasLength(1));
+  });
+
+  testWidgets('a lost answer to a listing already sent for checking is not published twice', (tester) async {
+    final calls = await open(tester, madeStatus: 'moderation');
+    await fillAll(tester);
+    await tester.tap(find.text('Жариялау'));
+    await tester.pumpAndSettle();
+    expect(calls.where((c) => c.endsWith('/publish')), isEmpty);
+    expect(find.text('Тексеруге жіберілді'), findsOneWidget);
+  });
+
+  testWidgets('the same pair keeps its key after the app closed, and starting over gives a new one', (tester) async {
+    final keys = <String>[];
+    await open(tester, keys: keys, createLost: (n) => n == 1);
+    await fillAll(tester);
+    await tester.tap(find.text('Жариялау'));
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pumpWidget(const SizedBox()); // the app closed with the answer lost
+
+    await open(tester, keys: keys);
+    await tester.tap(find.text('Жариялау'));
+    await tester.pumpAndSettle();
+    expect(keys, hasLength(2));
+    expect(keys.last, keys.first);
+
+    SharedPreferences.setMockInitialValues({
+      Session.editorDraftKey: jsonEncode({'title': 'Ескі', 'save_key': 'a' * 32})
+    });
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('start-over')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('start-over-sure')));
+    await tester.pumpAndSettle();
+    await fillAll(tester);
+    await tester.tap(find.text('Жариялау'));
+    await tester.pumpAndSettle();
+    expect(keys, hasLength(3));
+    expect(keys.last, isNot(startsWith('a' * 32)));
+    expect(keys.last.split('-').first, isNot(keys.first.split('-').first));
   });
 }

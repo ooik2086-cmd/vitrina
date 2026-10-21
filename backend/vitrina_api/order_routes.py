@@ -73,11 +73,9 @@ def create_order(body: OrderIn, user: User = Depends(current_user), db: Session 
     # are still added meanwhile, so a request that holds one of those never waits on this one.
     listing = db.get(Listing, body.listing_id, with_for_update={"key_share": True}, populate_existing=True)
     # Looked up under the lock: the same tap's first request, if it was here first, has committed by now.
-    seen = db.scalar(select(IdempotencyRecord).where(IdempotencyRecord.user_id == user.id,
-                                                     IdempotencyRecord.scope == "create_order",
-                                                     IdempotencyRecord.key == idempotency_key))
+    seen = IdempotencyRecord.made(db, user.id, "create_order", idempotency_key)
     if seen:
-        return order_out(db.get(Order, seen.order_id))
+        return order_out(db.get(Order, seen.result_id))
     if listing is None or listing.status not in ("published", "sold"):
         raise ApiError(404, "not_found")
     if listing.seller_id == user.id:
@@ -121,18 +119,16 @@ def create_order(body: OrderIn, user: User = Depends(current_user), db: Session 
     db.flush()
     if offer:
         offer.status, offer.order_id = "ordered", order.id
-    db.add(IdempotencyRecord(user_id=user.id, scope="create_order", key=idempotency_key, order_id=order.id))
+    db.add(IdempotencyRecord(user_id=user.id, scope="create_order", key=idempotency_key, result_id=order.id))
     try:
         db.commit()
     except IntegrityError:
         # The same tap arrived twice at once and the other request won: answer with its order, take nothing.
         db.rollback()
-        seen = db.scalar(select(IdempotencyRecord).where(IdempotencyRecord.user_id == user.id,
-                                                         IdempotencyRecord.scope == "create_order",
-                                                         IdempotencyRecord.key == idempotency_key))
+        seen = IdempotencyRecord.made(db, user.id, "create_order", idempotency_key)
         if seen is None:
             raise
-        return order_out(db.get(Order, seen.order_id))
+        return order_out(db.get(Order, seen.result_id))
     return order_out(order)
 
 

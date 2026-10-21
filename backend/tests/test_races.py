@@ -8,7 +8,7 @@ import unittest
 
 from sqlalchemy import func, select, text
 
-from tests.test_api import ADDRESS, ApiTestCase, with_check_digit
+from tests.test_api import ADDRESS, LISTING, ApiTestCase, with_check_digit
 from vitrina_api.models import (Conversation, LedgerTx, Listing, ListingSize, Offer, Order, OrderEvent, Payout,
                                 Review)
 
@@ -102,6 +102,12 @@ class RaceTests(ApiTestCase):
         rs = self.same(lambda: self.post("/orders", self.buyer, body, **{"Idempotency-Key": "last"}))
         self.assertEqual(self.codes(rs), [201] * N, [r.text[:120] for r in rs])
         self.assertEqual(len({r.json()["id"] for r in rs}), 1)
+
+    def test_the_same_new_listing_sent_many_times_at_once_is_made_once(self):
+        rs = self.same(lambda: self.post("/listings", self.seller, LISTING, **{"Idempotency-Key": "weak-line-1"}))
+        self.assertEqual(self.codes(rs), [201] * N, [r.text[:120] for r in rs])
+        self.assertEqual(len({r.json()["id"] for r in rs}), 1)
+        self.assertEqual(self.count(Listing, Listing.seller_id == rs[0].json()["seller"]["id"]), 1)
 
     def test_the_same_key_under_an_agreed_price_answers_every_tap_with_its_order(self):
         listing = self.publish(sizes=[{"label": "EU 42", "insole_cm": "26,5", "quantity": 5}])

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -137,6 +138,9 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
   bool _finished = false; // saved or thrown away: nothing more to keep
   Session? _session; // held, as the page is still kept while it is being closed
 
+  /// One per pair, kept with the work: every try at saving it, after a restart too, makes one listing at most.
+  String _saveKey = newIdempotencyKey();
+
   Api get _api => SessionScope.of(context).api;
 
   @override
@@ -196,6 +200,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
 
   Map<String, Object?> _draft() => {
         'owner': _session?.me?.id,
+        'save_key': _saveKey,
         'kept_at': DateTime.now().millisecondsSinceEpoch,
         'step': _step,
         for (final (k, c) in _fields) k: c.text,
@@ -308,6 +313,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
       ..addAll([for (final j in d['defect_photos'] as List? ?? []) _revive(j, fresh)].nonNulls);
     _frames = [for (final j in d['frames'] as List? ?? []) _revive(j, fresh, frame: true)].nonNulls.toList();
     _step = (d['step'] as int? ?? 0).clamp(0, 2);
+    _saveKey = d['save_key'] as String? ?? newIdempotencyKey(); // starting over is another pair
   }
 
   /// A kept photo: done if it went lately, otherwise sent again from the phone. A file the phone has since
@@ -605,7 +611,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
         for (final d in _defectPhotos) {'url': await d.future, 'angle': 'defect'},
         for (final f in _frames) {'url': await f.future, 'angle': 'frame'},
       ];
-      final listing = await _api.createListing({
+      final body = {
         'title': _title.text.trim(),
         'category': _category!,
         if (_audience != null) 'audience': _audience,
@@ -623,17 +629,24 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
             {'label': s.label.text.trim(), 'insole_cm': s.cm.text.trim(), 'quantity': int.tryParse(s.qty.text) ?? 0},
         ],
         'photos': photos,
-      });
-      final shown = publish ? await _api.publishListing(listing.id) : listing;
+      };
+      final listing = await _api.createListing(body, idempotencyKey: _saveKey);
+      // A try whose answer was lost made this listing already, as it was then: changed since, or already sent on,
+      // it is not published from here; the seller finds it in their listings, never a second one.
+      final earlier = !_madeAsSent(listing, body);
+      final shown = publish && !earlier && listing.status == 'draft' ? await _api.publishListing(listing.id) : listing;
       unawaited(_forget()); // it is on VITRINA now, kept there
       if (!mounted) return;
-      // Shown on the screen underneath, so the seller knows where the listing went.
+      // Shown on the screen underneath, and said by what the listing is now, so the seller knows where it went.
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(!publish
-              ? tr('Жоба ретінде сақталды')
-              : shown.status == 'moderation'
-                  ? tr('Тексеруге жіберілді')
-                  : tr('Сатылымға шықты'))));
+          content: Text(earlier
+              ? tr('Бұл тауар бұрын сақталған. Өзгерістерді «Менің тауарларым» бетінде енгізіңіз.')
+              : switch (shown.status) {
+                  'draft' => tr('Жоба ретінде сақталды'),
+                  'moderation' => tr('Тексеруге жіберілді'),
+                  'published' => tr('Сатылымға шықты'),
+                  _ => tr('Бұл тауар бұрын сақталған. Өзгерістерді «Менің тауарларым» бетінде енгізіңіз.'),
+                })));
       Navigator.pop(context, true);
     } catch (e) {
       if (!mounted) return;
@@ -648,6 +661,19 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
     } finally {
       if (mounted) setState(() => _saving = false);
     }
+  }
+
+  /// Whether the listing the server answered with is what was just sent: not one an earlier try made before the
+  /// seller changed something. Photos are compared by side, as their addresses change when sent again.
+  bool _madeAsSent(Listing l, Map<String, Object?> body) {
+    final sizes = [for (final s in body['sizes']! as List<Map<String, Object>>) '${s['label']}|${s['quantity']}'];
+    final angles = [for (final p in body['photos']! as List<Map<String, String>>) p['angle']!]..sort();
+    return l.title == body['title'] &&
+        l.priceTiyn == body['price_tiyn'] &&
+        l.deliveryPriceTiyn == body['delivery_price_tiyn'] &&
+        l.condition == body['condition'] &&
+        listEquals([for (final s in l.sizes) '${s.label}|${s.quantity}'], sizes) &&
+        listEquals([for (final m in l.media) m.angle]..sort(), angles);
   }
 
   String? _required(String? v) => (v ?? '').trim().isEmpty ? tr('Толтырыңыз') : null;
