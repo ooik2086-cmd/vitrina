@@ -640,6 +640,7 @@ const en = <String, String>{
   'тегін': 'free',
   'Атауы, бренді не үлгісі': 'Title, brand, or model',
   'Сай тауар жоқ.': 'No matching items.',
+  'Жауап өріске қойылды.': 'Answer placed in the field.',
   'Сұрақ күтеді': 'Questions waiting',
   'Жауапсыз сұрақ: {0}': 'Questions to answer: {0}',
   'Жауап күтетін сұрақ жоқ.': 'No questions waiting.',

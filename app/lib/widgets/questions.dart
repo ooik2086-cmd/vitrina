@@ -1,8 +1,12 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 
 import '../api.dart';
 import '../i18n.dart';
 import '../labels.dart';
+import '../quick_replies.dart';
 import '../screens/login_screen.dart';
 import '../session.dart';
 import '../theme.dart';
@@ -204,6 +208,8 @@ class _QuestionsScreenState extends State<QuestionsScreen> {
         minLength: 2,
         maxLength: 1000,
         send: (text) => SessionScope.of(context).api.answerQuestion(q.id, text),
+        // The seller's ready answers from the chat, so most questions take a tap instead of typing.
+        ready: true,
       ),
     );
     if (done == true && mounted) _reload();
@@ -281,11 +287,16 @@ class _TextSheet extends StatefulWidget {
     required this.maxLength,
     required this.send,
     this.initial,
+    this.ready = false,
   });
   final String title, hint, note, action;
   final String? initial;
   final int minLength, maxLength;
   final Future<Object?> Function(String text) send;
+
+  /// The seller's ready answers are offered above the field (those a public answer can take, publicQuickReplies),
+  /// and the keyboard waits for a tap on the field, so the sheet opens on them.
+  final bool ready;
 
   @override
   State<_TextSheet> createState() => _TextSheetState();
@@ -294,6 +305,8 @@ class _TextSheet extends StatefulWidget {
 class _TextSheetState extends State<_TextSheet> {
   late final _text = TextEditingController(text: widget.initial);
   bool _busy = false;
+  Object? _error; // the last send's refusal, shown under the field: a snack bar would sit behind this sheet
+  String? _picked; // the ready answer last put in the field
 
   @override
   void dispose() {
@@ -301,13 +314,32 @@ class _TextSheetState extends State<_TextSheet> {
     super.dispose();
   }
 
+  /// A ready answer goes into the field, not straight out: the seller can still change it before it is public.
+  /// It takes the place of an empty field, the old answer or the ready answer picked before; words the seller wrote
+  /// are kept, with it added after them.
+  void _pick(String text) {
+    final now = _text.text.trim();
+    final replace = now.isEmpty || now == (widget.initial ?? '').trim() || now == _picked;
+    final joined = replace ? text : '$now $text';
+    final fits = joined.characters.take(widget.maxLength).toString();
+    setState(() {
+      _picked = fits;
+      _error = null;
+      _text.value = TextEditingValue(text: fits, selection: TextSelection.collapsed(offset: fits.length));
+    });
+    SemanticsService.sendAnnouncement(View.of(context), tr('Жауап өріске қойылды.'), Directionality.of(context));
+  }
+
   Future<void> _send() async {
-    setState(() => _busy = true);
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
     try {
       await widget.send(_text.text.trim());
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
-      if (mounted) showError(context, e);
+      if (mounted) setState(() => _error = e);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -316,25 +348,45 @@ class _TextSheetState extends State<_TextSheet> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    const side = EdgeInsets.symmetric(horizontal: 20);
+    // The words scroll when the keyboard and large text leave too little room; the button stays in view above them.
     return Padding(
-      padding: EdgeInsets.fromLTRB(20, 8, 20, 20 + MediaQuery.of(context).viewInsets.bottom),
-      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(widget.title, style: weight(theme.textTheme.titleLarge!, 800)),
-        const SizedBox(height: 12),
-        TextField(
-          key: const Key('question-text'),
-          controller: _text,
-          autofocus: true,
-          minLines: 2,
-          maxLines: 5,
-          maxLength: widget.maxLength,
-          decoration: InputDecoration(hintText: widget.hint),
-          onChanged: (_) => setState(() {}),
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Flexible(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.only(top: 8),
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Padding(padding: side, child: Text(widget.title, style: weight(theme.textTheme.titleLarge!, 800))),
+              const SizedBox(height: 12),
+              if (widget.ready) ...[
+                _ReadyAnswers(onPick: _pick, padding: side),
+                const SizedBox(height: 8),
+              ],
+              Padding(
+                padding: side,
+                child: TextField(
+                  key: const Key('question-text'),
+                  controller: _text,
+                  autofocus: !widget.ready,
+                  minLines: 2,
+                  maxLines: 5,
+                  maxLength: widget.maxLength,
+                  decoration: InputDecoration(
+                      hintText: widget.hint, errorText: _error == null ? null : errorText(_error), errorMaxLines: 4),
+                  onChanged: (_) => setState(() => _error = null),
+                ),
+              ),
+              Padding(
+                padding: side,
+                child: Text(widget.note,
+                    style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+              ),
+            ]),
+          ),
         ),
-        Text(widget.note, style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
-        const SizedBox(height: 14),
-        SizedBox(
-          width: double.infinity,
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
           child: FilledButton(
             key: const Key('question-send'),
             onPressed: _busy || _text.text.trim().length < widget.minLength ? null : _send,
@@ -342,6 +394,51 @@ class _TextSheetState extends State<_TextSheet> {
           ),
         ),
       ]),
+    );
+  }
+}
+
+/// One row of the seller's ready answers, the ones the chat offers (changed there, under «Үлгілер») that a public
+/// answer can take.
+class _ReadyAnswers extends StatelessWidget {
+  const _ReadyAnswers({required this.onPick, required this.padding});
+  final ValueChanged<String> onPick;
+  final EdgeInsets padding; // inside the row, so it scrolls to the sheet's edges
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<List<String>?>(
+      valueListenable: quickReplies,
+      builder: (context, _, __) {
+        final items = publicQuickReplies();
+        if (items.isEmpty) return const SizedBox.shrink();
+        final scale = MediaQuery.textScalerOf(context);
+        // Wider with large text, so a chip still shows enough words to tell it from the next.
+        final widest = min(scale.scale(220), MediaQuery.sizeOf(context).width * 0.8);
+        return SizedBox(
+          // Grows with large text, so the chips are never cut at the top.
+          height: 48 + (scale.scale(14) - 14) * 1.7,
+          // A few short chips (ten at most), all built at once.
+          child: SingleChildScrollView(
+            key: const Key('ready-answers'),
+            scrollDirection: Axis.horizontal,
+            padding: padding,
+            child: Row(children: [
+              for (final t in items)
+                Padding(
+                  padding: const EdgeInsetsDirectional.only(end: 8),
+                  child: ActionChip(
+                    label: ConstrainedBox(
+                      constraints: BoxConstraints(maxWidth: widest),
+                      child: Text(t, overflow: TextOverflow.ellipsis),
+                    ),
+                    onPressed: () => onPick(t),
+                  ),
+                ),
+            ]),
+          ),
+        );
+      },
     );
   }
 }

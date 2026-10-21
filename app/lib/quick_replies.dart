@@ -7,7 +7,9 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'en.dart';
 import 'i18n.dart';
+import 'ru.dart';
 
 const _prefsKey = 'vitrina_quick_replies';
 const maxQuickReplies = 10;
@@ -51,3 +53,20 @@ Future<void> saveQuickReplies(List<String> items) async {
   quickReplies.value = clean;
   await (await SharedPreferences.getInstance()).setString(_prefsKey, jsonEncode(clean));
 }
+
+/// What a public answer to a buyer's question can take from the ready answers. Not the defaults about money held in
+/// the app, in any language: an answer stays on the listing whatever happens to online payment later. Not one with
+/// a phone, link or messenger either, which the server refuses there.
+List<String> publicQuickReplies() => [
+      for (final t in currentQuickReplies(payments: false))
+        if (!_paidDefaults.any((d) => t == d || t == ru[d] || t == en[d]) && !looksLikeContact(t)) t
+    ];
+
+/// The server's contact rule for public text (backend/vitrina_api/social.py CONTACT_RE); keep the two the same.
+/// Words are bounded by letters of any alphabet, as the server's are.
+final _contact = RegExp(
+    r'(\+?\d[\d\s\-()]{8,}\d)|(https?://|www\.)|((?<![\p{L}\p{N}_])(whats\s?app|telegram|t\.me|ватсап|телеграм)(?![\p{L}\p{N}_]))',
+    caseSensitive: false,
+    unicode: true);
+
+bool looksLikeContact(String text) => _contact.hasMatch(text);
