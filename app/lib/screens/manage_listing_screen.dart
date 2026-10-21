@@ -402,6 +402,10 @@ class _ManageListingScreenState extends State<ManageListingScreen> with WidgetsB
     if (!_form.currentState!.validate()) return;
     final fresh = !_l.everOnSale;
     final was = _was;
+    // A Save pauses a listing only when it brings pairs back to one that sold out, also out of sight while the page
+    // was open: then the seller is asked at once whether it goes back on sale.
+    final before = _l.status;
+    final addsPairs = was.entries.any((e) => _stock[e.key]! > e.value);
     final saved = await _run(
       (api) => api.editListing(_l.id,
           priceTiyn: _tiyn(_price.text),
@@ -425,12 +429,15 @@ class _ManageListingScreenState extends State<ManageListingScreen> with WidgetsB
     if (saved == null) {
       _showStored();
       _restored = false; // saved now: the note about changes from before has done its work
+      if (before != 'paused' && addsPairs && _l.status == 'paused') _offerSale();
     }
     if (soldMeanwhile) {
       try {
         final l = await SessionScope.of(context).api.listing(_l.id);
         if (!mounted) return;
         _l = l;
+        // An earlier Save whose answer was lost brought the pairs back: the same question, now.
+        if (before != 'paused' && addsPairs && l.status == 'paused') _offerSale();
       } catch (_) {
         return; // the counts stay as the seller set them, and Save tries again
       }
@@ -507,20 +514,66 @@ class _ManageListingScreenState extends State<ManageListingScreen> with WidgetsB
     }
   }
 
+  /// Asks whether a sold-out listing that got pairs again goes back on sale now; it stays paused otherwise. Only on
+  /// this page while it is in front: a leave question or another page opened meanwhile is not covered by it, and the
+  /// button to put it on sale stays on the page.
+  void _offerSale() {
+    if (!(ModalRoute.of(context)?.isCurrent ?? false)) return;
+    unawaited(_askSale());
+  }
+
+  Future<void> _askSale() async {
+    final sell = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        scrollable: true, // with large text its words scroll rather than being cut off
+        title: Text(tr('Қайта сатуға шығару керек пе?')),
+        content: Text(tr(
+            'Жұптар қосылды, бірақ тауар әзірге сатылымда емес. Кейін төмендегі «Сатылымға шығару» түймесімен де шығаруға болады.')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Кейін'))),
+          FilledButton(
+              key: const Key('restock-publish'),
+              onPressed: () => Navigator.pop(context, true),
+              child: Text(tr('Иә, шығару'))),
+        ],
+      ),
+    );
+    if (sell == true && mounted && !_busy) await _publish();
+  }
+
+  /// Its answer is told also when the page was left meanwhile. A lost answer is checked against the listing as the
+  /// server has it, so a publish that went is not reported as failed, nor pressed again into a refusal.
   Future<void> _publish() async {
     setState(() => _busy = true);
+    final api = SessionScope.of(context).api;
+    final messenger = ScaffoldMessenger.of(context);
+    void say(String text) {
+      // «Сақталды» just before is not left to stand in front of it; a bar about unsaved changes is.
+      if (_offlineBar == null) messenger.removeCurrentSnackBar();
+      messenger.showSnackBar(SnackBar(content: Text(text)));
+    }
+
+    void went(Listing l) {
+      if (mounted) {
+        setState(() {
+          _take(l);
+          _changed = true;
+        });
+      }
+      say(l.status == 'moderation' ? tr('Тексеруге жіберілді') : tr('Сатылымға шықты'));
+    }
+
     try {
-      final l = await SessionScope.of(context).api.publishListing(_l.id);
-      if (!mounted) return;
-      setState(() {
-        _take(l);
-        _changed = true;
-      });
-      final queued = l.status == 'moderation';
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(queued ? tr('Тексеруге жіберілді') : tr('Сатылымға шықты'))));
+      went(await api.publishListing(_l.id));
     } catch (e) {
-      if (mounted) showError(context, e);
+      if (e is ApiException && (e.passing || e.code == 'invalid_status')) {
+        try {
+          final l = await api.listing(_l.id);
+          if (l.status == 'published' || l.status == 'moderation') return went(l);
+        } catch (_) {} // still no answer: the first error is what is told
+      }
+      say(e is ApiException ? e.message : tr('Байланыс жоқ. Қайта көріңіз.'));
     } finally {
       if (mounted) setState(() => _busy = false);
     }

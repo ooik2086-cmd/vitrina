@@ -225,6 +225,11 @@ const en = <String, String>{
   'Тоқтату': 'Pause',
   'Промокодты тоқтату': 'Stop',
   'Сатылымға шықты': 'Listed for sale',
+  'Қайта сатуға шығару керек пе?': 'Put it back on sale?',
+  'Жұптар қосылды, бірақ тауар әзірге сатылымда емес. Кейін төмендегі «Сатылымға шығару» түймесімен де шығаруға болады.':
+      'Pairs added, but the listing is not on sale yet. You can also do it later with «List for sale» below.',
+  'Кейін': 'Later',
+  'Иә, шығару': 'Yes, list it',
   'Сатылымға шығару': 'List for sale',
   'Сақтау': 'Save',
   'қаралым': 'views',
