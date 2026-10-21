@@ -1424,7 +1424,8 @@ class SellerEditTests(ApiTestCase):
         public = self.c.get(f"/api/v1/listings/{lid}").json()
         self.assertNotIn("stats", public)
         mine = self.c.get("/api/v1/me/listings", headers=self.h(self.seller)).json()["items"][0]
-        self.assertEqual(mine["stats"], {"views": 3, "favorites": 1, "chats": 1, "orders": 1, "sold": 0})
+        self.assertEqual(mine["stats"], {"views": 3, "favorites": 1, "chats": 1, "orders": 1, "sold": 0,
+                                         "unanswered": 0})
 
     def test_price_drop_tells_people_who_saved_the_listing(self):
         listing = self.publish()
@@ -3072,6 +3073,38 @@ class QuestionTests(ApiTestCase):
         self.assertEqual(self.c.get(f"/api/v1{count}").status_code, 401)
         self.post(f"/listings/{listing['id']}/pause", self.seller)
         self.assertEqual(self.get(count, self.seller).status_code, 404)
+
+    def test_my_listings_say_which_listing_has_questions_waiting(self):
+        first, second, quiet = self.publish(), self.publish(), self.publish()
+        other = self.login("+77010000003")
+        def ask(listing, who, text):
+            return self.post(f"/listings/{listing['id']}/questions", who, {"text": text}).json()["id"]
+        answered = ask(first, self.buyer, "Қорабы бар ма?")
+        ask(first, other, "Өлшемі сай ма?")
+        ask(first, self.buyer, "Түсі суреттегідей ме?")
+        hidden = ask(second, self.buyer, "Жеткізу қашан?")
+        ask(second, other, "Жаңа ма?")
+        self.post(f"/questions/{answered}/answer", self.seller, {"text": "Иә"})
+        self.c.delete(f"/api/v1/questions/{hidden}", headers=self.h(self.seller))  # hidden: not waiting
+        waiting = {l["id"]: l["stats"]["unanswered"]
+                   for l in self.get("/me/listings", self.seller).json()["items"]}
+        self.assertEqual(waiting, {first["id"]: 2, second["id"]: 1, quiet["id"]: 0})
+        # The same number the to-do card adds up, and the one the seller's own listing page reads.
+        self.assertEqual(self.get("/me/todo", self.seller).json()["questions"], 3)
+        def one(listing):  # the seller's own listing alone, as its page reads it (not the list's grouped count)
+            return self.c.patch(f"/api/v1/listings/{listing['id']}", json={"price_tiyn": 4_000_000},
+                                headers=self.h(self.seller)).json()["stats"]["unanswered"]
+        self.assertEqual(one(first), 2)
+        self.assertEqual(one(second), 1)  # its hidden question is not waiting
+        # A paused listing's questions cannot be opened, so nothing counts them as waiting until it is back on sale.
+        self.post(f"/listings/{second['id']}/pause", self.seller)
+        paused = [l for l in self.get("/me/listings", self.seller).json()["items"] if l["id"] == second["id"]]
+        self.assertEqual(paused[0]["stats"]["unanswered"], 0)
+        self.assertEqual(self.get("/me/todo", self.seller).json()["questions"], 2)
+        self.post(f"/listings/{second['id']}/publish", self.seller)
+        self.assertEqual(self.get("/me/todo", self.seller).json()["questions"], 3)
+        # Nobody but the seller sees it.
+        self.assertNotIn("stats", self.get(f"/listings/{first['id']}", self.buyer).json())
 
     def test_a_buyer_waits_for_answers_before_asking_more(self):
         listing = self.publish()

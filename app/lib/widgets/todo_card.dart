@@ -40,7 +40,12 @@ final List<TodoLine> todoLines = [
     open: () => const OrdersScreen(sellerTab: true, onlyMine: true),
   ),
   (key: 'offers', icon: Icons.local_offer_outlined, label: 'Жауапсыз баға ұсынысы', open: () => const OffersScreen()),
-  (key: 'questions', icon: Icons.help_outline_rounded, label: 'Жауапсыз сұрақ', open: () => const MyListingsScreen()),
+  (
+    key: 'questions',
+    icon: Icons.help_outline_rounded,
+    label: 'Жауапсыз сұрақ',
+    open: () => const MyListingsScreen(status: 'questions'),
+  ),
   (
     key: 'to_pay',
     icon: Icons.payments_outlined,

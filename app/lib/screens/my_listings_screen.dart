@@ -3,25 +3,32 @@ import 'package:flutter/material.dart';
 import '../net_image.dart';
 import '../api.dart';
 import '../session.dart';
+import '../theme.dart';
 import 'listing_editor_screen.dart';
 import 'manage_listing_screen.dart';
 import '../i18n.dart';
 import '../widgets/common.dart';
+import '../widgets/questions.dart';
 import '../widgets/shop_sale.dart';
 
 class MyListingsScreen extends StatefulWidget {
-  const MyListingsScreen({super.key});
+  const MyListingsScreen({super.key, this.status = 'all'});
+
+  /// The filter it opens on: the to-do card's questions line opens on 'questions'.
+  final String status;
 
   @override
   State<MyListingsScreen> createState() => _MyListingsScreenState();
 }
 
-/// Which listings the seller wants to see. 'low' is on sale with one pair or none left.
-bool listingMatches(Listing l, {required String status, required String query}) {
+/// Which listings the seller wants to see. 'low' is on sale with one pair or none left; 'questions' has buyers'
+/// questions waiting for an answer ([waiting] of them).
+bool listingMatches(Listing l, {required String status, required String query, int waiting = 0}) {
   final left = l.sizes.fold<int>(0, (n, s) => n + (s.quantity ?? 0));
   final okStatus = switch (status) {
     'all' => true,
     'low' => l.status == 'published' && left <= 1,
+    'questions' => waiting > 0,
     _ => l.status == status,
   };
   if (!okStatus) return false;
@@ -33,7 +40,14 @@ bool listingMatches(Listing l, {required String status, required String query}) 
 class _MyListingsScreenState extends State<MyListingsScreen> {
   Future<List<Listing>>? _items;
   final _query = TextEditingController();
-  String _status = 'all';
+  late String _status = widget.status;
+
+  /// Questions waiting, read again for one listing after the seller comes back from it (they may have answered
+  /// there), so the whole list is not downloaded again for one number.
+  final _waiting = <int, int>{};
+  final _asks = <int, int>{}; // the latest ask per listing: an older answer arriving late is dropped
+
+  int _waitingOn(Listing l) => _waiting[l.id] ?? l.stats?.unanswered ?? 0;
 
   @override
   void dispose() {
@@ -49,9 +63,14 @@ class _MyListingsScreenState extends State<MyListingsScreen> {
 
   Future<void> _reload() async {
     final f = SessionScope.of(context).api.myListings();
+    final loading = shown(f);
     setState(() {
-      _items = shown(f);
+      _items = loading;
     });
+    // The numbers read since stay until the new list, which has them all, is in: a slow load shows no older ones.
+    f.then((_) {
+      if (mounted && identical(_items, loading)) setState(_waiting.clear);
+    }, onError: (_) {});
     await settled(f);
   }
 
@@ -59,6 +78,38 @@ class _MyListingsScreenState extends State<MyListingsScreen> {
     final created =
         await Navigator.of(context).push<bool>(MaterialPageRoute(builder: (_) => const ListingEditorScreen()));
     if (created == true) _reload();
+  }
+
+  /// Back from a listing whose buyers were waiting: its number may have changed. A failed ask keeps the old one.
+  Future<void> _recount(Listing l) async {
+    if (_waitingOn(l) == 0 || (l.status != 'published' && l.status != 'sold')) return;
+    final api = SessionScope.of(context).api;
+    final items = _items;
+    final ask = _asks[l.id] = (_asks[l.id] ?? 0) + 1;
+    try {
+      final n = await api.unansweredQuestions(l.id);
+      if (mounted && identical(items, _items) && _asks[l.id] == ask) setState(() => _waiting[l.id] = n);
+    } catch (_) {}
+  }
+
+  /// A listing on «Сұрақ күтеді» opens straight on its questions, the reason the seller came; any other one opens
+  /// its page.
+  Future<void> _open(Listing l) async {
+    final answerable = l.status == 'published' || l.status == 'sold';
+    if (_status == 'questions' && answerable) {
+      await Navigator.of(context)
+          .push(MaterialPageRoute(builder: (_) => QuestionsScreen(listingId: l.id, seller: true)));
+      if (mounted) _recount(l);
+      return;
+    }
+    final changed =
+        await Navigator.of(context).push<bool>(MaterialPageRoute(builder: (_) => ManageListingScreen(listing: l)));
+    if (!mounted) return;
+    if (changed == true) {
+      _reload();
+    } else {
+      _recount(l);
+    }
   }
 
   Future<void> _sale() async {
@@ -94,17 +145,27 @@ class _MyListingsScreenState extends State<MyListingsScreen> {
               child: ListView(children: [SizedBox(height: 120), Center(child: Text(tr('Әзірге тауар жоқ.')))]),
             );
           }
-          int count(String status) => all.where((l) => listingMatches(l, status: status, query: '')).length;
+          // A server from before the per-listing number sends none: then there is no questions filter to open on.
+          final known = all.any((l) => l.stats?.unanswered != null);
+          final status = _status == 'questions' && !known ? 'all' : _status;
+          int count(String status) =>
+              all.where((l) => listingMatches(l, status: status, query: '', waiting: _waitingOn(l))).length;
+          // The questions chip counts questions, as the to-do line that leads to it does; the others count listings.
+          int number(String code) => code == 'questions' ? all.fold(0, (n, l) => n + _waitingOn(l)) : count(code);
           final filters = [
             ('all', tr('Барлығы')),
+            ('questions', tr('Сұрақ күтеді')),
             ('published', tr('Сатылымда')),
             ('low', tr('Қалдығы аз')),
             ('moderation', tr('Тексерілуде')),
             ('paused', tr('Тоқтатылған')),
             ('sold', tr('Сатылды')),
             ('rejected', tr('Қайтарылды')),
-          ].where((f) => f.$1 == 'all' || f.$1 == _status || count(f.$1) > 0).toList();
-          final items = all.where((l) => listingMatches(l, status: _status, query: _query.text)).toList();
+          ]
+              .where((f) => f.$1 == 'all' || (f.$1 == status || count(f.$1) > 0) && (f.$1 != 'questions' || known))
+              .toList();
+          final items =
+              all.where((l) => listingMatches(l, status: status, query: _query.text, waiting: _waitingOn(l))).toList();
           return Column(children: [
             if (all.length > 5)
               Padding(
@@ -137,8 +198,8 @@ class _MyListingsScreenState extends State<MyListingsScreen> {
                       padding: const EdgeInsets.only(right: 8),
                       child: ChoiceChip(
                         key: Key('status-$code'),
-                        label: Text('$name ${count(code)}'),
-                        selected: _status == code,
+                        label: Text('$name ${number(code)}'),
+                        selected: status == code,
                         onSelected: (_) => setState(() => _status = code),
                       ),
                     ),
@@ -149,7 +210,15 @@ class _MyListingsScreenState extends State<MyListingsScreen> {
               child: RefreshIndicator(
                 onRefresh: _reload,
                 child: items.isEmpty
-                    ? ListView(children: [SizedBox(height: 80), Center(child: Text(tr('Сай тауар жоқ.')))])
+                    ? ListView(children: [
+                        SizedBox(height: 80),
+                        Center(
+                            child: Text(
+                                tr(status == 'questions' && count('questions') == 0
+                                    ? 'Жауап күтетін сұрақ жоқ.'
+                                    : 'Сай тауар жоқ.'),
+                                textAlign: TextAlign.center)),
+                      ])
                     : ListView.separated(
                         padding: contentPadding(context, const EdgeInsets.only(bottom: 88)),
                         itemCount: items.length,
@@ -157,6 +226,8 @@ class _MyListingsScreenState extends State<MyListingsScreen> {
                         itemBuilder: (context, i) {
                           final l = items[i];
                           final cover = l.coverUrl;
+                          final waiting = _waitingOn(l);
+                          final theme = Theme.of(context);
                           return ListTile(
                             leading: SizedBox(
                               width: 56,
@@ -180,13 +251,15 @@ class _MyListingsScreenState extends State<MyListingsScreen> {
                                   text: ' · ${stockSummary(l)}'
                                       '${l.frames.isNotEmpty ? ' · 360°' : ''}'
                                       '${l.photosPending ? ' · ${tr('фото өңделуде')}' : ''}'),
+                              // Buyers waiting on an answer: the one thing on the line that asks the seller to act.
+                              if (waiting > 0)
+                                TextSpan(
+                                    text: '\n${trf('Жауапсыз сұрақ: {0}', [waiting])}',
+                                    style: weight(theme.textTheme.bodyMedium!, 700)
+                                        .copyWith(color: theme.colorScheme.onSurface)),
                             ])),
                             trailing: const Icon(Icons.chevron_right),
-                            onTap: () async {
-                              final changed = await Navigator.of(context)
-                                  .push<bool>(MaterialPageRoute(builder: (_) => ManageListingScreen(listing: l)));
-                              if (changed == true) _reload();
-                            },
+                            onTap: () => _open(l),
                           );
                         },
                       ),

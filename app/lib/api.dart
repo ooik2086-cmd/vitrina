@@ -74,12 +74,16 @@ class ListingStats {
         favorites = j['favorites'] as int,
         chats = j['chats'] as int,
         orders = j['orders'] as int,
-        sold = j['sold'] as int;
+        sold = j['sold'] as int,
+        unanswered = j['unanswered'] as int?;
   final int views;
   final int favorites;
   final int chats;
   final int orders;
   final int sold;
+
+  /// Buyers' questions still waiting for the seller's answer; null from a server that does not send it yet.
+  final int? unanswered;
 }
 
 /// The seller's shareable promo video. state: null (never made), rendering, ready or failed.

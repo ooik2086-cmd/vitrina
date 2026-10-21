@@ -18,7 +18,7 @@ from . import moderation
 from .deps import now_utc
 from .errors import ApiError
 from .social import seller_rating
-from .models import PriceChange, Favorite, Listing, ListingSize, Media, Order, Review, User
+from .models import PriceChange, Favorite, Listing, ListingSize, Media, Order, Question, Review, User, question_waiting
 from .api_common import ALMATY
 from .storage import private_link
 
@@ -84,6 +84,9 @@ def listing_stats(db: Session, listing: Listing) -> dict:
                                                           Order.status != S.CANCELLED.value)),
         "sold": count(select(func.count(Order.id)).where(Order.listing_id == listing.id,
                                                         Order.status == S.COMPLETED.value)),
+        # Buyers' questions still waiting for the seller, the same count as the to-do card's, per listing.
+        "unanswered": count(select(func.count(Question.id)).join(Listing, Listing.id == Question.listing_id)
+                            .where(Question.listing_id == listing.id, *question_waiting())),
     }
 
 

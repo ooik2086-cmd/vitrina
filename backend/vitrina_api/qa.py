@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from . import services
 from .deps import current_user, get_db, now_utc, optional_user
 from .errors import ApiError
-from .models import Listing, Question, User
+from .models import Listing, Question, User, question_waiting
 from .social import CONTACT_RE
 
 router = APIRouter(prefix="/api/v1")
@@ -52,8 +52,8 @@ def visible_listing(db: Session, listing_id: int) -> Listing:
 
 def unanswered_count(db: Session, listing_id: int) -> int:
     """Questions on a listing still waiting for the seller's answer, all of them (the list shows at most 100)."""
-    return db.scalar(select(func.count(Question.id)).where(
-        Question.listing_id == listing_id, Question.answer.is_(None), Question.hidden.is_(False)))
+    return db.scalar(select(func.count(Question.id)).join(Listing, Listing.id == Question.listing_id)
+                     .where(Question.listing_id == listing_id, *question_waiting()))
 
 
 @router.get("/listings/{listing_id}/questions")

@@ -19,7 +19,7 @@ from . import delivery_eta
 from .deps import current_user, get_db, now_utc, optional_user
 from .errors import ApiError
 from .social import chats_waiting_on, reply_time, seller_rating
-from .models import Follow, Offer, ListingDailyViews, Favorite, Listing, ListingSize, Order, Question, User
+from .models import Follow, Offer, ListingDailyViews, Favorite, Listing, ListingSize, Order, Question, User, question_waiting
 from .api_common import ALMATY
 from .serializers import ADDRESS_HIDDEN_UNTIL_PAID, LIGHT, away_out, listing_out, with_light_media
 
@@ -45,7 +45,7 @@ def my_listings(before: int | None = Query(default=None, ge=1, le=2**31 - 1),
 
 
 def preload_stats(db: Session, ids: list[int]) -> None:
-    """listing_stats for many listings in four grouped queries instead of four per listing."""
+    """listing_stats for many listings in five grouped queries instead of five per listing."""
     from .models import Conversation
     if not ids:
         return
@@ -55,8 +55,11 @@ def preload_stats(db: Session, ids: list[int]) -> None:
     chats = grouped(Conversation.listing_id)
     orders = grouped(Order.listing_id, Order.status != S.CANCELLED.value)
     sold = grouped(Order.listing_id, Order.status == S.COMPLETED.value)
+    waiting = dict(db.execute(select(Question.listing_id, func.count()).join(Listing, Listing.id == Question.listing_id)
+                              .where(Question.listing_id.in_(ids), *question_waiting())
+                              .group_by(Question.listing_id)).all())
     db.info["listing_stats"] = {i: {"favorites": favs.get(i, 0), "chats": chats.get(i, 0), "orders": orders.get(i, 0),
-                                    "sold": sold.get(i, 0)} for i in ids}
+                                    "sold": sold.get(i, 0), "unanswered": waiting.get(i, 0)} for i in ids}
 
 
 @router.get("/me/earnings")
@@ -263,8 +266,7 @@ def my_todo(user: User = Depends(current_user), db: Session = Depends(get_db)):
             "to_ship": orders("seller", S.SELLER_ACCEPTED.value, S.PREPARING.value),
             "returns": orders("seller", S.RETURN_REQUESTED.value),
             "questions": int(db.scalar(select(func.count(Question.id)).join(Listing, Listing.id == Question.listing_id)
-                                       .where(Listing.seller_id == user.id, Question.answer.is_(None),
-                                              Question.hidden.is_(False))) or 0),
+                                       .where(Listing.seller_id == user.id, *question_waiting())) or 0),
             "offers": int(db.scalar(select(func.count(Offer.id)).where(
                 Offer.seller_id == user.id, Offer.status == "pending", Offer.expires_at > now)) or 0),
         }

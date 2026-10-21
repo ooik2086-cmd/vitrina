@@ -465,6 +465,13 @@ class Question(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+def question_waiting() -> tuple:
+    """A question the seller still has to answer and can: not answered, not hidden, on a listing on sale or sold
+    (the only ones whose questions open). Every count of waiting questions uses this, with Listing joined, so the
+    to-do card, the seller's list and the listing page agree."""
+    return (Question.answer.is_(None), Question.hidden.is_(False), Listing.status.in_(("published", "sold")))
+
+
 class Block(Base):
     """One user stops another from writing, offering, asking or ordering from them. Works both ways for
     contact; only the blocker can lift it."""

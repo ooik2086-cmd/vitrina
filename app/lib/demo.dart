@@ -86,6 +86,30 @@ class DemoClient extends http.BaseClient {
       final items = (_answers['GET ${waiting.group(1)}'] as Map)['items'] as List;
       return (200, {'unanswered': items.where((q) => (q as Map)['answer'] == null).length});
     }
+    // The seller's own listings: each one's waiting questions from the recorded list, like the count above.
+    if (path == '/me/listings' && _answers['GET /me/listings'] is Map) {
+      final mine = _answers['GET /me/listings'] as Map;
+      return (
+        200,
+        {
+          ...mine,
+          'items': [
+            for (final l in mine['items'] as List)
+              if ((l as Map)['stats'] is Map)
+                {
+                  ...l,
+                  'stats': {
+                    ...(l['stats'] as Map),
+                    // Only on sale or sold: the server's rule, as no other listing's questions open.
+                    'unanswered': l['status'] == 'published' || l['status'] == 'sold' ? _waitingOn(l['id']) : 0,
+                  },
+                }
+              else
+                l
+          ],
+        }
+      );
+    }
     if (RegExp(r'^/listings/\d+$').hasMatch(path) && _answers['GET $path'] is Map) {
       final one = _answers['GET $path'] as Map<String, dynamic>;
       return (200, {...one, 'colors': _colors(one)});
@@ -114,6 +138,12 @@ class DemoClient extends http.BaseClient {
       }
     }
     return (404, _notFound);
+  }
+
+  int _waitingOn(Object? listingId) {
+    final asked = _answers['GET /listings/$listingId/questions'];
+    if (asked is! Map) return 0;
+    return (asked['items'] as List).where((q) => (q as Map)['answer'] == null).length;
   }
 
   static const _notFound = {
