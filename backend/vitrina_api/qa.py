@@ -50,6 +50,12 @@ def visible_listing(db: Session, listing_id: int) -> Listing:
     return listing
 
 
+def unanswered_count(db: Session, listing_id: int) -> int:
+    """Questions on a listing still waiting for the seller's answer, all of them (the list shows at most 100)."""
+    return db.scalar(select(func.count(Question.id)).where(
+        Question.listing_id == listing_id, Question.answer.is_(None), Question.hidden.is_(False)))
+
+
 @router.get("/listings/{listing_id}/questions")
 def list_questions(listing_id: int, user: User | None = Depends(optional_user), db: Session = Depends(get_db)):
     listing = visible_listing(db, listing_id)
@@ -60,7 +66,16 @@ def list_questions(listing_id: int, user: User | None = Depends(optional_user), 
     rows = db.scalars(q.order_by(Question.answer.is_(None).desc() if seller else Question.id.desc(),
                                  Question.id.desc()).limit(100)).all()
     return {"items": [question_out(r, user) for r in rows],
-            "unanswered": sum(1 for r in rows if r.answer is None) if seller else None}
+            "unanswered": unanswered_count(db, listing.id) if seller else None}
+
+
+@router.get("/listings/{listing_id}/questions/unanswered")
+def count_unanswered(listing_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """Only the number, for the seller's edit page: a few bytes on a weak connection, not the whole list."""
+    listing = visible_listing(db, listing_id)
+    if listing.seller_id != user.id:
+        raise ApiError(404, "not_found")
+    return {"unanswered": unanswered_count(db, listing.id)}
 
 
 @router.post("/listings/{listing_id}/questions", status_code=201)

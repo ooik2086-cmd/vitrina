@@ -1830,6 +1830,8 @@ void main() {
           base: 'http://x/api/v1',
           client: MockClient((req) async {
             if (reply?.call(req) case final r?) return r;
+            // The Q&A row's count: none waiting (with no answer it would offer «Қайта көру» too).
+            if (req.url.path.endsWith('/questions/unanswered')) return jsonResponse({'unanswered': 0});
             if (req.method == 'GET') return http.Response('{}', 404);
             if (down-- > 0) throw http.ClientException('no connection');
             final body = jsonDecode(req.body) as Map<String, dynamic>;

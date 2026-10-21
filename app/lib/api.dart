@@ -1462,6 +1462,10 @@ class Api {
     );
   }
 
+  /// For the seller: how many questions on the listing wait for an answer (only the number).
+  Future<int> unansweredQuestions(int listingId) async =>
+      ((await _send('GET', '/listings/$listingId/questions/unanswered') as Map)['unanswered'] as num).toInt();
+
   Future<Question> askQuestion(int listingId, String text) async => Question.fromJson(
       await _send('POST', '/listings/$listingId/questions', body: {'text': text}) as Map<String, dynamic>);
 

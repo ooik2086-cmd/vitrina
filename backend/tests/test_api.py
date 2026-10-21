@@ -3054,6 +3054,25 @@ class QuestionTests(ApiTestCase):
         self.c.delete(f"/api/v1/questions/{qid}", headers=self.h(self.seller))
         self.assertEqual(self.get(url).json()["items"], [])
 
+    def test_the_seller_alone_gets_the_number_waiting_all_of_them(self):
+        listing = self.publish()
+        url = f"/listings/{listing['id']}/questions"
+        count = f"{url}/unanswered"
+        self.assertEqual(self.get(count, self.seller).json(), {"unanswered": 0})
+        buyers = [self.buyer] + [self.login(f"+770100001{i:02d}") for i in range(35)]
+        ids = [self.post(url, b, {"text": f"Сұрақ нөмірі {n}"}).json()["id"] for b in buyers for n in range(3)]
+        self.assertEqual(len(ids), 108)
+        self.assertEqual(self.get(count, self.seller).json(), {"unanswered": 108})
+        self.assertEqual(self.get(url, self.seller).json()["unanswered"], 108)  # past the 100 the list shows
+        self.post(f"/questions/{ids[0]}/answer", self.seller, {"text": "Иә"})
+        self.c.delete(f"/api/v1/questions/{ids[1]}", headers=self.h(self.seller))  # hidden: not waiting
+        self.assertEqual(self.get(count, self.seller).json(), {"unanswered": 106})
+        # Nobody else: a buyer, an asker or no account at all.
+        self.assertEqual(self.get(count, self.buyer).status_code, 404)
+        self.assertEqual(self.c.get(f"/api/v1{count}").status_code, 401)
+        self.post(f"/listings/{listing['id']}/pause", self.seller)
+        self.assertEqual(self.get(count, self.seller).status_code, 404)
+
     def test_a_buyer_waits_for_answers_before_asking_more(self):
         listing = self.publish()
         url = f"/listings/{listing['id']}/questions"

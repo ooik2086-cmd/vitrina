@@ -733,16 +733,8 @@ class _ManageListingScreenState extends State<ManageListingScreen> with WidgetsB
                 // Buyers waiting for an answer are part of coming back too.
                 if (_l.status == 'published' || _l.status == 'sold') ...[
                   const SizedBox(height: 8),
-                  ListTile(
-                    key: const Key('listing-questions'),
-                    contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.forum_outlined),
-                    title: Text(tr('Сұрақ-жауап')),
-                    subtitle: Text(tr('Сатып алушылардың сұрақтарына жауап беру')),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () => Navigator.of(context)
-                        .push(MaterialPageRoute(builder: (_) => QuestionsScreen(listingId: _l.id, seller: true))),
-                  ),
+                  // How many wait for an answer, so a seller sees there is something to do without opening it.
+                  _QuestionsRow(listingId: _l.id),
                 ],
                 const SizedBox(height: 16),
                 TextFormField(
@@ -1447,5 +1439,113 @@ class _EditsBackNote extends StatelessWidget {
         ]),
       ),
     );
+  }
+}
+
+/// The Q&A row of a listing on sale or sold, with how many buyers' questions wait for the seller's answer. It asks
+/// when it comes on the page (also when the listing goes back on sale), on coming back from the Q&A page and when
+/// the app comes back from the background while this page is in front.
+class _QuestionsRow extends StatefulWidget {
+  const _QuestionsRow({required this.listingId});
+  final int listingId;
+
+  @override
+  State<_QuestionsRow> createState() => _QuestionsRowState();
+}
+
+class _QuestionsRowState extends State<_QuestionsRow> with WidgetsBindingObserver {
+  int? _waiting; // the last number had; kept when a later ask fails, so a known count never vanishes
+  Object? _error; // the last ask failed
+  bool _asking = false;
+  int _ask = 0; // the latest ask: an older answer coming in late is dropped
+  bool _away = false; // the app went to the background (not just a dialog or the notification shade over it)
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _count());
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.hidden || state == AppLifecycleState.paused) _away = true;
+    if (state == AppLifecycleState.resumed && _away) {
+      _away = false;
+      // A buyer may have asked meanwhile. Under the Q&A page it asks on coming back from it instead.
+      if (ModalRoute.of(context)?.isCurrent ?? true) unawaited(_count());
+    }
+  }
+
+  Future<void> _count() async {
+    if (!mounted) return;
+    final api = SessionScope.of(context).api;
+    final ask = ++_ask;
+    setState(() => _asking = true);
+    try {
+      final n = await api.unansweredQuestions(widget.listingId);
+      if (mounted && ask == _ask) {
+        setState(() {
+          _waiting = n;
+          _error = null;
+        });
+      }
+    } catch (e) {
+      if (mounted && ask == _ask) setState(() => _error = e);
+    } finally {
+      if (mounted && ask == _ask) setState(() => _asking = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final waiting = _waiting;
+    final theme = Theme.of(context);
+    // Not had even once: the row still opens the Q&A page, says why the number is missing and asks again on a tap,
+    // as every part of the app does. A retry line in its place took the way to the questions away while offline,
+    // and with large text on a small phone its button left no room for its words.
+    final failed = waiting == null && _error != null;
+    final tile = ListTile(
+      key: const Key('listing-questions'),
+      contentPadding: EdgeInsets.zero,
+      leading: const Icon(Icons.forum_outlined),
+      title: Text(tr('Сұрақ-жауап')),
+      // Bold when buyers wait: a number on the icon would run into the title with large text.
+      subtitle: failed
+          ? Text(errorText(_error), key: const Key('questions-unknown'))
+          : waiting != null && waiting > 0
+              ? Text(trf('Жауапсыз: {0}', [waiting]),
+                  key: const Key('questions-waiting'),
+                  style: weight(theme.textTheme.bodyMedium!, 700).copyWith(color: theme.colorScheme.onSurface))
+              : Text(tr('Сатып алушылардың сұрақтарына жауап беру')),
+      trailing: const Icon(Icons.chevron_right),
+      onTap: () async {
+        await Navigator.of(context)
+            .push(MaterialPageRoute(builder: (_) => QuestionsScreen(listingId: widget.listingId, seller: true)));
+        unawaited(_count()); // the seller may have answered some there
+      },
+    );
+    if (!failed) return tile;
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      tile,
+      Padding(
+        key: const Key('listing-questions-retry'),
+        padding: const EdgeInsetsDirectional.only(start: 28), // its icon under the row's words
+        child: TextButton.icon(
+          key: const Key('retry'),
+          onPressed: _asking ? null : _count,
+          icon: _asking
+              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+              : const Icon(Icons.refresh_rounded),
+          label: Text(tr('Қайта көру')),
+        ),
+      ),
+    ]);
   }
 }

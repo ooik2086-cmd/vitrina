@@ -80,6 +80,12 @@ class DemoClient extends http.BaseClient {
         }
       );
     }
+    // The seller's count of questions waiting: those of the recorded list with no answer yet.
+    final waiting = RegExp(r'^(/listings/\d+/questions)/unanswered$').firstMatch(path);
+    if (waiting != null && _answers['GET ${waiting.group(1)}'] is Map) {
+      final items = (_answers['GET ${waiting.group(1)}'] as Map)['items'] as List;
+      return (200, {'unanswered': items.where((q) => (q as Map)['answer'] == null).length});
+    }
     if (RegExp(r'^/listings/\d+$').hasMatch(path) && _answers['GET $path'] is Map) {
       final one = _answers['GET $path'] as Map<String, dynamic>;
       return (200, {...one, 'colors': _colors(one)});
