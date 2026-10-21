@@ -71,6 +71,32 @@ def message_out(m: Message) -> dict:
             "created_at": services.aware(m.created_at).isoformat()}
 
 
+# How long a buyer's last message counts as waiting on the seller. Later the buyer has most likely bought elsewhere,
+# and a chat that ended on the buyer's «рақмет» does not stay on the seller's to-do list for good. A first question
+# the seller never answered keeps a week, so it is still there after a few days away.
+AWAITS_ANSWER_FOR = timedelta(days=3)
+FIRST_QUESTION_WAITS_FOR = timedelta(days=7)
+
+
+def chats_waiting_on(seller_id: int):
+    """The ids of this seller's chats where the buyer wrote last and still waits for an answer, read or not: opening a
+    chat clears its unread count, not the wait. Chats blocked either way are left out: the seller could not answer.
+    The to-do count and the mark in the chat list both come from here, so they always agree."""
+    now = now_utc()
+    newest = (select(func.max(Message.id)).where(Message.conversation_id == Conversation.id)
+              .correlate(Conversation).scalar_subquery())
+    seller_wrote = (select(Message.id).where(Message.conversation_id == Conversation.id,
+                                             Message.sender_id == Conversation.seller_id)
+                    .correlate(Conversation).exists())
+    return (select(Conversation.id).join(Message, Message.id == newest)
+            .where(Conversation.seller_id == seller_id, Conversation.last_message_at > now - FIRST_QUESTION_WAITS_FOR,
+                   Message.sender_id == Conversation.buyer_id,
+                   or_(Message.created_at > now - AWAITS_ANSWER_FOR,
+                       and_(~seller_wrote, Message.created_at > now - FIRST_QUESTION_WAITS_FOR)),
+                   Conversation.buyer_id.not_in(select(Block.blocked_id).where(Block.user_id == seller_id)),
+                   Conversation.buyer_id.not_in(select(Block.user_id).where(Block.blocked_id == seller_id))))
+
+
 def preload_conversations(db: Session, convs: list[Conversation], user: User) -> None:
     """Reads what a list of chats shows (listings with their photos, the other people, each chat's last message and
     unread count) in a few queries for the whole list; conversation_out then finds them in db.info. The last message
@@ -99,6 +125,9 @@ def preload_conversations(db: Session, convs: list[Conversation], user: User) ->
         .join(Conversation, Conversation.id == Message.conversation_id)
         .where(Message.conversation_id.in_(ids), Message.id > read_up_to, Message.sender_id != user.id)
         .group_by(Message.conversation_id)).all()))
+    awaits = db.info.setdefault("conv_awaits", {})
+    awaits.update({c: False for c in ids})
+    awaits.update({c: True for c in db.scalars(chats_waiting_on(user.id).where(Conversation.id.in_(ids)))})
 
 
 def conversation_out(db: Session, conv: Conversation, user: User) -> dict:
@@ -114,6 +143,10 @@ def conversation_out(db: Session, conv: Conversation, user: User) -> dict:
         last = db.scalar(select(Message).where(Message.conversation_id == conv.id).order_by(Message.id.desc()).limit(1))
         unread = db.scalar(select(func.count(Message.id)).where(
             Message.conversation_id == conv.id, Message.id > last_read, Message.sender_id != user.id))
+    if conv.id in db.info.get("conv_awaits", {}):
+        awaits = db.info["conv_awaits"][conv.id]
+    else:
+        awaits = not me_buyer and db.scalar(chats_waiting_on(user.id).where(Conversation.id == conv.id)) is not None
     from .serializers import listing_cover  # serializers imports this module
     cover = listing_cover(listing)
     return {
@@ -122,6 +155,7 @@ def conversation_out(db: Session, conv: Conversation, user: User) -> dict:
         # Names only, never phone numbers.
         "other_name": (other.shop_name if me_buyer else other.display_name) or ("Сатушы" if me_buyer else "Сатып алушы"),
         "last_message": message_out(last) if last else None, "unread": int(unread or 0),
+        "awaits_answer": awaits,
         "seller_away_until": seller_away(people.get(conv.seller_id) or db.get(User, conv.seller_id)),
     }
 

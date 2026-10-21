@@ -850,6 +850,7 @@ class Conversation {
         lastMessage =
             j['last_message'] == null ? null : ChatMessage.fromJson(j['last_message'] as Map<String, dynamic>),
         unread = j['unread'] as int,
+        awaitsAnswer = j['awaits_answer'] as bool? ?? false,
         sellerAwayUntil = j['seller_away_until'] == null ? null : DateTime.parse(j['seller_away_until'] as String);
   final int id;
   final int listingId;
@@ -860,6 +861,9 @@ class Conversation {
   final String otherName;
   final ChatMessage? lastMessage;
   final int unread;
+
+  /// For the seller: the buyer wrote last, lately, and waits for an answer, whether the chat was opened or not.
+  final bool awaitsAnswer;
 
   /// The seller's last holiday day while it lasts.
   final DateTime? sellerAwayUntil;

@@ -15,9 +15,16 @@ import '../quick_replies.dart';
 
 String _time(DateTime t) => '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
 
+/// Bumped when a chat closes, so every chat list shown (the Chat tab stays alive behind the others) reads the
+/// answers and unread counts again, not only the list the chat was opened from.
+final chatsChanged = ValueNotifier<int>(0);
+
 /// Inbox: every thread the user is part of, as buyer or as seller.
 class ChatsScreen extends StatefulWidget {
-  const ChatsScreen({super.key});
+  const ChatsScreen({super.key, this.waitingFirst = false});
+
+  /// Opened from the to-do card: the chats where a buyer waits for an answer come first.
+  final bool waitingFirst;
 
   @override
   State<ChatsScreen> createState() => _ChatsScreenState();
@@ -26,6 +33,22 @@ class ChatsScreen extends StatefulWidget {
 class _ChatsScreenState extends State<ChatsScreen> {
   Future<List<Conversation>>? _items;
   bool? _loadedFor;
+
+  @override
+  void initState() {
+    super.initState();
+    chatsChanged.addListener(_changed);
+  }
+
+  @override
+  void dispose() {
+    chatsChanged.removeListener(_changed);
+    super.dispose();
+  }
+
+  void _changed() {
+    if (mounted && _items != null) _reload();
+  }
 
   @override
   void didChangeDependencies() {
@@ -58,7 +81,11 @@ class _ChatsScreenState extends State<ChatsScreen> {
             return ErrorRetry(error: snap.error, onRetry: _reload);
           }
           if (!snap.hasData) return const Center(child: CircularProgressIndicator());
-          final items = snap.data!;
+          final roomy = MediaQuery.textScalerOf(context).scale(14) <= 18;
+          final items = [
+            if (widget.waitingFirst) ...snap.data!.where((c) => c.awaitsAnswer),
+            ...snap.data!.where((c) => !widget.waitingFirst || !c.awaitsAnswer),
+          ];
           return RefreshIndicator(
             onRefresh: _reload,
             child: items.isEmpty
@@ -92,26 +119,43 @@ class _ChatsScreenState extends State<ChatsScreen> {
                         ),
                         title: Text(personName(c.otherName),
                             style: weight(theme.textTheme.titleSmall!, c.unread > 0 ? 750 : 600)),
-                        subtitle: Text(
-                          c.lastMessage == null
-                              ? c.listingTitle
-                              : (c.lastMessage!.body.isEmpty ? tr('📷 Фото') : c.lastMessage!.body),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        trailing: Column(
+                        subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          // Stays after the chat is opened, until the seller answers: the to-do card counts these.
+                          // A line of its own, so the buyer's words stay readable beside it at any text size.
+                          if (c.awaitsAnswer)
+                            Text(tr('Жауап күтеді'),
+                                key: Key('chat-awaits-${c.id}'),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                    color: accentText(context),
+                                    fontWeight: FontWeight.w700,
+                                    fontVariations: const [FontVariation('wght', 700)])),
+                          Text(
+                            c.lastMessage == null
+                                ? c.listingTitle
+                                : (c.lastMessage!.body.isEmpty ? tr('📷 Фото') : c.lastMessage!.body),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ]),
+                        // The time over the unread number; side by side with large text, as a list tile keeps
+                        // its trailing part within 56 pixels of height.
+                        trailing: Flex(
+                            direction: roomy ? Axis.vertical : Axis.horizontal,
+                            mainAxisSize: roomy ? MainAxisSize.max : MainAxisSize.min,
                             mainAxisAlignment: MainAxisAlignment.center,
-                            crossAxisAlignment: CrossAxisAlignment.end,
+                            crossAxisAlignment: roomy ? CrossAxisAlignment.end : CrossAxisAlignment.center,
                             children: [
                               if (c.lastMessage != null)
                                 Text(_time(c.lastMessage!.createdAt), style: theme.textTheme.labelSmall),
-                              const SizedBox(height: 4),
+                              const SizedBox(height: 4, width: 6),
                               if (c.unread > 0) Badge(label: Text('${c.unread}')),
                             ]),
                         onTap: () async {
+                          // The list reads itself again when the chat closes (chatsChanged).
                           await Navigator.of(context)
                               .push(MaterialPageRoute(builder: (_) => ChatScreen(conversationId: c.id)));
-                          _reload();
                         },
                       );
                     },
@@ -210,6 +254,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _poll?.cancel();
     _input.dispose();
     _scroll.dispose();
+    // After the tree is settled: the lists rebuild, and nothing may be rebuilt while this chat is being taken down.
+    scheduleMicrotask(() => chatsChanged.value++);
     super.dispose();
   }
 

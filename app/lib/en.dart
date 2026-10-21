@@ -685,6 +685,8 @@ const en = <String, String>{
   'Белсенді': 'Active',
   'Сай тапсырыс жоқ.': 'No matching orders.',
   'Сізді күтеді': 'Waiting on you',
+  'Жауап күтетін сатып алушы': 'Buyers waiting for a reply',
+  'Жауап күтеді': 'Needs your reply',
   'Сіздің әрекетіңізді күтетін тапсырыс жоқ.': 'No orders are waiting on you.',
   'Дүкенмен бөлісу': 'Share the shop',
   'Дүкен сілтемесі': 'Shop link',

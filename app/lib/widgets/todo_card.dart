@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../api.dart';
 import '../i18n.dart';
+import '../screens/chat_screen.dart';
 import '../screens/my_listings_screen.dart';
 import '../screens/offers_screen.dart';
 import '../screens/orders_screen.dart';
@@ -13,6 +14,13 @@ import 'common.dart';
 typedef TodoLine = ({String key, IconData icon, String label, Widget Function() open});
 
 final List<TodoLine> todoLines = [
+  // First: while payments are off at launch, the chat is where a sale is agreed.
+  (
+    key: 'chats_to_answer',
+    icon: Icons.chat_bubble_outline_rounded,
+    label: 'Жауап күтетін сатып алушы',
+    open: () => const ChatsScreen(waitingFirst: true),
+  ),
   (
     key: 'to_accept',
     icon: Icons.inventory_2_outlined,

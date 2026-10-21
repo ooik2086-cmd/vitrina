@@ -2222,6 +2222,60 @@ class OfferTests(ApiTestCase):
         self.c.get(f"/api/v1/conversations/{conv['id']}/messages", headers=self.h(self.seller))
         self.assertEqual(todo(self.seller)["unread_messages"], 0)
 
+    def test_a_chat_the_buyer_wrote_last_waits_on_the_seller_even_once_read(self):
+        listing, other = self.publish(), self.publish(title="Екінші")
+        todo = lambda t: self.get("/me/todo", t).json()  # noqa: E731
+        chats = lambda t: {c["id"]: c["awaits_answer"] for c in self.get("/conversations", t).json()["items"]}  # noqa: E731
+        conv = self.post("/conversations", self.buyer, {"listing_id": listing["id"]}).json()
+        self.assertEqual(todo(self.seller)["chats_to_answer"], 0)  # an empty chat waits on no one
+        self.post(f"/conversations/{conv['id']}/messages", self.buyer, {"body": "Өлшемі сай ма?"})
+        self.post(f"/conversations/{conv['id']}/messages", self.buyer, {"body": "Тағы бір сұрақ"})
+        self.assertEqual(todo(self.seller)["chats_to_answer"], 1)  # one chat, however many messages
+        self.get(f"/conversations/{conv['id']}/messages", self.seller)  # opened: no longer unread, still unanswered
+        self.assertEqual((todo(self.seller)["unread_messages"], todo(self.seller)["chats_to_answer"]), (0, 1))
+        self.assertEqual((chats(self.seller), chats(self.buyer)), ({conv["id"]: True}, {conv["id"]: False}))
+        self.assertNotIn("chats_to_answer", todo(self.buyer))  # a seller line only
+        self.post(f"/conversations/{conv['id']}/messages", self.seller, {"body": "Иә, сай"})
+        self.assertEqual((todo(self.seller)["chats_to_answer"], chats(self.seller)), (0, {conv["id"]: False}))
+        # Two buyers waiting are two chats. A chat blocked either way is not counted: the seller could not answer it.
+        second, third = self.login("+77010000003"), self.login("+77010000004")
+        conv2 = self.post("/conversations", second, {"listing_id": other["id"]}).json()
+        conv3 = self.post("/conversations", third, {"listing_id": other["id"]}).json()
+        self.post(f"/conversations/{conv['id']}/messages", self.buyer, {"body": "Рақмет"})
+        self.post(f"/conversations/{conv2['id']}/messages", second, {"body": "Бар ма?"})
+        self.post(f"/conversations/{conv3['id']}/messages", third, {"body": "Түсі қандай?"})
+        self.assertEqual(todo(self.seller)["chats_to_answer"], 3)
+        self.post(f"/conversations/{conv2['id']}/block", self.seller)
+        self.post(f"/conversations/{conv3['id']}/block", third)
+        self.assertEqual(todo(self.seller)["chats_to_answer"], 1)
+        self.assertEqual(chats(self.seller), {conv["id"]: True, conv3["id"]: False})  # the blocked side still sees it
+
+        def age(conv_id, **ago):
+            with self.db() as db:
+                last = db.scalar(select(Message).where(Message.conversation_id == conv_id)
+                                 .order_by(Message.id.desc()))
+                last.created_at = datetime.now(timezone.utc) - timedelta(**ago)
+                db.commit()
+
+        # A chat the seller answered before waits three days; then the buyer has most likely moved on.
+        age(conv["id"], days=2, hours=23)
+        self.assertEqual((todo(self.seller)["chats_to_answer"], chats(self.seller)[conv["id"]]), (1, True))
+        age(conv["id"], days=3, minutes=1)
+        self.assertEqual((todo(self.seller)["chats_to_answer"], chats(self.seller)[conv["id"]]), (0, False))
+        # A first question the seller never answered waits a week, so it is still there after a few days away.
+        fourth = self.login("+77010000005")
+        conv4 = self.post("/conversations", fourth, {"listing_id": other["id"]}).json()
+        self.post(f"/conversations/{conv4['id']}/messages", fourth, {"body": "Сәлеметсіз бе"})
+        age(conv4["id"], days=6, hours=23)
+        self.assertEqual((todo(self.seller)["chats_to_answer"], chats(self.seller)[conv4["id"]]), (1, True))
+        age(conv4["id"], days=7, minutes=1)
+        self.assertEqual((todo(self.seller)["chats_to_answer"], chats(self.seller)[conv4["id"]]), (0, False))
+        # One chat on its own (as the chat screen asks for it) carries the same mark as the list.
+        self.post(f"/conversations/{conv4['id']}/messages", fourth, {"body": "Бар ма?"})
+        one = self.get(f"/conversations/{conv4['id']}/messages", self.seller).json()["conversation"]
+        mine = self.get(f"/conversations/{conv4['id']}/messages", fourth).json()["conversation"]
+        self.assertEqual((one["awaits_answer"], mine["awaits_answer"]), (True, False))
+
     def test_offer_bounds_and_daily_limit(self):
         listing = self.publish()  # 45 000 ₸
         self.assertEqual(self.offer(listing, 4_500_000).json()["code"], "offer_not_lower")

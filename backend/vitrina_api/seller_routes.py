@@ -18,7 +18,7 @@ from . import services
 from . import delivery_eta
 from .deps import current_user, get_db, now_utc, optional_user
 from .errors import ApiError
-from .social import reply_time, seller_rating
+from .social import chats_waiting_on, reply_time, seller_rating
 from .models import Follow, Offer, ListingDailyViews, Favorite, Listing, ListingSize, Order, Question, User
 from .api_common import ALMATY
 from .serializers import ADDRESS_HIDDEN_UNTIL_PAID, LIGHT, away_out, listing_out, with_light_media
@@ -257,6 +257,8 @@ def my_todo(user: User = Depends(current_user), db: Session = Depends(get_db)):
     }
     if user.is_seller:
         out |= {
+            "chats_to_answer": int(db.scalar(select(func.count()).select_from(
+                chats_waiting_on(user.id).subquery())) or 0),
             "to_accept": orders("seller", S.PAID.value),
             "to_ship": orders("seller", S.SELLER_ACCEPTED.value, S.PREPARING.value),
             "returns": orders("seller", S.RETURN_REQUESTED.value),
