@@ -570,7 +570,9 @@ def edit_listing(listing_id: int, body: ListingPatch, request: Request, backgrou
         for item in body.sizes:
             if item.id not in by_id:
                 raise ApiError(422, "validation", f"unknown size {item.id}")
-            if item.was is not None and item.was != by_id[item.id].quantity:
+            # A count already at what the seller asks for is no conflict: the same Save sent again after its answer
+            # was lost on a weak connection, or a change that happens to agree.
+            if item.was is not None and item.was != by_id[item.id].quantity != item.quantity:
                 raise ApiError(409, "stock_changed")
             by_id[item.id].quantity = item.quantity
     if body.sizes is not None or body.add_sizes:

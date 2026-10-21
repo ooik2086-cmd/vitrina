@@ -1816,6 +1816,193 @@ void main() {
     expect(find.text('Сақталды'), findsOneWidget);
   });
 
+  group('the seller keeps changes not yet saved', () {
+    /// Opens the manage page over another, as My listings does. [down] makes the next saves find no connection;
+    /// [reply] answers a request its own way, and [stored] is what the server makes of a saved body.
+    Future<List<Map<String, dynamic>>> open(WidgetTester tester,
+        {int down = 0,
+        http.Response? Function(http.Request req)? reply,
+        Map<String, dynamic> Function(Map<String, dynamic> body)? stored}) async {
+      final sent = <Map<String, dynamic>>[];
+      var listing = listingJson();
+      final api = Api(
+          base: 'http://x/api/v1',
+          client: MockClient((req) async {
+            if (reply?.call(req) case final r?) return r;
+            if (req.method == 'GET') return http.Response('{}', 404);
+            if (down-- > 0) throw http.ClientException('no connection');
+            final body = jsonDecode(req.body) as Map<String, dynamic>;
+            sent.add(body);
+            listing = {
+              ...listing,
+              if (body['price_tiyn'] != null) 'price_tiyn': body['price_tiyn'],
+              ...?stored?.call(body),
+            };
+            return jsonResponse(listing);
+          }));
+      tester.view.physicalSize = const Size(400, 1400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(SessionScope(
+          session: Session(api),
+          child: MaterialApp(
+              home: Scaffold(
+                  body: Builder(
+                      builder: (context) => TextButton(
+                          onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                              builder: (_) => ManageListingScreen(listing: Listing.fromJson(listingJson())))),
+                          child: const Text('open')))))));
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      return sent;
+    }
+
+    Future<void> back(WidgetTester tester) async {
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+    }
+
+    const offline = 'Байланыс жоқ. Өзгерістер жоғалған жоқ, осы бетте тұр.';
+
+    testWidgets('with no connection Save says the changes are still here, and sends them again with a tap',
+        (tester) async {
+      final sent = await open(tester, down: 1);
+      await tester.enterText(find.byKey(const Key('price')), '40000');
+      await tester.tap(find.byKey(const Key('save')));
+      await tester.pumpAndSettle();
+      expect(find.text('Байланыс жоқ. Өзгерістер жоғалған жоқ, осы бетте тұр.'), findsOneWidget);
+      expect(find.widgetWithText(TextFormField, '40000'), findsOneWidget); // nothing typed is lost
+      expect(sent, isEmpty);
+      await tester.tap(find.text('Қайта көру'));
+      await tester.pumpAndSettle();
+      expect(sent.single['price_tiyn'], 4000000);
+      expect(find.text('Сақталды'), findsOneWidget);
+      await tester.pageBack(); // saved: nothing to ask about
+      await tester.pumpAndSettle();
+      expect(find.byType(ManageListingScreen), findsNothing);
+    });
+
+    testWidgets('back with a change not saved asks first; staying keeps it', (tester) async {
+      final sent = await open(tester);
+      await tester.pageBack(); // nothing changed: back simply leaves
+      await tester.pumpAndSettle();
+      expect(find.byType(ManageListingScreen), findsNothing);
+
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byTooltip('Көбейту').first);
+      await tester.tap(find.byTooltip('Көбейту').first);
+      await tester.pump();
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      expect(find.text('Сақтамай шығу керек пе?'), findsOneWidget);
+      await tester.tap(find.text('Қалу'));
+      await tester.pumpAndSettle();
+      expect(find.byType(ManageListingScreen), findsOneWidget);
+      expect(find.text('2'), findsOneWidget); // the count the seller set is still there
+
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('discard')));
+      await tester.pumpAndSettle();
+      expect(find.byType(ManageListingScreen), findsNothing);
+      expect(sent, isEmpty);
+    });
+
+    for (final (field, typed) in [
+      (find.byKey(const Key('price')), '40000'),
+      (find.widgetWithText(TextFormField, 'Сипаттамасы'), 'Жаңа сипаттама'),
+      (find.widgetWithText(TextFormField, 'Атауы'), 'Nike Air Force 1 Low'),
+    ]) {
+      testWidgets('back with $typed typed and not saved asks first', (tester) async {
+        await open(tester);
+        await tester.enterText(field, typed);
+        await back(tester);
+        expect(find.text('Сақтамай шығу керек пе?'), findsOneWidget);
+      });
+    }
+
+    testWidgets('a refusal from the server is told in its own words, not as a lost connection', (tester) async {
+      await open(tester,
+          reply: (req) =>
+              req.method == 'PATCH' ? jsonResponse({'code': 'validation', 'message_kk': 'Бағасы тым жоғары'}, 422) : null);
+      await tester.enterText(find.byKey(const Key('price')), '40000');
+      await tester.tap(find.byKey(const Key('save')));
+      await tester.pumpAndSettle();
+      expect(find.text('Бағасы тым жоғары'), findsOneWidget);
+      expect(find.text(offline), findsNothing);
+      expect(find.text('Қайта көру'), findsNothing);
+    });
+
+    testWidgets('Save pressed again once online replaces the note about the lost connection', (tester) async {
+      final sent = await open(tester, down: 1);
+      await tester.enterText(find.byKey(const Key('price')), '40000');
+      await tester.tap(find.byKey(const Key('save')));
+      await tester.pumpAndSettle();
+      expect(find.text(offline), findsOneWidget);
+      await tester.tap(find.byKey(const Key('save')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(find.text(offline), findsNothing); // gone at once, not after its time is up
+      expect(find.text('Сақталды'), findsOneWidget);
+      expect(sent, hasLength(1));
+    });
+
+    testWidgets('leaving without the changes takes the note about them away too', (tester) async {
+      await open(tester, down: 1);
+      await tester.enterText(find.byKey(const Key('price')), '40000');
+      await tester.tap(find.byKey(const Key('save')));
+      await tester.pumpAndSettle();
+      await back(tester);
+      await tester.tap(find.byKey(const Key('discard')));
+      await tester.pumpAndSettle();
+      expect(find.byType(ManageListingScreen), findsNothing);
+      expect(find.text(offline), findsNothing);
+      expect(find.text('Қайта көру'), findsNothing);
+    });
+
+    testWidgets('what the server tidied on Save is shown, so the saved page leaves without asking', (tester) async {
+      await open(tester, stored: (body) => {'description': 'Жаңа сипаттама'});
+      await tester.enterText(find.widgetWithText(TextFormField, 'Сипаттамасы'), 'Жаңа  сипаттама'); // two spaces
+      await tester.tap(find.byKey(const Key('save')));
+      await tester.pumpAndSettle();
+      expect(find.text('Жаңа сипаттама'), findsOneWidget);
+      await back(tester);
+      expect(find.byType(ManageListingScreen), findsNothing);
+    });
+
+    testWidgets('a pair sold while the page was open is no change of the seller, and Save does not put it back',
+        (tester) async {
+      final sent = await open(tester,
+          reply: (req) => req.url.path.endsWith('/pause')
+              ? jsonResponse({
+                  ...listingJson(),
+                  'status': 'paused',
+                  'sizes': [
+                    {'id': 1, 'label': '42', 'insole_cm': '27,0', 'available': false, 'quantity': 0},
+                    {'id': 2, 'label': '43', 'insole_cm': '27,5', 'available': false, 'quantity': 0},
+                  ],
+                })
+              : null);
+      await tester.tap(find.text('Тоқтату'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('price')), '40000');
+      await tester.tap(find.byKey(const Key('save')));
+      await tester.pumpAndSettle();
+      expect(sent.single.containsKey('sizes'), isFalse);
+      await back(tester);
+      expect(find.byType(ManageListingScreen), findsNothing);
+    });
+
+    testWidgets('a price typed the same as before, with spaces, is no change', (tester) async {
+      await open(tester);
+      await tester.enterText(find.byKey(const Key('price')), '45 000');
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      expect(find.byType(ManageListingScreen), findsNothing);
+    });
+  });
+
   testWidgets('authenticity card shows the staff answer and hides editing once checked', (tester) async {
     Map<String, Object?> state = {'authenticity': 'unverified', 'note': 'Чекте модель көрінбейді', 'proofs': []};
     final api = Api(base: 'http://x/api/v1', client: MockClient((req) async => jsonResponse(state)));
@@ -3020,7 +3207,9 @@ void main() {
                 '/api/v1/listings/7/proofs' => jsonResponse({
                     'authenticity': 'unverified',
                     'note': null,
-                    'proofs': [for (var i = 0; i < proofs; i++) {'id': i, 'url': 'https://cdn/proof$i.jpg'}],
+                    'proofs': [
+                      for (var i = 0; i < proofs; i++) {'id': i, 'url': 'https://cdn/proof$i.jpg'}
+                    ],
                   }),
                 _ => jsonResponse(listing),
               }));

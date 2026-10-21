@@ -1477,6 +1477,18 @@ class SellerEditTests(ApiTestCase):
         r = self.patch(lid, {"sizes": [{"id": size_id, "quantity": 2, "was": 0}]})
         self.assertEqual(r.json()["sizes"][0]["quantity"], 2)
 
+    def test_the_same_stock_save_sent_again_after_a_lost_answer_is_accepted(self):
+        listing = self.publish()
+        lid, size_id = listing["id"], listing["sizes"][0]["id"]
+        was = listing["sizes"][0]["quantity"]
+        body = {"price_tiyn": 4_100_000, "sizes": [{"id": size_id, "quantity": was + 2, "was": was}]}
+        self.assertEqual(self.patch(lid, body).status_code, 200)
+        r = self.patch(lid, body)  # the answer never reached the phone; Save is tapped again
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual((r.json()["sizes"][0]["quantity"], r.json()["price_tiyn"]), (was + 2, 4_100_000))
+        r = self.patch(lid, {"sizes": [{"id": size_id, "quantity": was + 5, "was": was}]})
+        self.assertEqual((r.status_code, r.json()["code"]), (409, "stock_changed"), r.text)  # a real change stops
+
     def test_seller_cannot_lift_moderation_hide(self):
         lid = self.publish()["id"]
         staff = self.make_staff()

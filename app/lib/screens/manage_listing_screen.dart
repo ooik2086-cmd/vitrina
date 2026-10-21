@@ -67,6 +67,9 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
   final _scroll = ScrollController();
   int _tries = 0;
 
+  /// The note that a Save found no connection, while it is on screen.
+  ScaffoldFeatureController<SnackBar, SnackBarClosedReason>? _offlineBar;
+
   @override
   void initState() {
     super.initState();
@@ -108,20 +111,41 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
     return v == null ? null : v * 100;
   }
 
-  /// Returns the error, or null once done.
-  Future<Object?> _run(Future<Listing> Function(Api api) action, String done) async {
+  /// Returns the error, or null once done. With [offline], a lost connection is told in those words, with a way to
+  /// try again.
+  Future<Object?> _run(Future<Listing> Function(Api api) action, String done, {String? offline}) async {
     setState(() => _busy = true);
     try {
       final l = await action(SessionScope.of(context).api);
       if (!mounted) return null;
       setState(() {
-        _l = l;
+        _take(l);
         _changed = true;
       });
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(done)));
+      // The newest attempt's answer replaces an old «no connection» at once.
+      ScaffoldMessenger.of(context)
+        ..removeCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(done)));
       return null;
     } catch (e) {
-      if (mounted) showError(context, e);
+      if (mounted && offline != null && e is ApiException && e.offline) {
+        final messenger = ScaffoldMessenger.of(context)..clearSnackBars(); // so this one is first
+        final bar = _offlineBar = messenger.showSnackBar(SnackBar(
+            content: Text(offline),
+            duration: const Duration(seconds: 8),
+            // With a screen reader it waits to be reached; it is closed when the page is left.
+            persist: MediaQuery.accessibleNavigationOf(context),
+            action: SnackBarAction(
+                label: tr('Қайта көру'),
+                onPressed: () {
+                  if (mounted && !_busy) _save();
+                })));
+        unawaited(bar.closed.then((_) {
+          if (identical(_offlineBar, bar)) _offlineBar = null;
+        }));
+      } else if (mounted) {
+        showError(context, e);
+      }
       return e;
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -163,9 +187,11 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
           audience: _audience != _l.audience ? _audience : null,
           condition: _condition != _l.condition ? _condition : null),
       tr('Сақталды'),
+      offline: tr('Байланыс жоқ. Өзгерістер жоғалған жоқ, осы бетте тұр.'),
     );
     final soldMeanwhile = saved is ApiException && saved.code == 'stock_changed';
     if (!mounted || saved != null && !soldMeanwhile) return;
+    if (saved == null) _showStored();
     if (soldMeanwhile) {
       try {
         final l = await SessionScope.of(context).api.listing(_l.id);
@@ -181,13 +207,78 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
       ..addAll({for (final s in _l.sizes) s.id: _count(s)}));
   }
 
+  /// Takes the server's copy of the listing. A size the seller has not touched follows the server's count, a sale
+  /// meanwhile included, so it is neither shown as a change nor put back by Save; a count the seller set stays.
+  void _take(Listing l) {
+    final before = {for (final s in _l.sizes) s.id: _count(s)};
+    for (final s in l.sizes) {
+      if (_stock[s.id] == null || _stock[s.id] == before[s.id]) _stock[s.id] = _count(s);
+    }
+    _l = l;
+  }
+
+  /// Puts what the server stored back in the fields: it may tidy a colour or spaces, and a saved page reads as saved.
+  void _showStored() {
+    void put(TextEditingController c, String v) {
+      if (c.text.trim() != v) c.text = v;
+    }
+
+    put(_title, _l.title);
+    put(_brand, _l.brand ?? '');
+    put(_model, _l.modelName ?? '');
+    put(_color, _l.color);
+    put(_description, _l.description ?? '');
+    put(_defects, _l.defects ?? '');
+  }
+
+  /// Whether the page holds a change the server does not have yet: what Save would send.
+  bool get _dirty =>
+      !_locked(_l) &&
+      (_tiyn(_price.text) != _l.priceTiyn ||
+          (_tiyn(_delivery.text) ?? 0) != _l.deliveryPriceTiyn ||
+          _description.text.trim() != (_l.description ?? '') ||
+          _defects.text.trim() != (_l.defects ?? '') ||
+          _edited(_title, _l.title) != null ||
+          !_l.everOnSale && _edited(_brand, _l.brand) != null ||
+          !_l.everOnSale && _edited(_model, _l.modelName) != null ||
+          _edited(_color, _l.color) != null ||
+          !_l.everOnSale && _category != _l.category ||
+          _audience != _l.audience ||
+          _condition != _l.condition ||
+          _was.isNotEmpty);
+
+  /// Back with changes not saved asks first: a seller who lost the connection, or forgot Save, keeps them.
+  Future<void> _leave() async {
+    final leave = !_dirty ||
+        await showDialog<bool>(
+              context: context,
+              builder: (context) => AlertDialog(
+                title: Text(tr('Сақтамай шығу керек пе?')),
+                content: Text(tr('Енгізген өзгерістер сақталмайды.')),
+                actions: [
+                  // Staying keeps the work, so it is the button the eye goes to.
+                  TextButton(
+                      key: const Key('discard'),
+                      onPressed: () => Navigator.pop(context, true),
+                      child: Text(tr('Шығып кету'))),
+                  FilledButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Қалу'))),
+                ],
+              ),
+            ) ==
+            true;
+    if (leave && mounted) {
+      _offlineBar?.close(); // its changes are not on a page any more
+      Navigator.pop(context, _changed);
+    }
+  }
+
   Future<void> _publish() async {
     setState(() => _busy = true);
     try {
       final l = await SessionScope.of(context).api.publishListing(_l.id);
       if (!mounted) return;
       setState(() {
-        _l = l;
+        _take(l);
         _changed = true;
       });
       final queued = l.status == 'moderation';
@@ -207,7 +298,7 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop) Navigator.pop(context, _changed);
+        if (!didPop) _leave();
       },
       child: Scaffold(
         appBar: AppBar(title: Text(tr('Тауарды басқару')), actions: [
@@ -396,10 +487,7 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
                     listing: _l,
                     showNoShoe: widget.showPhotos,
                     onChanged: (l) => setState(() {
-                      _l = l;
-                      for (final s in l.sizes) {
-                        _stock.putIfAbsent(s.id, () => s.quantity ?? (s.available ? 1 : 0));
-                      }
+                      _take(l);
                       _changed = true;
                     }),
                   ),
@@ -417,7 +505,7 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
                   PromoCard(
                     listing: _l,
                     onChanged: (l) => setState(() {
-                      _l = l;
+                      _take(l);
                       _changed = true;
                     }),
                   ),

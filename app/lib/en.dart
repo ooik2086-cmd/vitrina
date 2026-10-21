@@ -510,10 +510,12 @@ const en = <String, String>{
       'Your name, address, favorites, saved searches, and notifications will be deleted, and your listings will leave the catalog. Order and payment records are kept as required by law. This can\'t be undone.',
   'Жою': 'Delete',
   'Аккаунт жойылды.': 'Account deleted.',
-  'Алдыңғы жұмысыңыз сақталған, тоқтаған жерден жалғастырыңыз.': 'Your earlier work was kept. Carry on where you stopped.',
+  'Алдыңғы жұмысыңыз сақталған, тоқтаған жерден жалғастырыңыз.':
+      'Your earlier work was kept. Carry on where you stopped.',
   'Барлығын өшіріп, жаңадан бастау керек пе?': 'Delete everything and start over?',
   'Толтырған мәліметтер мен фотолар өшіріледі.': 'The details and photos you added will be deleted.',
-  'Бұл тауар бұрын сақталған. Өзгерістерді «Менің тауарларым» бетінде енгізіңіз.': 'This listing was saved earlier. Make your changes in My listings.',
+  'Бұл тауар бұрын сақталған. Өзгерістерді «Менің тауарларым» бетінде енгізіңіз.':
+      'This listing was saved earlier. Make your changes in My listings.',
   'Жаңадан бастау': 'Start over',
   'Ұқсас тауар': 'Similar listing',
   'Ұқсас тауар қосу': 'Add similar listing',
@@ -870,6 +872,9 @@ const en = <String, String>{
   'Санмен жазыңыз, мысалы 27,5': 'Enter a number, e.g. 27.5',
   'Сатушы режимі қосылды. Енді «Менің тауарларым» бөлімінен тауар қоса аласыз.':
       'Seller mode is on. You can now add listings under “My listings”.',
+  'Енгізген өзгерістер сақталмайды.': 'The changes you made will not be saved.',
+  'Байланыс жоқ. Өзгерістер жоғалған жоқ, осы бетте тұр.':
+      'No connection. Your changes are not lost; they are still on this page.',
   'Сақтамай шығу керек пе?': 'Leave without saving?',
   'Сүзгіні тазарту': 'Clear filters',
   'Тапсырысты рәсімдеу · {0}': 'Place order · {0}',

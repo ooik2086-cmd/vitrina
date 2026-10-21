@@ -420,9 +420,10 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
         title: Text(tr('Сақтамай шығу керек пе?')),
         content: Text(tr('Толтырған мәліметтер мен фотолар жоғалады. Кейін жалғастыру үшін жоба ретінде сақтаңыз.')),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Қалу'))),
-          FilledButton(
+          // Staying keeps the work, so it is the button the eye goes to.
+          TextButton(
               key: const Key('discard'), onPressed: () => Navigator.pop(context, true), child: Text(tr('Шығып кету'))),
+          FilledButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Қалу'))),
         ],
       ),
     );
