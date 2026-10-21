@@ -1021,11 +1021,150 @@ void main() {
     await tester.pump();
     await tester.tap(find.byKey(const Key('showcase-details')));
     await tester.pumpAndSettle();
-    // The details come up under the app bar, which still stands on the stage's last stretch: so do the icons.
-    expect(style(), SystemUiOverlayStyle.light);
-    await tester.drag(find.byType(Scrollable).first, const Offset(0, -120));
+    // The stage has moved up under the bar, which now has the page's own canvas: the theme decides.
+    expect(style(), isNull);
+  });
+
+  showcaseTest('once the stage moves up, the bar takes the page\'s canvas: nothing runs under its buttons',
+      (tester) async {
+    await pump(tester, listing(backdrop: 'dark'));
+    await tester.pump();
+    double bar() => tester.widget<AnimatedOpacity>(find.byKey(const Key('listing-bar'))).opacity;
+    bool darkButtons() => tester
+        .widgetList<Material>(find.descendant(of: find.byType(AppBar), matching: find.byType(Material)))
+        .any((m) => m.color == ShowcaseScene.dark.panel);
+    expect(bar(), 0); // the shoe turning in place: the bar stays clear
+    expect(darkButtons(), isTrue);
+    final state = tester.state<ScrollShowcaseState>(find.byType(ScrollShowcase));
+    final page = tester.state<ScrollableState>(find.byType(Scrollable).first).position;
+    page.jumpTo(state.travel); // the turn's end: the stage still held
+    await tester.pump();
+    expect(bar(), 0);
+    page.jumpTo(state.travel + 40); // the stage's buttons start to go up under the bar
+    await tester.pump();
+    expect(bar(), 1);
+    expect(darkButtons(), isFalse); // the round buttons as on the page
+    expect(tester.widget<AppBar>(find.byType(AppBar)).systemOverlayStyle, isNull);
+    page.jumpTo(0);
+    await tester.pump();
+    expect(bar(), 0);
+    expect(darkButtons(), isTrue);
+  });
+
+  group('the bar over the page', () {
+    late int asked; // how often the page asked for the listing
+    Future<void> open(WidgetTester tester, {Brightness? theme, bool reduceMotion = false}) async {
+      asked = 0;
+      final api = Api(
+          base: 'http://x/api/v1',
+          client: MockClient((req) async {
+            if (req.url.path.endsWith('/similar')) return jsonResponse({'items': []});
+            if (req.url.path.endsWith('/listings/7')) asked++;
+            return jsonResponse(listing(backdrop: 'dark'));
+          }));
+      tester.view.physicalSize = const Size(400, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      tester.platformDispatcher.accessibilityFeaturesTestValue =
+          reduceMotion ? const FakeAccessibilityFeatures(disableAnimations: true) : const FakeAccessibilityFeatures();
+      addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
+      await tester.pumpWidget(SessionScope(
+          session: Session(api),
+          child: MaterialApp(
+              theme: theme == null ? null : buildTheme(theme), home: const ListingScreen(listingId: 7))));
+      await tester.pumpAndSettle();
+    }
+
+    double bar(WidgetTester tester) => tester.widget<AnimatedOpacity>(find.byKey(const Key('listing-bar'))).opacity;
+    ScrollPosition page(WidgetTester tester) =>
+        tester.state<ScrollableState>(find.byType(Scrollable).first).position;
+    double travel(WidgetTester tester) => tester.state<ScrollShowcaseState>(find.byType(ScrollShowcase)).travel;
+    bool darkButtons(WidgetTester tester) => tester
+        .widgetList<Material>(find.descendant(of: find.byType(AppBar), matching: find.byType(Material)))
+        .any((m) => m.color == ShowcaseScene.dark.panel);
+
+    showcaseTest('nothing of the page is ever under the clear bar\'s buttons, all the way down', (tester) async {
+      await open(tester);
+      final appBar = tester.getRect(find.byType(AppBar));
+      final parts = [
+        for (final k in ['showcase-details', 'showcase-photos', 'showcase-backdrop', 'showcase-turn-end'])
+          find.byKey(Key(k)),
+        find.text('Nike Air Force 1'),
+      ];
+      final held = travel(tester); // the stage leaves the page's list once far above it
+      final end = held + 800;
+      for (var at = 0.0; at <= end; at += 20) {
+        page(tester).jumpTo(math.min(at, page(tester).maxScrollExtent));
+        await tester.pump();
+        for (final part in parts) {
+          if (part.evaluate().isEmpty) continue;
+          if (tester.getRect(part.first).overlaps(appBar)) expect(bar(tester), 1, reason: '$part at $at');
+        }
+        if (at <= held) expect(bar(tester), 0, reason: 'the shoe turning in place at $at');
+      }
+    });
+
+    showcaseTest('the phone turned: how far the stage is held changes, and the bar follows with no scroll',
+        (tester) async {
+      await open(tester);
+      page(tester).jumpTo(travel(tester) + 40);
+      await tester.pump();
+      expect(bar(tester), 1);
+      tester.view.physicalSize = const Size(400, 1400); // a taller stage turns over a longer stretch
+      await tester.pump();
+      await tester.pump();
+      expect(page(tester).pixels, lessThan(travel(tester)));
+      expect(bar(tester), 0);
+      expect(darkButtons(tester), isTrue);
+    });
+
+    showcaseTest('the keyboard, the text size or the theme changing does not ask for the listing again',
+        (tester) async {
+      await open(tester, theme: Brightness.light);
+      final before = asked;
+      for (var i = 1; i <= 5; i++) {
+        tester.view.viewInsets = FakeViewPadding(bottom: i * 40.0);
+        await tester.pump();
+      }
+      tester.view.resetViewInsets();
+      tester.platformDispatcher.textScaleFactorTestValue = 1.3;
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      await tester.pump();
+      expect(asked, before);
+    });
+
+    showcaseTest('in the dark theme the solid bar is the page\'s night canvas, its buttons the night\'s', (tester) async {
+      await open(tester, theme: Brightness.dark);
+      page(tester).jumpTo(travel(tester) + 40);
+      await tester.pumpAndSettle();
+      expect(bar(tester), 1);
+      final canvas = tester.widget<DecoratedBox>(find.byKey(const Key('listing-bar-canvas')));
+      expect(canvas.decoration, AppCanvas.of(tester.element(find.byType(ListingScreen))).decoration);
+      // Laid out at the screen's height, cut to the bar: the gradient runs on from the page.
+      expect(tester.getSize(find.byKey(const Key('listing-bar-canvas'))).height, 800);
+      expect(darkButtons(tester), isTrue);
+    });
+
+    showcaseTest('with reduced motion the bar comes at once', (tester) async {
+      await open(tester, reduceMotion: true);
+      page(tester).jumpTo(travel(tester) + 40);
+      await tester.pump();
+      await tester.pump();
+      final fade = tester.renderObject<RenderAnimatedOpacity>(
+          find.descendant(of: find.byKey(const Key('listing-bar')), matching: find.byType(FadeTransition)).first);
+      expect(fade.opacity.value, 1);
+    });
+  });
+
+  showcaseTest('on the Photo tab the bar takes the page\'s canvas as soon as the page moves', (tester) async {
+    await pump(tester, listing());
+    await tester.tap(find.byKey(const Key('showcase-photos')));
     await tester.pumpAndSettle();
-    expect(style(), isNull); // the page's own canvas: the theme decides
+    double bar() => tester.widget<AnimatedOpacity>(find.byKey(const Key('listing-bar'))).opacity;
+    expect(bar(), 0);
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, -100));
+    await tester.pumpAndSettle();
+    expect(bar(), 1);
   });
 
   showcaseTest('the bottom bar takes the scene\'s panel colours under the stage, the page\'s own past it',

@@ -91,6 +91,11 @@ class _ListingScreenState extends State<ListingScreen> {
   final _sizesKey = GlobalKey();
   bool _scrollLocked = false; // the showcase is zoomed in or being pinched
   Brightness? _stageTop; // how dark the showcase stage under the status bar is, while it is there
+
+  /// The page has moved under the bar: the bar takes the page's canvas, so neither the stage's own buttons nor the
+  /// details run under its round buttons (they did, one over the other). While the shoe turns in place it stays
+  /// clear. Only the bar listens: the page is not built again for it. Opened at the details, it starts solid.
+  late final _barSolid = ValueNotifier<bool>(widget.atDetails);
   // How dark the showcase stage over the bottom bar is, while it reaches down to it. Only the bar listens, so the
   // page is not built again as the stage scrolls past.
   final _stageBottom = ValueNotifier<Brightness?>(null);
@@ -106,6 +111,20 @@ class _ListingScreenState extends State<ListingScreen> {
   void initState() {
     super.initState();
     _scroll.addListener(_followPhotos);
+    _scroll.addListener(_followBar);
+  }
+
+  /// The stage's height; a new one (the phone turned, the window resized) changes how far it is held, with no scroll.
+  double _stageFor(double height) {
+    if (_stage != height) WidgetsBinding.instance.addPostFrameCallback((_) => _followBar());
+    return _stage = height;
+  }
+
+  /// Also run after the stage's stretch may have changed with no scroll: the phone turned, a reload, the tabs.
+  void _followBar() {
+    if (!mounted || !_scroll.hasClients) return;
+    final held = _showPhotos ? 0.0 : (_showcase.currentState?.travel ?? 0.0); // where the stage starts to move up
+    _barSolid.value = _scroll.offset > held + 0.5;
   }
 
   /// On the Photo tab a dark scan's photos sit under the status bar until scrolled past: its icons go light there.
@@ -135,6 +154,7 @@ class _ListingScreenState extends State<ListingScreen> {
   void dispose() {
     _scroll.dispose();
     _stageBottom.dispose();
+    _barSolid.dispose();
     super.dispose();
   }
 
@@ -333,38 +353,52 @@ class _ListingScreenState extends State<ListingScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       extendBodyBehindAppBar: true,
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        // Icons that read on the stage under them, whatever the app's theme.
-        systemOverlayStyle: switch (_stageTop) {
-          Brightness.dark => SystemUiOverlayStyle.light,
-          Brightness.light => SystemUiOverlayStyle.dark,
-          null => null,
-        },
-        leading: Padding(
-            padding: const EdgeInsets.all(4), // the button keeps a finger's 48 in the bar's 56
-            child: _RoundButton(dark: _stageTop == Brightness.dark, back: true, child: const BackButtonIcon())),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: _RoundButton(
-              key: const Key('share'),
-              dark: _stageTop == Brightness.dark,
-              onTap: _share,
-              tooltip: tr('Бөлісу'),
-              child: const Icon(Icons.ios_share_rounded),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.only(right: 10),
-            child: _RoundButton(
-              dark: _stageTop == Brightness.dark,
-              onTap: _toggleFavorite,
-              tooltip: tr('Таңдаулыға'),
-              child: Icon(_favorite ? Icons.favorite : Icons.favorite_border, color: _favorite ? Brand.accent : null),
-            ),
-          ),
-        ],
+      appBar: PreferredSize(
+        preferredSize: const Size.fromHeight(kToolbarHeight),
+        child: ValueListenableBuilder<bool>(
+          valueListenable: _barSolid,
+          builder: (context, solid, _) {
+            // On the stage, its scene's look; on the bar's canvas, the theme's.
+            final dark = solid ? Theme.of(context).brightness == Brightness.dark : _stageTop == Brightness.dark;
+            return AppBar(
+              backgroundColor: Colors.transparent,
+              flexibleSpace: IgnorePointer(child: _BarCanvas(solid: solid)),
+              // Icons that read on the stage under them, whatever the app's theme; on the bar's canvas, the theme's.
+              systemOverlayStyle: solid
+                  ? null
+                  : switch (_stageTop) {
+                      Brightness.dark => SystemUiOverlayStyle.light,
+                      Brightness.light => SystemUiOverlayStyle.dark,
+                      null => null,
+                    },
+              leading: Padding(
+                  padding: const EdgeInsets.all(4), // the button keeps a finger's 48 in the bar's 56
+                  child: _RoundButton(dark: dark, back: true, child: const BackButtonIcon())),
+              actions: [
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: _RoundButton(
+                    key: const Key('share'),
+                    dark: dark,
+                    onTap: _share,
+                    tooltip: tr('Бөлісу'),
+                    child: const Icon(Icons.ios_share_rounded),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(right: 10),
+                  child: _RoundButton(
+                    dark: dark,
+                    onTap: _toggleFavorite,
+                    tooltip: tr('Таңдаулыға'),
+                    child: Icon(_favorite ? Icons.favorite : Icons.favorite_border,
+                        color: _favorite ? Brand.accent : null),
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
       ),
       body: FutureBuilder<Listing>(
         future: _listing,
@@ -561,7 +595,7 @@ class _ListingScreenState extends State<ListingScreen> {
                           key: _showcase,
                           listing: l,
                           scroll: _scroll,
-                          stageHeight: _stage = viewport.maxHeight,
+                          stageHeight: _stageFor(viewport.maxHeight),
                           onLock: (locked) {
                             if (mounted && locked != _scrollLocked) setState(() => _scrollLocked = locked);
                           },
@@ -571,10 +605,20 @@ class _ListingScreenState extends State<ListingScreen> {
                               _showPhotos = true;
                               _stage = null;
                             });
-                            WidgetsBinding.instance.addPostFrameCallback((_) => _followPhotos()); // once laid out
+                            WidgetsBinding.instance.addPostFrameCallback((_) {
+                              _followPhotos(); // once laid out
+                              _followBar();
+                            });
                           },
                           onStageTop: (top) {
-                            if (mounted) setState(() => _stageTop = top);
+                            if (!mounted) return;
+                            // Told again after the stage's height or photos change: its stretch may have too.
+                            _followBar();
+                            if (_barSolid.value) {
+                              _stageTop = top; // under the solid bar it shows nothing: kept for when it clears
+                            } else if (top != _stageTop) {
+                              setState(() => _stageTop = top);
+                            }
                           },
                           onStageBottom: (at) {
                             if (mounted) _stageBottom.value = at;
@@ -623,6 +667,7 @@ class _ListingScreenState extends State<ListingScreen> {
                               _showPhotos = v.first;
                               _stage = null; // set again by the showcase when it is built
                             });
+                            WidgetsBinding.instance.addPostFrameCallback((_) => _followBar());
                           },
                         ),
                       ),
@@ -1052,6 +1097,40 @@ bool _buyFitsBeside(BuildContext context, String text, String price, double widt
     p.dispose();
   }
   return fits;
+}
+
+/// The bar's canvas once the page has moved under it: the page's own, laid out at the screen's size and cut to the
+/// bar, so the night gradient and the paper grain run on from the page under it.
+class _BarCanvas extends StatelessWidget {
+  const _BarCanvas({required this.solid});
+  final bool solid;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final screen = MediaQuery.sizeOf(context).height;
+    return AnimatedOpacity(
+      key: const Key('listing-bar'),
+      opacity: solid ? 1 : 0,
+      duration: MediaQuery.disableAnimationsOf(context) ? Duration.zero : const Duration(milliseconds: 150),
+      child: DecoratedBox(
+        position: DecorationPosition.foreground,
+        decoration: BoxDecoration(border: Border(bottom: BorderSide(color: theme.colorScheme.outlineVariant))),
+        child: ClipRect(
+          child: OverflowBox(
+            alignment: Alignment.topCenter,
+            minHeight: screen,
+            maxHeight: screen,
+            child: DecoratedBox(
+              key: const Key('listing-bar-canvas'),
+              decoration: theme.extension<AppCanvas>()?.decoration ?? BoxDecoration(color: theme.colorScheme.surface),
+              child: const SizedBox.expand(),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _RoundButton extends StatelessWidget {

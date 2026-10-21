@@ -536,6 +536,9 @@ class ScrollShowcaseState extends State<ScrollShowcase>
 
   double get _travel => ScrollShowcase.travelFor(widget.stageHeight, _plan.steps.length);
 
+  /// How far the page scrolls with the stage held in place, turning the shoe; past it the stage moves up.
+  double get travel => _travel;
+
   /// What the stage shows now (ShowcasePlan.viewAt); null before the buyer scrolled, and while the first-show hint
   /// turns the shoe by itself.
   ShowcaseView? get view => _progress > 0 && !_hinting ? _plan.viewAt(_progress) : null;
