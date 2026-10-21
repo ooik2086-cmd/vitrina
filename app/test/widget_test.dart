@@ -1781,7 +1781,26 @@ void main() {
     expect(find.text('15'), findsOneWidget);
     expect(find.text('қаралым'), findsOneWidget);
     expect(find.text('2'), findsOneWidget);
-    expect(find.byKey(const Key('listing-quality')), findsOneWidget);
+    // What a seller comes back for, price, stock and buyers' questions, is at the top; the tips and the video wait
+    // below. Each part is measured from the top of the page, not of the screen, as the page scrolls down to it.
+    final page = find.byType(Scrollable).first;
+    final order = <double>[];
+    for (final part in [
+      find.byKey(const Key('price')),
+      find.text('Қалдық'),
+      find.byKey(const Key('listing-questions')),
+      find.widgetWithText(TextFormField, 'Сипаттамасы'),
+      find.byKey(const Key('listing-quality')),
+      find.byType(PromoCard),
+    ]) {
+      await tester.scrollUntilVisible(part, 300, scrollable: page);
+      await tester.pumpAndSettle();
+      order.add(tester.getTopLeft(part).dy + tester.state<ScrollableState>(page).position.pixels);
+    }
+    expect(order, orderedEquals([...order]..sort()));
+    expect(order.first, lessThan(400));
+    await tester.scrollUntilVisible(find.byKey(const Key('price')), -300, scrollable: find.byType(Scrollable).first);
+    await tester.pumpAndSettle();
     await tester.enterText(find.byKey(const Key('price')), '40000');
     await tester.ensureVisible(find.byTooltip('Көбейту'));
     await tester.pumpAndSettle();
@@ -2978,7 +2997,8 @@ void main() {
         {List<Map<String, dynamic>>? media,
         Map<String, dynamic> extra = const {},
         Size size = const Size(400, 800),
-        double textScale = 1}) async {
+        double textScale = 1,
+        int proofs = 0}) async {
       final listing = {...listingJson(media: media ?? twoPhotos), 'status': 'published', ...extra};
       final api = Api(
           base: 'http://x/api/v1',
@@ -2997,7 +3017,11 @@ void main() {
                     ]
                   }),
                 '/api/v1/notifications/read-all' => jsonResponse({}),
-                '/api/v1/listings/7/proofs' => jsonResponse({'authenticity': 'unverified', 'note': null, 'proofs': []}),
+                '/api/v1/listings/7/proofs' => jsonResponse({
+                    'authenticity': 'unverified',
+                    'note': null,
+                    'proofs': [for (var i = 0; i < proofs; i++) {'id': i, 'url': 'https://cdn/proof$i.jpg'}],
+                  }),
                 _ => jsonResponse(listing),
               }));
       tester.view.physicalSize = size;
@@ -3042,6 +3066,12 @@ void main() {
     testWidgets('with large text on a small phone the line about the photo is still in view', (tester) async {
       await tapNote(tester, 'photo_no_shoe', extra: {'ever_on_sale': true}, size: const Size(360, 640), textScale: 2);
       expect(tester.takeException(), isNull);
+      expect(inView(tester, find.byKey(const Key('photos-no-shoe'))), isTrue);
+    });
+
+    testWidgets('the photos are found even with a tall part of the page below them', (tester) async {
+      // Receipts and the video sit under the photos: the page must not jump past the photos to its very end.
+      await tapNote(tester, 'photo_no_shoe', size: const Size(360, 640), textScale: 2, proofs: 8);
       expect(inView(tester, find.byKey(const Key('photos-no-shoe'))), isTrue);
     });
 

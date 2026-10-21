@@ -169,9 +169,18 @@ class _MyListingsScreenState extends State<MyListingsScreen> {
                                       errorBuilder: (_, __, ___) => const Icon(Icons.broken_image_outlined)),
                             ),
                             title: Text(l.title),
-                            subtitle: Text('${tr(listingStatuses[l.status] ?? l.status)} · ${stockSummary(l)}'
-                                '${l.frames.isNotEmpty ? ' · 360°' : ''}'
-                                '${l.photosPending ? ' · ${tr('фото өңделуде')}' : ''}'),
+                            subtitle: Text.rich(TextSpan(children: [
+                              // A listing sent back or hidden needs the seller: its word stands out, the rest stays calm.
+                              TextSpan(
+                                  text: tr(listingStatuses[l.status] ?? l.status),
+                                  style: l.status == 'rejected' || l.status == 'hidden'
+                                      ? TextStyle(color: Theme.of(context).colorScheme.error)
+                                      : null),
+                              TextSpan(
+                                  text: ' · ${stockSummary(l)}'
+                                      '${l.frames.isNotEmpty ? ' · 360°' : ''}'
+                                      '${l.photosPending ? ' · ${tr('фото өңделуде')}' : ''}'),
+                            ])),
                             trailing: const Icon(Icons.chevron_right),
                             onTap: () async {
                               final changed = await Navigator.of(context)

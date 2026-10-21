@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:clock/clock.dart';
 import 'package:flutter/material.dart';
@@ -81,7 +82,9 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
       Scrollable.ensureVisible(at);
     } else if (_scroll.hasClients && _tries++ < 20) {
       // The list builds only what is near the screen: go down until the photos are built.
-      _scroll.jumpTo(_scroll.position.maxScrollExtent);
+      // A screen at a time, so no part is skipped over: more cards sit below the photos.
+      final p = _scroll.position;
+      _scroll.jumpTo(min(p.pixels + p.viewportDimension, p.maxScrollExtent));
       WidgetsBinding.instance.addPostFrameCallback((_) => _bringPhotos());
     } else if (_scroll.hasClients) {
       _scroll.jumpTo(0); // not found: the page opens from the top as usual
@@ -289,37 +292,7 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
                   const SizedBox(height: 20),
                   _StatsRow(stats: _l.stats!),
                 ],
-                if (!locked) ...[
-                  const SizedBox(height: 16),
-                  QualityCard(quality: listingQuality(_l)),
-                ],
-                if (_l.status == 'published' || _l.status == 'sold') ...[
-                  const SizedBox(height: 12),
-                  ListTile(
-                    key: const Key('listing-questions'),
-                    contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.forum_outlined),
-                    title: Text(tr('Сұрақ-жауап')),
-                    subtitle: Text(tr('Сатып алушылардың сұрақтарына жауап беру')),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () => Navigator.of(context)
-                        .push(MaterialPageRoute(builder: (_) => QuestionsScreen(listingId: _l.id, seller: true))),
-                  ),
-                ],
-                if (!locked) ...[
-                  const SizedBox(height: 16),
-                  AuthenticityCard(listingId: _l.id, onChanged: () => _changed = true),
-                ],
-                if (!locked) ...[
-                  const SizedBox(height: 16),
-                  PromoCard(
-                    listing: _l,
-                    onChanged: (l) => setState(() {
-                      _l = l;
-                      _changed = true;
-                    }),
-                  ),
-                ],
+                // What a seller comes back for most, price and stock, comes first; the rest waits below.
                 const SizedBox(height: 24),
                 Text(tr('Баға'), style: theme.textTheme.titleMedium),
                 const SizedBox(height: 8),
@@ -374,6 +347,20 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
                       ),
                     ]),
                   ),
+                // Buyers waiting for an answer are part of coming back too.
+                if (_l.status == 'published' || _l.status == 'sold') ...[
+                  const SizedBox(height: 8),
+                  ListTile(
+                    key: const Key('listing-questions'),
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.forum_outlined),
+                    title: Text(tr('Сұрақ-жауап')),
+                    subtitle: Text(tr('Сатып алушылардың сұрақтарына жауап беру')),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => Navigator.of(context)
+                        .push(MaterialPageRoute(builder: (_) => QuestionsScreen(listingId: _l.id, seller: true))),
+                  ),
+                ],
                 const SizedBox(height: 16),
                 TextFormField(
                   controller: _description,
@@ -413,6 +400,24 @@ class _ManageListingScreenState extends State<ManageListingScreen> {
                       for (final s in l.sizes) {
                         _stock.putIfAbsent(s.id, () => s.quantity ?? (s.available ? 1 : 0));
                       }
+                      _changed = true;
+                    }),
+                  ),
+                ],
+                if (!locked) ...[
+                  const SizedBox(height: 32),
+                  QualityCard(quality: listingQuality(_l)),
+                ],
+                if (!locked) ...[
+                  const SizedBox(height: 16),
+                  AuthenticityCard(listingId: _l.id, onChanged: () => _changed = true),
+                ],
+                if (!locked) ...[
+                  const SizedBox(height: 16),
+                  PromoCard(
+                    listing: _l,
+                    onChanged: (l) => setState(() {
+                      _l = l;
                       _changed = true;
                     }),
                   ),

@@ -27,9 +27,11 @@ Map<String, Object?> _own({required bool pending, String status = 'published'}) 
 
 /// What the server says now; a test may change it while the screen is open.
 var _serverPending = false;
+var _serverStatus = 'published';
 
 Future<void> _open(WidgetTester tester, Widget screen, {required bool pending}) async {
   _serverPending = pending;
+  addTearDown(() => _serverStatus = 'published');
   tester.view.physicalSize = const Size(360, 720);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
@@ -38,7 +40,7 @@ Future<void> _open(WidgetTester tester, Widget screen, {required bool pending}) 
   final client = MockClient.streaming((req, body) async {
     final path = req.url.path.replaceFirst('/api/v1', '');
     if (req.method == 'GET' && (path == '/me/listings' || path == '/listings/1')) {
-      final own = _own(pending: _serverPending);
+      final own = _own(pending: _serverPending, status: _serverStatus);
       final bytes = utf8.encode(jsonEncode(path == '/me/listings'
           ? {
               'items': [own]
@@ -87,4 +89,25 @@ void main() {
       expect(find.textContaining('фото өңделуде'), pending ? findsOneWidget : findsNothing);
     });
   }
+
+  testWidgets('in my listings a listing sent back or hidden stands out by its word, the others stay calm',
+      (tester) async {
+    for (final (status, stands) in [
+      ('rejected', true),
+      ('hidden', true),
+      ('published', false),
+      ('moderation', false)
+    ]) {
+      _serverStatus = status;
+      await tester.pumpWidget(const SizedBox());
+      await _open(tester, const MyListingsScreen(), pending: false);
+      final word = listingStatuses[status]!;
+      final line = tester.widget<Text>(find.textContaining('$word ·')).textSpan! as TextSpan;
+      final error = Theme.of(tester.element(find.byType(MyListingsScreen))).colorScheme.error;
+      expect(line.children!.first.toPlainText(), word);
+      expect(line.children!.first.style?.color, stands ? error : isNull, reason: status);
+      expect(line.style?.color, isNull, reason: 'only the word, $status');
+      expect(line.children![1].style?.color, isNull, reason: 'the rest stays calm, $status');
+    }
+  });
 }

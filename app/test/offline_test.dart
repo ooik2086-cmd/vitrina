@@ -60,7 +60,11 @@ void main() {
       testWidgets('${e.key} copes with no connection ($setup)', (tester) async {
         expect(
             await visit(tester, 'kk', size, scale, e.value,
-                offline: true, keepsMissing: e.key == 'home', look: scale == 1 ? look : null),
+                offline: true,
+                keepsMissing: e.key == 'home',
+                // The listing itself is already on the phone; only the cards at the foot of the page load.
+                offlineDepth: e.key == 'manage' ? 15 : 6,
+                look: scale == 1 ? look : null),
             isEmpty);
       });
     }

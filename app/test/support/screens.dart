@@ -169,13 +169,15 @@ class Line extends http.BaseClient {
 /// Opens [screen] on the demo data in [lang] at [size] with text [scale], goes through all of it, and returns the
 /// layout errors Flutter reported. [look] adds its own findings once the screen has loaded and again at its end.
 /// With [offline] the screen opens with the connection down, which it must say and recover from; [keepsMissing] is
-/// for a screen whose parts out of sight (other tabs) are tried again only once shown.
+/// for a screen whose parts out of sight (other tabs) are tried again only once shown; [offlineDepth] is how many
+/// drags down the offline message may sit.
 Future<List<String>> visit(WidgetTester tester, String lang, Size size, double scale, Widget Function() screen,
     {Widget? sheet,
     Future<void> Function(WidgetTester tester)? check,
     Brightness brightness = Brightness.light,
     Future<void> Function(WidgetTester tester, List<String> errors)? look,
     bool offline = false,
+    int offlineDepth = 6,
     bool keepsMissing = false}) async {
   SharedPreferences.setMockInitialValues({});
   await loadFonts(tester);
@@ -229,7 +231,7 @@ Future<List<String>> visit(WidgetTester tester, String lang, Size size, double s
     // With large text the message can sit below a tall header, as the goods would: it counts once scrolled to.
     final page =
         find.byWidgetPredicate((w) => w is Scrollable && axisDirectionToAxis(w.axisDirection) == Axis.vertical);
-    for (var i = 0; i < 6 && !told() && page.evaluate().isNotEmpty; i++) {
+    for (var i = 0; i < offlineDepth && !told() && page.evaluate().isNotEmpty; i++) {
       await tester.drag(page.first, const Offset(0, -300), warnIfMissed: false);
       await tester.pump(const Duration(milliseconds: 300));
     }
