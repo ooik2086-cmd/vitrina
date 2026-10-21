@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../chat_drafts.dart';
 import '../net_image.dart';
 import '../api.dart';
 import '../labels.dart';
@@ -200,12 +202,30 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   /// The message in the field may not have gone: the line above the field says so while its text is unchanged.
   bool _notSent = false;
 
+  /// The last message on screen when that message was sent: only a message of mine after it can be the one that went
+  /// after all, not the same words sent days before.
+  int _notSentAfter = 0;
+
+  /// Brought back from the phone: says it may not have gone without claiming the connection is down now. Shown only
+  /// once the chat has loaded and it is clear the message did not arrive meanwhile ([_checking]).
+  bool _notSentKept = false;
+  bool _checking = false;
+
+  /// What is kept on the phone for this chat, so leaving it or a closed app loses nothing; see [_keep].
+  Timer? _keepTimer;
+  String? _lastKept;
+  bool _keptOnce = false;
+  int? _owner; // read while the chat is on screen: when it closes, the session above can no longer be asked
+  int? _restoredFor;
+
   /// A photo that may not have gone, kept with its caption and key: sent again it arrives once, picked again it would
   /// be a new one.
   _Photo? _unsentPhoto;
 
   /// A pair marked sold from this chat whose answer did not come back. Sent again as it was, it is taken once.
   _Sale? _pendingSale;
+  bool _saleKept = false; // brought back from the phone, see [_notSentKept]
+  _Sale? _saleSending; // on its way: kept in case the chat or the app closes before the answer
   bool _marking = false;
 
   Api get _api => SessionScope.of(context).api;
@@ -218,11 +238,94 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _input.addListener(_onText);
   }
 
+  /// Keeps what this chat would lose if left now: the words in the field, whether they may already have gone (with
+  /// their key, also while their send waits for an answer) and a sale mark not yet answered. Nothing left to keep
+  /// lets the chat's entry go. Nothing is kept or let go while it is not known who is signed in.
+  Future<void> _keep() async {
+    _keepTimer?.cancel();
+    final me = _owner;
+    if (me == null) return;
+    final text = _input.text;
+    final sending = _sending && _sendKeyFor != null && text.trim() == _sendKeyFor;
+    final sale = _pendingSale ?? _saleSending;
+    final entry = text.trim().isEmpty && sale == null
+        ? null
+        : {
+            'text': text,
+            if (_notSent || sending) ...{'not_sent': true, 'key': _sendKey, 'after': _notSentAfter},
+            if (sale != null)
+              'sale': {'listing_id': sale.listingId, 'size_id': sale.sizeId, 'label': sale.label, 'key': sale.key},
+          };
+    final mine = entry == null ? null : jsonEncode(entry);
+    if (_keptOnce && mine == _lastKept) return; // nothing new since it was last kept
+    if (await ChatDrafts.put(me, widget.conversationId, entry)) {
+      _keptOnce = true;
+      _lastKept = mine;
+    }
+  }
+
+  /// Typing is kept a moment after it stops, not on every letter.
+  void _keepSoon() {
+    _keepTimer?.cancel();
+    _keepTimer = Timer(const Duration(milliseconds: 400), _keep);
+  }
+
+  /// Puts back what this person kept in this chat: their words (over the note the listing page puts in), the line
+  /// saying a message may not have gone (with its key) and the sale mark to send again. Waits until it is known who
+  /// is signed in: on a weak connection the profile can come later than the chat.
+  Future<void> _restore() async {
+    final me = _owner;
+    if (me == null || _restoredFor != null) return;
+    _restoredFor = me;
+    final d = await ChatDrafts.read(me, widget.conversationId);
+    if (d == null || !mounted) return;
+    try {
+      final text = d['text'] as String? ?? '';
+      final notSent = d['not_sent'] == true && d['key'] is String;
+      final sale = d['sale'] as Map<String, dynamic>?;
+      // The person's own words win over the note from the listing, unless they already began writing here.
+      final takeText = _input.text == (widget.draft ?? '') && text.trim().isNotEmpty;
+      setState(() {
+        if (takeText) {
+          _input.value = TextEditingValue(text: text, selection: TextSelection.collapsed(offset: text.length));
+          if (notSent) {
+            _sendKey = d['key'] as String;
+            _sendKeyFor = text.trim();
+            _notSentAfter = d['after'] as int? ?? 0;
+            _notSent = _notSentKept = true;
+            _checking = _conversation == null; // the first load says whether it arrived meanwhile
+          }
+        }
+        if (sale != null && _pendingSale == null) {
+          _pendingSale = (
+            listingId: sale['listing_id'] as int,
+            sizeId: sale['size_id'] as int,
+            label: sale['label'] as String,
+            key: sale['key'] as String,
+          );
+          _saleKept = true;
+        }
+      });
+      // Already on screen: it went after all.
+      if (_notSent && _cameWhileSending(_notSentAfter, (m) => m.photoUrl == null && m.body == _sendKeyFor)) {
+        _input.clear();
+      }
+    } catch (_) {
+      unawaited(ChatDrafts.put(me, widget.conversationId, null)); // kept by an older version in another shape
+    }
+  }
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (!_started) {
+    _owner = SessionScope.of(context).me?.id;
+    if (_started) {
+      _restore(); // the profile came after the chat: now it is known whose words to bring back
+    } else {
       _started = true;
+      // Both at once: the chat does not wait on the phone's storage. Whichever ends last tells a kept message that
+      // went after all ([_checking] and the check at the end of [_restore]).
+      _restore();
       _fetch();
       _startPolling();
       SessionScope.of(context).api.paymentsOn().then((on) {
@@ -245,6 +348,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     } else if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
       _poll?.cancel();
       _poll = null;
+      _keep(); // the phone may close the app from here
     }
   }
 
@@ -252,6 +356,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _poll?.cancel();
+    // Reads the field now; the writing finishes after. A send still waiting is kept with its key.
+    if ((_keepTimer?.isActive ?? false) || _sending || _marking) _keep();
+    _keepTimer?.cancel();
+    _input.removeListener(_onText);
     _input.dispose();
     _scroll.dispose();
     // After the tree is settled: the lists rebuild, and nothing may be rebuilt while this chat is being taken down.
@@ -261,9 +369,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   /// A changed or cleared text is a new message: it gets its own key, and the line about the old one goes.
   void _onText() {
+    _keepSoon();
     if (_sendKeyFor == null || _input.text.trim() == _sendKeyFor) return;
     _sendKey = _sendKeyFor = null;
-    if (_notSent) setState(() => _notSent = false);
+    if (_notSent) setState(() => _notSent = _notSentKept = false);
   }
 
   Future<void> _fetch() async {
@@ -278,7 +387,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       // A send whose answer was lost may have gone after all: once it shows up here, it is not in the field.
       bool came(bool Function(ChatMessage m) same) =>
           !_sending && fresh.any((m) => !known.contains(m.id) && m.senderId == me && same(m));
-      if (_notSent && came((m) => m.photoUrl == null && m.body == _sendKeyFor)) _input.clear();
+      if (_notSent && came((m) => m.id > _notSentAfter && m.photoUrl == null && m.body == _sendKeyFor)) _input.clear();
       final photo = _unsentPhoto;
       final photoCame = photo != null && came((m) => m.photoUrl != null && m.body == photo.caption);
       if (photoCame && _input.text.trim() == photo.caption) _input.clear();
@@ -295,6 +404,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     } finally {
       // Every request ends within the API timeout, so a hung one cannot stop the polling for good.
       _loading = false;
+      // A message brought back from the phone that did not arrive: now the line may say so.
+      if (mounted && _checking) setState(() => _checking = false);
     }
   }
 
@@ -351,9 +462,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _sendKeyFor = text;
     }
     final before = _lastId;
+    final owner = _owner, key = _sendKey!;
+    if (!_notSent) _notSentAfter = before; // sent again, it is still the first time that counts
     setState(() => _sending = true);
+    _keep(); // with its key while it waits: the chat or the app may close before the answer comes
     try {
-      final m = await _api.sendMessage(widget.conversationId, text, idempotencyKey: _sendKey);
+      final m = await _api.sendMessage(widget.conversationId, text, idempotencyKey: key);
+      if (owner != null) unawaited(ChatDrafts.settled(owner, widget.conversationId, key)); // also once closed
+      if (!mounted) return;
       _input.clear(); // drops the key and the note with the text
       setState(() {
         if (!_messages.any((x) => x.id == m.id)) _messages.add(m);
@@ -368,10 +484,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         if (_input.text.trim() == text) _input.clear(); // it went after all: the thread already shows it
         return;
       }
-      setState(() => _notSent = offline && _input.text.trim() == text);
+      setState(() {
+        _notSent = offline && _input.text.trim() == text;
+        _notSentKept = _checking = false; // the connection is down now: the line says so
+      });
       if (!offline) showError(context, e);
     } finally {
-      if (mounted) setState(() => _sending = false);
+      if (mounted) {
+        setState(() => _sending = false);
+        _keep();
+      }
     }
   }
 
@@ -492,16 +614,31 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   /// Takes the pair from the count as it is on the server; sent again with its key after a lost answer, it takes
   /// nothing more. A mark that may have gone stays in a line above the field until it is sent again.
   Future<void> _saveSale(_Sale sale) async {
+    final owner = _owner;
+    setState(() => _saleSending = sale);
+    _keep(); // with its key while it waits: the chat or the app may close before the answer comes
     try {
       final l = await _api.markPairSold(sale.listingId, sale.sizeId, idempotencyKey: sale.key);
+      if (owner != null) unawaited(ChatDrafts.settled(owner, widget.conversationId, sale.key)); // also once closed
       if (!mounted) return;
-      setState(() => _pendingSale = null);
+      setState(() {
+        _pendingSale = _saleSending = null;
+        _saleKept = false;
+      });
+      _keep();
       _saleDone(sale, l.sizes);
     } catch (e) {
-      if (!mounted) return;
-      // A lost connection or a failing server may still have taken the pair: kept with its key to send again.
+      // A lost connection or a failing server may still have taken the pair: kept with its key to send again. A
+      // clear refusal leaves nothing to send again.
       final unsure = e is ApiException && e.passing;
-      setState(() => _pendingSale = unsure ? sale : null);
+      if (!unsure && owner != null) unawaited(ChatDrafts.settled(owner, widget.conversationId, sale.key));
+      if (!mounted) return;
+      setState(() {
+        _pendingSale = unsure ? sale : null;
+        _saleSending = null;
+        _saleKept = false;
+      });
+      _keep();
       if (!unsure) showError(context, e);
     }
   }
@@ -613,7 +750,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         if (_pendingSale case final sale?)
           _NotSentLine(
             key: const Key('sale-not-sent'),
-            text: trf('Байланыс жоқ. {0} өлшемінің белгісі сақталмаған болуы мүмкін.', [sale.label]),
+            text: _saleKept
+                ? trf('{0} өлшемінің белгісі сақталмаған болуы мүмкін.', [sale.label])
+                : trf('Байланыс жоқ. {0} өлшемінің белгісі сақталмаған болуы мүмкін.', [sale.label]),
             retryKey: 'sale-resend',
             onRetry: _marking ? null : _resendSale,
           ),
@@ -626,10 +765,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             onRetry: _sending ? null : () => _postPhoto(photo),
             onDrop: _sending ? null : () => _dropPhoto(photo),
           ),
-        if (_notSent)
+        if (_notSent && !_checking)
           _NotSentLine(
             key: const Key('chat-not-sent'),
-            text: tr('Байланыс жоқ. Хабарлама жетпеген болуы мүмкін, мәтіні осы жерде тұр.'),
+            // Brought back from the phone, it does not claim the connection is down now.
+            text: _notSentKept
+                ? tr('Хабарлама жетпеген болуы мүмкін, мәтіні осы жерде тұр.')
+                : tr('Байланыс жоқ. Хабарлама жетпеген болуы мүмкін, мәтіні осы жерде тұр.'),
             onRetry: _sending ? null : _send,
           ),
         Material(

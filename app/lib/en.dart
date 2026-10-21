@@ -685,6 +685,8 @@ const en = <String, String>{
   'Белсенді': 'Active',
   'Сай тапсырыс жоқ.': 'No matching orders.',
   'Сізді күтеді': 'Waiting on you',
+  'Хабарлама жетпеген болуы мүмкін, мәтіні осы жерде тұр.': 'The message may not have gone; its text is still here.',
+  '{0} өлшемінің белгісі сақталмаған болуы мүмкін.': 'The mark for size {0} may not have been saved.',
   'Жауап күтетін сатып алушы': 'Buyers waiting for a reply',
   'Жауап күтеді': 'Needs your reply',
   'Сіздің әрекетіңізді күтетін тапсырыс жоқ.': 'No orders are waiting on you.',

@@ -1,7 +1,11 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'api.dart';
+import 'chat_drafts.dart';
 
 /// Signed-in state shared across screens. The token is kept on the device; the phone number never leaves the profile.
 class Session extends ChangeNotifier {
@@ -21,6 +25,7 @@ class Session extends ChangeNotifier {
   bool get signedIn => api.token != null;
 
   Future<void> restore() async {
+    unawaited(ChatDrafts.sweep()); // chat words past their time go, even if their chat is never opened again
     final prefs = await SharedPreferences.getInstance();
     api.token = prefs.getString(_tokenKey);
     if (api.token == null) return;
@@ -44,6 +49,22 @@ class Session extends ChangeNotifier {
   void update(Me value) {
     me = value;
     notifyListeners();
+  }
+
+  /// Everything [owner] left on this phone (a new listing, unsaved edits, words in chats) goes with their account.
+  Future<void> forgetLocal(int owner) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final draft = prefs.getString(editorDraftKey);
+      if (draft != null && (jsonDecode(draft) as Map)['owner'] == owner) await prefs.remove(editorDraftKey);
+      final edits = jsonDecode(prefs.getString(listingEditsKey) ?? '{}') as Map<String, dynamic>;
+      final before = edits.length;
+      edits.removeWhere((_, v) => v is Map && v['owner'] == owner);
+      if (edits.length != before) await prefs.setString(listingEditsKey, jsonEncode(edits));
+    } catch (_) {
+      // Kept in a shape no longer readable: nothing of theirs to find there.
+    }
+    await ChatDrafts.forget(owner);
   }
 
   Future<void> signOut() async {

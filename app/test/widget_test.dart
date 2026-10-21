@@ -14,6 +14,7 @@ import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:vitrina/net_image.dart';
 import 'package:vitrina/api.dart';
+import 'package:vitrina/chat_drafts.dart';
 import 'package:vitrina/appearance.dart';
 import 'package:vitrina/colors.dart';
 import 'package:vitrina/demo.dart';
@@ -2625,7 +2626,13 @@ void main() {
   });
 
   testWidgets('deleting the account asks first, then signs out', (tester) async {
-    SharedPreferences.setMockInitialValues({});
+    // Words this person left in a chat go with the account; another person's on the phone stay.
+    SharedPreferences.setMockInitialValues({
+      ChatDrafts.key: jsonEncode({
+        '2:9': {'text': 'Менікі', 'kept_at': DateTime.now().millisecondsSinceEpoch},
+        '5:9': {'text': 'Басқаның', 'kept_at': DateTime.now().millisecondsSinceEpoch},
+      })
+    });
     final calls = <String>[];
     final api = Api(
         base: 'http://x/api/v1',
@@ -2652,6 +2659,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(calls, ['DELETE /api/v1/me']);
     expect(session.signedIn, isFalse);
+    final kept = jsonDecode((await SharedPreferences.getInstance()).getString(ChatDrafts.key)!) as Map;
+    expect(kept.keys, ['5:9']);
   });
 
   testWidgets('catalog loads the next page when scrolled near the end', (tester) async {

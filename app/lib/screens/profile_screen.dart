@@ -211,7 +211,9 @@ class ProfileScreen extends StatelessWidget {
     );
     if (ok != true) return;
     try {
+      final owner = session.me?.id;
       await session.api.deleteAccount();
+      if (owner != null) await session.forgetLocal(owner);
       await session.signOut();
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr('Аккаунт жойылды.'))));
