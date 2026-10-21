@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../net_image.dart';
 import '../api.dart';
@@ -45,8 +47,11 @@ class _SizeRow {
 /// Uploads run as soon as a photo is picked, so the final save only sends URLs. The photo is kept, so one that
 /// did not go is sent again with a tap, never taken again.
 class _Upload {
-  _Upload(this.send);
+  _Upload(this.send, {this.path});
   final Future<String> Function() send;
+
+  /// Where the photo lies on the phone, so work kept after the app closed can send it again.
+  final String? path;
   late Future<String> future;
   String? url;
   Object? error;
@@ -102,7 +107,7 @@ class ListingEditorScreen extends StatefulWidget {
   State<ListingEditorScreen> createState() => _ListingEditorScreenState();
 }
 
-class _ListingEditorScreenState extends State<ListingEditorScreen> {
+class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsBindingObserver {
   final _form = GlobalKey<FormState>();
   final _title = TextEditingController();
   final _brand = TextEditingController();
@@ -127,6 +132,10 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
   bool _suggestAsked = false;
   String? _modelName;
   late final String _initial; // what the form held on opening
+  Timer? _keepTimer;
+  bool _restored = false; // work from before was put back: say so, with a way to start over
+  bool _finished = false; // saved or thrown away: nothing more to keep
+  Session? _session; // held, as the page is still kept while it is being closed
 
   Api get _api => SessionScope.of(context).api;
 
@@ -135,6 +144,209 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
     super.initState();
     _prefill();
     _initial = _snapshot();
+    WidgetsBinding.instance.addObserver(this);
+    if (widget.template == null) _restore();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _session = SessionScope.maybeOf(context);
+  }
+
+  /// Every change is kept on the phone a moment later, so a closed app or a dead battery loses nothing.
+  @override
+  void setState(VoidCallback fn) {
+    super.setState(fn);
+    if (_finished || !_keeps) return;
+    _keepTimer?.cancel();
+    _keepTimer = Timer(const Duration(seconds: 1), _keep);
+  }
+
+  /// Only a new pair is kept: a copy of another listing loses nothing that the listing itself does not hold, and
+  /// must never replace or wipe a new pair kept from before.
+  bool get _keeps => widget.template == null;
+
+  /// Android may close an app in the background at any moment: what is on the page is kept right away.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) _keep();
+  }
+
+  Future<void> _keep() async {
+    _keepTimer?.cancel();
+    if (_finished || !_keeps) return;
+    final draft = _dirty ? jsonEncode(_draft()) : null; // back to a blank page: nothing to offer next time
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await (draft == null ? prefs.remove(Session.editorDraftKey) : prefs.setString(Session.editorDraftKey, draft));
+    } catch (_) {
+      // Nowhere to keep it (a test, a full phone): the page still works, only an app closed now loses the work.
+    }
+  }
+
+  Future<void> _forget() async {
+    _finished = true;
+    _keepTimer?.cancel();
+    if (!_keeps) return;
+    try {
+      await (await SharedPreferences.getInstance()).remove(Session.editorDraftKey);
+    } catch (_) {}
+  }
+
+  Map<String, Object?> _draft() => {
+        'owner': _session?.me?.id,
+        'kept_at': DateTime.now().millisecondsSinceEpoch,
+        'step': _step,
+        for (final (k, c) in _fields) k: c.text,
+        'category': _category,
+        'condition': _condition,
+        'audience': _audience,
+        'style': _style,
+        'model': _modelName,
+        'sizes': [
+          for (final r in _sizes) [r.label.text, r.cm.text, r.qty.text]
+        ],
+        'photos': {for (final e in _photos.entries) e.key: _kept(e.value)},
+        'defect_photos': [for (final d in _defectPhotos) _kept(d)],
+        'frames': [for (final f in _frames) _kept(f)],
+      };
+
+  List<(String, TextEditingController)> get _fields => [
+        ('title', _title),
+        ('brand', _brand),
+        ('color', _color),
+        ('defects', _defects),
+        ('description', _description),
+        ('price', _price),
+        ('delivery', _delivery),
+      ];
+
+  /// A photo is kept by its address once it went, and by its file on the phone, to be sent again if needed.
+  Map<String, String> _kept(_Upload u) => {
+        if (u.url != null) 'url': u.url!,
+        if (u.path != null) 'path': u.path!,
+      };
+
+  /// The server clears photos no listing uses after a week (backend orphans.py); a day sooner, a kept address is
+  /// no longer trusted and the photo is sent again from the phone.
+  static const _keptUrlsLast = Duration(days: 6);
+
+  Future<void> _restore() async {
+    String? raw;
+    try {
+      raw = (await SharedPreferences.getInstance()).getString(Session.editorDraftKey);
+    } catch (_) {
+      return;
+    }
+    if (raw == null || !mounted || _dirty) return; // the seller already began something new: that wins
+    try {
+      final d = jsonDecode(raw) as Map<String, dynamic>;
+      final me = _session?.me?.id;
+      if (d['owner'] != null && me != null && d['owner'] != me) {
+        unawaited(_forget()); // another person's work, on a shared phone
+        _finished = false;
+        return;
+      }
+      setState(() {
+        _apply(d);
+        _restored = true;
+      });
+    } catch (_) {
+      unawaited(_forget()); // kept by an older version and no longer readable
+      _finished = false;
+      setState(() => _apply({})); // not half of it: a clean page
+    }
+  }
+
+  /// Puts kept work on the page; an empty map gives a blank page, for starting over.
+  void _apply(Map<String, dynamic> d) {
+    _cancel([..._photos.values, ..._defectPhotos, ..._frames]);
+    for (final (k, c) in _fields) {
+      c.text = d[k] as String? ?? (k == 'delivery' ? '0' : '');
+    }
+    _category = d['category'] as String?;
+    _condition = d['condition'] as String? ?? 'new_with_box';
+    _audience = d['audience'] as String?;
+    _style = d['style'] as String? ?? 'clean';
+    _modelName = d['model'] as String?;
+    _suggestAsked = _brand.text.isNotEmpty;
+    _suggestion = null;
+    final keptAt = DateTime.fromMillisecondsSinceEpoch(d['kept_at'] as int? ?? 0);
+    final fresh = DateTime.now().difference(keptAt) < _keptUrlsLast;
+    final sizes = [
+      for (final r in (d['sizes'] as List? ??
+              [
+                const ['', '', '1']
+              ])
+          .cast<List>())
+        (r[0] as String, r[1] as String, r[2] as String),
+    ];
+    final old = [..._sizes]; // still held by the fields on screen until the next frame
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      for (final r in old) {
+        r.dispose();
+      }
+    });
+    _sizes
+      ..clear()
+      ..addAll([
+        for (final (label, cm, qty) in sizes)
+          _SizeRow()
+            ..label.text = label
+            ..cm.text = cm
+            ..qty.text = qty,
+      ]);
+    _photos
+      ..clear()
+      ..addAll({
+        for (final e in (d['photos'] as Map? ?? {}).entries)
+          if (_revive(e.value, fresh, detail: detailAngles.contains(e.key)) case final u?) e.key as String: u,
+      });
+    _defectPhotos
+      ..clear()
+      ..addAll([for (final j in d['defect_photos'] as List? ?? []) _revive(j, fresh)].nonNulls);
+    _frames = [for (final j in d['frames'] as List? ?? []) _revive(j, fresh, frame: true)].nonNulls.toList();
+    _step = (d['step'] as int? ?? 0).clamp(0, 2);
+  }
+
+  /// A kept photo: done if it went lately, otherwise sent again from the phone. A file the phone has since
+  /// cleared fails to read, and its tile asks for another photo.
+  _Upload? _revive(Object? kept, bool fresh, {bool detail = false, bool frame = false}) {
+    if (kept is! Map) return null;
+    final path = kept['path'] as String?;
+    if (kept['url'] case final String url when fresh) {
+      return _Upload(() async => url, path: path)
+        ..url = url
+        ..future = Future.value(url);
+    }
+    if (path != null) return _startUpload(XFile(path), detail: detail, frame: frame);
+    return null;
+  }
+
+  /// Asks first, as leaving does: one tap must not throw away a whole pair's photos.
+  Future<void> _startOver() async {
+    final sure = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(tr('Барлығын өшіріп, жаңадан бастау керек пе?')),
+        content: Text(tr('Толтырған мәліметтер мен фотолар өшіріледі.')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Қалу'))),
+          FilledButton(
+              key: const Key('start-over-sure'),
+              onPressed: () => Navigator.pop(context, true),
+              child: Text(tr('Өшіру'))),
+        ],
+      ),
+    );
+    if (sure != true || !mounted) return;
+    unawaited(_forget());
+    setState(() {
+      _apply({});
+      _restored = false;
+    });
+    _finished = false;
   }
 
   void _prefill() {
@@ -168,6 +380,8 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _keep(); // the last change, before the timer would have kept it
     _cancel([..._photos.values, ..._defectPhotos, ..._frames]); // nothing more is sent for a page that was left
     for (final c in [_title, _brand, _color, _defects, _description, _price, _delivery]) {
       c.dispose();
@@ -206,16 +420,21 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
         ],
       ),
     );
-    if (leave == true && mounted) Navigator.pop(context);
+    if (leave == true && mounted) {
+      unawaited(_forget()); // thrown away on purpose: not offered again next time
+      Navigator.pop(context);
+    }
   }
 
   _Upload _startUpload(XFile file, {bool detail = false, bool frame = false}) {
     final api = _api;
     late final _Upload u;
-    u = _Upload(() => _pool.run(() async {
-          if (u.cancelled) throw const _Cancelled();
-          return api.uploadPhotoPatiently(await file.readAsBytes(), file.name, detail: detail);
-        }, first: !frame));
+    u = _Upload(
+        () => _pool.run(() async {
+              if (u.cancelled) throw const _Cancelled();
+              return api.uploadPhotoPatiently(await file.readAsBytes(), file.name, detail: detail);
+            }, first: !frame),
+        path: file.path.isEmpty ? null : file.path);
     return _send(u);
   }
 
@@ -406,6 +625,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
         'photos': photos,
       });
       final shown = publish ? await _api.publishListing(listing.id) : listing;
+      unawaited(_forget()); // it is on VITRINA now, kept there
       if (!mounted) return;
       // Shown on the screen underneath, so the seller knows where the listing went.
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -475,7 +695,10 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
   void _next() {
     if (_step == 0 ? _photosDone() : _detailsDone()) {
       FocusScope.of(context).unfocus();
-      setState(() => _step++);
+      setState(() {
+        _step++;
+        _restored = false;
+      });
     }
   }
 
@@ -504,6 +727,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> {
             key: ValueKey('step-$_step'), // each step opens at its top
             padding: contentPadding(context, const EdgeInsets.all(16)),
             children: [
+              if (_restored) _RestoredNote(onStartOver: _startOver),
               _StepHeader(step: _step),
               const SizedBox(height: 20),
               ...switch (_step) {
@@ -895,6 +1119,39 @@ class _SuggestionCard extends StatelessWidget {
             TextButton(onPressed: onDismiss, child: Text(tr('Жоқ'))),
             FilledButton(key: const Key('apply-suggestion'), onPressed: onApply, child: Text(tr('Қолдану'))),
           ]),
+        ]),
+      ),
+    );
+  }
+}
+
+/// Work from before was put back on the page. One calm line, and a way to begin a new pair instead.
+class _RestoredNote extends StatelessWidget {
+  const _RestoredNote({required this.onStartOver});
+  final VoidCallback onStartOver;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      key: const Key('restored-note'),
+      color: theme.colorScheme.secondaryContainer,
+      margin: const EdgeInsets.only(bottom: 16),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 14, 8, 6),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Icon(Icons.history_rounded, size: 20),
+            const SizedBox(width: 10),
+            Expanded(
+                child: Semantics(
+                    liveRegion: true, // put back a moment after the page opens: said, not just shown
+                    child: Text(tr('Алдыңғы жұмысыңыз сақталған, тоқтаған жерден жалғастырыңыз.')))),
+          ]),
+          Align(
+            alignment: AlignmentDirectional.centerEnd,
+            child: TextButton(key: const Key('start-over'), onPressed: onStartOver, child: Text(tr('Жаңадан бастау'))),
+          ),
         ]),
       ),
     );

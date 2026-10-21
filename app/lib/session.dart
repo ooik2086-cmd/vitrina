@@ -11,6 +11,10 @@ class Session extends ChangeNotifier {
 
   static const _tokenKey = 'vitrina_token';
 
+  /// A new listing not yet saved, kept on the phone so a closed app loses nothing. It carries its owner, so a
+  /// lapsed sign-in does not lose it and another person signing in on the phone never sees it.
+  static const editorDraftKey = 'vitrina_editor_draft';
+
   bool get signedIn => api.token != null;
 
   Future<void> restore() async {

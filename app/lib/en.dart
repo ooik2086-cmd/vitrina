@@ -510,6 +510,10 @@ const en = <String, String>{
       'Your name, address, favorites, saved searches, and notifications will be deleted, and your listings will leave the catalog. Order and payment records are kept as required by law. This can\'t be undone.',
   'Жою': 'Delete',
   'Аккаунт жойылды.': 'Account deleted.',
+  'Алдыңғы жұмысыңыз сақталған, тоқтаған жерден жалғастырыңыз.': 'Your earlier work was kept. Carry on where you stopped.',
+  'Барлығын өшіріп, жаңадан бастау керек пе?': 'Delete everything and start over?',
+  'Толтырған мәліметтер мен фотолар өшіріледі.': 'The details and photos you added will be deleted.',
+  'Жаңадан бастау': 'Start over',
   'Ұқсас тауар': 'Similar listing',
   'Ұқсас тауар қосу': 'Add similar listing',
   '«{0}» мәліметтері көшірілді. Фото мен 360° кадрларды осы жұптан жаңадан түсіріңіз.':

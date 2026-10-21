@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -8,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:image_picker_platform_interface/image_picker_platform_interface.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:vitrina/api.dart';
 import 'package:vitrina/screens/listing_editor_screen.dart';
 import 'package:vitrina/session.dart';
@@ -60,7 +62,15 @@ var maxInFlight = 0;
 final uploadOrder = <String>[];
 
 void main() {
-  setUp(() => ImagePickerPlatform.instance = _FakePicker());
+  setUp(() {
+    ImagePickerPlatform.instance = _FakePicker();
+    SharedPreferences.setMockInitialValues({});
+  });
+
+  Future<Map<String, dynamic>?> kept() async {
+    final raw = (await SharedPreferences.getInstance()).getString(Session.editorDraftKey);
+    return raw == null ? null : jsonDecode(raw) as Map<String, dynamic>;
+  }
 
   /// Opens the editor from a screen underneath, as the app does, and records what reaches the server.
   Future<List<String>> open(WidgetTester tester,
@@ -71,7 +81,9 @@ void main() {
       Future<void>? failLater,
       Future<void>? hold,
       List<Duration> waits = const [],
-      double width = 500}) async {
+      double width = 500,
+      bool settle = true,
+      int? me}) async {
     final calls = <String>[];
     var uploads = 0, inFlight = 0;
     maxInFlight = 0;
@@ -101,7 +113,8 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     await tester.pumpWidget(SessionScope(
-        session: Session(api),
+        session: Session(api)
+          ..me = me == null ? null : Me.fromJson({'id': me, 'phone': '+77010000000', 'is_seller': true}),
         child: MaterialApp(
             theme: buildTheme(Brightness.light),
             home: Scaffold(
@@ -111,7 +124,11 @@ void main() {
                             .push(MaterialPageRoute(builder: (_) => ListingEditorScreen(template: template))),
                         child: const Text('open')))))));
     await tester.tap(find.text('open'));
-    await tester.pumpAndSettle();
+    if (settle) {
+      await tester.pumpAndSettle();
+    } else {
+      await tester.pump(const Duration(seconds: 1)); // a photo read from the phone keeps its tile spinning
+    }
     return calls;
   }
 
@@ -512,5 +529,269 @@ void main() {
     expect(insoleCheck('27.5'), isNull);
     expect(insoleCheck('8'), isNull); // a baby's first shoes
     expect(insoleCheck('36'), isNotNull);
+  });
+
+  testWidgets('a new pair not yet saved survives the app closing: it opens where the seller stopped', (tester) async {
+    await open(tester);
+    await pickSides(tester);
+    await next(tester);
+    await tester.enterText(find.widgetWithText(TextFormField, 'Атауы'), 'Qadam етік');
+    await tester.pump(const Duration(seconds: 2));
+    expect((await kept())!['title'], 'Qadam етік');
+
+    await tester.pumpWidget(const SizedBox()); // the app was closed
+    final calls = await open(tester); // and opened again
+    expect(find.byKey(const Key('restored-note')), findsOneWidget);
+    expect(step(tester), 'Тауар туралы');
+    expect(find.text('Qadam етік'), findsOneWidget);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(step(tester), 'Фото');
+    expect(find.bySemanticsLabel(RegExp('жүктелмеді')), findsNothing);
+    expect(calls.where((c) => c.endsWith('/media')), isEmpty); // the photos that went are not sent twice
+    await next(tester);
+    expect(step(tester), 'Тауар туралы');
+    expect(find.byKey(const Key('restored-note')), findsNothing); // said once, then out of the way
+  });
+
+  testWidgets('starting over clears the kept work and the page', (tester) async {
+    await open(tester);
+    await pickSides(tester);
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pumpWidget(const SizedBox());
+    await open(tester);
+    await tester.tap(find.byKey(const Key('start-over')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Қалу')); // one tap does not throw a pair away: it asks first
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('restored-note')), findsOneWidget);
+    expect(await kept(), isNotNull);
+    await tester.tap(find.byKey(const Key('start-over')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('start-over-sure')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('restored-note')), findsNothing);
+    expect(find.text('Алдынан *'), findsOneWidget);
+    await next(tester);
+    expect(step(tester), 'Фото'); // the four sides are gone
+    expect(await kept(), isNull);
+  });
+
+  testWidgets('saved, or thrown away on purpose, the work is not offered again', (tester) async {
+    final sent = <Map<String, dynamic>>[];
+    await open(tester, sent: sent);
+    await pickSides(tester);
+    await next(tester);
+    await fillDetails(tester);
+    await next(tester);
+    await tester.enterText(find.widgetWithText(TextFormField, 'Бағасы'), '20000');
+    await tester.enterText(find.widgetWithText(TextFormField, 'Өлшем'), '38');
+    await tester.enterText(find.widgetWithText(TextFormField, 'Ұлтарақ, см'), '24,5');
+    await tester.pump(const Duration(seconds: 2));
+    expect(await kept(), isNotNull);
+    await tester.tap(find.text('Жоба ретінде сақтау'));
+    await tester.pumpAndSettle();
+    expect(sent, hasLength(1));
+    expect(await kept(), isNull);
+
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('restored-note')), findsNothing);
+    await pick(tester, find.text('Алдынан *'));
+    await tester.pump(const Duration(seconds: 2));
+    expect(await kept(), isNotNull);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('discard')));
+    await tester.pumpAndSettle();
+    expect(await kept(), isNull);
+  });
+
+  testWidgets('when the phone sends the app to the background, the work is kept at once', (tester) async {
+    await open(tester);
+    await pick(tester, find.text('Алдынан *'));
+    expect(await kept(), isNull);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    await tester.pump();
+    expect((await kept())!['photos'], {
+      'front': {'url': 'https://cdn/1.jpg', 'path': '/picked/p.jpg'}
+    });
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+  });
+
+  testWidgets('a photo still on its way when the app closed is sent again from the phone', (tester) async {
+    final dir = Directory.systemTemp.createTempSync('kept');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final file = File('${dir.path}/front.jpg')..writeAsBytesSync(utf8.encode('jpeg bytes'));
+    final gate = Completer<void>();
+    await open(tester, hold: gate.future);
+    await pick(tester, find.text('Алдынан *'));
+    await tester.pump(const Duration(seconds: 2));
+    expect((await kept())!['photos'], {
+      'front': {'path': '/picked/p.jpg'}
+    }); // not yet sent: kept by its file
+    gate.complete();
+    await tester.pumpWidget(const SizedBox());
+
+    SharedPreferences.setMockInitialValues({
+      Session.editorDraftKey: jsonEncode({
+        'photos': {
+          'front': {'path': file.path}
+        }
+      })
+    });
+    final calls = await open(tester, settle: false);
+    for (var i = 0; i < 10; i++) {
+      // A real file is read in a few real steps (open, size, read, close); fake time lets each one land.
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await tester.pump();
+    }
+    await tester.pumpAndSettle();
+    expect(calls.where((c) => c.endsWith('/media')), hasLength(1));
+    expect(find.bySemanticsLabel(RegExp('жүктелмеді')), findsNothing);
+    await tester.pump(const Duration(seconds: 2));
+    expect((await kept())!['photos'], {
+      'front': {'url': 'https://cdn/1.jpg', 'path': file.path}
+    });
+  });
+
+  testWidgets('kept work belongs to who made it: a lapsed sign-in keeps it, another person never sees it',
+      (tester) async {
+    await open(tester, me: 5);
+    await pick(tester, find.text('Алдынан *'));
+    await tester.pump(const Duration(seconds: 2));
+    expect((await kept())!['owner'], 5);
+    await Session(Api(base: 'http://x/api/v1')).signOut(); // the sign-in ran out; the same seller comes back
+    await tester.pumpWidget(const SizedBox());
+    await open(tester, me: 5);
+    expect(find.byKey(const Key('restored-note')), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+    await open(tester, me: 9);
+    expect(find.byKey(const Key('restored-note')), findsNothing);
+    expect(await kept(), isNull);
+  });
+
+  testWidgets('a copy of another listing never replaces or wipes a new pair kept from before', (tester) async {
+    await open(tester);
+    await pick(tester, find.text('Табаны'));
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pumpWidget(const SizedBox());
+
+    await open(tester, template: Listing.fromJson(listingJson())); // opened and left untouched
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    await open(tester, template: Listing.fromJson(listingJson())); // changed, then sent to the background
+    await pick(tester, find.text('Алдынан *'));
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    await tester.pump(const Duration(seconds: 2));
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpWidget(const SizedBox());
+    expect((await kept())!['photos'], {'sole': anything}); // still the new pair's own
+
+    await open(tester);
+    expect(find.byKey(const Key('restored-note')), findsOneWidget);
+    await tester.pump(const Duration(seconds: 2));
+    expect((await kept())!['photos'], {'sole': anything});
+  });
+
+  testWidgets('everything on the three steps comes back: details, sizes, a defect photo and the 360° frames',
+      (tester) async {
+    await open(tester);
+    await pickSides(tester);
+    await tester.tap(find.text('Галереядан'));
+    await tester.pumpAndSettle();
+    await next(tester);
+    await fillDetails(tester, condition: 'Ақауы бар');
+    await pick(tester, find.text('Ақау фотосы'));
+    await next(tester);
+    await tester.enterText(find.widgetWithText(TextFormField, 'Бағасы'), '20000');
+    await tester.enterText(find.widgetWithText(TextFormField, 'Өлшем'), '38');
+    await tester.enterText(find.widgetWithText(TextFormField, 'Ұлтарақ, см'), '24,5');
+    await tester.pump(const Duration(seconds: 2));
+    final before = await kept();
+    await tester.pumpWidget(const SizedBox());
+
+    final sent = <Map<String, dynamic>>[];
+    final calls = await open(tester, sent: sent);
+    expect(step(tester), 'Бағасы мен өлшемі');
+    expect(find.text('20000'), findsOneWidget);
+    expect(find.text('24,5'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 2));
+    expect((await kept())!..remove('kept_at'), before!..remove('kept_at')); // the same work, nothing lost
+    await tester.tap(find.text('Жариялау'));
+    await tester.pumpAndSettle();
+    expect(calls.where((c) => c.endsWith('/media')), isEmpty);
+    final body = sent.single;
+    expect(body, containsPair('condition', 'defective'));
+    expect(body, containsPair('category', 'boots'));
+    expect(body, containsPair('audience', 'women'));
+    expect(body, containsPair('title', 'Qadam етік'));
+    expect(body['sizes'], [
+      {'label': '38', 'insole_cm': '24,5', 'quantity': 1}
+    ]);
+    final angles = [for (final p in body['photos'] as List) (p as Map)['angle']];
+    expect(angles.where((a) => a == 'frame'), hasLength(24));
+    expect(angles.where((a) => a == 'defect'), hasLength(1));
+    expect(angles.toSet(), containsAll(requiredAngles.keys));
+    expect(await kept(), isNull);
+  });
+
+  testWidgets('work emptied again by hand is not offered next time', (tester) async {
+    SharedPreferences.setMockInitialValues({
+      Session.editorDraftKey: jsonEncode({'step': 1, 'title': 'Ойланып жүрмін'})
+    });
+    await open(tester);
+    expect(step(tester), 'Тауар туралы');
+    await tester.enterText(find.widgetWithText(TextFormField, 'Атауы'), '');
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 2));
+    expect(await kept(), isNull); // the page is blank again
+  });
+
+  testWidgets('a photo address kept for a week is not trusted: the server may have cleared it', (tester) async {
+    SharedPreferences.setMockInitialValues({
+      Session.editorDraftKey: jsonEncode({
+        'kept_at': 0,
+        'title': 'Ескі жұмыс',
+        'photos': {
+          'front': {'url': 'https://cdn/old.jpg'}
+        }
+      })
+    });
+    await open(tester);
+    expect(find.byKey(const Key('restored-note')), findsOneWidget);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Қалу'));
+    await tester.pumpAndSettle();
+    await pick(tester, find.text('Сырт бүйірі *'));
+    await pick(tester, find.text('Ішкі бүйірі *'));
+    await pick(tester, find.text('Өкшесі *'));
+    await next(tester);
+    expect(find.text('Фото жетіспейді: Алдынан.'), findsOneWidget); // the old one is asked for again
+  });
+
+  testWidgets('work kept by another version that cannot be read gives a clean page, not half of it', (tester) async {
+    SharedPreferences.setMockInitialValues({
+      Session.editorDraftKey: jsonEncode({
+        'title': 'Жартысы',
+        'sizes': [
+          [38, 24, 1]
+        ]
+      })
+    });
+    await open(tester);
+    expect(find.byKey(const Key('restored-note')), findsNothing);
+    expect(find.text('Жартысы'), findsNothing);
+    expect(await kept(), isNull);
+    await pickSides(tester);
+    await next(tester);
+    expect(find.text('Жартысы'), findsNothing); // not even the title that could be read
+    await fillDetails(tester);
+    await next(tester);
+    await tester.enterText(find.widgetWithText(TextFormField, 'Өлшем'), '38'); // the size row works
+    await tester.pump();
   });
 }
