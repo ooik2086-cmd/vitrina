@@ -1197,6 +1197,12 @@ class Api {
       await _send('POST', '/listings/$listingId/sizes/$sizeId/sold', headers: {'Idempotency-Key': idempotencyKey})
           as Map<String, dynamic>);
 
+  /// Takes back the mark sent with [idempotencyKey] (a tap by mistake): its pair returns to the stock. Only once, and
+  /// only soon after the mark ("too_late_to_undo" later); sent again after a lost answer, it returns nothing more.
+  Future<Listing> undoPairSold(int listingId, int sizeId, {required String idempotencyKey}) async => Listing.fromJson(
+      await _send('POST', '/listings/$listingId/sizes/$sizeId/sold/undo', headers: {'Idempotency-Key': idempotencyKey})
+          as Map<String, dynamic>);
+
   Future<Suggestion> suggestDetails(String photoUrl) async => Suggestion.fromJson(
       await _send('POST', '/listings/suggest', body: {'photo_url': photoUrl}) as Map<String, dynamic>);
 

@@ -898,6 +898,10 @@ const en = <String, String>{
   'Иә, сатылды': 'Yes, sold',
   'Белгіленді: тауар түгел сатылды.': 'Marked: the item is sold out.',
   'Белгіленді: {0} өлшемінен {1} жұп қалды.': 'Marked: {1} left in size {0}.',
+  'Қате басылды': 'Undo',
+  'Белгі алынды: {0} өлшемінен {1} жұп бар.': 'Mark undone: {1} in stock in size {0}.',
+  'Байланыс жоқ. {0} өлшемінің белгісі алынбаған болуы мүмкін.':
+      'No connection. The mark on size {0} may not have been undone.',
   'Қай өлшемі сатылды?': 'Which size was sold?',
   'Қалдықтан бір жұп алынады.': 'One pair comes off the stock.',
   'Қалды: {0}': 'Left: {0}',

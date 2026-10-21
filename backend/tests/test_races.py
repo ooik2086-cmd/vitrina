@@ -9,8 +9,8 @@ import unittest
 from sqlalchemy import func, select, text
 
 from tests.test_api import ADDRESS, LISTING, ApiTestCase, jpeg, with_check_digit
-from vitrina_api.models import (Conversation, LedgerTx, Listing, ListingSize, Message, Offer, Order, OrderEvent,
-                                Payout, Review)
+from vitrina_api.models import (AuditLog, Conversation, LedgerTx, Listing, ListingSize, Message, Offer, Order,
+                                OrderEvent, Payout, Review)
 
 N = 8
 
@@ -137,6 +137,17 @@ class RaceTests(ApiTestCase):
         self.assertEqual(self.codes(rs), [200] * N, [r.text[:120] for r in rs])
         with self.db() as db:
             self.assertEqual(db.get(ListingSize, size).quantity, 4)
+
+    def test_the_same_undo_sent_many_times_at_once_puts_back_one_pair(self):
+        listing = self.publish(sizes=[{"label": "EU 42", "insole_cm": "26,5", "quantity": 5}])
+        size = listing["sizes"][0]["id"]
+        self.post(f"/listings/{listing['id']}/sizes/{size}/sold", self.seller, **{"Idempotency-Key": "sold-by-mistake"})
+        rs = self.same(lambda: self.post(f"/listings/{listing['id']}/sizes/{size}/sold/undo", self.seller,
+                                         **{"Idempotency-Key": "sold-by-mistake"}))
+        self.assertEqual(self.codes(rs), [200] * N, [r.text[:120] for r in rs])
+        with self.db() as db:
+            self.assertEqual(db.get(ListingSize, size).quantity, 5)
+            self.assertEqual(db.scalar(select(func.count(AuditLog.id)).where(AuditLog.action == "undo_pair_sold")), 1)
 
     def test_marks_and_orders_at_once_never_take_more_pairs_than_there_are(self):
         listing = self.publish(sizes=[{"label": "EU 42", "insole_cm": "26,5", "quantity": 3}])

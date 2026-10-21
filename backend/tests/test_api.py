@@ -1516,6 +1516,70 @@ class SellerEditTests(ApiTestCase):
             from vitrina_api.models import AuditLog
             self.assertEqual(db.scalar(select(func.count(AuditLog.id)).where(AuditLog.action == "mark_pair_sold")), 2)
 
+    def test_a_sold_mark_tapped_by_mistake_is_taken_back_once_soon_after(self):
+        listing = self.publish(sizes=[{"label": "EU 42", "insole_cm": "26,5", "quantity": 1},
+                                      {"label": "EU 43", "insole_cm": "27,0", "quantity": 1}])
+        lid, (a, b) = listing["id"], [s["id"] for s in listing["sizes"]]
+        sold = lambda size, key: self.post(  # noqa: E731
+            f"/listings/{lid}/sizes/{size}/sold", self.seller, **{"Idempotency-Key": key})
+        undo = lambda size, key, token=None: self.post(  # noqa: E731
+            f"/listings/{lid}/sizes/{size}/sold/undo", token or self.seller, **{"Idempotency-Key": key})
+        sold(a, "undo-mark-1")
+        r = sold(b, "undo-mark-2")
+        self.assertEqual((r.json()["status"], [s["quantity"] for s in r.json()["sizes"]]), ("sold", [0, 0]))
+        r = self.c.put(f"/api/v1/listings/{lid}/sizes/{a}/alert", headers=self.h(self.buyer))
+        self.assertEqual(r.json(), {"size_id": a, "alert": True})  # a buyer waits for the size the wrong tap took
+        r = undo(a, "undo-mark-1")
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual((r.json()["status"], [s["quantity"] for s in r.json()["sizes"]]), ("published", [1, 0]))
+        again = undo(a, "undo-mark-1")  # the answer never reached the phone
+        self.assertEqual([s["quantity"] for s in again.json()["sizes"]], [1, 0])  # nothing more put back
+        with self.db() as db:
+            from vitrina_api.models import IdempotencyRecord
+            first = db.scalar(select(IdempotencyRecord).where(IdempotencyRecord.key == "undo-mark-1",
+                                                              IdempotencyRecord.scope == f"sold:{lid}"))
+            self.assertIsNotNone(first.at)
+            first.at = first.at - timedelta(minutes=11)
+            db.commit()
+        late = undo(a, "undo-mark-1")  # sent again after the window: it went, so it is answered as done, not refused
+        self.assertEqual((late.status_code, [s["quantity"] for s in late.json()["sizes"]]), (200, [1, 0]), late.text)
+        self.assertEqual(undo(b, "undo-mark-1").status_code, 404)  # a mark undoes only its own size
+        self.assertEqual(undo(a, "undo-never-marked").status_code, 404)
+        self.assertEqual(undo(b, "undo-mark-2", self.buyer).status_code, 404)  # only the seller's own
+        r = self.post(f"/listings/{lid}/sizes/{b}/sold/undo", self.seller)
+        self.assertEqual((r.status_code, r.json()["code"]), (400, "idempotency_key_required"))
+        with self.db() as db:
+            from vitrina_api.models import IdempotencyRecord
+            mark = db.scalar(select(IdempotencyRecord).where(IdempotencyRecord.key == "undo-mark-2"))
+            mark.at = mark.at - timedelta(minutes=11)
+            db.commit()
+        r = undo(b, "undo-mark-2")
+        self.assertEqual((r.status_code, r.json()["code"]), (409, "too_late_to_undo"), r.text)  # edit it instead
+        with self.db() as db:
+            db.scalar(select(IdempotencyRecord).where(IdempotencyRecord.key == "undo-mark-2")).at = None
+            db.commit()  # a mark from before the time was kept
+        self.assertEqual(undo(b, "undo-mark-2").json()["code"], "too_late_to_undo")
+        with self.db() as db:
+            self.assertEqual([db.get(ListingSize, i).quantity for i in (a, b)], [1, 0])
+            from vitrina_api.models import AuditLog, Notification
+            self.assertEqual(db.scalar(select(func.count(AuditLog.id)).where(AuditLog.action == "undo_pair_sold")), 1)
+            self.assertEqual(db.scalar(select(func.count(Notification.id)).where(Notification.kind == "back_in_stock")),
+                             1)
+
+    def test_an_undone_mark_leaves_a_paused_or_hidden_listing_as_it_is(self):
+        listing = self.publish(sizes=[{"label": "EU 42", "insole_cm": "26,5", "quantity": 1}])
+        lid, size = listing["id"], listing["sizes"][0]["id"]
+        self.post(f"/listings/{lid}/sizes/{size}/sold", self.seller, **{"Idempotency-Key": "undo-hidden-1"})
+        self.post(f"/admin/listings/{lid}/hide", self.make_staff(), {"reason": "fake brand"})
+        r = self.post(f"/listings/{lid}/sizes/{size}/sold/undo", self.seller, **{"Idempotency-Key": "undo-hidden-1"})
+        self.assertEqual((r.status_code, r.json()["code"]), (409, "invalid_status"), r.text)  # stays down
+        listing = self.publish(sizes=[{"label": "EU 42", "insole_cm": "26,5", "quantity": 2}])
+        lid, size = listing["id"], listing["sizes"][0]["id"]
+        self.assertEqual(self.post(f"/listings/{lid}/pause", self.seller).status_code, 200)
+        self.post(f"/listings/{lid}/sizes/{size}/sold", self.seller, **{"Idempotency-Key": "undo-paused-1"})
+        r = self.post(f"/listings/{lid}/sizes/{size}/sold/undo", self.seller, **{"Idempotency-Key": "undo-paused-1"})
+        self.assertEqual((r.status_code, r.json()["status"], r.json()["sizes"][0]["quantity"]), (200, "paused", 2))
+
     def test_a_pair_cannot_be_marked_sold_on_a_listing_never_on_sale_or_hidden(self):
         r = self.post("/listings", self.seller, LISTING)
         lid, size = r.json()["id"], r.json()["sizes"][0]["id"]

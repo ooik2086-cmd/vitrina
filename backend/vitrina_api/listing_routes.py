@@ -633,6 +633,54 @@ def mark_pair_sold(listing_id: int, size_id: int, user: User = Depends(current_u
     return listing_out(db, listing, owner=True)
 
 
+# How long after a "sold" mark the seller can take it back: enough to notice a wrong tap, short enough that the
+# count has rarely been changed by hand since.
+SOLD_UNDO_WINDOW = timedelta(minutes=10)
+
+
+@router.post("/listings/{listing_id}/sizes/{size_id}/sold/undo")
+def undo_pair_sold(listing_id: int, size_id: int, user: User = Depends(current_user), db: Session = Depends(get_db),
+                   idempotency_key: str | None = Header(default=None, min_length=8, max_length=100)):
+    """Takes back a "sold" mark tapped by mistake: its pair returns to the stock. Sent with the mark's own
+    Idempotency-Key, so only a mark this seller made on this size, and only once: sent again (its answer lost on
+    weak mobile data) it returns nothing more. Only soon after the mark; later the count is fixed by editing."""
+    if not idempotency_key:
+        raise ApiError(400, "idempotency_key_required")
+    listing = own_listing(db, listing_id, user, lock=True)
+    mark = IdempotencyRecord.made(db, user.id, f"sold:{listing.id}", idempotency_key)
+    if mark is None or mark.result_id != size_id:
+        raise ApiError(404, "not_found")
+    scope = f"unsold:{listing.id}"
+    if IdempotencyRecord.made(db, user.id, scope, idempotency_key):
+        db.rollback()
+        return listing_out(db, own_listing(db, listing_id, user), owner=True)
+    if mark.at is None or now_utc() - services.aware(mark.at) > SOLD_UNDO_WINDOW:
+        raise ApiError(409, "too_late_to_undo")
+    if listing.status in ("hidden", "archived"):
+        raise ApiError(409, "invalid_status")  # moderation or the seller took it down meanwhile: it stays down
+    size = db.scalar(select(ListingSize).where(ListingSize.id == size_id, ListingSize.listing_id == listing.id)
+                     .with_for_update().execution_options(populate_existing=True))
+    if size is None:
+        raise ApiError(404, "not_found")
+    size.quantity += 1
+    db.add(IdempotencyRecord(user_id=user.id, scope=scope, key=idempotency_key, result_id=size.id))
+    if listing.status == "sold":
+        # Only a live listing turns sold, so the mark (or an order since) made it so: back on sale, not paused as a
+        # restock by hand would leave it.
+        listing.status = "published"
+    services.tell_back_in_stock(db, listing)
+    services.audit(db, user.id, "undo_pair_sold", f"listing:{listing.id}", f"size:{size.id}")
+    try:
+        db.commit()
+    except IntegrityError:
+        # The same undo arrived twice at once and the other request returned the pair: this one returns nothing.
+        db.rollback()
+        if not IdempotencyRecord.made(db, user.id, scope, idempotency_key):
+            raise
+        listing = own_listing(db, listing_id, user)
+    return listing_out(db, listing, owner=True)
+
+
 def settle_stock_status(listing: Listing) -> None:
     """The one place stock decides status: a live listing with nothing left is sold; a sold one restocked waits,
     paused, for the seller to put it back on sale."""

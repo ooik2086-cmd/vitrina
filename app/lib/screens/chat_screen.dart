@@ -239,6 +239,18 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   /// A pair marked sold from this chat whose answer did not come back. Sent again as it was, it is taken once.
   _Sale? _pendingSale;
   bool _saleKept = false; // brought back from the phone, see [_notSentKept]
+
+  /// The last pair marked here, which a tap can take back for a while (see [undoFor]); with [_undoUnsure] its undo
+  /// was sent and the answer lost, so the line offers to send it again with the same key.
+  _Sale? _undoable;
+  String _undoSaid = '';
+  bool _undoUnsure = false;
+  bool _undoing = false;
+  Timer? _undoTimer;
+  final _markedAt = <String, DateTime>{}; // keys of marks made in this chat: a mark brought back later is too old
+
+  /// Under the server's ten minutes, so a tap near the end still arrives in time.
+  static const undoFor = Duration(minutes: 9);
   _Sale? _saleSending; // on its way: kept in case the chat or the app closes before the answer
   bool _marking = false;
 
@@ -412,6 +424,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _poll?.cancel();
+    _undoTimer?.cancel();
     // Reads the field now; the writing finishes after. A send still waiting is kept with its key.
     if ((_keepTimer?.isActive ?? false) || _sending || _marking) _keep();
     _keepTimer?.cancel();
@@ -737,7 +750,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         ),
       );
       if (sure != true || !mounted) return;
-      await _saveSale((listingId: listing.id, sizeId: size.id, label: size.label, key: newIdempotencyKey()));
+      final key = newIdempotencyKey();
+      _markedAt[key] = DateTime.now();
+      await _saveSale((listingId: listing.id, sizeId: size.id, label: size.label, key: key));
     } catch (e) {
       if (mounted) showError(context, e);
     } finally {
@@ -788,15 +803,81 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
+  /// Says what is left. For a mark made here it is said in a line above the field, with the way to take it back
+  /// while the server still allows it: one place, nothing on top of the field or of the button.
   void _saleDone(_Sale sale, List<ShoeSize> sizes) {
     final left = sizes.where((x) => x.id == sale.sizeId).firstOrNull?.quantity ?? 0;
     final gone = sizes.every((x) => (x.quantity ?? 0) == 0);
-    ScaffoldMessenger.of(context)
-      ..clearSnackBars()
-      ..showSnackBar(SnackBar(
-          content: Text(gone
-              ? tr('Белгіленді: тауар түгел сатылды.')
-              : trf('Белгіленді: {0} өлшемінен {1} жұп қалды.', [sale.label, left]))));
+    final said = gone
+        ? tr('Белгіленді: тауар түгел сатылды.')
+        : trf('Белгіленді: {0} өлшемінен {1} жұп қалды.', [sale.label, left]);
+    final messenger = ScaffoldMessenger.of(context)..clearSnackBars();
+    final at = _markedAt[sale.key];
+    final remaining = at == null ? Duration.zero : at.add(undoFor).difference(DateTime.now());
+    if (remaining <= Duration.zero) {
+      messenger.showSnackBar(SnackBar(content: Text(said))); // brought back from the phone, long after the tap
+      return;
+    }
+    _undoTimer?.cancel();
+    _undoTimer = Timer(remaining, () {
+      if (mounted && !_undoing && !_undoUnsure) setState(() => _undoable = null);
+    });
+    setState(() {
+      _undoable = sale;
+      _undoSaid = said;
+      _undoUnsure = false;
+    });
+  }
+
+  /// Puts the pair back with the mark's own key, so only that mark and only once. Its answer is told also when the
+  /// chat was left meanwhile; a lost one keeps the line, to send the same undo again.
+  Future<void> _undoSale(_Sale sale) async {
+    if (!mounted || _undoing) return;
+    setState(() => _undoing = true);
+    final messenger = ScaffoldMessenger.of(context);
+    final reader = MediaQuery.accessibleNavigationOf(context);
+    void done() {
+      if (!mounted) return;
+      _undoTimer?.cancel();
+      setState(() {
+        if (_undoable?.key == sale.key) _undoable = null;
+        _undoUnsure = false;
+      });
+    }
+
+    try {
+      final l = await _api.undoPairSold(sale.listingId, sale.sizeId, idempotencyKey: sale.key);
+      _markedAt.remove(sale.key);
+      done();
+      final left = l.sizes.where((x) => x.id == sale.sizeId).firstOrNull?.quantity ?? 0;
+      messenger
+        ..clearSnackBars()
+        ..showSnackBar(SnackBar(content: Text(trf('Белгі алынды: {0} өлшемінен {1} жұп бар.', [sale.label, left]))));
+    } catch (e) {
+      if (e is ApiException && e.passing) {
+        if (mounted) {
+          setState(() => _undoUnsure = true); // the line stays, now with the same undo to send again
+        } else {
+          messenger
+            ..clearSnackBars()
+            ..showSnackBar(SnackBar(
+                content: Text(trf('Байланыс жоқ. {0} өлшемінің белгісі алынбаған болуы мүмкін.', [sale.label])),
+                duration: const Duration(seconds: 12),
+                persist: reader));
+        }
+      } else {
+        done();
+        // Too late, or the listing was taken down meanwhile: said long enough to read what to do instead.
+        messenger
+          ..clearSnackBars()
+          ..showSnackBar(SnackBar(
+              content: Text(e is ApiException ? e.message : tr('Байланыс жоқ. Қайта көріңіз.')),
+              duration: const Duration(seconds: 12),
+              persist: reader));
+      }
+    } finally {
+      if (mounted) setState(() => _undoing = false);
+    }
   }
 
   /// Puts the kept photo aside; its words come back to the field, as they are the sender's to keep or send.
@@ -885,7 +966,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         ),
         if (conv?.role == 'seller')
           _QuickReplies(
-              onPick: _useReply, payments: _payments, onSold: _marking || _pendingSale != null ? null : _markSold),
+              onPick: _useReply,
+              payments: _payments,
+              onSold: _marking || _undoing || _undoUnsure || _pendingSale != null ? null : _markSold),
         if (_pendingSale case final sale?)
           _NotSentLine(
             key: const Key('sale-not-sent'),
@@ -894,6 +977,17 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 : trf('Байланыс жоқ. {0} өлшемінің белгісі сақталмаған болуы мүмкін.', [sale.label]),
             retryKey: 'sale-resend',
             onRetry: _marking ? null : _resendSale,
+          ),
+        if (_undoable case final sale?)
+          _NotSentLine(
+            key: const Key('sale-undo-line'),
+            text: _undoUnsure
+                ? trf('Байланыс жоқ. {0} өлшемінің белгісі алынбаған болуы мүмкін.', [sale.label])
+                : _undoSaid,
+            icon: _undoUnsure ? null : Icons.check_circle_outline,
+            retryLabel: _undoUnsure ? null : tr('Қате басылды'),
+            retryKey: _undoUnsure ? 'sale-undo-again' : 'sale-undo',
+            onRetry: _undoing ? null : () => _undoSale(sale),
           ),
         if (_unsentPhoto case final photo? when !_photoChecking)
           _NotSentLine(
@@ -1011,8 +1105,14 @@ class _NotSentLine extends StatelessWidget {
       this.photo,
       this.caption = '',
       this.onDrop,
-      this.retryKey});
+      this.retryKey,
+      this.icon,
+      this.retryLabel});
   final String text;
+
+  /// A line that offers a way back rather than a retry says so with its own icon and button.
+  final IconData? icon;
+  final String? retryLabel;
 
   /// The retry button's key, where it is not the text's or the photo's.
   final String? retryKey;
@@ -1029,7 +1129,7 @@ class _NotSentLine extends StatelessWidget {
     final scheme = theme.colorScheme;
     final style = theme.textTheme.bodyMedium?.copyWith(color: scheme.onSurface);
     final words = Row(children: [
-      Icon(Icons.cloud_off_outlined, size: 20, color: scheme.error),
+      Icon(icon ?? Icons.cloud_off_outlined, size: 20, color: icon == null ? scheme.error : scheme.primary),
       const SizedBox(width: 8),
       if (photo case final bytes?) ...[
         ClipRRect(
@@ -1064,7 +1164,7 @@ class _NotSentLine extends StatelessWidget {
         key: Key(retryKey ?? (photo == null ? 'chat-resend' : 'chat-photo-resend')),
         onPressed: onRetry,
         style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
-        child: Text(tr('Қайта көру')),
+        child: Text(retryLabel ?? tr('Қайта көру')),
       ),
       if (photo != null)
         IconButton(
@@ -1196,7 +1296,8 @@ class _QuickReplies extends StatelessWidget {
       builder: (context, _, __) {
         final items = currentQuickReplies(payments: payments);
         return SizedBox(
-          height: 48,
+          // Grows with large text, so the chips are never cut at the top.
+          height: 48 + (MediaQuery.textScalerOf(context).scale(14) - 14) * 1.7,
           child: ListView(
             key: const Key('quick-replies'),
             scrollDirection: Axis.horizontal,

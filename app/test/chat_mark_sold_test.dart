@@ -1,5 +1,6 @@
 // With online payment off, a pair is sold in the chat and paid in hand. The seller marks it sold right there, so the
 // page does not keep offering it: one pair of the chosen size, once, even when the answer is lost on weak data.
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -48,6 +49,9 @@ Map<String, Object?> _listing(Map<int, int> stock, [String status = 'published']
       'seller': {'id': 3, 'shop_name': 'Qadam Store', 'city': 'Алматы'},
     };
 
+const _tooLate = 'Белгіні қайтару уақыты өтті (10 минут). Жұп санын тауарды өңдеу бетінде түзетіп, '
+    'қайта сатылымға қойыңыз.';
+
 void main() {
   /// Opens the chat as [role]. The server keeps [stock] by size id and takes a pair as the real one does, once per
   /// key; [lost] says, by mark, that it was taken but its answer never came back. Marks sent go into the list.
@@ -56,10 +60,14 @@ void main() {
       String role = 'seller',
       String status = 'published',
       bool Function(int mark)? lost,
-      bool Function(int mark)? broken}) async {
+      bool Function(int mark)? broken,
+      List<(int, String?)>? undos,
+      bool Function(int undo)? undoLost,
+      bool tooLate = false,
+      Future<void>? undoGate}) async {
     final sent = <(int, String?)>[];
-    final taken = <String>{};
-    var marks = 0;
+    final taken = <String, int>{}, putBack = <String>{};
+    var marks = 0, unmarks = 0;
     final api = Api(
         base: 'http://x/api/v1',
         client: MockClient((req) async {
@@ -68,14 +76,29 @@ void main() {
             return _json({'conversation': _conv(role), 'items': []});
           }
           if (req.method == 'GET' && path.endsWith('/listings/7')) return _json(_listing(stock, status));
+          final undo = RegExp(r'/listings/7/sizes/(\d+)/sold/undo$').firstMatch(path);
+          if (req.method == 'POST' && undo != null) {
+            // As the server: only a mark made on this size, once, and only soon after.
+            final n = ++unmarks;
+            final id = int.parse(undo.group(1)!), key = req.headers['Idempotency-Key'];
+            undos?.add((id, key));
+            if (key == null || taken[key] != id) return _json({'code': 'not_found', 'message_kk': 'Табылмады.'}, 404);
+            if (tooLate && !putBack.contains(key)) {
+              return _json({'code': 'too_late_to_undo', 'message_kk': _tooLate}, 409);
+            }
+            if (undoGate != null) await undoGate;
+            if (putBack.add(key)) stock[id] = stock[id]! + 1;
+            if (undoLost?.call(n) ?? false) throw http.ClientException('answer lost');
+            return _json(_listing(stock, status));
+          }
           final sold = RegExp(r'/listings/7/sizes/(\d+)/sold$').firstMatch(path);
           if (req.method == 'POST' && sold != null) {
             final n = ++marks;
             final id = int.parse(sold.group(1)!), key = req.headers['Idempotency-Key'];
             sent.add((id, key));
-            if (key != null && !taken.contains(key)) {
+            if (key != null && !taken.containsKey(key)) {
               if (stock[id]! <= 0) return _json({'code': 'out_of_stock', 'message_kk': 'Бұл өлшем қалмады.'}, 409);
-              taken.add(key);
+              taken[key] = id;
               stock[id] = stock[id]! - 1;
             }
             if (lost?.call(n) ?? false) throw http.ClientException('answer lost');
@@ -251,6 +274,115 @@ void main() {
   testWidgets('only the seller can mark a pair sold', (tester) async {
     await open(tester, stock: {1: 2}, role: 'buyer');
     expect(markSold, findsNothing);
+  });
+
+  final undoMark = find.byKey(const Key('sale-undo'));
+  final undoLine = find.byKey(const Key('sale-undo-line'));
+
+  testWidgets('a mark tapped by mistake is taken back with its own key, once', (tester) async {
+    final stock = {1: 1, 2: 0}, undos = <(int, String?)>[];
+    final sent = await open(tester, stock: stock, undos: undos);
+    await sell(tester, size: 1);
+    await sure(tester);
+    expect(find.descendant(of: undoLine, matching: find.text('Белгіленді: тауар түгел сатылды.')), findsOneWidget);
+    expect(find.byType(SnackBar), findsNothing); // said once, in the line, with nothing over the field
+    await tester.tap(undoMark);
+    await tester.pumpAndSettle();
+    expect(undos.single, sent.single); // the mark's size and key: no other mark can be undone by it
+    expect(stock, {1: 1, 2: 0});
+    expect(find.text('Белгі алынды: 42 өлшемінен 1 жұп бар.'), findsOneWidget);
+    expect(undoLine, findsNothing); // nothing left to take back: a second undo cannot be sent from here
+    expect(canMark(tester), isTrue);
+  });
+
+  testWidgets('the way back stays while the server still allows it, then goes', (tester) async {
+    await open(tester, stock: {1: 2});
+    await sell(tester, size: 1);
+    await sure(tester);
+    await tester.pump(const Duration(minutes: 8));
+    expect(undoMark, findsOneWidget); // long after the message, for a seller who notices late
+    await tester.pump(const Duration(minutes: 2));
+    expect(undoLine, findsNothing); // before the server's ten minutes, so a tap never meets a refusal
+  });
+
+  testWidgets('a newer mark is the one the line takes back', (tester) async {
+    final stock = {1: 3}, undos = <(int, String?)>[];
+    final sent = await open(tester, stock: stock, undos: undos);
+    await sell(tester, size: 1);
+    await sure(tester);
+    await sell(tester, size: 1);
+    await sure(tester);
+    await tester.tap(undoMark);
+    await tester.pumpAndSettle();
+    expect(undos.single, sent[1]);
+    expect(stock, {1: 2});
+  });
+
+  testWidgets('an undo whose answer was lost stays in the line and goes again with the same key', (tester) async {
+    final stock = {1: 2}, undos = <(int, String?)>[];
+    await open(tester, stock: stock, undos: undos, undoLost: (n) => n == 1);
+    await sell(tester, size: 1);
+    await sure(tester);
+    await tester.tap(undoMark);
+    await tester.pumpAndSettle();
+    expect(find.text('Байланыс жоқ. 42 өлшемінің белгісі алынбаған болуы мүмкін.'), findsOneWidget);
+    expect(canMark(tester), isFalse); // the open undo is finished first
+    await tester.pump(const Duration(minutes: 20));
+    expect(undoLine, findsOneWidget); // still the way to know: the server answers a repeat at any time
+    await tester.tap(find.byKey(const Key('sale-undo-again')));
+    await tester.pumpAndSettle();
+    expect(undos, hasLength(2));
+    expect(undos[1], undos[0]);
+    expect(stock, {1: 2}); // back once, not twice
+    expect(find.text('Белгі алынды: 42 өлшемінен 2 жұп бар.'), findsOneWidget);
+    expect(undoLine, findsNothing);
+  });
+
+  testWidgets('too late to take back says what to do instead, long enough to read', (tester) async {
+    final stock = {1: 2};
+    await open(tester, stock: stock, tooLate: true);
+    await sell(tester, size: 1);
+    await sure(tester);
+    await tester.tap(undoMark);
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 10));
+    await tester.pump(const Duration(seconds: 1)); // a bar timed out by now would be gone
+    expect(find.text(_tooLate), findsOneWidget);
+    expect(undoLine, findsNothing);
+    expect(stock, {1: 1});
+  });
+
+  testWidgets('an undo answered after the chat was left is still told', (tester) async {
+    final stock = {1: 2}, gate = Completer<void>();
+    await open(tester, stock: stock, undoGate: gate.future);
+    await sell(tester, size: 1);
+    await sure(tester);
+    await tester.tap(undoMark);
+    await tester.pump();
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    gate.complete();
+    await tester.pumpAndSettle();
+    expect(stock, {1: 2});
+    expect(find.text('Белгі алынды: 42 өлшемінен 2 жұп бар.'), findsOneWidget);
+  });
+
+  testWidgets('the way back fits at 360 wide with large text', (tester) async {
+    tester.view.physicalSize = const Size(360, 760);
+    tester.view.devicePixelRatio = 1;
+    tester.platformDispatcher.textScaleFactorTestValue = 2;
+    addTearDown(tester.view.reset);
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+    await open(tester, stock: {1: 2});
+    await sell(tester, size: 1);
+    await sure(tester);
+    expect(undoMark, findsOneWidget);
+    expect(tester.getSize(undoMark).height, greaterThanOrEqualTo(48));
+    final row = tester.getRect(find.byKey(const Key('quick-replies')));
+    final words = tester.getRect(find.descendant(of: markSold, matching: find.text('Сатылды')));
+    expect(row.top, lessThanOrEqualTo(words.top)); // the button that starts it is not cut
+    expect(row.bottom, greaterThanOrEqualTo(words.bottom));
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('the size list and the question fit at 360 wide with large text', (tester) async {

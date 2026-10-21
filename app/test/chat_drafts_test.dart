@@ -304,6 +304,7 @@ void main() {
     expect(server.marks.toSet(), hasLength(1)); // the same key both times
     expect(server.left, 1); // taken once
     expect(find.byKey(const Key('sale-not-sent')), findsNothing);
+    expect(find.byKey(const Key('sale-undo-line')), findsNothing); // its tap may be long past: no way back offered
     expect(await kept(), isEmpty);
   });
 

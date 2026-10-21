@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 
 from sqlalchemy import (BigInteger, Boolean, Date, DateTime, ForeignKey, Index, Integer, LargeBinary, String, Text,
-                        UniqueConstraint, create_engine, select)
+                        UniqueConstraint, create_engine, func, select)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 
 
@@ -296,6 +296,10 @@ class IdempotencyRecord(Base):
     # What the first request with this key made: an order for "create_order", a listing for "create_listing". The
     # column keeps its first name, so the image before this one still runs on the same database after a rollback.
     result_id: Mapped[int] = mapped_column("order_id", Integer)
+    # When the first request was made. Empty on rows from before it was kept: those are treated as long past. Also
+    # filled by the database, so a row the image before this one writes during a deploy or after a rollback has it.
+    at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=utcnow, server_default=func.now(),
+                                                nullable=True)
 
     @staticmethod
     def made(db, user_id: int, scope: str, key: str) -> "IdempotencyRecord | None":
