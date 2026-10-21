@@ -9,8 +9,8 @@ import unittest
 from sqlalchemy import func, select, text
 
 from tests.test_api import ADDRESS, LISTING, ApiTestCase, with_check_digit
-from vitrina_api.models import (Conversation, LedgerTx, Listing, ListingSize, Offer, Order, OrderEvent, Payout,
-                                Review)
+from vitrina_api.models import (Conversation, LedgerTx, Listing, ListingSize, Message, Offer, Order, OrderEvent,
+                                Payout, Review)
 
 N = 8
 
@@ -108,6 +108,15 @@ class RaceTests(ApiTestCase):
         self.assertEqual(self.codes(rs), [201] * N, [r.text[:120] for r in rs])
         self.assertEqual(len({r.json()["id"] for r in rs}), 1)
         self.assertEqual(self.count(Listing, Listing.seller_id == rs[0].json()["seller"]["id"]), 1)
+
+    def test_the_same_message_sent_many_times_at_once_is_posted_once(self):
+        listing = self.publish()
+        cid = self.post("/conversations", self.buyer, {"listing_id": listing["id"]}).json()["id"]
+        rs = self.same(lambda: self.post(f"/conversations/{cid}/messages", self.buyer, {"body": "Бар ма?"},
+                                         **{"Idempotency-Key": "weak-line-msg"}))
+        self.assertEqual(self.codes(rs), [201] * N, [r.text[:120] for r in rs])
+        self.assertEqual(len({r.json()["id"] for r in rs}), 1)
+        self.assertEqual(self.count(Message, Message.conversation_id == cid), 1)
 
     def test_the_same_key_under_an_agreed_price_answers_every_tap_with_its_order(self):
         listing = self.publish(sizes=[{"label": "EU 42", "insole_cm": "26,5", "quantity": 5}])

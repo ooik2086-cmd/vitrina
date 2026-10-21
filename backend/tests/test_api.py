@@ -1847,6 +1847,33 @@ class SocialTests(ApiTestCase):
         self.assertEqual(self.get(f"/conversations/{cid}/messages", stranger).status_code, 404)
         self.assertEqual(self.post(f"/conversations/{cid}/messages", stranger, {"body": "hi"}).status_code, 404)
 
+    def test_a_message_sent_again_after_a_lost_answer_reaches_the_other_side_once(self):
+        listing = self.publish()
+        cid = self.post("/conversations", self.buyer, {"listing_id": listing["id"]}).json()["id"]
+        send = lambda token, body, key: self.post(  # noqa: E731
+            f"/conversations/{cid}/messages", token, {"body": body}, **{"Idempotency-Key": key})
+        first = send(self.buyer, "42 өлшемі бар ма?", "weak-line-msg-1")
+        again = send(self.buyer, "42 өлшемі бар ма?", "weak-line-msg-1")  # the answer never reached the phone
+        self.assertEqual((first.status_code, again.status_code), (201, 201), again.text)
+        self.assertEqual(again.json()["id"], first.json()["id"])
+        self.assertEqual(send(self.buyer, "Тағы бір сұрақ", "weak-line-msg-2").status_code, 201)  # a new message
+        bodies = [m["body"] for m in self.get(f"/conversations/{cid}/messages", self.seller).json()["items"]]
+        self.assertEqual(bodies, ["42 өлшемі бар ма?", "Тағы бір сұрақ"])
+        notes = [n["text"] for n in self.get("/notifications", self.seller).json()["items"]]
+        self.assertEqual(notes.count("Жаңа хабарлама: 42 өлшемі бар ма?"), 1)  # told once, not twice
+        # A key is the sender's own: the other side using the same one posts its own message.
+        self.assertNotEqual(send(self.seller, "Иә, бар", "weak-line-msg-1").json()["id"], first.json()["id"])
+        self.assertEqual(self.post(f"/conversations/{cid}/messages", self.buyer, {"body": "Кілтсіз"}).status_code, 201)
+        self.assertEqual(send(self.buyer, "қысқа", "short").status_code, 422)  # not a real key
+        # A key is one chat's own too: the same one in another chat posts there.
+        other = self.post("/conversations", self.buyer, {"listing_id": self.publish()["id"]}).json()["id"]
+        there = self.post(f"/conversations/{other}/messages", self.buyer, {"body": "42 өлшемі бар ма?"},
+                          **{"Idempotency-Key": "weak-line-msg-1"})
+        self.assertEqual(there.status_code, 201, there.text)
+        self.assertNotEqual(there.json()["id"], first.json()["id"])
+        self.assertEqual([m["id"] for m in self.get(f"/conversations/{other}/messages", self.buyer).json()["items"]],
+                         [there.json()["id"]])
+
     def test_either_side_sends_a_clean_photo_in_the_chat(self):
         listing = self.publish()
         cid = self.post("/conversations", self.buyer, {"listing_id": listing["id"]}).json()["id"]

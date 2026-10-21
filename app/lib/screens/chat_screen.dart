@@ -148,6 +148,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   bool _payments = true;
   Object? _loadError; // the first load failed, so there is nothing to show but the error and a retry
 
+  /// The key of the message in the field, kept while the same text is sent again: a send whose answer was lost on
+  /// weak mobile data, tried again, reaches the other side once. A changed text is a new message.
+  String? _sendKey;
+  String? _sendKeyFor;
+
+  /// The message in the field may not have gone: the line above the field says so while its text is unchanged.
+  bool _notSent = false;
+
   Api get _api => SessionScope.of(context).api;
 
   @override
@@ -155,6 +163,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     if (widget.draft case final draft?) _input.text = draft;
+    _input.addListener(_onText);
   }
 
   @override
@@ -196,6 +205,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     super.dispose();
   }
 
+  /// A changed or cleared text is a new message: it gets its own key, and the line about the old one goes.
+  void _onText() {
+    if (_sendKeyFor == null || _input.text.trim() == _sendKeyFor) return;
+    _sendKey = _sendKeyFor = null;
+    if (_notSent) setState(() => _notSent = false);
+  }
+
   Future<void> _fetch() async {
     if (_loading) return;
     _loading = true;
@@ -204,6 +220,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           await _api.messages(widget.conversationId, afterId: _messages.isEmpty ? 0 : _messages.last.id);
       if (!mounted) return;
       final known = {for (final m in _messages) m.id};
+      final me = SessionScope.of(context).me?.id;
+      // A send whose answer was lost may have gone after all: once it shows up here, it is not in the field.
+      if (_notSent &&
+          !_sending &&
+          fresh.any((m) => !known.contains(m.id) && m.senderId == me && m.body == _sendKeyFor)) {
+        _input.clear();
+      }
       setState(() {
         _conversation = conv;
         _loadError = null;
@@ -267,16 +290,25 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Future<void> _send() async {
     final text = _input.text.trim();
     if (text.isEmpty || _sending) return;
+    if (_sendKeyFor != text) {
+      _sendKey = newIdempotencyKey();
+      _sendKeyFor = text;
+    }
     setState(() => _sending = true);
     try {
-      final m = await _api.sendMessage(widget.conversationId, text);
-      _input.clear();
+      final m = await _api.sendMessage(widget.conversationId, text, idempotencyKey: _sendKey);
+      _input.clear(); // drops the key and the note with the text
       setState(() {
         if (!_messages.any((x) => x.id == m.id)) _messages.add(m);
       });
       _toBottom();
     } catch (e) {
-      if (mounted) showError(context, e);
+      if (!mounted) return;
+      // On a lost connection the text stays in the field with a line above it; the same message goes again with a
+      // tap, and arrives once. A refusal from the server is told in its own words.
+      final offline = e is ApiException && e.offline;
+      setState(() => _notSent = offline && _input.text.trim() == text);
+      if (!offline) showError(context, e);
     } finally {
       if (mounted) setState(() => _sending = false);
     }
@@ -290,7 +322,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     try {
       final bytes = await file.readAsBytes();
       final m = await _api.sendChatPhoto(widget.conversationId, bytes, file.name, caption: _input.text.trim());
-      _input.clear();
+      _input.clear(); // the caption went with the photo, so a key kept for that text goes too
       setState(() {
         if (!_messages.any((x) => x.id == m.id)) _messages.add(m);
       });
@@ -373,6 +405,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     ),
         ),
         if (conv?.role == 'seller') _QuickReplies(onPick: _useReply, payments: _payments),
+        if (_notSent) _NotSentLine(onRetry: _sending ? null : _send),
         Material(
           color: scheme.surface,
           child: SafeArea(
@@ -415,6 +448,41 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               ]),
             ),
           ),
+        ),
+      ]),
+    );
+  }
+}
+
+/// Says, above the field and not over it, that the message in it may not have gone, with a way to send it again.
+class _NotSentLine extends StatelessWidget {
+  const _NotSentLine({required this.onRetry});
+  final VoidCallback? onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Container(
+      key: const Key('chat-not-sent'),
+      width: double.infinity,
+      color: scheme.surfaceContainerHigh, // calm: it is said once, in words, with the way out beside it
+      padding: contentPadding(context, const EdgeInsets.fromLTRB(16, 6, 8, 6)),
+      child: Row(children: [
+        Icon(Icons.cloud_off_outlined, size: 20, color: scheme.error),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Semantics(
+            liveRegion: true,
+            child: Text(tr('Байланыс жоқ. Хабарлама жетпеген болуы мүмкін, мәтіні осы жерде тұр.'),
+                style: theme.textTheme.bodyMedium?.copyWith(color: scheme.onSurface)),
+          ),
+        ),
+        TextButton(
+          key: const Key('chat-resend'),
+          onPressed: onRetry,
+          style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+          child: Text(tr('Қайта көру')),
         ),
       ]),
     );

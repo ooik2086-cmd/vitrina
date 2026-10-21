@@ -7,7 +7,7 @@ import statistics
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Header, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -19,7 +19,7 @@ from . import services
 from .deps import current_user, get_db, get_storage, now_utc
 from .errors import ApiError
 from .storage import MAX_UPLOAD_BYTES, Storage, normalize_image
-from .models import Block, Conversation, Listing, Message, Notification, Order, Review, User
+from .models import Block, Conversation, IdempotencyRecord, Listing, Message, Notification, Order, Review, User
 
 router = APIRouter(prefix="/api/v1")
 
@@ -199,14 +199,25 @@ def list_messages(conversation_id: int, after_id: int = 0, user: User = Depends(
     return {"conversation": conversation_out(db, conv, user), "items": [message_out(m) for m in rows]}
 
 
+def message_sent_by(db: Session, user: User, conv: Conversation, key: str) -> Message | None:
+    """The message an earlier request with [key] put in this chat."""
+    seen = IdempotencyRecord.made(db, user.id, f"message:{conv.id}", key)
+    return None if seen is None else db.get(Message, seen.result_id)
+
+
 @router.post("/conversations/{conversation_id}/messages", status_code=201)
 def send_message(conversation_id: int, body: MessageIn, user: User = Depends(current_user),
-                 db: Session = Depends(get_db)):
+                 db: Session = Depends(get_db),
+                 idempotency_key: str | None = Header(default=None, min_length=8, max_length=100)):
+    """With an Idempotency-Key, one per message typed in the app, a message sent again (its answer lost on weak
+    mobile data) is the message the first one put in the chat, never a second copy for the other side."""
     conv = conversation_for(db, conversation_id, user)
     text = body.body.strip()
     if not text:
         raise ApiError(422, "validation", "empty message")
-    return post_message(db, conv, user, text, None)
+    if idempotency_key and (sent := message_sent_by(db, user, conv, idempotency_key)):
+        return message_out(sent)
+    return post_message(db, conv, user, text, None, key=idempotency_key)
 
 
 @router.post("/conversations/{conversation_id}/photos", status_code=201)
@@ -263,13 +274,16 @@ def check_rate(db: Session, user: User) -> None:
         raise ApiError(429, "rate_limited")
 
 
-def post_message(db: Session, conv: Conversation, user: User, text: str, photo_url: str | None) -> dict:
+def post_message(db: Session, conv: Conversation, user: User, text: str, photo_url: str | None,
+                 key: str | None = None) -> dict:
     services.ensure_not_blocked(db, conv.buyer_id, conv.seller_id)
     check_rate(db, user)
     msg = Message(conversation_id=conv.id, sender_id=user.id, body=text, photo_url=photo_url,
                   contact_warning=bool(CONTACT_RE.search(text)))
     db.add(msg)
     db.flush()
+    if key:
+        db.add(IdempotencyRecord(user_id=user.id, scope=f"message:{conv.id}", key=key, result_id=msg.id))
     conv.last_message_at = now_utc()
     if user.id == conv.buyer_id:
         conv.buyer_last_read_id = msg.id
@@ -281,7 +295,15 @@ def post_message(db: Session, conv: Conversation, user: User, text: str, photo_u
     preview_en = text[:120] if text else "📷 Photo"
     services.notify(db, other, "message", f"Жаңа хабарлама: {preview_kk}",
                     f"Новое сообщение: {preview_ru}", f"New message: {preview_en}", conversation_id=conv.id)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # The same message arrived twice at once and the other request won: answer with its message, add none.
+        db.rollback()
+        sent = message_sent_by(db, user, conv, key) if key else None
+        if sent is None:
+            raise
+        return message_out(sent)
     return message_out(msg)
 
 

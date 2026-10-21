@@ -1387,8 +1387,11 @@ class Api {
     );
   }
 
-  Future<ChatMessage> sendMessage(int conversationId, String body) async => ChatMessage.fromJson(
-      await _send('POST', '/conversations/$conversationId/messages', body: {'body': body}) as Map<String, dynamic>);
+  /// With [idempotencyKey], one per message typed, the same message sent again after a lost answer is posted once.
+  Future<ChatMessage> sendMessage(int conversationId, String body, {String? idempotencyKey}) async =>
+      ChatMessage.fromJson(await _send('POST', '/conversations/$conversationId/messages',
+          body: {'body': body},
+          headers: {if (idempotencyKey != null) 'Idempotency-Key': idempotencyKey}) as Map<String, dynamic>);
 
   /// A photo in the chat, with an optional caption. Cleaned of metadata on the server like any upload.
   Future<ChatMessage> sendChatPhoto(int conversationId, List<int> bytes, String filename, {String caption = ''}) async {
