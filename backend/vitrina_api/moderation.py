@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from vitrina_core.catalog import compute_bounds
 
 from .models import Listing, Media
-from .social import CONTACT_RE
+from .social import looks_like_contact
 
 log = logging.getLogger("vitrina.moderation")
 
@@ -37,9 +37,9 @@ CHECKED_ANGLES = ("front", "outer", "inner", "back", "top", "sole", "detail", "l
 FRAME_SAMPLE = 4
 
 REASONS = {
-    "contacts": ("Атауда не сипаттамада телефон, сілтеме не мессенджер бар. Байланыс тек VITRINA чатында.",
-                 "В названии или описании есть телефон, ссылка или мессенджер. Связь только в чате VITRINA.",
-                 "The title or description has a phone number, link or messenger. Contact happens only in VITRINA chat."),
+    "contacts": ("Атауда не сипаттамада телефон, сілтеме, почта, @атау не мессенджер бар. Байланыс тек VITRINA чатында.",
+                 "В названии или описании есть телефон, ссылка, почта, @имя или мессенджер. Связь только в чате VITRINA.",
+                 "The title or description has a phone number, link, e-mail, @name or messenger. Contact happens only in VITRINA chat."),
     "replica": ("Мәтінде көшірме тауар туралы сөз бар. Көшірме аяқкиім сатуға болмайды.",
                 "В тексте упоминается копия. Продавать копии обуви нельзя.",
                 "The text mentions a replica. Selling replica shoes isn't allowed."),
@@ -79,7 +79,7 @@ def ensure_hashes(db: Session, storage, listing: Listing) -> None:
 
 
 def has_contacts(listing: Listing) -> bool:
-    return any(CONTACT_RE.search(t or "") for t in (listing.title, listing.description, listing.defects))
+    return any(looks_like_contact(t) for t in (listing.title, listing.description, listing.defects))
 
 
 def mentions_replica(listing: Listing) -> bool:

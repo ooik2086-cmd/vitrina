@@ -2157,6 +2157,29 @@ class ModerationTests(ApiTestCase):
         self.assertEqual(listing["status"], "published")
         self.assertEqual(listing["moderation"]["flags"], [])
 
+    def test_a_description_listing_sizes_is_not_held_for_contacts(self):
+        lid = self.draft(description="Өлшемдер: 38 39 40 41 42. Табаны 26,5 см.")
+        r = self.post(f"/listings/{lid}/publish", self.seller).json()
+        self.assertNotIn("contacts", (r.get("moderation") or {}).get("flags", []))
+        lid = self.draft(title="New Balance 574 40 41 42 43", description="Табаны 26,5 см, 2 жұп қалды.")
+        r = self.post(f"/listings/{lid}/publish", self.seller).json()
+        self.assertNotIn("contacts", (r.get("moderation") or {}).get("flags", []))
+        lid = self.draft(description="Көбірек сурет инстаграмда: @qadam_store")
+        r = self.post(f"/listings/{lid}/publish", self.seller).json()
+        self.assertEqual(r["status"], "moderation")
+        self.assertIn("contacts", r["moderation"]["flags"])
+
+    def test_a_price_edit_never_holds_a_page_over_words_a_newer_rule_reads(self):
+        lid = self.publish(description="Бір маусым киілген.")["id"]
+        with self.db() as db:  # written before the rule read Instagram
+            db.get(Listing, lid).description = "Көбірек сурет Instagram-да"
+            db.commit()
+        r = self.c.patch(f"/api/v1/listings/{lid}", json={"price_tiyn": 2_100_000}, headers=self.h(self.seller))
+        self.assertEqual(r.json()["status"], "published", r.text)
+        r = self.c.patch(f"/api/v1/listings/{lid}", json={"description": "Сурет Instagram-да"},
+                         headers=self.h(self.seller))
+        self.assertEqual(r.json()["status"], "moderation")  # words the seller writes now are read by the new rule
+
     def test_contacts_and_replica_words_go_to_the_queue_with_reasons(self):
         lid = self.draft(description="Жазыңыз WhatsApp +7 701 123 45 67")
         r = self.post(f"/listings/{lid}/publish", self.seller).json()
@@ -3054,6 +3077,21 @@ class QuestionTests(ApiTestCase):
         self.assertEqual(self.c.delete(f"/api/v1/questions/{qid}", headers=self.h(self.buyer)).status_code, 404)
         self.c.delete(f"/api/v1/questions/{qid}", headers=self.h(self.seller))
         self.assertEqual(self.get(url).json()["items"], [])
+
+    def test_a_list_of_sizes_is_an_answer_not_a_phone_number(self):
+        """A shoe seller lists sizes: «39 40 41 42 43» has ten digits but is no phone, so the answer goes through,
+        while Instagram and an e-mail address are refused like a phone."""
+        listing = self.publish()
+        url = f"/listings/{listing['id']}/questions"
+        qid = self.post(url, self.buyer, {"text": "Қандай өлшемдер бар?"}).json()["id"]
+        r = self.post(f"/questions/{qid}/answer", self.seller, {"text": "Иә, 39 40 41 42 43 өлшемдері бар"})
+        self.assertEqual(r.status_code, 200, r.text)
+        for text in ("Инстаграмда көбірек сурет бар", "Жазыңыз: qadam@mail.ru", "Ватсапқа жазыңыз"):
+            r = self.post(f"/questions/{qid}/answer", self.seller, {"text": text})
+            self.assertEqual(r.json()["code"], "contacts_not_allowed", text)
+            self.assertIn("почта, @атау", r.json()["message_kk"])  # the refusal names what the seller wrote
+        for text in ("Бағасы 15 000 - 20 000 теңге", "Бойы 92 98 104 110 116", "US 8 8.5 9 9.5 10"):
+            self.assertEqual(self.post(f"/questions/{qid}/answer", self.seller, {"text": text}).status_code, 200, text)
 
     def test_the_seller_alone_gets_the_number_waiting_all_of_them(self):
         listing = self.publish()

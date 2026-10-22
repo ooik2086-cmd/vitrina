@@ -24,9 +24,71 @@ from .models import Block, Conversation, IdempotencyRecord, Listing, Message, No
 router = APIRouter(prefix="/api/v1")
 
 MESSAGES_PER_MINUTE = 20
-# Phone numbers (7-12 digits with separators), links and messenger handles.
-CONTACT_RE = re.compile(r"(\+?\d[\d\s\-()]{8,}\d)|(https?://|www\.)|(\b(whats\s?app|telegram|t\.me|ватсап|телеграм)\b)",
-                        re.IGNORECASE)
+# Links, messengers, Instagram, e-mail addresses and @names. The app keeps a copy (app/lib/quick_replies.dart,
+# looksLikeContact) for the ready answers it offers in public text; keep the two the same. Both sides' tests read the
+# cases in contracts/contact_cases.json.
+_LINK_RE = re.compile(r"(https?://|www\.)"
+                      # With any ending, as Kazakh and Russian add them: ватсапқа, телеграмда, инстаға, в инсту.
+                      r"|\b(whats\s?app?|wats?app|telegram|instagram|viber|ватсап|вотсап|вацап|вотцап|уатсап|телеграм|телег[аеиуы](?!й)"
+                      r"|инстаграм|вайбер|директ(?!ор|ив))"
+                      r"|\b(тг|tg)\s*[:@]"  # «тг: qadam», but «500 тг» is tenge
+                      r"|\b(t\.me|wa\.me|insta(?!ll|nt|nce|x))"
+                      r"|\bинст[аеуыо](?!лл|нц|кс)"  # инста, инсту, инсте, but not инсталляция, инстанция, Инстакс
+                      r"|[\w.+-]{1,64}@([\w-]+\.[a-z]{2,}|(gmail|mail|yandex|inbox|bk|list|icloud|outlook|hotmail)\b)"
+                      r"|(?<![\w@.])@[a-z0-9_.]{3,}"
+                      # A bare site: qadam.kz, linktr.ee/qadam.
+                      r"|(?<![\w@.-])[a-z0-9-]{2,}\.(kz|ru|com|net|org|me|cc|ee|io|su|uz|kg|link|site|shop|store|online)\b",
+                      re.IGNORECASE)
+# A run of digits and separators that may hold a phone number. ASCII digits only, as the app reads them.
+_RUN_RE = re.compile(r"\+?[0-9][0-9\s\-().,]*[0-9]")
+_TOKEN_RE = re.compile(r"[0-9]{1,2}[.,]5(?![0-9])|[0-9]+")  # 38.5 is one size
+# The digits of a phone number written with any separators: a Kazakh one without its 8 (701 123 45 67), with 8 or
+# +7, a Russian 8 9.., a Central Asian 99..; with a +, any international one.
+_PHONE_RE = re.compile(r"7[0-9]{9}|[78][0-9]{10}|99[0-9]{10}")
+# Letters that look like Latin ones, so that «whаtsapp» typed with a Cyrillic а is still a messenger.
+_LATIN_LOOK = str.maketrans("аеорсхукмтвіİı", "aeopcxykmtbiii")
+_CYRILLIC_LOOK = str.maketrans("aeopcxykmtABEKMHOPCTXY", "аеорсхукмтАВЕКМНОРСТХУ")  # and «Тeлеграм» with a Latin e
+_ZERO_RE = re.compile(r"(?<=[0-9])[OoОо](?=[0-9])")  # 8 7O1: a letter O between digits
+_INVISIBLE = dict.fromkeys(map(ord, "\u00ad\u180e\u200b\u200c\u200d\u2060\ufeff"))
+_FULLWIDTH = {c: c - 0xFEE0 for c in range(0xFF01, 0xFF5F)}  # ８７０１ and ＠ typed on some keyboards
+
+
+def _sizes(tokens: list[str]) -> bool:
+    """Shoe sizes going up, 36 37 38 or 7 7.5 8: a list of them is not a phone number (a phone's first pair, 70-89,
+    is never a size)."""
+    try:
+        values = [float(t.replace(",", ".")) for t in tokens]
+    except ValueError:
+        return False
+    return len(values) > 1 and all(v <= 60 for v in values) and all(a < b for a, b in zip(values, values[1:]))
+
+
+def _has_phone(run: str) -> bool:
+    tokens = _TOKEN_RE.findall(run)
+    for i in range(len(tokens)):
+        digits = ""
+        for j in range(i, len(tokens)):
+            if j > i and tokens[j] == "000":
+                break  # prices: 75 000 80 000
+            digits += re.sub(r"[^0-9]", "", tokens[j])
+            if len(digits) > 15:
+                break
+            if len(digits) < 10 or _sizes(tokens[i:j + 1]):
+                continue
+            if (i == 0 and run.startswith("+")) or _PHONE_RE.fullmatch(digits):
+                return True
+    return False
+
+
+def looks_like_contact(text: str | None) -> bool:
+    """A phone number, a link, a site, an e-mail, an @name or a messenger, which public text and the shop page refuse
+    and the chat marks. Sizes, prices and dates are not phones."""
+    if not text:
+        return False
+    text = _ZERO_RE.sub("0", text.translate(_INVISIBLE).translate(_FULLWIDTH))
+    if any(_LINK_RE.search(t) for t in (text, text.translate(_LATIN_LOOK), text.translate(_CYRILLIC_LOOK))):
+        return True
+    return any(_has_phone(run.group()) for run in _RUN_RE.finditer(text))
 
 
 class ConversationIn(BaseModel):
@@ -318,7 +380,7 @@ def post_message(db: Session, conv: Conversation, user: User, text: str, photo_u
     services.ensure_not_blocked(db, conv.buyer_id, conv.seller_id)
     check_rate(db, user)
     msg = Message(conversation_id=conv.id, sender_id=user.id, body=text, photo_url=photo_url,
-                  contact_warning=bool(CONTACT_RE.search(text)))
+                  contact_warning=looks_like_contact(text))
     db.add(msg)
     db.flush()
     if key:

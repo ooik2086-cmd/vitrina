@@ -260,18 +260,12 @@ class ShopAboutTile extends StatelessWidget {
 
   Future<void> _edit(BuildContext context) async {
     final session = SessionScope.of(context);
-    final saved = await showDialog<String>(
+    final saved = await showDialog<bool>(
       context: context,
       builder: (_) => _ShopAboutDialog(initial: session.me?.shopAbout ?? ''),
     );
-    if (saved == null || !context.mounted) return;
-    try {
-      session.update(await session.api.setShopAbout(saved.isEmpty ? null : saved));
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr('Дүкен беті жаңартылды.'))));
-      }
-    } catch (e) {
-      if (context.mounted) showError(context, e);
+    if (saved == true && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr('Дүкен беті жаңартылды.'))));
     }
   }
 
@@ -301,6 +295,8 @@ class _ShopAboutDialog extends StatefulWidget {
 
 class _ShopAboutDialogState extends State<_ShopAboutDialog> {
   late final _text = TextEditingController(text: widget.initial);
+  bool _busy = false;
+  Object? _error; // a refusal stays under the field with the text, so the seller can fix it and save again
 
   @override
   void dispose() {
@@ -308,8 +304,26 @@ class _ShopAboutDialogState extends State<_ShopAboutDialog> {
     super.dispose();
   }
 
+  Future<void> _save() async {
+    final session = SessionScope.of(context);
+    final text = _text.text.trim();
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      session.update(await session.api.setShopAbout(text.isEmpty ? null : text));
+      if (mounted) Navigator.pop(context, true);
+    } catch (e) {
+      if (mounted) setState(() => _error = e);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) => AlertDialog(
+        scrollable: true, // the whole refusal reads at 2× text too
         title: Text(tr('Дүкен туралы')),
         content: TextField(
           key: const Key('shop-about-field'),
@@ -317,15 +331,18 @@ class _ShopAboutDialogState extends State<_ShopAboutDialog> {
           autofocus: true,
           maxLines: 5,
           maxLength: 500,
+          onChanged: (_) {
+            if (_error != null) setState(() => _error = null);
+          },
           decoration: InputDecoration(
-              hintText: tr('Мысалы: жөнелту мерзімі, қайтару шарты, жұмыс уақыты. Телефон мен сілтеме жазылмайды.')),
+              hintText: tr('Мысалы: жөнелту мерзімі, қайтару шарты, жұмыс уақыты. Телефон мен сілтеме жазылмайды.'),
+              errorText: _error == null ? null : errorText(_error),
+              errorMaxLines: 12),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: Text(tr('Болдырмау'))),
           FilledButton(
-              key: const Key('shop-about-save'),
-              onPressed: () => Navigator.pop(context, _text.text.trim()),
-              child: Text(tr('Сақтау'))),
+              key: const Key('shop-about-save'), onPressed: _busy ? null : _save, child: Text(tr('Сақтау'))),
         ],
       );
 }

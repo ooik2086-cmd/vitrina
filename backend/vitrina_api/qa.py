@@ -14,7 +14,7 @@ from . import services
 from .deps import current_user, get_db, now_utc, optional_user
 from .errors import ApiError
 from .models import Listing, Question, User, question_waiting
-from .social import CONTACT_RE
+from .social import looks_like_contact
 
 router = APIRouter(prefix="/api/v1")
 
@@ -31,7 +31,7 @@ class AnswerIn(BaseModel):
 
 def clean(text: str) -> str:
     text = " ".join(text.split())
-    if CONTACT_RE.search(text):
+    if looks_like_contact(text):
         raise ApiError(422, "contacts_not_allowed")
     return text
 

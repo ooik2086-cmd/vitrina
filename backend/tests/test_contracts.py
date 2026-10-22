@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from vitrina_api.serializers import one_turn, showcase_parts
+from vitrina_api.social import looks_like_contact
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -42,6 +43,22 @@ class ShowcasePartsTest(unittest.TestCase):
             with self.subTest(key):
                 self.assertEqual({"sizes": [len(p) for p in parts], "starts": [p[0].original_url for p in parts],
                                   "turn": len(one_turn(media)[0])}, want[key])
+
+
+class ContactRuleTest(unittest.TestCase):
+    """Public text refuses contacts; the app leaves the same ones out of the ready answers it offers there."""
+
+    def test_cases_shared_with_the_app(self):
+        cases = json.loads((ROOT / "contracts/contact_cases.json").read_text())
+        self.assertGreater(len(cases["contact"]), 10)
+        self.assertGreater(len(cases["not_contact"]), 10)
+        for text in cases["contact"]:
+            with self.subTest(text):
+                self.assertTrue(looks_like_contact(text))
+        for text in cases["not_contact"]:
+            with self.subTest(text):
+                self.assertFalse(looks_like_contact(text))
+
 
 if __name__ == "__main__":
     unittest.main()

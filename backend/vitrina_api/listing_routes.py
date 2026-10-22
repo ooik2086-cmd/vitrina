@@ -703,7 +703,12 @@ def recheck(db: Session, storage: Storage, listing: Listing, changed: set[str]) 
     listing.moderation_cleared = ",".join(c for c in split_codes(listing.moderation_cleared) if c not in stale) or None
     flags = moderation.check(db, storage, listing)
     listing.moderation_flags = ",".join(flags) or None
-    if set(flags) - set(split_codes(listing.moderation_cleared)):
+    held = set(flags) - set(split_codes(listing.moderation_cleared))
+    if not changed & {"text", "name"}:
+        # Words the seller did not touch were checked when they were written: a newer word rule (stage 88 began
+        # reading Instagram and e-mail) never takes a page off sale over a price or a count.
+        held -= set(CLEARANCE_OF["text"])
+    if held:
         listing.status = "moderation"
 
 

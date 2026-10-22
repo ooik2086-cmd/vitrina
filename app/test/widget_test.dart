@@ -2760,6 +2760,57 @@ void main() {
     expect(find.text('Қайтару 3 күн ішінде.'), findsOneWidget);
   });
 
+  testWidgets('a shop page note the server refuses stays in the dialog with the reason, to fix and save again',
+      (tester) async {
+    final sent = <String?>[];
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async {
+          final text = (jsonDecode(req.body) as Map)['text'] as String?;
+          sent.add(text);
+          if (text!.contains('@')) {
+            return http.Response(
+                jsonEncode({
+                  'code': 'contacts_not_allowed',
+                  'message_kk': 'Телефон, сілтеме, почта, @атау не мессенджер жазуға болмайды.',
+                }),
+                422,
+                headers: {'content-type': 'application/json; charset=utf-8'});
+          }
+          return http.Response(
+              jsonEncode({'id': 1, 'phone': '+77010000001', 'is_seller': true, 'shop_about': text}), 200,
+              headers: {'content-type': 'application/json; charset=utf-8'});
+        }));
+    final session = Session(api)..update(Me.fromJson({'id': 1, 'phone': '+77010000001', 'is_seller': true}));
+    await tester
+        .pumpWidget(SessionScope(session: session, child: const MaterialApp(home: Scaffold(body: ShopAboutTile()))));
+    await tester.tap(find.byKey(const Key('shop-about-tile')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Болдырмау'));
+    await tester.pumpAndSettle();
+    expect(sent, isEmpty, reason: 'cancel saves nothing');
+    expect(find.text('Дүкен беті жаңартылды.'), findsNothing);
+    await tester.tap(find.byKey(const Key('shop-about-tile')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('shop-about-field')), 'Қайтару 3 күн. Жазыңыз: qadam@mail.ru');
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('shop-about-save')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('shop-about-field')), findsOneWidget, reason: 'the dialog stays open');
+    expect(find.text('Телефон, сілтеме, почта, @атау не мессенджер жазуға болмайды.'), findsOneWidget);
+    expect(find.text('Қайтару 3 күн. Жазыңыз: qadam@mail.ru'), findsOneWidget, reason: 'the text is kept');
+    expect(find.text('Дүкен беті жаңартылды.'), findsNothing);
+    await tester.enterText(find.byKey(const Key('shop-about-field')), 'Қайтару 3 күн.');
+    await tester.pump();
+    expect(find.text('Телефон, сілтеме, почта, @атау не мессенджер жазуға болмайды.'), findsNothing);
+    await tester.tap(find.byKey(const Key('shop-about-save')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('shop-about-field')), findsNothing);
+    expect(sent, ['Қайтару 3 күн. Жазыңыз: qadam@mail.ru', 'Қайтару 3 күн.']);
+    expect(find.text('Қайтару 3 күн.'), findsOneWidget);
+    expect(find.text('Дүкен беті жаңартылды.'), findsOneWidget);
+  });
+
   testWidgets('turning an optional alert off saves it, and a failed save puts the switch back', (tester) async {
     final sent = <Map<String, dynamic>>[];
     var on = {'price_drop': true, 'saved_search': true, 'followed_shop': true, 'back_in_stock': true};

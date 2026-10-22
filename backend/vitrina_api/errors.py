@@ -176,9 +176,12 @@ MESSAGES: dict[str, tuple[str, str, str]] = {  # code: (Kazakh, Russian, English
     "promo_with_offer": ("Келісілген бағаға промокод қосылмайды.",
                          "Промокод не суммируется с согласованной ценой.",
                          "A promo code can't be combined with an agreed price."),
-    "contacts_not_allowed": ("Телефон, сілтеме не мессенджер жазуға болмайды. Байланыс тек VITRINA чатында.",
-                             "Нельзя указывать телефон, ссылку или мессенджер. Связь только в чате VITRINA.",
-                             "Phone numbers, links and messengers aren't allowed. Contact happens only in VITRINA chat."),
+    "contacts_not_allowed": ("Телефон, сілтеме, почта, @атау не мессенджер (WhatsApp, Telegram, Instagram) жазуға "
+                             "болмайды. Байланыс тек VITRINA чатында.",
+                             "Нельзя указывать телефон, ссылку, почту, @имя или мессенджер (WhatsApp, Telegram, "
+                             "Instagram). Связь только в чате VITRINA.",
+                             "Phone numbers, links, e-mail, @names and messengers (WhatsApp, Telegram, Instagram) "
+                             "aren't allowed. Contact happens only in VITRINA chat."),
     "too_many_questions": ("Алдыңғы сұрақтарыңызға жауап күтіңіз.",
                            "Дождитесь ответа на предыдущие вопросы.",
                            "Wait for answers to your earlier questions."),

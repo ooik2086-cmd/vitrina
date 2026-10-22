@@ -2,6 +2,7 @@
 // a tap and a check instead of typing on a phone keyboard.
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -179,10 +180,29 @@ void main() {
     ]);
     await open(tester, _Server());
     await answer(tester);
-    expect(chips(), findsNWidgets(3));
-    for (final ok in ['Иә, бар.', 'Ватсапқа жазыңыз', 'Өлшемі 42']) {
-      expect(chip(ok), findsOneWidget, reason: ok); // 'Ватсапқа' is not the word on its own, as on the server
+    expect(chips(), findsNWidgets(2));
+    for (final ok in ['Иә, бар.', 'Өлшемі 42']) {
+      expect(chip(ok), findsOneWidget, reason: ok);
     }
+  });
+
+  test('the contact rule reads the cases shared with the server alike', () {
+    final cases = jsonDecode(File('../contracts/contact_cases.json').readAsStringSync()) as Map;
+    expect((cases['contact'] as List).length, greaterThan(10));
+    for (final t in cases['contact'] as List) {
+      expect(looksLikeContact(t as String), isTrue, reason: t);
+    }
+    for (final t in cases['not_contact'] as List) {
+      expect(looksLikeContact(t as String), isFalse, reason: t);
+    }
+  });
+
+  testWidgets('a ready answer listing sizes is offered: it is no phone number', (tester) async {
+    await saveQuickReplies(['Иә, 39 40 41 42 43 өлшемдері бар', 'Ватсапқа жазыңыз']);
+    await open(tester, _Server());
+    await answer(tester);
+    expect(chips(), findsOneWidget);
+    expect(chip('Иә, 39 40 41 42 43 өлшемдері бар'), findsOneWidget);
   });
 
   testWidgets('a refusal shows in the sheet, under the words, not behind it', (tester) async {
