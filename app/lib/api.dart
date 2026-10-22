@@ -41,10 +41,18 @@ class ApiException implements Exception {
   /// The server's message in the interface language. A contacts refusal also quotes what the server found, so the
   /// seller knows which part to take out.
   String get message {
-    final text = _local ? tr(messageKk) : pick(messageKk, messageRu, messageEn);
-    final found = code == 'contacts_not_allowed' ? detail : null;
     // The action first: at large text a long message may be cut, and this is the line the seller needs.
-    return found == null || found.isEmpty ? text : '${trf('Мынаны алып тастаңыз: «{0}»', [found])}\n$text';
+    return foundLine == null ? reason : '$foundLine\n$reason';
+  }
+
+  /// The message alone, in the interface language, without the line naming what was found.
+  String get reason => _local ? tr(messageKk) : pick(messageKk, messageRu, messageEn);
+
+  /// For a contacts refusal, the line naming what the server found: «Мынаны алып тастаңыз: «a», «b»».
+  String? get foundLine {
+    final found = code == 'contacts_not_allowed' ? detail : null;
+    if (found == null || found.isEmpty) return null;
+    return trf('Мынаны алып тастаңыз: «{0}»', [appLanguage.value == 'en' ? found.replaceAll('», «', '”, “') : found]);
   }
 
   /// No answer at all: no network, the server is down, or it did not answer in time.

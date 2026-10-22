@@ -325,25 +325,31 @@ class _ShopAboutDialogState extends State<_ShopAboutDialog> {
   Widget build(BuildContext context) => AlertDialog(
         scrollable: true, // the whole refusal reads at 2× text too
         title: Text(tr('Дүкен туралы')),
-        content: TextField(
-          key: const Key('shop-about-field'),
-          controller: _text,
-          autofocus: true,
-          maxLines: 5,
-          maxLength: 500,
-          buildCounter: nearLimitCounter,
-          onChanged: (_) {
-            if (_error != null) setState(() => _error = null);
-          },
-          decoration: InputDecoration(
-              hintText: tr('Мысалы: жөнелту мерзімі, қайтару шарты, жұмыс уақыты. Телефон мен сілтеме жазылмайды.'),
-              errorText: _error == null ? null : errorText(_error),
-              errorMaxLines: 30),
-        ),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          TextField(
+            key: const Key('shop-about-field'),
+            controller: _text,
+            autofocus: true,
+            maxLines: 5,
+            maxLength: 500,
+            buildCounter: nearLimitCounter,
+            onChanged: (_) {
+              if (_error != null) setState(() => _error = null);
+            },
+            decoration: InputDecoration(
+                hintText: tr('Мысалы: жөнелту мерзімі, қайтару шарты, жұмыс уақыты. Телефон мен сілтеме жазылмайды.'),
+                errorText: _error == null ? null : refusalText(_error, _text.text),
+                errorMaxLines: 30),
+          ),
+          RemoveContactsButton(
+              error: _error,
+              controller: _text,
+              showRule: true, // the hint that says the rule is hidden while there is text
+              onRemoved: (clean) => setState(() => _error = clean ? null : moreContacts())),
+        ]),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: Text(tr('Болдырмау'))),
-          FilledButton(
-              key: const Key('shop-about-save'), onPressed: _busy ? null : _save, child: Text(tr('Сақтау'))),
+          FilledButton(key: const Key('shop-about-save'), onPressed: _busy ? null : _save, child: Text(tr('Сақтау'))),
         ],
       );
 }

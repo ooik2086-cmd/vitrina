@@ -5,6 +5,7 @@ import 'package:flutter/rendering.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../net_image.dart';
+import '../quick_replies.dart';
 import '../api.dart';
 import '../labels.dart';
 import '../screens/listing_screen.dart';
@@ -46,6 +47,126 @@ Widget? nearLimitCounter(BuildContext context,
     maxLength != null && currentLength >= maxLength * 0.8
         ? Text('$currentLength/$maxLength', style: Theme.of(context).textTheme.bodySmall)
         : null;
+
+/// The pieces a contacts refusal names, as the server quoted them («a», «b»), a piece cut short ending in «…»; none
+/// for any other error.
+List<String> refusedContacts(Object? error) {
+  if (error is! ApiException || error.code != 'contacts_not_allowed') return const [];
+  return [
+    for (final piece in (error.detail ?? '').split('», «'))
+      if (piece.isNotEmpty) piece
+  ];
+}
+
+/// Where [piece] stands in the words as a whole word. The server quotes it from text with each run of spaces made
+/// one, so any run of spaces or line breaks stands for a space.
+RegExp _pieceIn(String piece) =>
+    RegExp('(?<![\\p{L}\\p{N}_])${piece.split(RegExp(r'\s+')).map(RegExp.escape).join(r'\s+')}(?![\\p{L}\\p{N}_])',
+        unicode: true);
+
+/// The pieces one tap can take out of [text]: all that the refusal names, or none when any of them is not in the
+/// words as written (a piece cut short ends in «…», so it is not), so the tap never leaves a named contact behind.
+List<String> removableContacts(Object? error, String text) {
+  final pieces = refusedContacts(error);
+  if (pieces.any((p) => !_pieceIn(p).hasMatch(text))) return const [];
+  return pieces;
+}
+
+const _gone = '\u0000';
+const _joiners = ',;:–—-';
+const _closers = '.,;:!?)';
+
+/// [text] with [pieces] taken out. Only the lines that held them change: the gap closes with one space, a label's
+/// colon or a comma left with nothing to join goes too, and a line left empty is dropped.
+String withoutPieces(String text, List<String> pieces) {
+  var out = text;
+  for (final piece in [...pieces]..sort((a, b) => b.length - a.length)) {
+    out = out.replaceAll(_pieceIn(piece), _gone); // the longest first, so a shorter one cannot split it
+  }
+  out = out.replaceAll(RegExp('[(«"“„]\\s*$_gone\\s*[)»"”“]'), _gone); // brackets or quotes left empty go with it
+  final lines = <String>[];
+  for (var line in out.split('\n')) {
+    if (!line.contains(_gone)) {
+      lines.add(line);
+      continue;
+    }
+    while (line.contains(_gone)) {
+      final at = line.indexOf(_gone);
+      var left = line.substring(0, at).trimRight();
+      var right = line.substring(at + 1).trimLeft();
+      if (left.isNotEmpty &&
+          _joiners.contains(left[left.length - 1]) &&
+          (right.isEmpty || _closers.contains(right[0]) || right[0] == _gone)) {
+        left = left.substring(0, left.length - 1).trimRight(); // «Жазыңыз: …» at the end: «Жазыңыз»
+      }
+      if (left.isEmpty && right.isNotEmpty && _joiners.contains(right[0])) {
+        right = right.substring(1).trimLeft(); // «…, сурет көп» at the start: «сурет көп»
+      }
+      final glue = left.isEmpty || right.isEmpty || _closers.contains(right[0]) ? '' : ' ';
+      line = '$left$glue$right';
+    }
+    if (line.trim().isNotEmpty) lines.add(line);
+  }
+  return lines.join('\n').trim();
+}
+
+/// A refusal as shown under a field: when [RemoveContactsButton] can take every named piece out, only the line naming
+/// them, so the button stands right under it, even at large text; otherwise the whole refusal.
+String refusalText(Object? error, String text) {
+  if (error is ApiException && removableContacts(error, text).isNotEmpty) return error.foundLine ?? errorText(error);
+  return errorText(error);
+}
+
+/// Under a refused field: one tap takes out what the server found, so a seller need not hunt for it in her words.
+/// Nothing is sent: she sees the rest and sends it herself. [onRemoved] hears whether the rest is clean by the app's
+/// own copy of the rule (the server names three at most).
+class RemoveContactsButton extends StatelessWidget {
+  const RemoveContactsButton(
+      {super.key, required this.error, required this.controller, required this.onRemoved, this.showRule = false});
+  final Object? error;
+  final TextEditingController controller;
+  final ValueChanged<bool> onRemoved;
+
+  /// Also says the rule under the button, where nothing else near the field does.
+  final bool showRule;
+
+  @override
+  Widget build(BuildContext context) {
+    final pieces = removableContacts(error, controller.text);
+    if (pieces.isEmpty) return const SizedBox.shrink();
+    final theme = Theme.of(context);
+    final button = Align(
+      alignment: AlignmentDirectional.centerStart,
+      child: FilledButton.tonalIcon(
+        key: const Key('remove-contacts'),
+        style: FilledButton.styleFrom(minimumSize: const Size(48, 48)),
+        icon: const Icon(Icons.backspace_outlined),
+        label: Text(tr('Мәтіннен алып тастау')),
+        onPressed: () {
+          final text = withoutPieces(controller.text, pieces);
+          controller.value = TextEditingValue(text: text, selection: TextSelection.collapsed(offset: text.length));
+          final clean = !looksLikeContact(text);
+          onRemoved(clean);
+          SemanticsService.sendAnnouncement(
+              View.of(context),
+              tr(clean ? 'Байланыс мәтіннен алынды.' : 'Мәтінде тағы байланыс бар. Оны да алып тастаңыз.'),
+              Directionality.of(context));
+        },
+      ),
+    );
+    if (!showRule) return button;
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+      button,
+      Text((error as ApiException).reason,
+          key: const Key('remove-contacts-rule'),
+          style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+    ]);
+  }
+}
+
+/// What a tap that left a contact behind shows under the field.
+ApiException moreContacts() =>
+    ApiException.local(422, 'contacts_left', 'Мәтінде тағы байланыс бар. Оны да алып тастаңыз.');
 
 /// A failed load in people's words: the server's own message when it sent one, never a raw exception.
 String errorText(Object? error) => error is ApiException ? error.message : tr('Серверге қосылу мүмкін болмады.');

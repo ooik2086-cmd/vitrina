@@ -68,6 +68,11 @@ class FoundContactTest(unittest.TestCase):
         cases = {
             "Сұрақтар болса WhatsApp: +7 701 555 12 34": "WhatsApp: +7 701 555 12 34",  # the word and its number
             "тг: qadam": "тг: qadam",
+            "Telegram: @qadam.kz, сурет көп": "Telegram: @qadam.kz",
+            "Instagram: сурет көп": "Instagram",  # only a Latin name after the colon goes with the word
+            "тг: Аружан апай": "тг",
+            "WhatsApp: жазыңыз": "WhatsApp",
+            "Telegram: qa": "Telegram",
             "Instagram, qadam@mail.ru, 8 701 123 45 67, t.me/q": "Instagram», «qadam@mail.ru», «8 701 123 45 67",
             "тел (8 701 123 45 67)": "8 701 123 45 67",
             "(70) 11-23-45-67": "(70) 11-23-45-67",

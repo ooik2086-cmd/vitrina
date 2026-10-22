@@ -575,12 +575,12 @@ const en = <String, String>{
   'Барлығы ({0})': 'All ({0})',
   'Жауабыңыз': 'Your reply',
   'Жауапсыз: {0}': 'Unanswered: {0}',
-  'Жауапты барлық сатып алушы көреді. Телефон мен сілтеме жазбаңыз.':
-      'All buyers will see the reply. Don\'t include phone numbers or links.',
+  'Жауапты барлық сатып алушы көреді. Телефон, сілтеме, почта, @атау не мессенджер жазбаңыз.':
+      'All buyers will see the reply. Don\'t include phone numbers, links, email, @names or messengers.',
   'Жауапты өзгерту': 'Edit reply',
   'Мысалы: өлшемі кішілеу ме? Қорабы бар ма?': 'For example: does it run small? Is there a box?',
-  'Сатушы жауап бергенде сұрақ пен жауапты барлық сатып алушы көреді. Телефон мен сілтеме жазбаңыз.':
-      'Once the seller replies, all buyers will see the question and answer. Don\'t include phone numbers or links.',
+  'Сатушы жауап бергенде сұрақ пен жауапты барлық сатып алушы көреді. Телефон, сілтеме, почта, @атау не мессенджер жазбаңыз.':
+      'Once the seller replies, all buyers will see the question and answer. Don\'t include phone numbers, links, email, @names or messengers.',
   'Сатушыға сұрақ': 'Question for the seller',
   'Сатып алушылардың сұрақтарына жауап беру': 'Answer buyer questions',
   'Сұрақ қою': 'Ask a question',
@@ -642,6 +642,9 @@ const en = <String, String>{
   'Сай тауар жоқ.': 'No matching items.',
   'Жауап өріске қойылды.': 'Answer placed in the field.',
   'Мынаны алып тастаңыз: «{0}»': 'Take this out: “{0}”',
+  'Мәтінде тағы байланыс бар. Оны да алып тастаңыз.': 'There is another contact in the text. Remove it too.',
+  'Мәтіннен алып тастау': 'Remove from the text',
+  'Байланыс мәтіннен алынды.': 'Removed from the text.',
   'Сұрақ күтеді': 'Questions waiting',
   'Жауапсыз сұрақ: {0}': 'Questions to answer: {0}',
   'Жауап күтетін сұрақ жоқ.': 'No questions waiting.',

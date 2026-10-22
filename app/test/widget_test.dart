@@ -1931,8 +1931,9 @@ void main() {
 
     testWidgets('a refusal from the server is told in its own words, not as a lost connection', (tester) async {
       await open(tester,
-          reply: (req) =>
-              req.method == 'PATCH' ? jsonResponse({'code': 'validation', 'message_kk': 'Бағасы тым жоғары'}, 422) : null);
+          reply: (req) => req.method == 'PATCH'
+              ? jsonResponse({'code': 'validation', 'message_kk': 'Бағасы тым жоғары'}, 422)
+              : null);
       await tester.enterText(find.byKey(const Key('price')), '40000');
       await tester.tap(find.byKey(const Key('save')));
       await tester.pumpAndSettle();
@@ -2811,10 +2812,13 @@ void main() {
     await tester.pump();
     await tester.tap(find.byKey(const Key('shop-about-save')));
     await tester.pumpAndSettle();
-    final error = find.textContaining('Мынаны алып тастаңыз: «Instagram-да»\nТелефон');
+    final error = find.text('Мынаны алып тастаңыз: «Instagram-да»');
     expect(error, findsOneWidget);
-    expect(tester.renderObject<RenderParagraph>(find.descendant(of: error, matching: find.byType(RichText)))
-        .didExceedMaxLines, isFalse);
+    expect(
+        tester
+            .renderObject<RenderParagraph>(find.descendant(of: error, matching: find.byType(RichText)))
+            .didExceedMaxLines,
+        isFalse);
     expect(tester.takeException(), isNull);
     expect(find.byKey(const Key('shop-about-save')).hitTestable(), findsOneWidget, reason: 'Сақтау stays in reach');
   });
@@ -2858,19 +2862,21 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('shop-about-field')), findsOneWidget, reason: 'the dialog stays open');
     expect(
-        find.text('Мынаны алып тастаңыз: «qadam@mail.ru»\nТелефон, сілтеме, почта, @атау не мессенджер жазуға болмайды.'),
+        find.text('Мынаны алып тастаңыз: «qadam@mail.ru»'), // the rule itself is in the hint
         findsOneWidget,
         reason: 'the refusal says which part to take out');
     expect(find.text('Қайтару 3 күн. Жазыңыз: qadam@mail.ru'), findsOneWidget, reason: 'the text is kept');
     expect(find.text('Дүкен беті жаңартылды.'), findsNothing);
-    await tester.enterText(find.byKey(const Key('shop-about-field')), 'Қайтару 3 күн.');
+    expect(find.byKey(const Key('remove-contacts-rule')), findsOneWidget, reason: 'the hint is hidden by the words');
+    await tester.tap(find.byKey(const Key('remove-contacts'))); // one tap, as a seller would
     await tester.pump();
+    expect(find.text('Қайтару 3 күн. Жазыңыз'), findsOneWidget);
     expect(find.textContaining('Мынаны алып тастаңыз'), findsNothing);
-    await tester.tap(find.byKey(const Key('shop-about-save')));
+    await tester.tap(find.byKey(const Key('shop-about-save'))); // and sends the rest as it stands
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('shop-about-field')), findsNothing);
-    expect(sent, ['Қайтару 3 күн. Жазыңыз: qadam@mail.ru', 'Қайтару 3 күн.']);
-    expect(find.text('Қайтару 3 күн.'), findsOneWidget);
+    expect(sent, ['Қайтару 3 күн. Жазыңыз: qadam@mail.ru', 'Қайтару 3 күн. Жазыңыз']);
+    expect(find.text('Қайтару 3 күн. Жазыңыз'), findsOneWidget);
     expect(find.text('Дүкен беті жаңартылды.'), findsOneWidget);
   });
 

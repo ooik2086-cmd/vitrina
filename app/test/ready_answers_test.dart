@@ -248,6 +248,44 @@ void main() {
     });
   }
 
+  testWidgets('one tap takes the contact out of the answer; the seller then sends the rest', (tester) async {
+    final server = _Server()
+      ..refuse = true
+      ..found = 'WhatsApp: +7 701 555 12 34';
+    await open(tester, server);
+    await answer(tester);
+    await tester.enterText(field, 'Иә, бар. WhatsApp: +7 701 555 12 34');
+    await tester.pump();
+    await tester.tap(sendButton);
+    await settle(tester);
+    await tester.tap(find.byKey(const Key('remove-contacts')));
+    await tester.pump();
+    expect(tester.widget<TextField>(field).controller!.text, 'Иә, бар.');
+    expect(find.textContaining('Мынаны алып тастаңыз'), findsNothing);
+    expect(find.byKey(const Key('remove-contacts')), findsNothing);
+    expect(server.answered, isNull, reason: 'nothing is sent by the tap');
+    server.refuse = false;
+    await tester.tap(sendButton);
+    await settle(tester);
+    expect(server.answered, 'Иә, бар.');
+  });
+
+  testWidgets('a contact left after the tap is still named under the field', (tester) async {
+    final server = _Server()
+      ..refuse = true
+      ..found = 'WhatsApp», «Instagram», «qadam@mail.ru'; // the server names three at most
+    await open(tester, server);
+    await answer(tester);
+    await tester.enterText(field, 'WhatsApp, Instagram, qadam@mail.ru, @qadam_kz бар');
+    await tester.pump();
+    await tester.tap(sendButton);
+    await settle(tester);
+    await tester.tap(find.byKey(const Key('remove-contacts')));
+    await tester.pump();
+    expect(tester.widget<TextField>(field).controller!.text, '@qadam_kz бар');
+    expect(find.text('Мәтінде тағы байланыс бар. Оны да алып тастаңыз.'), findsOneWidget);
+  });
+
   testWidgets('words the seller wrote are kept: a ready answer is added after them', (tester) async {
     await open(tester, _Server());
     await answer(tester);

@@ -119,7 +119,8 @@ Future<bool> askQuestion(BuildContext context, int listingId) async {
     builder: (_) => _TextSheet(
       title: tr('Сатушыға сұрақ'),
       hint: tr('Мысалы: өлшемі кішілеу ме? Қорабы бар ма?'),
-      note: tr('Сатушы жауап бергенде сұрақ пен жауапты барлық сатып алушы көреді. Телефон мен сілтеме жазбаңыз.'),
+      note: tr(
+          'Сатушы жауап бергенде сұрақ пен жауапты барлық сатып алушы көреді. Телефон, сілтеме, почта, @атау не мессенджер жазбаңыз.'),
       action: tr('Жіберу'),
       minLength: 5,
       maxLength: 500,
@@ -203,7 +204,7 @@ class _QuestionsScreenState extends State<QuestionsScreen> {
         title: q.text,
         hint: tr('Жауабыңыз'),
         initial: q.answer,
-        note: tr('Жауапты барлық сатып алушы көреді. Телефон мен сілтеме жазбаңыз.'),
+        note: tr('Жауапты барлық сатып алушы көреді. Телефон, сілтеме, почта, @атау не мессенджер жазбаңыз.'),
         action: q.answer == null ? tr('Жауап беру') : tr('Сақтау'),
         minLength: 2,
         maxLength: 1000,
@@ -375,9 +376,18 @@ class _TextSheetState extends State<_TextSheet> {
                   buildCounter: nearLimitCounter,
                   decoration: InputDecoration(
                       // errorMaxLines: a refusal reads in full, at any text size; the sheet scrolls.
-                      hintText: widget.hint, errorText: _error == null ? null : errorText(_error), errorMaxLines: 30),
+                      hintText: widget.hint,
+                      errorText: _error == null ? null : refusalText(_error, _text.text),
+                      errorMaxLines: 30),
                   onChanged: (_) => setState(() => _error = null),
                 ),
+              ),
+              Padding(
+                padding: side,
+                child: RemoveContactsButton(
+                    error: _error,
+                    controller: _text,
+                    onRemoved: (clean) => setState(() => _error = clean ? null : moreContacts())),
               ),
               Padding(
                 padding: side,

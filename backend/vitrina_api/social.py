@@ -96,6 +96,10 @@ _OPEN = "«“„\"'([‘"
 _CLOSE = "»”“\"')]’,;…"
 
 
+# A messenger name after a colon: Latin letters, digits, «_» and «.», as Telegram and Instagram allow, and a whole word.
+_HANDLE = r"\s*@?[A-Za-z0-9_.]{3,}(?![^\s,;»”\"'!?)])"
+
+
 def _contact_spans(text: str):
     """Where the contacts are in the (cleaned) text: links, sites, e-mails, @names and messengers first, then phones.
     Lazy, so a yes-or-no question stops at the first."""
@@ -106,8 +110,8 @@ def _contact_spans(text: str):
                 start -= 1  # the whole word: «Instagram-да», not «Instagram»
             while end < len(text) and not text[end].isspace() and text[end] not in _CLOSE:
                 end += 1
-            if handle := re.match(r"\s*[^\s,;»”\"']+" if text[end - 1] == ":" else r":\s*[^\s,;»”\"']+", text[end:]):
-                end += handle.end()  # «Telegram: qadam», «тг: qadam»: the name goes too
+            if handle := re.match(("" if text[end - 1] == ":" else ":") + _HANDLE, text[end:]):
+                end += handle.end()  # «Telegram: qadam», «тг: qadam»: the name goes too, «Instagram: сурет көп» not
             yield start, end
     for run in _RUN_RE.finditer(text):
         yield from _phones_in(run)
