@@ -2303,6 +2303,13 @@ class ModerationTests(ApiTestCase):
         r = self.post(f"/listings/{lid}/publish", self.seller)
         self.assertEqual((r.status_code, r.json()["code"]), (422, "out_of_stock"))  # the reason, where it is asked
 
+    def test_a_held_listing_once_on_sale_that_sold_out_meanwhile_is_sold_when_released(self):
+        listing = self.publish()
+        lid, size = listing["id"], listing["sizes"][0]["id"]
+        self.edit(lid, description="Telegram: qadam")
+        r = self.edit(lid, description="Таза.", sizes=[{"id": size, "quantity": 0}])
+        self.assertEqual(r["status"], "sold")  # as it would be had it stayed on sale, not a paused one to restart
+
     def test_a_defective_pair_is_not_put_on_sale_without_the_defect_close_up(self):
         lid = self.draft(description="Telegram: qadam")
         self.post(f"/listings/{lid}/publish", self.seller)
@@ -2352,6 +2359,107 @@ class ModerationTests(ApiTestCase):
         self.assertEqual(self.post(f"/admin/moderation/{lid}/approve", staff).json()["status"], "sold")
         note = self.get("/notifications", self.seller).json()["items"][0]["text"]
         self.assertIn("Жұп қосып", note)
+
+    def test_staff_approval_puts_a_listing_back_where_it_came_from(self):
+        staff = self.make_staff()
+        paused = self.publish()["id"]
+        self.post(f"/listings/{paused}/pause", self.seller)
+        self.edit(paused, title="Найк люкс копия")  # a replica word: staff decide
+        fresh = self.draft(title="Найк люкс копия")
+        self.post(f"/listings/{fresh}/publish", self.seller)
+        queue = {q["listing"]["id"]: q["back_to"] for q in self.get("/admin/moderation", staff).json()["items"]}
+        self.assertEqual(queue, {paused: "paused", fresh: "published"})  # staff see where Approve puts it
+        self.assertEqual(self.post(f"/admin/moderation/{paused}/approve", staff).json()["status"], "paused")
+        self.assertIn("«Сатылымға шығару» басыңыз", self.get("/notifications", self.seller).json()["items"][0]["text"])
+        self.assertNotIn(paused, [i["id"] for i in self.c.get("/api/v1/listings").json()["items"]])
+        self.assertEqual(self.post(f"/admin/moderation/{fresh}/approve", staff).json()["status"], "published")
+        self.assertIn("сатылымда", self.get("/notifications", self.seller).json()["items"][0]["text"])
+        self.assertEqual(self.post(f"/listings/{paused}/publish", self.seller).json()["status"], "published")
+
+    def test_staff_approval_never_puts_on_sale_what_a_publish_would_refuse(self):
+        lid = self.draft(title="Найк люкс копия")
+        self.post(f"/listings/{lid}/publish", self.seller)
+        with self.db() as db:  # as a Save of a pair never on sale could leave it
+            row = db.get(Listing, lid)
+            row.condition, row.defects = "defective", "Табаны жыртық"
+            db.commit()
+        staff = self.make_staff()
+        item = self.get("/admin/moderation", staff).json()["items"][0]
+        self.assertEqual((item["back_to"], item["back_missing"]), ("paused", "defects_required"))
+        self.assertEqual(self.post(f"/admin/moderation/{lid}/approve", staff).json()["status"], "paused")
+        note = self.get("/notifications", self.seller).json()["items"][0]["text"]
+        self.assertIn("жетпейтінін толтырыңыз", note)  # not a bare «tap List for sale» that would be refused
+
+    def test_staff_approval_of_a_never_announced_listing_with_no_pair_says_to_add_pairs(self):
+        listing = self.draft_listing_held_for_staff()
+        self.edit(listing["id"], sizes=[{"id": listing["sizes"][0]["id"], "quantity": 0}])
+        staff = self.make_staff()
+        item = self.get("/admin/moderation", staff).json()["items"][0]
+        self.assertEqual((item["back_to"], item["back_missing"]), ("paused", "out_of_stock"))
+        self.assertEqual(self.post(f"/admin/moderation/{listing['id']}/approve", staff).json()["status"], "paused")
+        self.assertIn("Жұп қосып", self.get("/notifications", self.seller).json()["items"][0]["text"])
+
+    def draft_listing_held_for_staff(self):
+        lid = self.draft(title="Найк люкс копия")
+        return self.post(f"/listings/{lid}/publish", self.seller).json()
+
+    def test_the_admin_line_names_where_approve_puts_it_with_stock_settled(self):
+        staff = self.make_staff()
+        sold_out = self.publish()
+        self.edit(sold_out["id"], title="Найк люкс копия")
+        self.edit(sold_out["id"], sizes=[{"id": sold_out["sizes"][0]["id"], "quantity": 0}])
+        restocked = self.publish()["id"]
+        self.edit(restocked, title="Найк люкс копия")
+        with self.db() as db:  # held from sold, a pair added since
+            db.get(Listing, restocked).held_from = "sold"
+            db.commit()
+        queue = {q["listing"]["id"]: q["back_to"] for q in self.get("/admin/moderation", staff).json()["items"]}
+        self.assertEqual(queue, {sold_out["id"]: "sold", restocked: "paused"})
+        for lid, status in queue.items():
+            self.assertEqual(self.post(f"/admin/moderation/{lid}/approve", staff).json()["status"], status)
+
+    def test_staff_approval_of_a_version_the_seller_changed_since_is_refused(self):
+        staff = self.make_staff()
+        lid = self.draft_listing_held_for_staff()["id"]
+        seen = self.get("/admin/moderation", staff).json()["items"][0]["seen"]
+        self.edit(lid, description="Жазыңыз: WhatsApp +7 701 555 12 34")  # after staff opened the queue
+        r = self.c.post(f"/api/v1/admin/moderation/{lid}/approve", json={"seen": seen}, headers=self.h(staff))
+        self.assertEqual((r.status_code, r.json()["code"]), (409, "changed_since_review"))
+        fresh = self.get("/admin/moderation", staff).json()["items"][0]
+        self.assertIn("contacts", fresh["moderation"]["flags"])
+        r = self.c.post(f"/api/v1/admin/moderation/{lid}/approve", json={"seen": fresh["seen"]}, headers=self.h(staff))
+        self.assertEqual(r.json()["status"], "published")
+
+    def test_a_seller_can_pause_a_listing_while_it_waits_for_staff(self):
+        lid = self.draft_listing_held_for_staff()["id"]
+        self.assertTrue(self.get(f"/listings/{lid}", self.seller).json()["moderation"]["goes_on_sale"])
+        r = self.post(f"/listings/{lid}/pause", self.seller).json()
+        self.assertEqual((r["status"], r["moderation"]["goes_on_sale"]), ("moderation", False))  # still held
+        staff = self.make_staff()
+        self.assertEqual(self.get("/admin/moderation", staff).json()["items"][0]["back_to"], "paused")
+        self.assertEqual(self.post(f"/admin/moderation/{lid}/approve", staff).json()["status"], "paused")
+
+    def test_staff_approval_tells_buyers_waiting_for_a_size_that_it_is_back(self):
+        listing = self.publish(sizes=[{"label": "EU 42", "insole_cm": "26,5", "quantity": 1},
+                                      {"label": "EU 43", "insole_cm": "27,5", "quantity": 0}])
+        lid, s43 = listing["id"], listing["sizes"][1]["id"]
+        self.c.put(f"/api/v1/listings/{lid}/sizes/{s43}/alert", headers=self.h(self.buyer))
+        self.edit(lid, title="Найк люкс копия")
+        self.edit(lid, sizes=[{"id": s43, "quantity": 2}])  # held: nobody is told yet
+        self.post(f"/admin/moderation/{lid}/approve", self.make_staff())
+        kinds = [n["kind"] for n in self.get("/notifications", self.buyer).json()["items"]]
+        self.assertIn("back_in_stock", kinds)
+
+    def test_staff_approval_of_a_listing_held_before_stage_91_puts_it_on_sale_as_then(self):
+        lid = self.publish()["id"]
+        self.post(f"/listings/{lid}/pause", self.seller)
+        self.edit(lid, title="Найк люкс копия")
+        with self.db() as db:
+            row = db.get(Listing, lid)
+            row.held_from = row.held_for = None
+            db.commit()
+        self.assertEqual(self.post(f"/admin/moderation/{lid}/approve", self.make_staff()).json()["status"],
+                         "published")
 
     def test_found_names_contacts_from_every_field_three_at_most(self):
         lid = self.draft(title="Кроссовка WhatsApp", description="qadam@mail.ru, t.me/qadam", condition="used_good",

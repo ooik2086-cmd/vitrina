@@ -644,6 +644,10 @@ const en = <String, String>{
   'Мынаны алып тастаңыз: «{0}»': 'Take this out: “{0}”',
   'Мәтінде тағы байланыс бар. Оны да алып тастаңыз.': 'There is another contact in the text. Remove it too.',
   'Сақталды. Тексеру аяқталды, тауар сатылымда.': 'Saved. The review is over and the listing is on sale.',
+  'Тоқтатылды. Тексеруден өткен соң, сатылымға өзіңіз шығарасыз.':
+      'Paused. Once it passes review, you put it on sale yourself.',
+  'Сақталды. Тексеру аяқталды. Сату үшін жұп қосыңыз.': 'Saved. The review is over. To sell, add pairs.',
+  'Сату үшін алдымен жұп қосыңыз.': 'To sell, add pairs first.',
   'Сақталды. Тексеру аяқталды.': 'Saved. The review is over.',
   'Байланыс алынды. Енді «Қайта жіберу» басыңыз.': 'Contact removed. Now tap “Resubmit”.',
   'Байланыс алынды. Енді «Сақтау» басыңыз.': 'Contact removed. Now tap “Save”.',

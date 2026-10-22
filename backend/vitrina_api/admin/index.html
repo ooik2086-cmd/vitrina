@@ -66,7 +66,7 @@ async function call(method, path, body) {
     body: body ? JSON.stringify(body) : undefined });
   const data = r.status === 204 ? null : await r.json().catch(() => null);
   if (!r.ok) { if (r.status === 401) { token = ''; sessionStorage.removeItem('vitrina_admin'); }
-    throw new Error(data?.message_kk || 'Қате ' + r.status); }
+    throw Object.assign(new Error(data?.message_kk || 'Қате ' + r.status), { code: data?.code }); }
   return data;
 }
 
@@ -222,25 +222,39 @@ async function show() {
     } else if (tab === 'moderation') {
       const r = await call('GET', '/admin/moderation');
       if (!r.items.length) box.append($(`<div class="card muted">Тексеруді күтіп тұрған тауар жоқ.</div>`));
-      r.items.forEach(({ listing: l, moderation: m }) => {
+      // Where Approve puts it: a pair its seller paused stays paused, one with nothing to sell is marked sold, and one
+      // a publish would refuse waits off sale till its seller adds what is missing.
+      const BACK = { published: 'Мақұлдаса, сатылымға шығады.', paused: 'Мақұлдаса, тоқтатылған күйде қалады: сатушы өзі шығарады.',
+        draft: 'Мақұлдаса, жоба күйінде қалады: сатушы өзі шығарады.', sold: 'Мақұлдаса, «Сатылды» болады: жұбы қалмаған.' };
+      const MISSING = { out_of_stock: 'жұбы жоқ', missing_required_photos: 'фото аз', defects_required: 'ақаудың сипаттамасы не суреті жоқ' };
+      const backLine = (back, missing) => missing
+        ? `Мақұлдаса, сатылымға әлі шықпайды (${MISSING[missing] || missing}): сатушы толтырып, өзі шығарады.`
+        : BACK[back] || back;
+      r.items.forEach(({ listing: l, moderation: m, back_to: back, back_missing: missing, seen }) => {
         const cover = (l.media.find(x => x.angle !== 'frame') || l.media[0] || {}).original_url;
         const n = $(`<div class="card"><div class="row">${cover ? `<img src="${esc(cover)}" alt="">` : ''}<div style="flex:1">
           <b>#${l.id} · ${esc(l.title)}</b> ${m.flags.map(f => `<span class="pill">${esc(FLAG[f] || f)}</span>`).join(' ')}
           <div class="muted">${tenge(l.price_tiyn)} · ${esc(l.seller.shop_name)} · ${l.media.filter(x => x.angle === 'frame').length} кадр 360°</div>
           ${l.description ? `<div class="muted">«${esc(l.description)}»</div>` : ''}
           <ol class="hist">${m.reasons.map(x => `<li>${esc(x)}</li>`).join('')}</ol>
+          ${back ? `<div>${esc(backLine(back, missing))}</div>` : ''}
           <form class="inline" style="grid-template-columns:1fr auto auto"><input name="reason" placeholder="Қайтару себебі (сатушы көреді)">
           <button class="ghost danger" value="reject">Қайтару</button><button class="primary" value="approve">Мақұлдау</button>
           <div class="err" style="grid-column:1/-1"></div></form></div></div></div>`);
         const f = n.querySelector('form');
         f.onsubmit = async (e) => {
           e.preventDefault();
+          if (e.submitter.value === 'reload') return show();
           const reject = e.submitter.value === 'reject';
           try {
             if (reject && f.reason.value.trim().length < 3) throw new Error('Сатушыға себебін жазыңыз.');
-            await call('POST', `/admin/moderation/${l.id}/${e.submitter.value}`, reject ? { reason: f.reason.value.trim() } : undefined);
+            // seen: the version on this page, so Approve never clears a change the seller made after it loaded.
+            await call('POST', `/admin/moderation/${l.id}/${e.submitter.value}`, reject ? { reason: f.reason.value.trim() } : { seen });
             show();
-          } catch (x) { f.querySelector('.err').textContent = x.message; }
+          } catch (x) {
+            f.querySelector('.err').textContent = x.message;
+            if (x.code === 'changed_since_review') Object.assign(f.querySelector('[value=approve]'), { value: 'reload', textContent: 'Жаңарту' });
+          }
         };
         box.append(n);
       });

@@ -1,6 +1,8 @@
 """The staff console: moderation, disputes, reports, evidence and the audit log."""
 from __future__ import annotations
 
+import hashlib
+import json
 from collections import defaultdict
 
 from fastapi import APIRouter, Depends
@@ -20,7 +22,7 @@ from .serializers import (LIGHT, listing_out, moderation_out, order_out, order_s
                           ordered_photos, preload_orders, preload_sellers, with_light_media)
 from .saved_search_routes import announce
 from .storage import Storage, private_link
-from .listing_routes import settle_stock_status, split_codes
+from .listing_routes import back_from_hold, settle_stock_status, split_codes
 from .order_routes import dispute_evidence_until, order_evidence_list, order_for
 
 
@@ -170,10 +172,30 @@ def admin_listings(status: str | None = None, staff: User = Depends(staff_user),
 
 
 @router.get("/admin/moderation")
-def admin_moderation(staff: User = Depends(staff_user), db: Session = Depends(get_db)):
+def admin_moderation(staff: User = Depends(staff_user), db: Session = Depends(get_db),
+                     cfg: Settings = Depends(get_settings)):
     """Listings the publish checks flagged, oldest first so nobody waits longest."""
     rows = db.scalars(select(Listing).where(Listing.status == "moderation").order_by(Listing.id)).all()
-    return {"items": [{"listing": listing_out(db, r), "moderation": moderation_out(r)} for r in rows]}
+    items = []
+    for r in rows:
+        back_to, back_missing = back_from_hold(cfg, r)
+        # back_to: where Approve puts it, so staff know a pair its seller paused is not put on sale by approving it;
+        # back_missing: what a publish still asks of its seller then. seen goes back with Approve (see approve_listing).
+        items.append({"listing": listing_out(db, r), "moderation": moderation_out(r), "back_to": back_to,
+                      "back_missing": back_missing, "seen": review_seen(r)})
+    return {"items": items}
+
+
+def review_seen(listing: Listing) -> str:
+    """A short fingerprint of what staff judge on the queue page: the words, condition, price, photos and flags."""
+    shown = [listing.title, listing.brand, listing.model_name, listing.description, listing.defects, listing.condition,
+             listing.price_tiyn, listing.moderation_flags,
+             sorted((m.id, m.angle, m.original_url) for m in listing.media)]
+    return hashlib.sha256(json.dumps(shown, default=str).encode()).hexdigest()[:16]
+
+
+class ModerationApproveIn(BaseModel):
+    seen: str | None = Field(default=None, max_length=64)  # review_seen of the version staff looked at
 
 
 class ModerationRejectIn(BaseModel):
@@ -192,10 +214,16 @@ def queued_listing(db: Session, listing_id: int) -> Listing:
 
 
 @router.post("/admin/moderation/{listing_id}/approve")
-def approve_listing(listing_id: int, staff: User = Depends(staff_user), db: Session = Depends(get_db)):
+def approve_listing(listing_id: int, body: ModerationApproveIn | None = None, staff: User = Depends(staff_user),
+                    db: Session = Depends(get_db), cfg: Settings = Depends(get_settings)):
     listing = queued_listing(db, listing_id)
-    listing.status, listing.held_from, listing.held_for = "published", None, None
-    settle_stock_status(listing)  # approved with no pair left: sold, not on sale empty
+    if body and body.seen and body.seen != review_seen(listing):
+        # The seller saved a change after staff opened the queue: approving would clear what staff never saw.
+        raise ApiError(409, "changed_since_review")
+    # Back where it came from: a pair its seller paused stays paused, one with nothing to sell is sold.
+    listing.status, missing = back_from_hold(cfg, listing)
+    listing.held_from, listing.held_for = None, None
+    settle_stock_status(listing)  # back_from_hold settled it already; kept so stock decides in one place
     # Remember what was cleared so pausing and republishing does not queue the same listing again.
     listing.moderation_cleared = ",".join(sorted(set(split_codes(listing.moderation_cleared))
                                                  | set(split_codes(listing.moderation_flags)))) or None
@@ -203,14 +231,28 @@ def approve_listing(listing_id: int, staff: User = Depends(staff_user), db: Sess
     services.audit(db, staff.id, "approve_listing", f"listing:{listing.id}", listing.moderation_flags or "")
     if listing.status == "published":
         announce(db, listing)
+        services.tell_back_in_stock(db, listing)
         services.notify(db, listing.seller_id, "moderation", f"«{listing.title}» тексеруден өтті және сатылымда.",
                         f"«{listing.title}» прошёл проверку и уже продаётся.",
                         f"“{listing.title}” passed review and is on sale.", listing_id=listing.id)
-    else:
+    elif listing.status == "sold" or missing == "out_of_stock":
         services.notify(db, listing.seller_id, "moderation",
                         f"«{listing.title}» тексеруден өтті. Жұп қосып, сатылымға шығарыңыз.",
                         f"«{listing.title}» прошёл проверку. Добавьте пары и выставьте его в продажу.",
                         f"“{listing.title}” passed review. Add pairs and put it on sale.", listing_id=listing.id)
+    elif missing:
+        services.notify(db, listing.seller_id, "moderation",
+                        f"«{listing.title}» тексеруден өтті. Ашып, жетпейтінін толтырыңыз да, "
+                        f"«Сатылымға шығару» басыңыз.",
+                        f"«{listing.title}» прошёл проверку. Откройте его, дополните недостающее и нажмите "
+                        f"«Выставить на продажу».",
+                        f"“{listing.title}” passed review. Open it, add what is missing and tap “List for sale”.",
+                        listing_id=listing.id)
+    else:
+        services.notify(db, listing.seller_id, "moderation",
+                        f"«{listing.title}» тексеруден өтті. Сату үшін «Сатылымға шығару» басыңыз.",
+                        f"«{listing.title}» прошёл проверку. Чтобы продавать, нажмите «Выставить на продажу».",
+                        f"“{listing.title}” passed review. To sell it, tap “List for sale”.", listing_id=listing.id)
     db.commit()
     return {"id": listing.id, "status": listing.status}
 

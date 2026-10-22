@@ -206,7 +206,8 @@ class Moderation {
           for (final r in (j['reasons_en'] as List?) ?? (j['reasons_ru'] as List?) ?? j['reasons'] as List) r as String
         ],
         note = j['note'] as String?,
-        found = j['found'] as String?;
+        found = j['found'] as String?,
+        goesOnSale = j['goes_on_sale'] as bool? ?? false;
   final List<String> flags;
   final List<String> reasonsKk;
   final List<String> reasonsRu;
@@ -215,6 +216,9 @@ class Moderation {
 
   /// What the contacts check found, as written («WhatsApp», «8 701 …»).
   final String? found;
+
+  /// Whether the listing goes on sale when the hold ends; its seller can pause it meanwhile.
+  final bool goesOnSale;
 
   List<String> reasons(String lang) => switch (lang) { 'ru' => reasonsRu, 'en' => reasonsEn, _ => reasonsKk };
 }

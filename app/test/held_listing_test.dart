@@ -69,8 +69,19 @@ void main() {
         mine = _json(now);
       } else if (req.method == 'POST' && path == '/listings/1/publish') {
         sent.add({'publish': true});
+        if ((now['sizes'] as List).every((s) => (s as Map)['quantity'] == 0)) {
+          mine = _json({'code': 'out_of_stock', 'message_kk': 'Бұл өлшем қалмады.'}, 422);
+          return http.StreamedResponse(Stream.value(mine.bodyBytes), mine.statusCode, headers: mine.headers);
+        }
         final words = '${now['title']}\n${now['description']}';
         now = {...now, 'status': looksLikeContact(words) ? 'moderation' : 'published'};
+        mine = _json(now);
+      } else if (req.method == 'POST' && path == '/listings/1/pause') {
+        sent.add({'pause': true});
+        now = {
+          ...now,
+          'moderation': {...(now['moderation'] as Map), 'goes_on_sale': false}
+        };
         mine = _json(now);
       } else if (req.method == 'GET' && path == '/listings/1') {
         mine = _json(now);
@@ -216,6 +227,65 @@ void main() {
     expect(find.textContaining('Сонда тексеру бірден аяқталады.'), findsNothing);
     expect(
         find.text('Қызметкер қарап шыққанша сатып алушылар көрмейді. Нәтижесі хабарландыруда келеді.'), findsOneWidget);
+  });
+
+  testWidgets('a held listing that would go on sale can be paused while it waits; the pause is kept', (tester) async {
+    final listing = held('Жеңіл кроссовка Найк люкс копия', 'Қорабы бар.', '');
+    final sent = await open(tester, {
+      ...listing,
+      'moderation': {
+        'flags': ['replica'],
+        'reasons': ['Копия сөзі бар.'],
+        'note': null,
+        'found': null,
+        'goes_on_sale': true
+      },
+    });
+    expect(find.byKey(const Key('publish')), findsNothing, reason: 'nothing to put on sale while held');
+    await tester.tap(find.byKey(const Key('pause')));
+    await settle(tester);
+    expect(sent.single, {'pause': true});
+    expect(find.text('Тоқтатылды. Тексеруден өткен соң, сатылымға өзіңіз шығарасыз.'), findsOneWidget);
+    expect(find.byKey(const Key('pause')), findsNothing, reason: 'paused already');
+    expect(find.text('Тауар тексерілуде'), findsOneWidget, reason: 'still held');
+  });
+
+  testWidgets('no pause button on a held listing that would not go on sale anyway', (tester) async {
+    await open(tester, held('Жеңіл кроссовка WhatsApp', 'Қорабы бар.', 'WhatsApp'));
+    expect(find.byKey(const Key('pause')), findsNothing);
+  });
+
+  testWidgets('a Save that ends the check with no pair left says to add pairs', (tester) async {
+    final listing = held('Жеңіл кроссовка WhatsApp', 'Қорабы бар.', 'WhatsApp');
+    await open(
+        tester,
+        {
+          ...listing,
+          'sizes': [
+            for (final s in listing['sizes'] as List) <String, dynamic>{...(s as Map), 'quantity': 0}
+          ],
+        },
+        releaseTo: 'sold');
+    await tapRemove(tester);
+    await save(tester);
+    expect(find.text('Сақталды. Тексеру аяқталды. Сату үшін жұп қосыңыз.'), findsOneWidget);
+  });
+
+  testWidgets('«List for sale» on a listing with no pair left says to add pairs, not that a size is gone',
+      (tester) async {
+    final listing = held(demo['title'] as String, demo['description'] as String, '');
+    await open(tester, {
+      ...listing,
+      'status': 'paused',
+      'moderation': null,
+      'sizes': [
+        for (final s in listing['sizes'] as List) <String, dynamic>{...(s as Map), 'quantity': 0}
+      ],
+    });
+    await tester.tap(find.byKey(const Key('publish')));
+    await settle(tester);
+    expect(find.text('Сату үшін алдымен жұп қосыңыз.'), findsOneWidget);
+    expect(find.text('Бұл өлшем қалмады.'), findsNothing);
   });
 
   for (final (name, b, t) in [

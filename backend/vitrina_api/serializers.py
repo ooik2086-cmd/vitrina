@@ -210,6 +210,8 @@ def moderation_out(listing: Listing) -> dict:
             "reasons_ru": [moderation.REASONS[c][1] for c in flags if c in moderation.REASONS],
             "reasons_en": [moderation.REASONS[c][2] for c in flags if c in moderation.REASONS],
             "note": listing.moderation_note,
+            # Whether the hold ends on sale (the seller can still pause it while held), so the app offers «Тоқтату».
+            "goes_on_sale": listing.status == "moderation" and (listing.held_from or "published") == "published",
             # What the contacts check found, so the seller knows what to take out; not once staff have cleared it.
             "found": moderation.found_contacts(listing)
             if "contacts" in flags and "contacts" not in (listing.moderation_cleared or "").split(",") else None}

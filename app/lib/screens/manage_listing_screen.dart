@@ -483,6 +483,9 @@ class _ManageListingScreenState extends State<ManageListingScreen> with WidgetsB
           ..showSnackBar(SnackBar(
               content: Text(switch (_l.status) {
             'published' => tr('Сақталды. Тексеру аяқталды, тауар сатылымда.'),
+            'sold' ||
+            'paused' when _l.sizes.every((s) => s.quantity == 0) =>
+              tr('Сақталды. Тексеру аяқталды. Сату үшін жұп қосыңыз.'),
             'paused' => tr('Сақталды. Тексеру аяқталды. Сатуға «Сатылымға шығару» басыңыз.'),
             _ => tr('Сақталды. Тексеру аяқталды.'),
           })));
@@ -637,7 +640,10 @@ class _ManageListingScreenState extends State<ManageListingScreen> with WidgetsB
           if (l.status == 'published' || l.status == 'moderation') return went(l);
         } catch (_) {} // still no answer: the first error is what is told
       }
-      say(e is ApiException ? e.message : tr('Байланыс жоқ. Қайта көріңіз.'));
+      say(e is ApiException
+          // «This size is out of stock» says nothing to a seller with no pair left on the listing.
+          ? (e.code == 'out_of_stock' ? tr('Сату үшін алдымен жұп қосыңыз.') : e.message)
+          : tr('Байланыс жоқ. Қайта көріңіз.'));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -873,11 +879,18 @@ class _ManageListingScreenState extends State<ManageListingScreen> with WidgetsB
                 child: Padding(
                   padding: contentPadding(context, const EdgeInsets.fromLTRB(20, 8, 20, 12)),
                   child: Row(children: [
-                    if (_l.status == 'published')
+                    if (_l.status == 'published' || _l.status == 'moderation' && (_l.moderation?.goesOnSale ?? false))
                       Expanded(
                         child: OutlinedButton(
-                          onPressed:
-                              _busy ? null : () => _run((api) => api.pauseListing(_l.id), tr('Сатылым тоқтатылды')),
+                          key: const Key('pause'),
+                          onPressed: _busy
+                              ? null
+                              : () => _run(
+                                  (api) => api.pauseListing(_l.id),
+                                  // Held for review: the pause is kept for when the review ends.
+                                  _l.status == 'moderation'
+                                      ? tr('Тоқтатылды. Тексеруден өткен соң, сатылымға өзіңіз шығарасыз.')
+                                      : tr('Сатылым тоқтатылды')),
                           child: Text(tr('Тоқтату')),
                         ),
                       ),

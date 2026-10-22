@@ -514,15 +514,16 @@ def publish_listing(listing_id: int, user: User = Depends(current_user), db: Ses
     return listing_out(db, listing, owner=True)
 
 
-def publish_blocker(cfg: Settings, listing: Listing) -> ApiError | None:
-    """Why the listing cannot go on sale as it is, or None: the photos, the defects and a pair to sell."""
+def publish_blocker(cfg: Settings, listing: Listing, stock: bool = True) -> ApiError | None:
+    """Why the listing cannot go on sale as it is, or None: the photos, the defects and (unless stock is False) a pair
+    to sell."""
     if len(listing.media) < cfg.min_listing_photos:
         return ApiError(422, "missing_required_photos")
     if listing.condition in DEFECT_REQUIRED and not (listing.defects or "").strip():
         return ApiError(422, "defects_required")
     if listing.condition == Condition.DEFECTIVE.value and not any(m.angle == "defect" for m in listing.media):
         return ApiError(422, "defects_required", "a close-up photo of each defect is required")
-    if not any(s.quantity > 0 for s in listing.sizes):
+    if stock and not any(s.quantity > 0 for s in listing.sizes):
         return ApiError(422, "out_of_stock")
     return None
 
@@ -730,6 +731,24 @@ def recheck(db: Session, storage: Storage, listing: Listing, changed: set[str]) 
 SELF_FIXABLE = {"contacts"}
 
 
+def back_from_hold(cfg: Settings, listing: Listing) -> tuple[str, str | None]:
+    """Where a held listing goes when the hold ends, by its seller's fix or by staff, and, when that is not on sale,
+    what a publish would still refuse it for (None: one tap on «Сатылымға шығару» puts it on sale). It goes back where
+    it came from (on sale for one held before stage 91), with stock settled as settle_stock_status would: one once on
+    sale that sold out meanwhile is sold, as it would be on sale, and a sold one restocked waits paused. It is never on
+    sale without what a publish asks for: then it waits paused."""
+    in_stock = any(s.quantity > 0 for s in listing.sizes)
+    back = listing.held_from or "published"
+    if back == "published" and not publish_blocker(cfg, listing, stock=listing.announced_at is None):
+        return "published" if in_stock else "sold", None
+    if back == "sold" and not in_stock:
+        return "sold", None
+    if back in ("published", "sold"):
+        back = "paused"
+    blocker = publish_blocker(cfg, listing)
+    return back, blocker.code if blocker else None
+
+
 def release_if_fixed(db: Session, cfg: Settings, storage: Storage, listing: Listing, user: User,
                      flags: list[str] | None = None) -> None:
     """A listing held for contacts alone goes back where it was once an edit by its seller takes them out, as a fixed
@@ -746,10 +765,8 @@ def release_if_fixed(db: Session, cfg: Settings, storage: Storage, listing: List
     listing.held_for = ",".join(sorted(held_for))
     if held or not held_for <= SELF_FIXABLE:
         return
-    back = listing.held_from or "published"
-    if back == "published" and publish_blocker(cfg, listing):
-        back = "paused"
-    listing.status, listing.held_from, listing.held_for, listing.moderation_note = back, None, None, None
+    listing.status, _ = back_from_hold(cfg, listing)
+    listing.held_from, listing.held_for, listing.moderation_note = None, None, None
     settle_stock_status(listing)
     if listing.status == "published":
         announce(db, listing)
@@ -960,7 +977,12 @@ def end_shop_sale(user: User = Depends(current_user), db: Session = Depends(get_
 
 @router.post("/listings/{listing_id}/pause")
 def pause_listing(listing_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    listing = own_listing(db, listing_id, user)
+    listing = own_listing(db, listing_id, user, lock=True)  # not lost to a staff decision
+    if listing.status == "moderation" and (listing.held_from or "published") in ("published", "paused"):
+        # Held for review: it stays held, but wherever the hold ends, by Save or by staff, it stays off sale.
+        listing.held_from = "paused"
+        db.commit()
+        return listing_out(db, listing, owner=True)
     if listing.status != "published":
         raise ApiError(409, "invalid_status")
     listing.status = "paused"
