@@ -4,6 +4,7 @@ import 'dart:math';
 
 import 'package:clock/clock.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -20,6 +21,7 @@ import 'listing_editor_screen.dart';
 import 'listing_screen.dart';
 import '../i18n.dart';
 import '../listing_quality.dart';
+import '../quick_replies.dart';
 
 const listingStatuses = {
   'draft': 'Жоба',
@@ -398,6 +400,51 @@ class _ManageListingScreenState extends State<ManageListingScreen> with WidgetsB
           if (_stock[s.id] != null && _stock[s.id] != _count(s)) s.id: _count(s)
       };
 
+  /// The fields the contacts check reads, as on the page.
+  List<TextEditingController> get _checkedWords => [_title, _description, _defects];
+
+  /// Whether one tap can take out every piece the check found: each stands whole in one of the fields as typed.
+  bool get _canRemoveContacts {
+    final pieces = contactPieces(_l.moderation?.found);
+    return pieces.isNotEmpty && pieces.every((p) => _checkedWords.any((c) => holdsPiece(c.text, p)));
+  }
+
+  /// The check found contacts, the seller has changed the words, and they hold none any more: Save (or «Қайта
+  /// жіберу») is what is left. Unchanged words are the ones the server read, whatever the app's own copy of the rule
+  /// makes of them.
+  bool get _contactsGone {
+    final stored = [_l.title, _l.description ?? '', _l.defects ?? ''];
+    final words = _checkedWords;
+    return contactPieces(_l.moderation?.found).isNotEmpty &&
+        [for (var i = 0; i < words.length; i++) words[i].text.trim() != stored[i].trim()].contains(true) &&
+        !words.any((c) => looksLikeContact(c.text));
+  }
+
+  /// Takes what the check found out of the name, the description and the defects. Nothing is saved: the seller
+  /// sees the rest and presses Save (or «Қайта жіберу», which saves first), and the card says which.
+  void _removeContacts() {
+    if (!_canRemoveContacts) return;
+    final pieces = contactPieces(_l.moderation?.found);
+    setState(() {
+      for (final c in _checkedWords) {
+        final here = [
+          for (final p in pieces)
+            if (holdsPiece(c.text, p)) p
+        ];
+        if (here.isEmpty) continue;
+        final text = withoutPieces(c.text, here);
+        c.value = TextEditingValue(text: text, selection: TextSelection.collapsed(offset: text.length));
+      }
+    });
+    if (_checkedWords.any((c) => looksLikeContact(c.text))) {
+      final messenger = ScaffoldMessenger.of(context);
+      if (_offlineBar == null) messenger.removeCurrentSnackBar(); // a bar about unsaved changes stays
+      messenger.showSnackBar(SnackBar(content: Text(tr('Мәтінде тағы байланыс бар. Оны да алып тастаңыз.'))));
+    } else {
+      SemanticsService.sendAnnouncement(View.of(context), tr('Байланыс мәтіннен алынды.'), Directionality.of(context));
+    }
+  }
+
   Future<void> _save() async {
     if (!_form.currentState!.validate()) return;
     final fresh = !_l.everOnSale;
@@ -429,6 +476,17 @@ class _ManageListingScreenState extends State<ManageListingScreen> with WidgetsB
     if (saved == null) {
       _showStored();
       _restored = false; // saved now: the note about changes from before has done its work
+      if (before == 'moderation' && _l.status != 'moderation') {
+        // Nothing held it any more: the check is over, without waiting for staff.
+        ScaffoldMessenger.of(context)
+          ..removeCurrentSnackBar()
+          ..showSnackBar(SnackBar(
+              content: Text(switch (_l.status) {
+            'published' => tr('Сақталды. Тексеру аяқталды, тауар сатылымда.'),
+            'paused' => tr('Сақталды. Тексеру аяқталды. Сатуға «Сатылымға шығару» басыңыз.'),
+            _ => tr('Сақталды. Тексеру аяқталды.'),
+          })));
+      }
       if (before != 'paused' && addsPairs && _l.status == 'paused') _offerSale();
     }
     if (soldMeanwhile) {
@@ -545,6 +603,12 @@ class _ManageListingScreenState extends State<ManageListingScreen> with WidgetsB
   /// Its answer is told also when the page was left meanwhile. A lost answer is checked against the listing as the
   /// server has it, so a publish that went is not reported as failed, nor pressed again into a refusal.
   Future<void> _publish() async {
+    if (_dirty) {
+      // What the seller sees is what is sent: changes on the page, a contact taken out with one tap among them,
+      // are saved first, and nothing is sent if they cannot be.
+      await _save();
+      if (!mounted || _dirty) return;
+    }
     setState(() => _busy = true);
     final api = SessionScope.of(context).api;
     final messenger = ScaffoldMessenger.of(context);
@@ -653,7 +717,14 @@ class _ManageListingScreenState extends State<ManageListingScreen> with WidgetsB
                 ],
                 if (_l.status == 'moderation' || _l.status == 'rejected') ...[
                   const SizedBox(height: 16),
-                  ModerationCard(listing: _l),
+                  // Follows the fields as the seller types, so the button goes once the words no longer hold what was found.
+                  ListenableBuilder(
+                    listenable: Listenable.merge(_checkedWords),
+                    builder: (context, _) => ModerationCard(
+                        listing: _l,
+                        onRemoveContacts: _canRemoveContacts ? _removeContacts : null,
+                        contactsGone: _contactsGone),
+                  ),
                 ],
                 if (_l.photosPending && !(_photosReady && _photosReadyFor == _l.photosVersion) && !locked) ...[
                   const SizedBox(height: 16),
@@ -1019,8 +1090,14 @@ class _AuthenticityCardState extends State<AuthenticityCard> with WidgetsBinding
 
 /// Tells the seller why a listing is waiting for staff, or why staff sent it back and what to fix.
 class ModerationCard extends StatelessWidget {
-  const ModerationCard({super.key, required this.listing});
+  const ModerationCard({super.key, required this.listing, this.onRemoveContacts, this.contactsGone = false});
   final Listing listing;
+
+  /// Takes what the check found out of the fields on the page, when they hold it; nothing is saved.
+  final VoidCallback? onRemoveContacts;
+
+  /// The fields on the page no longer hold a contact: what was found is not asked for again, only the next step.
+  final bool contactsGone;
 
   @override
   Widget build(BuildContext context) {
@@ -1028,6 +1105,9 @@ class ModerationCard extends StatelessWidget {
     final rejected = listing.status == 'rejected';
     final m = listing.moderation;
     final reasons = m?.reasons(appLanguage.value) ?? const <String>[];
+    final found = (m?.found ?? '').isNotEmpty && !contactsGone;
+    // Only a hold for contacts alone ends on the seller's Save (the server's SELF_FIXABLE); others wait for staff.
+    final ownFix = !rejected && (m?.flags ?? const []).every((f) => f == 'contacts');
     return Card(
       key: const Key('moderation-card'),
       color: rejected ? theme.colorScheme.errorContainer : theme.colorScheme.surfaceContainerHighest,
@@ -1056,18 +1136,37 @@ class ModerationCard extends StatelessWidget {
                 Expanded(child: Text(r)),
               ]),
             ),
-          if ((m?.found ?? '').isNotEmpty)
+          if (found)
             Padding(
               padding: const EdgeInsets.only(bottom: 4),
-              child: Text(trf('Мынаны алып тастаңыз: «{0}»', [m!.found!]),
+              child: Text(takeOutLine(m!.found!),
                   key: const Key('moderation-found'),
                   style: TextStyle(fontWeight: FontWeight.w700, fontVariations: const [FontVariation('wght', 700)])),
             ),
+          if (onRemoveContacts != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 4, bottom: 4),
+              child: FilledButton.tonalIcon(
+                key: const Key('moderation-remove-contacts'),
+                style: FilledButton.styleFrom(minimumSize: const Size(48, 48)),
+                icon: const Icon(Icons.backspace_outlined),
+                label: Text(tr('Мәтіннен алып тастау')),
+                onPressed: onRemoveContacts,
+              ),
+            ),
           const SizedBox(height: 4),
           Text(
-            rejected
-                ? tr('Сипаттаманы түзетіп, «Қайта жіберу» басыңыз.')
-                : tr('Қызметкер қарап шыққанша сатып алушылар көрмейді. Нәтижесі хабарландыруда келеді.'),
+            contactsGone
+                ? tr(rejected
+                    ? 'Байланыс алынды. Енді «Қайта жіберу» басыңыз.'
+                    : 'Байланыс алынды. Енді «Сақтау» басыңыз.')
+                : rejected
+                    ? tr('Сипаттаманы түзетіп, «Қайта жіберу» басыңыз.')
+                    : found && ownFix
+                        // A listing held for contacts alone leaves the queue on Save (release_if_fixed).
+                        ? tr('Мәтіннен алып тастап, «Сақтау» басыңыз. Сонда тексеру бірден аяқталады.')
+                        : tr('Қызметкер қарап шыққанша сатып алушылар көрмейді. Нәтижесі хабарландыруда келеді.'),
+            key: const Key('moderation-next'),
             style: theme.textTheme.bodySmall,
           ),
         ]),

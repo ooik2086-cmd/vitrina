@@ -87,8 +87,10 @@ def has_contacts(listing: Listing) -> bool:
 
 
 def found_contacts(listing: Listing) -> str | None:
-    """What the contacts check found, as the seller wrote it, for the card that says what to take out."""
-    return next(filter(None, map(find_contact, _words(listing))), None)
+    """What the contacts check found in the name, the description and the defects, as the seller wrote it (three at
+    most, «a», «b»), for the card that says what to take out."""
+    pieces = [p for found in map(find_contact, _words(listing)) if found for p in found.split("», «")]
+    return "», «".join(list(dict.fromkeys(pieces))[:3]) or None
 
 
 def mentions_replica(listing: Listing) -> bool:

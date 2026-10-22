@@ -16,7 +16,7 @@ from sqlalchemy import create_engine, delete, func, select
 
 os.environ.setdefault("VITRINA_LOG_LEVEL", "WARNING")  # keep test output to what failed
 
-from vitrina_api import promo
+from vitrina_api import moderation, promo
 from vitrina_api.app import create_app
 from vitrina_api.config import Settings
 from vitrina_api.models import (Base, Conversation, Listing, ListingSize, Message, Offer, PriceChange, SavedSearch,
@@ -2237,6 +2237,128 @@ class ModerationTests(ApiTestCase):
                          headers=self.h(self.seller))
         self.assertEqual(r.json()["status"], "moderation")
 
+    def edit(self, lid, **body):
+        r = self.c.patch(f"/api/v1/listings/{lid}", json=body, headers=self.h(self.seller))
+        self.assertEqual(r.status_code, 200, r.text)
+        return r.json()
+
+    def test_a_listing_held_for_contacts_goes_on_sale_once_its_seller_takes_them_out(self):
+        lid = self.draft(title="Nike Air Max WhatsApp", description="Жазыңыз: qadam@mail.ru. Қорабы бар.")
+        r = self.post(f"/listings/{lid}/publish", self.seller).json()
+        self.assertEqual(r["status"], "moderation")
+        self.assertEqual(r["moderation"]["found"], "WhatsApp», «qadam@mail.ru")  # every field the check reads
+        self.assertEqual(self.edit(lid, price_tiyn=4_400_000)["status"], "moderation")  # the words still hold them
+        self.assertEqual(self.edit(lid, description="Қорабы бар.")["status"], "moderation")  # one is still there
+        r = self.edit(lid, title="Nike Air Max")
+        self.assertEqual((r["status"], r["moderation"]["flags"], r["moderation"]["found"]), ("published", [], None))
+        self.assertIn(lid, [i["id"] for i in self.c.get("/api/v1/listings").json()["items"]])
+        staff = self.make_staff()
+        self.assertEqual(self.get("/admin/moderation", staff).json()["items"], [])  # nothing left for staff
+        self.assertIn("release_held_listing", [a["action"] for a in self.get("/admin/audit", staff).json()["items"]])
+        with self.db() as db:
+            self.assertIsNone(db.get(Listing, lid).held_from)
+
+    def test_a_held_listing_goes_back_where_an_edit_took_it_from(self):
+        lid = self.publish()["id"]
+        self.post(f"/listings/{lid}/pause", self.seller)
+        self.assertEqual(self.edit(lid, description="Қоңырау шалыңыз 87011234567")["status"], "moderation")
+        self.assertEqual(self.edit(lid, description="Бір маусым киілген.")["status"], "paused")  # not put on sale
+
+    def test_a_hold_for_anything_but_contacts_stays_for_staff_whatever_is_fixed(self):
+        for _ in range(5):
+            self.publish()
+        lid = self.draft(price_tiyn=900_000, description="Telegram: qadam")
+        r = self.post(f"/listings/{lid}/publish", self.seller).json()
+        self.assertEqual(sorted(r["moderation"]["flags"]), ["contacts", "low_price"])
+        r = self.edit(lid, description="Таза.")
+        self.assertEqual((r["status"], r["moderation"]["flags"]), ("moderation", ["low_price"]))
+        self.assertEqual(self.edit(lid, price_tiyn=3_800_000)["status"], "moderation")  # a low price is for staff
+        # A replica word taken out in one Save and the contact in the next: the replica word held it, so staff see it.
+        lid = self.draft(title="Найк люкс копия", description="Telegram: qadam")
+        self.assertEqual(self.post(f"/listings/{lid}/publish", self.seller).json()["status"], "moderation")
+        self.assertEqual(self.edit(lid, title="Найк кроссовка")["moderation"]["flags"], ["contacts"])
+        r = self.edit(lid, description="Таза.")
+        self.assertEqual((r["status"], r["moderation"]["flags"]), ("moderation", []))
+        with self.db() as db:
+            self.assertEqual(db.get(Listing, lid).held_for, "contacts,replica")
+        staff = self.make_staff()
+        self.assertIn(lid, [q["listing"]["id"] for q in self.get("/admin/moderation", staff).json()["items"]])
+        self.assertEqual(self.post(f"/admin/moderation/{lid}/approve", staff).json()["status"], "published")
+        with self.db() as db:
+            self.assertEqual((db.get(Listing, lid).held_from, db.get(Listing, lid).held_for), (None, None))
+
+    def test_a_contact_added_while_held_for_contacts_does_not_widen_what_staff_must_see(self):
+        lid = self.draft(description="Telegram: qadam")
+        self.post(f"/listings/{lid}/publish", self.seller)
+        self.assertEqual(self.edit(lid, description="WhatsApp: +7 701 555 12 34")["status"], "moderation")
+        self.assertEqual(self.edit(lid, description="Таза.")["status"], "published")
+
+    def test_a_held_listing_that_cannot_go_on_sale_waits_paused_with_the_reason_at_publish(self):
+        listing = self.publish(description="Telegram: qadam")
+        lid, size = listing["id"], listing["sizes"][0]["id"]
+        self.assertEqual(listing["status"], "moderation")
+        r = self.edit(lid, description="Таза.", sizes=[{"id": size, "quantity": 0}])
+        self.assertEqual(r["status"], "paused")  # out of the queue, not on sale with nothing to sell
+        self.assertEqual(self.get("/admin/moderation", self.make_staff()).json()["items"], [])
+        r = self.post(f"/listings/{lid}/publish", self.seller)
+        self.assertEqual((r.status_code, r.json()["code"]), (422, "out_of_stock"))  # the reason, where it is asked
+
+    def test_a_defective_pair_is_not_put_on_sale_without_the_defect_close_up(self):
+        lid = self.draft(description="Telegram: qadam")
+        self.post(f"/listings/{lid}/publish", self.seller)
+        with self.db() as db:  # as a Save of a pair never on sale could leave it
+            row = db.get(Listing, lid)
+            row.condition, row.defects = "defective", "Табаны жыртық"
+            db.commit()
+        self.assertEqual(self.edit(lid, description="Таза.")["status"], "paused")
+
+    def test_a_listing_staff_sent_back_keeps_their_reason_when_edited(self):
+        lid = self.publish()["id"]
+        self.edit(lid, description="Telegram: qadam")
+        staff = self.make_staff()
+        self.post(f"/admin/moderation/{lid}/reject", staff, {"reason": "Мессенджерді алып тастаңыз"})
+        r = self.edit(lid, description="WhatsApp: +7 701 555 12 34")
+        self.assertEqual((r["status"], r["moderation"]["note"]), ("rejected", "Мессенджерді алып тастаңыз"))
+        r = self.edit(lid, description="Таза.")
+        self.assertEqual((r["status"], r["moderation"]["note"]), ("rejected", "Мессенджерді алып тастаңыз"))
+        self.assertEqual(self.post(f"/listings/{lid}/publish", self.seller).json()["status"], "published")
+
+    def test_a_save_on_a_held_listing_checks_it_once(self):
+        lid = self.publish()["id"]
+        self.edit(lid, description="Telegram: qadam")
+        with mock.patch.object(moderation, "check", wraps=moderation.check) as check:
+            self.assertEqual(self.edit(lid, description="Таза.")["status"], "published")
+        self.assertEqual(check.call_count, 1)  # recheck's answer is the one release reads
+
+    def test_a_listing_held_before_the_stage_is_left_to_staff(self):
+        lid = self.publish()["id"]
+        self.post(f"/listings/{lid}/pause", self.seller)
+        self.edit(lid, description="Telegram: qadam")
+        with self.db() as db:  # as the migration leaves a row already held
+            row = db.get(Listing, lid)
+            row.held_from = row.held_for = None
+            db.commit()
+        self.assertEqual(self.edit(lid, description="Таза.")["status"], "moderation")
+
+    def test_staff_approving_a_held_listing_with_no_pair_left_marks_it_sold(self):
+        listing = self.publish()
+        lid, size = listing["id"], listing["sizes"][0]["id"]
+        self.edit(lid, description="Telegram: qadam")
+        with self.db() as db:
+            for s in db.get(Listing, lid).sizes:
+                s.quantity = 0
+            db.commit()
+        staff = self.make_staff()
+        self.assertEqual(self.post(f"/admin/moderation/{lid}/approve", staff).json()["status"], "sold")
+        note = self.get("/notifications", self.seller).json()["items"][0]["text"]
+        self.assertIn("Жұп қосып", note)
+
+    def test_found_names_contacts_from_every_field_three_at_most(self):
+        lid = self.draft(title="Кроссовка WhatsApp", description="qadam@mail.ru, t.me/qadam", condition="used_good",
+                         defects="Instagram-да сурет")
+        r = self.post(f"/listings/{lid}/publish", self.seller).json()
+        self.assertEqual(r["moderation"]["found"], "WhatsApp», «qadam@mail.ru», «t.me/qadam")
+
     def test_a_price_far_below_the_model_is_flagged(self):
         for _ in range(5):
             self.publish()
@@ -3660,9 +3782,11 @@ class ListingEditTests(ApiTestCase):
         self.assertEqual(got["status"], "rejected")  # a clean edit goes back through publish, not straight on sale
         self.assertTrue(got["ever_on_sale"])
 
-    def test_a_listing_waiting_for_review_is_not_put_on_sale_by_a_clean_edit(self):
+    def test_a_listing_waiting_for_review_is_put_back_on_sale_only_when_held_for_contacts_alone(self):
         lid = self.publish()["id"]
         self.patch(lid, {"title": "Кроссовка, жазыңыз 87011234567"})
+        self.assertEqual(self.patch(lid, {"title": "Күнделікті кроссовка"}).json()["status"], "published")
+        self.patch(lid, {"title": "Найк люкс копия"})
         self.assertEqual(self.patch(lid, {"title": "Күнделікті кроссовка"}).json()["status"], "moderation")
         self.assertEqual(self.patch(lid, {"sizes": []}).json()["status"], "moderation")
 

@@ -102,6 +102,12 @@ class Listing(Base):
     moderation_flags: Mapped[str | None] = mapped_column(String(200))
     moderation_cleared: Mapped[str | None] = mapped_column(String(200))
     moderation_note: Mapped[str | None] = mapped_column(Text)
+    # Where a listing held by the checks goes back to when its seller fixes what they found: "published" when the
+    # seller was putting it on sale, else the status an edit took it from. held_for gathers every flag that held it
+    # while it waits (comma-separated); only a hold for contacts alone is the seller's to lift. Both are None for a
+    # listing not held, and for one held before stage 91, which staff decide as before.
+    held_from: Mapped[str | None] = mapped_column(String(20))
+    held_for: Mapped[str | None] = mapped_column(String(200))
     # The price before the seller's last cut, shown crossed out for a while. Only a price the listing really had.
     was_price_tiyn: Mapped[int | None] = mapped_column(BigInteger)
     was_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

@@ -21,6 +21,10 @@ String privacyUrl(String lang, {String base = apiBase}) =>
     '${base.replaceFirst(RegExp(r'/api/v1/?$'), '')}/privacy?lang=$lang';
 
 /// Error as the API returns it: a stable code plus ready messages in Kazakh, Russian and English.
+/// The line naming what the server's contacts check found («a», «b»), quoted the interface language's way.
+String takeOutLine(String found) =>
+    trf('Мынаны алып тастаңыз: «{0}»', [appLanguage.value == 'en' ? found.replaceAll('», «', '”, “') : found]);
+
 class ApiException implements Exception {
   ApiException(this.status, this.code, this.messageKk, [this.detail, this.messageRu, this.messageEn]) : _local = false;
 
@@ -51,8 +55,7 @@ class ApiException implements Exception {
   /// For a contacts refusal, the line naming what the server found: «Мынаны алып тастаңыз: «a», «b»».
   String? get foundLine {
     final found = code == 'contacts_not_allowed' ? detail : null;
-    if (found == null || found.isEmpty) return null;
-    return trf('Мынаны алып тастаңыз: «{0}»', [appLanguage.value == 'en' ? found.replaceAll('», «', '”, “') : found]);
+    return found == null || found.isEmpty ? null : takeOutLine(found);
   }
 
   /// No answer at all: no network, the server is down, or it did not answer in time.

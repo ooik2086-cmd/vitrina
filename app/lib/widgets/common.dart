@@ -52,11 +52,17 @@ Widget? nearLimitCounter(BuildContext context,
 /// for any other error.
 List<String> refusedContacts(Object? error) {
   if (error is! ApiException || error.code != 'contacts_not_allowed') return const [];
-  return [
-    for (final piece in (error.detail ?? '').split('», «'))
-      if (piece.isNotEmpty) piece
-  ];
+  return contactPieces(error.detail);
 }
+
+/// The pieces in what the server found («a», «b»): a refusal's detail or a held listing's moderation.found.
+List<String> contactPieces(String? found) => [
+      for (final piece in (found ?? '').split('», «'))
+        if (piece.isNotEmpty) piece
+    ];
+
+/// Whether [text] holds [piece] as written, as a whole word, any run of spaces standing for a space.
+bool holdsPiece(String text, String piece) => _pieceIn(piece).hasMatch(text);
 
 /// Where [piece] stands in the words as a whole word. The server quotes it from text with each run of spaces made
 /// one, so any run of spaces or line breaks stands for a space.
@@ -68,7 +74,7 @@ RegExp _pieceIn(String piece) =>
 /// words as written (a piece cut short ends in «…», so it is not), so the tap never leaves a named contact behind.
 List<String> removableContacts(Object? error, String text) {
   final pieces = refusedContacts(error);
-  if (pieces.any((p) => !_pieceIn(p).hasMatch(text))) return const [];
+  if (pieces.any((p) => !holdsPiece(text, p))) return const [];
   return pieces;
 }
 

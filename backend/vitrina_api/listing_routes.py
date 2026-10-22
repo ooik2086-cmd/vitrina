@@ -507,17 +507,24 @@ def publish_listing(listing_id: int, user: User = Depends(current_user), db: Ses
     # "hidden" is a moderation decision; only staff can lift it. A "rejected" listing is fixed and sent again.
     if listing.status not in ("draft", "paused", "rejected"):
         raise ApiError(409, "invalid_status")
-    if len(listing.media) < cfg.min_listing_photos:
-        raise ApiError(422, "missing_required_photos")
-    if listing.condition in DEFECT_REQUIRED and not (listing.defects or "").strip():
-        raise ApiError(422, "defects_required")
-    if listing.condition == Condition.DEFECTIVE.value and not any(m.angle == "defect" for m in listing.media):
-        raise ApiError(422, "defects_required", "a close-up photo of each defect is required")
-    if not any(s.quantity > 0 for s in listing.sizes):
-        raise ApiError(422, "out_of_stock")
+    if blocker := publish_blocker(cfg, listing):
+        raise blocker
     route_after_checks(db, storage, listing)
     db.commit()
     return listing_out(db, listing, owner=True)
+
+
+def publish_blocker(cfg: Settings, listing: Listing) -> ApiError | None:
+    """Why the listing cannot go on sale as it is, or None: the photos, the defects and a pair to sell."""
+    if len(listing.media) < cfg.min_listing_photos:
+        return ApiError(422, "missing_required_photos")
+    if listing.condition in DEFECT_REQUIRED and not (listing.defects or "").strip():
+        return ApiError(422, "defects_required")
+    if listing.condition == Condition.DEFECTIVE.value and not any(m.angle == "defect" for m in listing.media):
+        return ApiError(422, "defects_required", "a close-up photo of each defect is required")
+    if not any(s.quantity > 0 for s in listing.sizes):
+        return ApiError(422, "out_of_stock")
+    return None
 
 
 def split_codes(text: str | None) -> list[str]:
@@ -528,8 +535,8 @@ def route_after_checks(db: Session, storage: Storage, listing: Listing) -> None:
     """Publish, or queue for staff when a check flags something staff have not already cleared."""
     flags = moderation.check(db, storage, listing)
     listing.moderation_flags = ",".join(flags) or None
-    if set(flags) - set(split_codes(listing.moderation_cleared)):
-        listing.status = "moderation"
+    if held := set(flags) - set(split_codes(listing.moderation_cleared)):
+        listing.status, listing.held_from, listing.held_for = "moderation", "published", ",".join(sorted(held))
     else:
         listing.status = "published"
         listing.moderation_note = None
@@ -544,6 +551,7 @@ def edit_listing(listing_id: int, body: ListingPatch, request: Request, backgrou
     listing = own_listing(db, listing_id, user, lock=True)
     if listing.status == "hidden":
         raise ApiError(409, "invalid_status")
+    held = listing.status == "moderation"
     changed = edit_contents(db, cfg, storage, listing, body, user)
     if body.price_tiyn is not None and body.price_tiyn != listing.price_tiyn:
         set_price(db, listing, body.price_tiyn)
@@ -577,9 +585,12 @@ def edit_listing(listing_id: int, body: ListingPatch, request: Request, backgrou
             by_id[item.id].quantity = item.quantity
     if body.sizes is not None or body.add_sizes:
         settle_stock_status(listing)
+    flags = None
     if changed and listing.announced_at is not None:
-        recheck(db, storage, listing, changed)
+        flags = recheck(db, storage, listing, changed)
         services.audit(db, user.id, "edit_listing", f"listing:{listing.id}", ",".join(sorted(changed)))
+    if changed and held:
+        release_if_fixed(db, cfg, storage, listing, user, flags)
     services.tell_back_in_stock(db, listing)
     if "photos" in changed:
         # The search-by-photo vector was made from the old photos. Dropped with them, so that until the job makes a
@@ -696,9 +707,10 @@ CLEARANCE_OF = {"text": ("contacts", "replica"), "photos": ("reused_photo",), "p
                 "name": ("contacts", "replica", "low_price")}
 
 
-def recheck(db: Session, storage: Storage, listing: Listing, changed: set[str]) -> None:
+def recheck(db: Session, storage: Storage, listing: Listing, changed: set[str]) -> list[str]:
     """Checks a change to a listing that has been on sale, whatever its status now (a sold or paused page is
-    public too). A flagged change sends it to staff; a clean one never puts a listing on sale by itself."""
+    public too). A flagged change sends it to staff; a clean one never puts a listing on sale by itself. A listing
+    staff sent back is not public: it keeps its status and their reason, and is checked when sent again."""
     stale = {code for part in changed for code in CLEARANCE_OF.get(part, ())}
     listing.moderation_cleared = ",".join(c for c in split_codes(listing.moderation_cleared) if c not in stale) or None
     flags = moderation.check(db, storage, listing)
@@ -708,8 +720,40 @@ def recheck(db: Session, storage: Storage, listing: Listing, changed: set[str]) 
         # Words the seller did not touch were checked when they were written: a newer word rule (stage 88 began
         # reading Instagram and e-mail) never takes a page off sale over a price or a count.
         held -= set(CLEARANCE_OF["text"])
-    if held:
-        listing.status = "moderation"
+    if held and listing.status not in ("moderation", "rejected"):
+        listing.status, listing.held_from, listing.held_for = "moderation", listing.status, ",".join(sorted(held))
+    return flags
+
+
+# Holds a seller may lift by fixing the listing: a contact taken out is plain to see. A replica word, a price far
+# below the model or a reused photo can be hidden rather than fixed, so staff look at those.
+SELF_FIXABLE = {"contacts"}
+
+
+def release_if_fixed(db: Session, cfg: Settings, storage: Storage, listing: Listing, user: User,
+                     flags: list[str] | None = None) -> None:
+    """A listing held for contacts alone goes back where it was once an edit by its seller takes them out, as a fixed
+    listing sent again would: staff have nothing left to look at. Back on sale only as a publish would let it (the
+    photos, the defects, a pair to sell); else it waits paused, where «Сатылымға шығару» says what is missing.
+    [flags] are the checks just made by recheck, so they are not made twice."""
+    if flags is None:
+        flags = moderation.check(db, storage, listing)
+        listing.moderation_flags = ",".join(flags) or None
+    if listing.held_for is None:
+        return  # held before stage 91: staff decide, as they did then
+    held = set(flags) - set(split_codes(listing.moderation_cleared))
+    held_for = set(split_codes(listing.held_for)) | held  # a flag that held it once stays, whatever is fixed later
+    listing.held_for = ",".join(sorted(held_for))
+    if held or not held_for <= SELF_FIXABLE:
+        return
+    back = listing.held_from or "published"
+    if back == "published" and publish_blocker(cfg, listing):
+        back = "paused"
+    listing.status, listing.held_from, listing.held_for, listing.moderation_note = back, None, None, None
+    settle_stock_status(listing)
+    if listing.status == "published":
+        announce(db, listing)
+    services.audit(db, user.id, "release_held_listing", f"listing:{listing.id}", listing.status)
 
 
 CONDITION_ORDER = [c.value for c in Condition]  # best first

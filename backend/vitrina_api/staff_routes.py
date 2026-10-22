@@ -20,7 +20,7 @@ from .serializers import (LIGHT, listing_out, moderation_out, order_out, order_s
                           ordered_photos, preload_orders, preload_sellers, with_light_media)
 from .saved_search_routes import announce
 from .storage import Storage, private_link
-from .listing_routes import split_codes
+from .listing_routes import settle_stock_status, split_codes
 from .order_routes import dispute_evidence_until, order_evidence_list, order_for
 
 
@@ -181,7 +181,9 @@ class ModerationRejectIn(BaseModel):
 
 
 def queued_listing(db: Session, listing_id: int) -> Listing:
-    listing = db.get(Listing, listing_id)
+    # Locked (on Postgres) as the seller's edit locks it, so a Save that ends the check and a staff decision never
+    # both take the listing out of the queue.
+    listing = db.get(Listing, listing_id, with_for_update=True, populate_existing=True)
     if listing is None:
         raise ApiError(404, "not_found")
     if listing.status != "moderation":
@@ -192,16 +194,23 @@ def queued_listing(db: Session, listing_id: int) -> Listing:
 @router.post("/admin/moderation/{listing_id}/approve")
 def approve_listing(listing_id: int, staff: User = Depends(staff_user), db: Session = Depends(get_db)):
     listing = queued_listing(db, listing_id)
-    listing.status = "published"
+    listing.status, listing.held_from, listing.held_for = "published", None, None
+    settle_stock_status(listing)  # approved with no pair left: sold, not on sale empty
     # Remember what was cleared so pausing and republishing does not queue the same listing again.
     listing.moderation_cleared = ",".join(sorted(set(split_codes(listing.moderation_cleared))
                                                  | set(split_codes(listing.moderation_flags)))) or None
     listing.moderation_note = None
-    announce(db, listing)
     services.audit(db, staff.id, "approve_listing", f"listing:{listing.id}", listing.moderation_flags or "")
-    services.notify(db, listing.seller_id, "moderation", f"«{listing.title}» тексеруден өтті және сатылымда.",
-                    f"«{listing.title}» прошёл проверку и уже продаётся.",
-                    f"“{listing.title}” passed review and is on sale.", listing_id=listing.id)
+    if listing.status == "published":
+        announce(db, listing)
+        services.notify(db, listing.seller_id, "moderation", f"«{listing.title}» тексеруден өтті және сатылымда.",
+                        f"«{listing.title}» прошёл проверку и уже продаётся.",
+                        f"“{listing.title}” passed review and is on sale.", listing_id=listing.id)
+    else:
+        services.notify(db, listing.seller_id, "moderation",
+                        f"«{listing.title}» тексеруден өтті. Жұп қосып, сатылымға шығарыңыз.",
+                        f"«{listing.title}» прошёл проверку. Добавьте пары и выставьте его в продажу.",
+                        f"“{listing.title}” passed review. Add pairs and put it on sale.", listing_id=listing.id)
     db.commit()
     return {"id": listing.id, "status": listing.status}
 
@@ -211,7 +220,7 @@ def reject_listing(listing_id: int, body: ModerationRejectIn, staff: User = Depe
                    db: Session = Depends(get_db)):
     listing = queued_listing(db, listing_id)
     reason = body.reason.strip()
-    listing.status, listing.moderation_note = "rejected", reason
+    listing.status, listing.moderation_note, listing.held_from, listing.held_for = "rejected", reason, None, None
     services.audit(db, staff.id, "reject_listing", f"listing:{listing.id}", reason)
     services.notify(db, listing.seller_id, "moderation", f"«{listing.title}» қайтарылды: {reason}",
                     f"«{listing.title}» возвращён: {reason}",
