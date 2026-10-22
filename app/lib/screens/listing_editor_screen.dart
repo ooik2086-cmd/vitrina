@@ -14,6 +14,7 @@ import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/listing_contents.dart' show ShowcaseStopsHint;
 import 'spin_capture_screen.dart';
+import '../color_guess.dart';
 import '../colors.dart';
 import '../i18n.dart';
 
@@ -131,6 +132,15 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
   final _pool = _Pool(3);
   Suggestion? _suggestion;
   bool _suggestAsked = false;
+
+  /// The colour the outer side photo (or, until there is one, the front) suggests, asked as one question in the
+  /// next step; [_guessAngle] is the photo it came from, [_guessRun] keeps a slow, older guess from landing last.
+  String? _colorGuess;
+  String? _guessAngle;
+  int _guessRun = 0;
+
+  /// The guess the seller already answered, yes or no: not asked again, on coming back to the step either.
+  String? _colorAnswered;
   String? _modelName;
   late final String _initial; // what the form held on opening
   Timer? _keepTimer;
@@ -277,6 +287,8 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
     _modelName = d['model'] as String?;
     _suggestAsked = _brand.text.isNotEmpty;
     _suggestion = null;
+    _colorGuess = _guessAngle = _colorAnswered = null;
+    _guessRun++;
     final keptAt = DateTime.fromMillisecondsSinceEpoch(d['kept_at'] as int? ?? 0);
     final fresh = DateTime.now().difference(keptAt) < _keptUrlsLast;
     final sizes = [
@@ -312,6 +324,14 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
       ..clear()
       ..addAll([for (final j in d['defect_photos'] as List? ?? []) _revive(j, fresh)].nonNulls);
     _frames = [for (final j in d['frames'] as List? ?? []) _revive(j, fresh, frame: true)].nonNulls.toList();
+    // Kept photos: the colour is guessed again while none is set.
+    if (_color.text.trim().isEmpty) {
+      if (_photos['outer']?.path case final path?) {
+        _guessColor(XFile(path), 'outer');
+      } else if (_photos['front']?.path case final path?) {
+        _guessColor(XFile(path), 'front');
+      }
+    }
     _step = (d['step'] as int? ?? 0).clamp(0, 2);
     _saveKey = d['save_key'] as String? ?? newIdempotencyKey(); // starting over is another pair
   }
@@ -531,10 +551,23 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
     final upload = _startUpload(file, detail: detail);
     _photos[angle]?.cancelled = true;
     setState(() => _photos[angle] = upload);
+    _guessColor(file, angle);
     if (!_suggestAsked && (angle == 'outer' || angle == 'front')) {
       _suggestAsked = true;
       _suggestFrom(upload);
     }
+  }
+
+  Future<void> _guessColor(XFile file, String angle) async {
+    if (angle != 'outer' && (angle != 'front' || _guessAngle == 'outer')) return;
+    if (_color.text.trim().isNotEmpty && _color.text != widget.template?.color) return; // the seller chose already
+    _guessAngle = angle;
+    final run = ++_guessRun;
+    String? guess;
+    try {
+      guess = await guessShoeColor(await file.readAsBytes());
+    } catch (_) {} // a photo the phone no longer has: the seller picks the colour from the list
+    if (mounted && run == _guessRun) setState(() => _colorGuess = guess);
   }
 
   /// Offers brand, model and category from look-alikes once the first side photo is uploaded.
@@ -890,7 +923,15 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
           onChanged: (v) => setState(() => _audience = v),
         ),
         TextFormField(controller: _brand, decoration: InputDecoration(labelText: tr('Бренді (міндетті емес)'))),
-        ColorField(controller: _color),
+        ColorField(
+          controller: _color,
+          // Asked while no colour is set, or while it is still the one copied from the similar pair: another
+          // colour of the same shoe is the usual reason to copy one.
+          guess: _colorGuess != _colorAnswered && (_color.text.trim().isEmpty || _color.text == widget.template?.color)
+              ? _colorGuess
+              : null,
+          onAnswered: () => _colorAnswered = _colorGuess,
+        ),
         DropdownButtonFormField<String>(
           initialValue: _condition,
           isExpanded: true,

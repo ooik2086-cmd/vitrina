@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -17,12 +18,18 @@ import 'package:vitrina/theme.dart';
 
 import 'support/screens.dart' show loadFonts;
 
+/// What every pick hands back: a few bytes that are not a picture, unless a test gives a real photo; [pickQueue],
+/// when not empty, gives the next picks their own photos.
+var pickedBytes = utf8.encode('jpeg bytes');
+final pickQueue = <List<int>>[];
+
 /// Every pick hands back the same small photo, as if taken with the camera.
 class _FakePicker extends ImagePickerPlatform {
   @override
   Future<XFile?> getImageFromSource(
           {required ImageSource source, ImagePickerOptions options = const ImagePickerOptions()}) async =>
-      XFile.fromData(utf8.encode('jpeg bytes'), name: 'p.jpg', path: '/picked/p.jpg');
+      XFile.fromData(Uint8List.fromList(pickQueue.isEmpty ? pickedBytes : pickQueue.removeAt(0)),
+          name: 'p.jpg', path: '/picked/p.jpg');
 
   @override
   Future<List<XFile>> getMultiImageWithOptions(
@@ -77,6 +84,8 @@ final uploadOrder = <String>[];
 void main() {
   setUp(() {
     ImagePickerPlatform.instance = _FakePicker();
+    pickedBytes = utf8.encode('jpeg bytes');
+    pickQueue.clear();
     SharedPreferences.setMockInitialValues({});
   });
 
@@ -545,6 +554,104 @@ void main() {
     await next(tester);
     expect(find.widgetWithText(TextFormField, '45000'), findsOneWidget);
     expect(find.widgetWithText(TextFormField, '43'), findsOneWidget); // every size row came along
+  });
+
+  /// Lets the photo's colour be read: decoding a real picture takes real time.
+  Future<void> readPhotos(WidgetTester tester) async {
+    for (var i = 0; i < 10; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 30)));
+      await tester.pump();
+    }
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('the side photo suggests the colour: one tap on Иә, and the listing is that colour', (tester) async {
+    pickedBytes = File('demo/media/1/07992a536638a99986f39bb59fc48ba8.jpg').readAsBytesSync(); // a blue pair
+    final sent = <Map<String, dynamic>>[];
+    await open(tester, sent: sent);
+    await pickSides(tester);
+    await readPhotos(tester);
+    await next(tester);
+    expect(step(tester), 'Тауар туралы');
+    expect(find.text('Көк пе?'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('color-yes')));
+    await tester.pump();
+    await tester.enterText(find.widgetWithText(TextFormField, 'Атауы'), 'Qadam кроссовка');
+    await choose(tester, find.byKey(const Key('audience')), 'Әйелдерге');
+    await choose(tester, find.byKey(const ValueKey('category-null')), 'Кроссовкалар');
+    await next(tester);
+    expect(step(tester), 'Бағасы мен өлшемі');
+    await tester.enterText(find.widgetWithText(TextFormField, 'Бағасы'), '30000');
+    await tester.enterText(find.widgetWithText(TextFormField, 'Өлшем'), '38');
+    await tester.enterText(find.widgetWithText(TextFormField, 'Ұлтарақ, см'), '24');
+    await tester.tap(find.text('Жариялау'));
+    await tester.pumpAndSettle();
+    expect(sent.single['color'], 'көк');
+  });
+
+  testWidgets('a similar pair keeps the copied colour until the photo shows another, then asks', (tester) async {
+    pickedBytes = File('demo/media/1/07992a536638a99986f39bb59fc48ba8.jpg').readAsBytesSync();
+    await open(tester, template: Listing.fromJson(listingJson())); // a white pair
+    await pickSides(tester);
+    await readPhotos(tester);
+    await next(tester);
+    expect(find.text('Көк пе?'), findsOneWidget); // another colour of the same shoe is why one copies it
+    await next(tester);
+    expect(step(tester), 'Тауар туралы'); // unanswered, the copied white is not saved unseen
+    await tester.tap(find.byKey(const Key('color-no')));
+    await tester.pump();
+    expect(tester.widget<ChoiceChip>(find.byKey(const Key('color-ақ'))).selected, isTrue); // the list, white picked
+
+    // Back to the photos and on again: answered once, not asked again.
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(step(tester), 'Фото');
+    await next(tester);
+    expect(find.byKey(const Key('color-guess')), findsNothing);
+  });
+
+  testWidgets('the outer side photo decides the colour; a front photo taken after it does not', (tester) async {
+    final blue = File('demo/media/1/07992a536638a99986f39bb59fc48ba8.jpg').readAsBytesSync();
+    final pink = File('demo/media/1/1b3b2efb9ca638b707837c452fa6cc1f.jpg').readAsBytesSync();
+    await open(tester);
+    pickQueue.add(pink);
+    await pick(tester, find.text('Алдынан *'));
+    await readPhotos(tester);
+    pickQueue.addAll([blue, blue, blue, pink]);
+    await pick(tester, find.text('Сырт бүйірі *'));
+    await pick(tester, find.text('Ішкі бүйірі *'));
+    await pick(tester, find.text('Өкшесі *'));
+    await pick(tester, find.text('Алдынан *')); // taken again
+    await readPhotos(tester);
+    await next(tester);
+    expect(find.text('Көк пе?'), findsOneWidget);
+  });
+
+  testWidgets('kept photos from before ask the colour again while none is set', (tester) async {
+    final dir = Directory.systemTemp.createTempSync('kept');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final file = File('${dir.path}/outer.jpg')
+      ..writeAsBytesSync(File('demo/media/1/07992a536638a99986f39bb59fc48ba8.jpg').readAsBytesSync());
+    SharedPreferences.setMockInitialValues({
+      Session.editorDraftKey: jsonEncode({
+        'photos': {
+          for (final a in requiredAngles.keys) a: {'path': file.path}
+        }
+      })
+    });
+    await open(tester, settle: false);
+    await readPhotos(tester);
+    await next(tester);
+    expect(find.text('Көк пе?'), findsOneWidget);
+  });
+
+  testWidgets('a photo that is not a picture asks nothing: the colours are listed as before', (tester) async {
+    await open(tester);
+    await pickSides(tester);
+    await readPhotos(tester);
+    await next(tester);
+    expect(find.byKey(const Key('color-guess')), findsNothing);
+    expect(find.byKey(const Key('color-көк')), findsOneWidget);
   });
 
   test('insole centimetres are read as sellers type them', () {

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 
 import 'i18n.dart';
+import 'theme.dart';
 
 /// The shoe colours a seller picks from, by the Kazakh name the server stores (backend vitrina_core/colors.py, which
 /// also turns "черный" or "black" typed by hand into "қара"). Each with the colour of its dot in the picker; the
@@ -34,6 +36,31 @@ const colorParts = <String, List<String>>{
   'қара-ақ': ['қара', 'ақ'],
 };
 
+/// The one question asked when the photo suggests a colour: "Көк пе?" (each with its own Kazakh question word).
+const colorQuestions = <String, String>{
+  'қара': 'Қара ма?',
+  'ақ': 'Ақ па?',
+  'сұр': 'Сұр ма?',
+  'қоңыр': 'Қоңыр ма?',
+  'құм түсті': 'Құм түсті ме?',
+  'сүт түсті': 'Сүт түсті ме?',
+  'көк': 'Көк пе?',
+  'көгілдір': 'Көгілдір ме?',
+  'қою көк': 'Қою көк пе?',
+  'жасыл': 'Жасыл ма?',
+  'хаки': 'Хаки түсті ме?',
+  'қызыл': 'Қызыл ма?',
+  'бордо': 'Бордо ма?',
+  'қызғылт': 'Қызғылт па?',
+  'сары': 'Сары ма?',
+  'қызғылт сары': 'Қызғылт сары ма?',
+  'күлгін': 'Күлгін бе?',
+  'күміс': 'Күміс пе?',
+  'алтын': 'Алтын түсті ме?',
+  'қара-ақ': 'Қара-ақ па?',
+  'түрлі түсті': 'Түрлі түсті ме?',
+};
+
 /// A stored colour in the interface language: the listed colours are translated, a colour the seller typed is shown
 /// as typed.
 String colorName(String stored) => shoeColors.containsKey(stored) ? tr(stored) : stored;
@@ -41,10 +68,18 @@ String colorName(String stored) => shoeColors.containsKey(stored) ? tr(stored) :
 /// The colour of a listing: a dot for each listed colour to pick, or "another colour" to type one. Once picked, only
 /// the pick shows, with a button to change it, so the list does not push the rest of the form away. The text stays
 /// in [controller], as the plain field before it did.
+///
+/// With a [guess] from the photo, one question comes first: its dot, "Көк пе?" and a large "Иә". One tap and the
+/// colour is set; "no" opens the list (with the colour already set, if any, picked). Until answered, the form does
+/// not go on: a copied colour is never saved unseen. Each answer is told to [onAnswered], so the page does not ask
+/// about the same guess again. A guess that arrives once the field is showing is not asked: the question would
+/// take the place of a colour the seller may be tapping.
 class ColorField extends StatefulWidget {
-  const ColorField({super.key, required this.controller, this.enabled = true});
+  const ColorField({super.key, required this.controller, this.enabled = true, this.guess, this.onAnswered});
   final TextEditingController controller;
   final bool enabled;
+  final String? guess;
+  final VoidCallback? onAnswered;
 
   @override
   State<ColorField> createState() => _ColorFieldState();
@@ -57,9 +92,16 @@ class _ColorFieldState extends State<ColorField> {
   /// What the seller typed under "another colour", kept while they look at a listed one.
   late String _typedText;
 
+  /// The guess the seller answered here, yes or no.
+  String? _answered;
+
+  /// There was no guess when the field first showed: one arriving later is not asked.
+  late final bool _late;
+
   @override
   void initState() {
     super.initState();
+    _late = widget.guess == null;
     final text = widget.controller.text;
     _other = _typed(text);
     _open = text.trim().isEmpty;
@@ -69,7 +111,23 @@ class _ColorFieldState extends State<ColorField> {
   /// A colour that is not on the list, typed by the seller (an empty field is not one yet).
   static bool _typed(String text) => text.trim().isNotEmpty && !shoeColors.containsKey(text.trim());
 
+  bool get _asking {
+    final guess = widget.guess;
+    return widget.enabled &&
+        !_late &&
+        guess != null &&
+        guess != _answered &&
+        colorQuestions.containsKey(guess) &&
+        (_other || guess != widget.controller.text.trim());
+  }
+
+  void _answer() {
+    _answered = widget.guess;
+    widget.onAnswered?.call();
+  }
+
   String? _check(String? _) {
+    if (_asking) return tr('Түсін таңдаңыз');
     final text = widget.controller.text.trim();
     if (text.length >= 2) return null;
     return _other ? tr('Түсін жазыңыз') : tr('Түсін таңдаңыз');
@@ -124,6 +182,59 @@ class _ColorFieldState extends State<ColorField> {
                 }
               : null,
         );
+        final guess = widget.guess;
+        final question = !_asking || guess == null
+            ? null
+            : Container(
+                key: const Key('color-guess'),
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: scheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(children: [
+                    ExcludeSemantics(child: ColorDot(guess, size: 32)),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(tr(colorQuestions[guess]!),
+                          key: const Key('color-guess-question'), style: weight(theme.textTheme.titleMedium!, 700)),
+                    ),
+                  ]),
+                  const SizedBox(height: 12),
+                  Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
+                    FilledButton(
+                      key: const Key('color-yes'),
+                      style: FilledButton.styleFrom(minimumSize: const Size(96, 48)),
+                      onPressed: () {
+                        setState(() {
+                          _other = false;
+                          _open = false;
+                          _answer();
+                        });
+                        widget.controller.text = guess;
+                        changed();
+                        SemanticsService.sendAnnouncement(
+                            View.of(context), colorName(guess), Directionality.of(context));
+                      },
+                      // Heard alone, "Иә" would not say what is set.
+                      child: Text(tr('Иә'), semanticsLabel: '${tr('Иә')}, ${colorName(guess)}'),
+                    ),
+                    TextButton(
+                      key: const Key('color-no'),
+                      style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+                      onPressed: () {
+                        setState(() {
+                          _open = true; // the list, with the colour already set picked
+                          _answer();
+                        });
+                        changed();
+                      },
+                      child: Text(tr('Жоқ, басқа түс')),
+                    ),
+                  ]),
+                ]),
+              );
         return Semantics(
           container: true,
           label: tr('Түсі'),
@@ -134,7 +245,9 @@ class _ColorFieldState extends State<ColorField> {
                 padding: const EdgeInsets.only(top: 12, bottom: 8),
                 child: Text(tr('Түсі'), style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
               ),
-              if (!_open)
+              if (question != null)
+                question
+              else if (!_open)
                 Row(children: [
                   Flexible(
                     child: Chip(
@@ -152,7 +265,7 @@ class _ColorFieldState extends State<ColorField> {
                 ])
               else
                 Wrap(spacing: 8, runSpacing: 4, children: [for (final name in shoeColors.keys) chip(name), other]),
-              if (_open && _other)
+              if (question == null && _open && _other)
                 Padding(
                   padding: const EdgeInsets.only(top: 8),
                   child: TextField(
@@ -172,7 +285,7 @@ class _ColorFieldState extends State<ColorField> {
                     },
                   ),
                 ),
-              if (state.hasError && !(_open && _other))
+              if (state.hasError && (question != null || !(_open && _other)))
                 Padding(
                   padding: const EdgeInsets.only(top: 6),
                   child: Text(state.errorText!, style: theme.textTheme.bodySmall?.copyWith(color: scheme.error)),
@@ -187,9 +300,10 @@ class _ColorFieldState extends State<ColorField> {
 
 /// The colour itself, in a ring so white and silver show on a white chip and dark colours on a dark picked chip.
 class ColorDot extends StatelessWidget {
-  const ColorDot(this.name, {super.key, this.onPicked = false});
+  const ColorDot(this.name, {super.key, this.onPicked = false, this.size = 18});
   final String name;
   final bool onPicked;
+  final double size;
 
   @override
   Widget build(BuildContext context) {
@@ -215,8 +329,8 @@ class ColorDot extends StatelessWidget {
       _ => null,
     };
     return Container(
-      width: 18,
-      height: 18,
+      width: size,
+      height: size,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         color: gradient == null ? shoeColors[name] : null,
