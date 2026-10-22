@@ -223,6 +223,18 @@ class Moderation {
   List<String> reasons(String lang) => switch (lang) { 'ru' => reasonsRu, 'en' => reasonsEn, _ => reasonsKk };
 }
 
+/// A shoe's 3D model (glTF binary): a light copy that opens first, a sharp one swapped in after it for close-ups,
+/// and which of the model's colours (KHR_materials_variants) this listing is.
+class ListingModel {
+  ListingModel.fromJson(Map<String, dynamic> j)
+      : url = j['url'] as String,
+        hqUrl = j['hq_url'] as String?,
+        variant = j['variant'] as String?;
+  final String url;
+  final String? hqUrl;
+  final String? variant;
+}
+
 /// Brand, model and category read off look-alike listings already on VITRINA. Any field may be null.
 class Suggestion {
   Suggestion.fromJson(Map<String, dynamic> j)
@@ -510,6 +522,7 @@ class Listing {
         description = j['description'] as String?,
         showcaseStyle = j['showcase_style'] as String,
         backdrop = j['backdrop'] as String?,
+        model = j['model'] is Map ? ListingModel.fromJson((j['model'] as Map).cast<String, dynamic>()) : null,
         coverFrame = j['cover_frame'] as String?,
         angleFrames = {
           for (final MapEntry(:key, :value) in ((j['angle_frames'] as Map?) ?? const {}).entries)
@@ -571,6 +584,9 @@ class Listing {
 
   /// light or dark: what the cut-out shoe stands out on, chosen by the server from the shoe's own brightness.
   final String? backdrop;
+
+  /// The shoe in 3D, turned and zoomed on the listing page; null shows the photos only.
+  final ListingModel? model;
 
   /// The 360° frame (its original url) that shows the shoe as the cover does: a turn starts there.
   final String? coverFrame;

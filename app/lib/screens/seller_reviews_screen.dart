@@ -27,10 +27,14 @@ class Stars extends StatelessWidget {
 }
 
 class SellerReviewsScreen extends StatefulWidget {
-  const SellerReviewsScreen({super.key, required this.sellerId, required this.shopName, this.rating});
+  const SellerReviewsScreen(
+      {super.key, required this.sellerId, required this.shopName, this.rating, this.inSheet = false});
   final int sellerId;
   final String shopName;
   final double? rating;
+
+  /// Shown in a sheet over the listing page: closed by its round × as the page's other sheets, not a back arrow.
+  final bool inSheet;
 
   @override
   State<SellerReviewsScreen> createState() => _SellerReviewsScreenState();
@@ -90,7 +94,22 @@ class _SellerReviewsScreenState extends State<SellerReviewsScreen> {
     final rating = widget.rating;
     final isOwner = SessionScope.of(context).me?.id == widget.sellerId;
     return Scaffold(
-      appBar: AppBar(title: Text(widget.shopName)),
+      appBar: AppBar(
+        automaticallyImplyLeading: !widget.inSheet,
+        title: Text(widget.shopName),
+        actions: [
+          if (widget.inSheet)
+            Padding(
+              padding: const EdgeInsets.only(right: 12),
+              child: IconButton.outlined(
+                key: const Key('sheet-close'),
+                tooltip: tr('Жабу'),
+                onPressed: () => Navigator.of(context).pop(),
+                icon: const Icon(Icons.close_rounded, size: 20),
+              ),
+            ),
+        ],
+      ),
       body: FutureBuilder<List<Review>>(
         future: _items,
         builder: (context, snap) {

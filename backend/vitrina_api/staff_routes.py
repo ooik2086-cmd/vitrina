@@ -17,8 +17,8 @@ from .config import Settings
 from .deps import get_db, get_private, get_settings, staff_user
 from .errors import ApiError
 from .models import AuditLog, AuthProof, ListingReport, Listing, Order, OrderEvent, OrderEvidence, User, utcnow
-from .schemas import EvidenceRequestIn, ReasonIn, ReportCloseIn, ResolveIn
-from .serializers import (LIGHT, listing_out, moderation_out, order_out, order_summary, ordered_details,
+from .schemas import EvidenceRequestIn, ListingModelIn, ReasonIn, ReportCloseIn, ResolveIn
+from .serializers import (LIGHT, listing_out, model_out, moderation_out, order_out, order_summary, ordered_details,
                           ordered_photos, preload_orders, preload_sellers, with_light_media)
 from .saved_search_routes import announce
 from .storage import Storage, private_link
@@ -113,6 +113,40 @@ def hide_listing(listing_id: int, body: ReasonIn, staff: User = Depends(staff_us
     services.audit(db, staff.id, "hide_listing", f"listing:{listing.id}", body.reason)
     db.commit()
     return {"id": listing.id, "status": listing.status}
+
+
+@router.put("/admin/listings/{listing_id}/model")
+def set_listing_model(listing_id: int, body: ListingModelIn, staff: User = Depends(staff_user),
+                      db: Session = Depends(get_db)):
+    """Gives a listing its 3D model: the listing page then turns the shoe in 3D instead of showing its photos."""
+    listing = db.get(Listing, listing_id)
+    if listing is None:
+        raise ApiError(404, "not_found")
+    if not body.reason.strip():
+        raise ApiError(422, "reason_required")
+    was = f"{listing.model_url} {listing.model_hq_url} {listing.model_variant}" if listing.model_url else "none"
+    listing.model_url, listing.model_hq_url, listing.model_variant = body.url, body.hq_url, body.variant
+    # What it was and what it is now, both copies: a wrong 3D can be traced and put back.
+    services.audit(db, staff.id, "set_listing_model", f"listing:{listing.id}",
+                   f"{body.url} {body.hq_url} {body.variant} (was {was}): {body.reason}"[:2000])
+    db.commit()
+    return {"id": listing.id, "model": model_out(listing)}
+
+
+@router.delete("/admin/listings/{listing_id}/model")
+def remove_listing_model(listing_id: int, body: ReasonIn, staff: User = Depends(staff_user),
+                         db: Session = Depends(get_db)):
+    """Takes a listing's 3D model away (it does not show this shoe truly): the page shows the photos again."""
+    listing = db.get(Listing, listing_id)
+    if listing is None:
+        raise ApiError(404, "not_found")
+    if not body.reason.strip():
+        raise ApiError(422, "reason_required")
+    was = f"{listing.model_url} {listing.model_hq_url} {listing.model_variant}"
+    listing.model_url = listing.model_hq_url = listing.model_variant = None
+    services.audit(db, staff.id, "remove_listing_model", f"listing:{listing.id}", f"(was {was}): {body.reason}"[:2000])
+    db.commit()
+    return {"id": listing.id, "model": None}
 
 
 @router.get("/admin/overview")

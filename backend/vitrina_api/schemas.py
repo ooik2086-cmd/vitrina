@@ -120,6 +120,14 @@ class ReasonIn(BaseModel):
     reason: str = Field(max_length=2000)
 
 
+class ListingModelIn(BaseModel):
+    """A listing's 3D model: glTF binary files over https, and the colour among the model's own variants."""
+    url: str = Field(max_length=500, pattern=r"^https://[^\s]+\.glb$")
+    hq_url: str | None = Field(default=None, max_length=500, pattern=r"^https://[^\s]+\.glb$")
+    variant: str | None = Field(default=None, max_length=40, pattern=r"^[A-Za-z0-9_-]+$")
+    reason: str = Field(max_length=2000)
+
+
 class ReportIn(BaseModel):
     reason: Literal["fake", "wrong_photos", "prohibited", "contact_details", "other"]
     text: str | None = Field(default=None, max_length=1000)

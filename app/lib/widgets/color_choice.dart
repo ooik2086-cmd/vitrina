@@ -8,22 +8,37 @@ import '../labels.dart';
 import '../theme.dart';
 import 'studio.dart';
 
-/// The same model's colours in this shop as small round photos, this one ringed, always in the same order whichever
-/// colour is open. A sold-out colour is struck through, and still opens: the buyer can look and ask to be told.
+/// The same model's colours in this shop as small round photos in one calm row, this one ringed, always in the same
+/// order whichever colour is open; room for ten and more: the row scrolls sideways and fades out at its right edge to
+/// show there are more. A sold-out colour is struck through, and still opens: the buyer can look and ask to be told.
 class ColorSwatches extends StatelessWidget {
   const ColorSwatches(
-      {super.key, required this.colors, required this.ring, required this.edge, required this.onPick, this.pending});
+      {super.key,
+      required this.colors,
+      required this.ring,
+      required this.edge,
+      required this.onPick,
+      this.gap,
+      this.pending});
   final List<Colorway> colors;
 
   /// A colour picked and still on its way: the ring moves to it at once, with a small turning arc.
   final int? pending;
 
-  /// The ring around the colour shown, and the thin edge of the others: from the stage or the page they sit on.
+  /// The ring around the colour shown, and the thin edge of the others: from the page they sit on.
   final Color ring;
   final Color edge;
+
+  /// The page's colour, between the shown colour's photo and its ring.
+  final Color? gap;
   final ValueChanged<Colorway> onPick;
 
-  static const size = 44.0;
+  /// The photo's size, and the round place around it a finger taps (as Aza set them, 2026-10-22).
+  static const size = 34.0;
+  static const target = 44.0;
+
+  /// How wide the row's right edge fades out.
+  static const fade = 40.0;
 
   /// What a swatch says when touched and long-pressed: the colour, its price, and that it is sold out.
   static String describe(Colorway c) {
@@ -38,71 +53,97 @@ class ColorSwatches extends StatelessWidget {
       container: true,
       explicitChildNodes: true,
       label: tr('Басқа түстер'),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          for (final c in colors)
-            if ((pending == null ? c.current : c.id == pending, c.id == pending) case (final ringed, final coming))
-              Semantics(
-                button: !c.current,
-                selected: c.current,
-                // While it comes, a screen reader says so at once rather than leaving the wait silent; short, as the
-                // page is replaced within a second and would cut a longer one off.
-                liveRegion: coming,
-                label: coming ? trf('{0}: ашылуда', [colorName(c.color)]) : describe(c),
-                onTap: c.current ? null : () => onPick(c),
-                excludeSemantics: true,
-                child: Tooltip(
-                  message: describe(c),
-                  excludeFromSemantics: true,
-                  child: InkWell(
-                    key: Key('color-${c.id}'),
-                    customBorder: const CircleBorder(),
+      child: LayoutBuilder(builder: (context, box) {
+        final row = SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          // The last colour can come out of the fade.
+          padding: const EdgeInsets.only(right: fade - 16),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            for (final (i, c) in colors.indexed)
+              if ((pending == null ? c.current : c.id == pending, c.id == pending) case (final ringed, final coming))
+                Padding(
+                  padding: EdgeInsets.only(left: i == 0 ? 0 : 4),
+                  child: Semantics(
+                    button: !c.current,
+                    selected: c.current,
+                    // While it comes, a screen reader says so at once rather than leaving the wait silent; short, as
+                    // the page is replaced within a second and would cut a longer one off.
+                    liveRegion: coming,
+                    label: coming ? trf('{0}: ашылуда', [colorName(c.color)]) : describe(c),
                     onTap: c.current ? null : () => onPick(c),
-                    // 48 dp to touch, as the round buttons beside them; the photo inside a ring when it is this one.
-                    child: SizedBox(
-                      width: 48,
-                      height: 48,
-                      child: Center(
-                        child: Container(
-                          key: Key('color-ring-${c.id}'),
-                          width: size,
-                          height: size,
-                          padding: const EdgeInsets.all(3),
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            border: Border.all(color: ringed ? ring : edge, width: ringed ? 2 : 1),
-                          ),
-                          child: ClipOval(
-                            child: Stack(fit: StackFit.expand, children: [
-                              DecoratedBox(
-                                decoration: const BoxDecoration(gradient: studioGradient),
-                                child: c.thumbUrl == null
-                                    ? null
-                                    : Opacity(
-                                        opacity: c.inStock ? 1 : 0.5,
-                                        child: Image(
-                                          image: ResizeImage(netImage(c.thumbUrl!),
-                                              width: side, height: side, policy: ResizeImagePolicy.fit),
-                                          fit: c.cutout ? BoxFit.contain : BoxFit.cover,
-                                          errorBuilder: (_, __, ___) => const SizedBox.expand(),
-                                        ),
-                                      ),
+                    excludeSemantics: true,
+                    child: Tooltip(
+                      message: describe(c),
+                      excludeFromSemantics: true,
+                      child: InkWell(
+                        key: Key('color-${c.id}'),
+                        customBorder: const CircleBorder(),
+                        onTap: c.current ? null : () => onPick(c),
+                        child: SizedBox(
+                          width: target,
+                          height: target,
+                          child: Center(
+                            child: Container(
+                              key: Key('color-ring-${c.id}'),
+                              width: size + 7,
+                              height: size + 7,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                // The shown colour: the page's colour, then a dark ring, as on the approved demo.
+                                border: ringed ? Border.all(color: ring, width: 1.5) : null,
                               ),
-                              if (!c.inStock) CustomPaint(key: Key('color-sold-out-${c.id}'), painter: _Strike(ring)),
-                              if (coming)
-                                CircularProgressIndicator(
-                                    key: Key('color-coming-${c.id}'), strokeWidth: 2, color: ring),
-                            ]),
+                              padding: EdgeInsets.all(ringed ? 2 : 3.5),
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: gap,
+                                  border: ringed ? null : Border.all(color: edge),
+                                ),
+                                child: ClipOval(
+                                  child: Stack(fit: StackFit.expand, children: [
+                                    DecoratedBox(
+                                      decoration: const BoxDecoration(gradient: studioGradient),
+                                      child: c.thumbUrl == null
+                                          ? null
+                                          : Opacity(
+                                              opacity: c.inStock ? 1 : 0.5,
+                                              child: Image(
+                                                image: ResizeImage(netImage(c.thumbUrl!),
+                                                    width: side, height: side, policy: ResizeImagePolicy.fit),
+                                                fit: c.cutout ? BoxFit.contain : BoxFit.cover,
+                                                errorBuilder: (_, __, ___) => const SizedBox.expand(),
+                                              ),
+                                            ),
+                                    ),
+                                    if (!c.inStock)
+                                      CustomPaint(key: Key('color-sold-out-${c.id}'), painter: _Strike(ring)),
+                                    if (coming)
+                                      CircularProgressIndicator(
+                                          key: Key('color-coming-${c.id}'), strokeWidth: 2, color: ring),
+                                  ]),
+                                ),
+                              ),
+                            ),
                           ),
                         ),
                       ),
                     ),
                   ),
                 ),
-              ),
-        ]),
-      ),
+          ]),
+        );
+        // Faded only where the row runs past the page's edge.
+        final wide = colors.length * (target + 4) > box.maxWidth;
+        if (!wide || !box.maxWidth.isFinite) return row;
+        return ShaderMask(
+          blendMode: BlendMode.dstIn,
+          shaderCallback: (rect) => LinearGradient(
+            colors: const [Colors.black, Colors.black, Colors.transparent],
+            stops: [0, (rect.width - fade) / rect.width, 1],
+          ).createShader(rect),
+          child: row,
+        );
+      }),
     );
   }
 }
@@ -129,9 +170,12 @@ class _Strike extends CustomPainter {
 
 /// Under the title: the shoe's colour in words, and the other colours to switch to when the shop has them.
 class ColorChoice extends StatelessWidget {
-  const ColorChoice({super.key, required this.listing, required this.onPick});
+  const ColorChoice({super.key, required this.listing, required this.onPick, this.pending});
   final Listing listing;
   final ValueChanged<Colorway> onPick;
+
+  /// A colour picked and on its way (see [ColorSwatches.pending]).
+  final int? pending;
 
   @override
   Widget build(BuildContext context) {
@@ -149,11 +193,13 @@ class ColorChoice extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.only(top: 2),
           child: Transform.translate(
-            offset: const Offset(-2, 0), // the first ring lines up with the text, not its touch margin
+            offset: const Offset(-5, 0), // the first picture lines up with the text, not its touch margin
             child: ColorSwatches(
               colors: listing.colors,
-              ring: theme.colorScheme.primary,
+              ring: theme.colorScheme.onSurface,
               edge: theme.colorScheme.outlineVariant,
+              gap: theme.scaffoldBackgroundColor,
+              pending: pending,
               onPick: onPick,
             ),
           ),

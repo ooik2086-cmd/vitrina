@@ -92,8 +92,8 @@ class KeptImage extends ImageProvider<NetworkImage> implements NetworkImage {
     return consolidateHttpClientResponseBytes(response, onBytesReceived: progress);
   }
 
-  /// The file name for [url]: two different 64-bit FNV-1a hashes of it, so two addresses never share a file.
-  @visibleForTesting
+  /// The file name for [url]: two different 64-bit FNV-1a hashes of it, so two addresses never share a file. The 3D
+  /// models (ViewerHost) are named the same way.
   static String nameOf(String url) {
     var a = 0xcbf29ce484222325, b = 0x84222325cbf29ce4;
     for (final unit in url.codeUnits) {

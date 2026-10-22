@@ -1249,6 +1249,54 @@ class ReportTests(ApiTestCase):
     def report(self, lid, token, reason="fake", text=None):
         return self.post(f"/listings/{lid}/report", token, {"reason": reason, "text": text})
 
+    def test_staff_give_a_listing_its_3d_model_and_take_it_away(self):
+        lid = self.publish()["id"]
+        self.assertIsNone(self.c.get(f"/api/v1/listings/{lid}").json()["model"])  # photos only
+        staff = self.make_staff()
+        body = {"url": "https://cdn.example/shoe-1024.glb", "hq_url": "https://cdn.example/shoe-2048.glb",
+                "variant": "midnight", "reason": "Сатушының фотоларынан жасалды"}
+        url = f"/api/v1/admin/listings/{lid}/model"
+        self.assertEqual(self.c.put(url, json=body, headers=self.h(self.seller)).status_code, 403)
+        for bad in ({"url": "http://cdn.example/shoe.glb"}, {"url": "https://cdn.example/shoe.png"},
+                    {"hq_url": "javascript:x.glb"}, {"variant": "a b"}, {"variant": "x" * 41}):
+            self.assertEqual(self.c.put(url, json={**body, **bad}, headers=self.h(staff)).status_code, 422, bad)
+        self.assertEqual(self.c.put(url, json={**body, "reason": " "}, headers=self.h(staff)).json()["code"],
+                         "reason_required")
+        self.assertEqual(self.c.put("/api/v1/admin/listings/9999/model", json=body, headers=self.h(staff)).status_code,
+                         404)
+        version = self.c.get(f"/api/v1/listings/{lid}").json()["photos_version"]
+        r = self.c.put(url, json=body, headers=self.h(staff))
+        want = {"url": body["url"], "hq_url": body["hq_url"], "variant": "midnight"}
+        self.assertEqual(r.json(), {"id": lid, "model": want})
+        # An order from a page that showed no 3D (or another one) is placed on what the buyer saw, or refused.
+        self.assertNotEqual(self.c.get(f"/api/v1/listings/{lid}").json()["photos_version"], version)
+        self.assertEqual(self.c.get(f"/api/v1/listings/{lid}").json()["model"], want)
+        items = self.c.get("/api/v1/listings").json()["items"]
+        self.assertEqual([i["model"] for i in items if i["id"] == lid], [want])
+        # A second model in its place: the log keeps both copies of each, and what was there before.
+        self.c.put(url, json={**body, "variant": "beach"}, headers=self.h(staff))
+        audit = self.c.get("/api/v1/admin/audit", headers=self.h(staff)).json()["items"]
+        sets = [a["reason"] for a in audit if a["action"] == "set_listing_model"]
+        self.assertTrue(any("shoe-2048.glb beach (was https://cdn.example/shoe-1024.glb https://cdn.example/"
+                            "shoe-2048.glb midnight)" in r for r in sets), sets)
+        self.assertTrue(any("(was none)" in r for r in sets), sets)
+        gone = self.c.request("DELETE", url, json={"reason": "Түсі сәйкес емес"}, headers=self.h(staff))
+        self.assertEqual(gone.json(), {"id": lid, "model": None})
+        self.assertIsNone(self.c.get(f"/api/v1/listings/{lid}").json()["model"])
+        audit = self.c.get("/api/v1/admin/audit", headers=self.h(staff)).json()["items"]
+        self.assertTrue(any(a["action"] == "remove_listing_model" and "beach" in a["reason"] for a in audit))
+        self.assertEqual(self.c.request("DELETE", "/api/v1/admin/listings/9999/model", json={"reason": "x"},
+                                        headers=self.h(staff)).status_code, 404)
+        # The seller makes it another colour, or a title fix: the 3D goes with the colour, stays with the typo.
+        self.c.put(url, json=body, headers=self.h(staff))
+        edit = lambda change: self.c.patch(f"/api/v1/listings/{lid}", json=change, headers=self.h(self.seller))
+        self.assertEqual(edit({"title": "Жеңіл кроссовка, көк түсті"}).status_code, 200)
+        self.assertEqual(self.c.get(f"/api/v1/listings/{lid}").json()["model"], want)
+        self.assertEqual(edit({"color": "Қызыл"}).status_code, 200)
+        self.assertIsNone(self.c.get(f"/api/v1/listings/{lid}").json()["model"])
+        self.assertEqual(self.c.request("DELETE", url, json={"reason": "x"}, headers=self.h(self.buyer)).status_code,
+                         403)
+
     def test_reports_queue_for_moderator_who_hides_and_everyone_is_told(self):
         lid = self.publish()["id"]
         other = self.login("+77010000003")

@@ -23,7 +23,7 @@ const setups = [
 ];
 
 void main() {
-  testWidgets('with large text the buy button goes under the total and the hint gives the shoe its room',
+  testWidgets('with large text the buy button goes under the total',
       (tester) async {
     SharedPreferences.setMockInitialValues({});
     await loadFonts(tester);
@@ -47,11 +47,9 @@ void main() {
     await show(1);
     expect(tester.getCenter(find.byKey(const Key('buy'))).dy,
         closeTo(tester.getCenter(find.byKey(const Key('total'))).dy, 20));
-    expect(find.byKey(const Key('showcase-hint')), findsOneWidget);
     await show(2);
     expect(tester.getTopLeft(find.byKey(const Key('buy'))).dy,
         greaterThan(tester.getBottomLeft(find.byKey(const Key('total'))).dy));
-    expect(find.byKey(const Key('showcase-hint')), findsNothing);
     await tester.pumpWidget(const SizedBox());
     await tester.pump(const Duration(seconds: 2));
   });

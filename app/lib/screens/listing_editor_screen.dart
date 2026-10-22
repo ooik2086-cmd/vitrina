@@ -985,18 +985,8 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
               icon: const Icon(Icons.add),
               label: Text(tr('Өлшем қосу'))),
         ),
-        const SizedBox(height: 8),
-        Text(tr('Витрина фоны'), style: theme.textTheme.titleMedium),
-        const SizedBox(height: 8),
-        SegmentedButton<String>(
-          segments: [
-            ButtonSegment(value: 'clean', label: Text(tr('Таза'))),
-            ButtonSegment(value: 'premium', label: Text(tr('Премиум'))),
-            ButtonSegment(value: 'dynamic', label: Text(tr('Динамик'))),
-          ],
-          selected: {_style},
-          onSelectionChanged: (v) => setState(() => _style = v.first),
-        ),
+        // No "showcase background" to pick any more: the 3D stage and the photos have the app's own light or dark
+        // scene, which the buyer switches. The stored style is still sent, for the server and older apps.
       ];
 }
 

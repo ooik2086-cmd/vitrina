@@ -18,6 +18,8 @@ dependencies:
   share_plus: ^13.3.1
   shared_preferences: ^2.3.2
   url_launcher: ^6.3.3
+  webview_flutter: ^4.14.1
+  webview_flutter_android: ^4.14.1
 
 dev_dependencies:
   flutter_test:
@@ -31,6 +33,7 @@ flutter:
   assets:
     - demo/api.json
     - assets/textures/grain.png
+    - assets/viewer/
   fonts:
     - family: Inter
       fonts:

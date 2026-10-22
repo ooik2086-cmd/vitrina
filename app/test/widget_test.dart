@@ -415,6 +415,11 @@ void main() {
     await tester
         .pumpWidget(SessionScope(session: Session(api), child: const MaterialApp(home: ListingScreen(listingId: 7))));
     await tester.pumpAndSettle();
+    // One small line by the sizes; the bars open in a sheet.
+    expect(find.text('Кішілеу келеді ›'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('fit-line')));
+    await tester.pumpAndSettle();
+    expect(find.text('Өлшемі қалай келді'), findsOneWidget); // the sheet's title; the verdict is in it once
     expect(find.text('Кішілеу келеді'), findsOneWidget);
     expect(find.text('Жарты өлшем үлкенін алыңыз'), findsOneWidget);
     expect(find.text('5 сатып алушы'), findsOneWidget);
@@ -454,12 +459,19 @@ void main() {
     await tester
         .pumpWidget(SessionScope(session: Session(api), child: const MaterialApp(home: ListingScreen(listingId: 7))));
     await tester.pumpAndSettle();
+    Future<void> facts() async {
+      await tester.tap(find.byKey(const Key('description-line')));
+      await tester.pumpAndSettle();
+    }
+
+    await facts();
     expect(find.text('Кімге арналған'), findsOneWidget);
     expect(find.text('Әйелдерге'), findsOneWidget);
     audience = null;
     await tester
         .pumpWidget(SessionScope(session: Session(api), child: const MaterialApp(home: ListingScreen(listingId: 8))));
     await tester.pumpAndSettle();
+    await facts();
     expect(find.text('Кімге арналған'), findsNothing);
   });
 
@@ -505,16 +517,17 @@ void main() {
     await tester
         .pumpWidget(SessionScope(session: Session(api), child: const MaterialApp(home: ListingScreen(listingId: 7))));
     await tester.pumpAndSettle();
-    expect(find.byIcon(Icons.notifications_none_rounded), findsOneWidget);
+    expect(find.byIcon(Icons.notifications_active), findsNothing);
+    expect(find.text('Қалмаған өлшемді басыңыз: қайта шыққанда хабарлаймыз.'), findsOneWidget);
     await tester.tap(find.text('43'));
     await tester.pumpAndSettle();
     expect(find.text('43 өлшемі қайта шыққанда хабарлаймыз.'), findsOneWidget);
     expect(find.byIcon(Icons.notifications_active), findsOneWidget);
-    expect(find.text('Тапсырыс беру'), findsNothing); // a sold-out size is never selected for ordering
+    expect(find.textContaining('Сатып алу'), findsNothing); // a sold-out size is never selected for ordering
     await tester.tap(find.text('43'));
     await tester.pumpAndSettle();
     expect(calls, ['PUT', 'DELETE']);
-    expect(find.byIcon(Icons.notifications_none_rounded), findsOneWidget);
+    expect(find.byIcon(Icons.notifications_active), findsNothing);
   });
 
   testWidgets('product page keeps segment, condition and authenticity apart and shows defects', (tester) async {
@@ -530,15 +543,44 @@ void main() {
       child: const MaterialApp(home: ListingScreen(listingId: 7)),
     ));
     await tester.pumpAndSettle();
-    expect(find.text('Баға деңгейі'), findsOneWidget);
-    expect(find.text('Деректер әлі аз'), findsOneWidget); // no invented segment while data is thin
-    expect(find.text('Киілген, жақсы'), findsOneWidget);
-    expect(find.text('Тексерілмеген'), findsOneWidget);
-    expect(find.textContaining('сызат'), findsOneWidget);
+    expect(find.textContaining('сызат'), findsOneWidget); // the defects stay on the page, never folded away
     expect(find.text('Өлшемді таңдаңыз'), findsOneWidget);
     await tester.tap(find.text('42'));
     await tester.pump();
-    expect(find.text('Тапсырыс беру'), findsOneWidget);
+    expect(find.text('Сатып алу · 42'), findsOneWidget);
+    // Worn or new is on the page itself, not only in the description.
+    expect(find.text('Киілген, жақсы'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('description-line')));
+    await tester.pumpAndSettle();
+    expect(find.text('Баға деңгейі'), findsNothing); // no invented segment, and no empty row, while data is thin
+    expect(find.text('Киілген, жақсы'), findsNWidgets(2));
+    expect(find.text('Тексерілмеген'), findsOneWidget);
+  });
+
+  testWidgets('the size chart is this pair\'s own: each size with its measured insole, and a tap picks it',
+      (tester) async {
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((_) async => http.Response(jsonEncode(listingJson()), 200,
+            headers: {'content-type': 'application/json; charset=utf-8'})));
+    tester.view.physicalSize = const Size(400, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester
+        .pumpWidget(SessionScope(session: Session(api), child: const MaterialApp(home: ListingScreen(listingId: 7))));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('size-guide')));
+    await tester.pumpAndSettle();
+    expect(find.text('27,0 см'), findsOneWidget);
+    expect(find.text('27,5 см · қалмады'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('chart-2'))); // sold out: not picked
+    await tester.pumpAndSettle();
+    expect(find.text('27,5 см · қалмады'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('chart-1')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('chart-1')), findsNothing); // the sheet closed on the pick
+    expect(find.textContaining('27,0 см'), findsOneWidget); // "Өлшемі: 42 · 27,0 см" on the page
+    expect(find.text('Сатып алу · 42'), findsOneWidget);
   });
 
   testWidgets('buyer follows a shop from its page', (tester) async {
@@ -607,7 +649,7 @@ void main() {
     await tester
         .pumpWidget(SessionScope(session: Session(api), child: const MaterialApp(home: ListingScreen(listingId: 7))));
     await tester.pumpAndSettle();
-    expect(find.text('Баға ұсыну үшін өлшемді таңдаңыз'), findsOneWidget);
+    expect(find.byKey(const Key('make-offer')), findsNothing); // only once a size is picked
     await tester.tap(find.text('42'));
     await tester.pump();
     await tester.tap(find.byKey(const Key('make-offer')));
@@ -655,7 +697,7 @@ void main() {
     await tester.tap(find.text('42'));
     await tester.pump();
     expect(tester.widget<Text>(find.byKey(const Key('total'))).data, formatTenge(4000000 + 150000));
-    await tester.tap(find.text('Келісілген бағамен алу'));
+    await tester.tap(find.text('Келісілген бағамен алу · 42'));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('promo-open')), findsNothing); // no promo code on top of an agreed price
     await tester.tap(find.byKey(const Key('delivery-continue')));

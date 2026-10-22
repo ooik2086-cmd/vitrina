@@ -65,6 +65,12 @@ def check(answers: dict, root: Path) -> list[str]:
         if isinstance(node, dict):
             if node.get("listing_cover") and node.get("listing_id") is not None:
                 covers.append((node["listing_cover"], node["listing_id"], f"listing {node['listing_id']} cover"))
+            if isinstance(node.get("model"), dict) and "id" in node:
+                # The 3D stage falls back to the photos without a word when its model is missing: say so here.
+                for u in (node["model"].get("url"), node["model"].get("hq_url") or node["model"].get("url")):
+                    path = root / u.split("/demo/media/", 1)[1] if u and "/demo/media/" in u else None
+                    if path is None or not path.is_file() or path.read_bytes()[:4] != b"glTF":
+                        problems.append(f"listing {node['id']} 3D model: not a model in the demo media: {u}")
             if "media" in node and "id" in node and isinstance(node["media"], list):
                 for m in node["media"]:
                     owned.setdefault(node["id"], set()).update(

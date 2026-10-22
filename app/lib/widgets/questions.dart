@@ -11,12 +11,20 @@ import '../screens/login_screen.dart';
 import '../session.dart';
 import '../theme.dart';
 import 'common.dart';
+import 'listing_lines.dart';
 
 /// Questions block on a listing: the latest answered ones and a way to ask.
 class QuestionsSection extends StatefulWidget {
-  const QuestionsSection({super.key, required this.listingId, required this.sellerId});
+  const QuestionsSection(
+      {super.key, required this.listingId, required this.sellerId, this.inSheet = false, this.onLoaded});
   final int listingId;
   final int sellerId;
+
+  /// Told each time the questions load, so the line that opened this sheet counts them without asking again.
+  final ValueChanged<({List<Question> items, int? unanswered})>? onLoaded;
+
+  /// Shown in the listing page's questions sheet, which has its own title.
+  final bool inSheet;
 
   @override
   State<QuestionsSection> createState() => _QuestionsSectionState();
@@ -28,11 +36,17 @@ class _QuestionsSectionState extends State<QuestionsSection> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _data ??= shown(SessionScope.of(context).api.questions(widget.listingId));
+    _data ??= _fetch();
+  }
+
+  Future<({List<Question> items, int? unanswered})> _fetch() {
+    final data = shown(SessionScope.of(context).api.questions(widget.listingId));
+    data.then((d) => widget.onLoaded?.call(d), onError: (_) {});
+    return data;
   }
 
   void _reload() => setState(() {
-        _data = shown(SessionScope.of(context).api.questions(widget.listingId));
+        _data = _fetch();
       });
 
   Future<void> _ask() async {
@@ -61,11 +75,15 @@ class _QuestionsSectionState extends State<QuestionsSection> {
       builder: (context, snap) {
         final items = snap.data?.items ?? const <Question>[];
         final unanswered = snap.data?.unanswered ?? 0;
-        final visible = items.where((q) => q.answer != null || q.mine).take(2).toList();
+        // On the page two; in the sheet the line opens, all of them.
+        final visible = items.where((q) => q.answer != null || q.mine).take(widget.inSheet ? items.length : 2).toList();
         return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const SizedBox(height: 24),
+          if (!widget.inSheet) const SizedBox(height: 24),
           Row(children: [
-            Expanded(child: Text(tr('Сұрақ-жауап'), style: theme.textTheme.titleMedium)),
+            Expanded(
+                child: widget.inSheet
+                    ? const SizedBox.shrink()
+                    : Text(tr('Сұрақ-жауап'), style: theme.textTheme.titleMedium)),
             if (items.isNotEmpty)
               TextButton(
                 key: const Key('questions-all'),
@@ -92,7 +110,11 @@ class _QuestionsSectionState extends State<QuestionsSection> {
               padding: const EdgeInsets.only(bottom: 4),
               child: Text(tr('Өлшемі, қорабы не жағдайы туралы сұраңыз: жауапты бәрі көреді.'),
                   style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
-            ),
+            )
+          else if (items.isEmpty && seller && snap.hasData)
+            Text(tr('Әзірге сұрақ жоқ.'),
+                key: const Key('no-questions'),
+                style: theme.textTheme.bodyLarge?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
           for (final q in visible) QuestionTile(question: q),
           if (!seller)
             Align(
@@ -105,6 +127,68 @@ class _QuestionsSectionState extends State<QuestionsSection> {
               ),
             ),
         ]);
+      },
+    );
+  }
+}
+
+/// The listing page's questions as one line, "Сұрақтар · 2 ›", opening a sheet with the answers and a way to ask.
+class QuestionsLine extends StatefulWidget {
+  const QuestionsLine({super.key, required this.listingId, required this.sellerId});
+  final int listingId;
+  final int sellerId;
+
+  @override
+  State<QuestionsLine> createState() => _QuestionsLineState();
+}
+
+class _QuestionsLineState extends State<QuestionsLine> {
+  Future<({List<Question> items, int? unanswered})>? _data;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _data ??= _load();
+  }
+
+  @override
+  void didUpdateWidget(QuestionsLine oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.listingId != widget.listingId) _data = _load(); // another colour, its own questions
+  }
+
+  // Not shown as an error here: the line just carries no count, and the sheet says what did not load.
+  Future<({List<Question> items, int? unanswered})> _load() => SessionScope.of(context).api.questions(widget.listingId);
+
+  Future<void> _open() => showPageSheet<void>(context,
+      title: tr('Сұрақтар'),
+      builder: (_) => QuestionsSection(
+          listingId: widget.listingId,
+          sellerId: widget.sellerId,
+          inSheet: true,
+          // A question asked in the sheet counts on the line too, from what the sheet loaded.
+          onLoaded: (d) {
+            if (mounted) {
+              setState(() {
+                _data = Future.value(d);
+              });
+            }
+          }));
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<({List<Question> items, int? unanswered})>(
+      future: _data,
+      builder: (context, snap) {
+        final n = snap.data?.items.length;
+        // The seller cannot ask on their own pair: for them nothing asked yet is a plain 0.
+        final seller = SessionScope.of(context).me?.id == widget.sellerId;
+        return LineButton(
+          key: const Key('questions-line'),
+          title: tr('Сұрақтар'),
+          detail: n == null ? null : (n == 0 && !seller ? tr('сұрақ қою') : '$n'),
+          onTap: _open,
+        );
       },
     );
   }

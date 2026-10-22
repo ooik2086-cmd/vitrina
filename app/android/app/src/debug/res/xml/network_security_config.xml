@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Debug builds only: plain http to the local dev server (10.0.2.2) too. Once a network security config is set,
+     android:usesCleartextTraffic is no longer read, so the debug manifest's flag alone would not allow it. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

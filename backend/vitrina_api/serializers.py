@@ -148,7 +148,7 @@ def listing_out(db: Session, listing: Listing, *, owner: bool = False) -> dict:
         # Three separate facts, never merged into one "quality" label.
         "segment": segment_for(db, listing), "condition": listing.condition, "authenticity": listing.authenticity,
         "defects": listing.defects, "description": listing.description, "showcase_style": listing.showcase_style,
-        "backdrop": listing.backdrop, "cover_frame": cover_frame(listing),
+        "backdrop": listing.backdrop, "cover_frame": cover_frame(listing), "model": model_out(listing),
         "angle_frames": angle_frames(listing),
         "sizes": [{"id": s.id, "label": s.label, "insole_cm": mm_to_cm(s.insole_mm), "available": s.quantity > 0,
                    **({"quantity": s.quantity} if owner else {})} for s in listing.sizes],
@@ -247,6 +247,13 @@ def cover_photo(listing: Listing):
     return next((m for m in media_of(listing) if m.angle != "frame"), None)
 
 
+def model_out(listing: Listing) -> dict | None:
+    """The 3D model the listing page shows, or None: the page then shows the photos."""
+    if not listing.model_url:
+        return None
+    return {"url": listing.model_url, "hq_url": listing.model_hq_url, "variant": listing.model_variant}
+
+
 def cover_frame(listing: Listing) -> str | None:
     """The frame matching the cover, while both are still the listing's."""
     cover = cover_photo(listing)
@@ -325,6 +332,8 @@ def photos_version(listing: Listing) -> str:
     made while they were deciding."""
     shown = sorted(media_of(listing), key=lambda m: m.position)
     lines = [f"{m.original_url} {m.angle}" for m in shown] + [details_snapshot(listing)]
+    if listing.model_url:  # the 3D is what the buyer turned and looked at too (left out when none: old names hold)
+        lines.append(f"model {listing.model_url} {listing.model_hq_url} {listing.model_variant}")
     return hashlib.sha256("\n".join(lines).encode()).hexdigest()[:16]
 
 

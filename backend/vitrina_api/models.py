@@ -93,6 +93,12 @@ class Listing(Base):
     # photos: the 360° frame of one turn showing that side square on. It tells which way and how evenly the turn
     # goes, so shoes compared side by side turn alike. Matched by the media job; a new photo voids its side.
     angle_frames: Mapped[str | None] = mapped_column(Text)
+    # The shoe as a 3D model (glTF binary over https) the listing page turns every way: a light copy that opens fast,
+    # a sharper one swapped in after, and the colour among the model's own (KHR_materials_variants). Set by staff
+    # (admin/listings/{id}/model) until sellers' photos are made into models; without one the page shows the photos.
+    model_url: Mapped[str | None] = mapped_column(String(500))
+    model_hq_url: Mapped[str | None] = mapped_column(String(500))
+    model_variant: Mapped[str | None] = mapped_column(String(40))
     search_text: Mapped[str] = mapped_column(Text, default="")
     views: Mapped[int] = mapped_column(Integer, default=0, server_default="0")  # product page opens by others
     promo_state: Mapped[str | None] = mapped_column(String(12))  # rendering | ready | failed; None = never made

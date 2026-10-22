@@ -776,6 +776,12 @@ def release_if_fixed(db: Session, cfg: Settings, storage: Storage, listing: List
 CONDITION_ORDER = [c.value for c in Condition]  # best first
 
 
+def drop_model(listing: Listing) -> None:
+    """The staff-given 3D no longer shows this listing (another colour, shoe or photos): its page shows the photos until
+    staff match a model to it again."""
+    listing.model_url = listing.model_hq_url = listing.model_variant = None
+
+
 def edit_contents(db: Session, cfg: Settings, storage: Storage, listing: Listing, body: ListingPatch,
                   user: User) -> set[str]:
     """Name, photos and sizes. Returns which kinds of content buyers see actually changed."""
@@ -790,6 +796,7 @@ def edit_contents(db: Session, cfg: Settings, storage: Storage, listing: Listing
             and CONDITION_ORDER.index(body.condition.value) < CONDITION_ORDER.index(listing.condition)):
         raise ApiError(409, "listing_locked")  # after sale a condition may only be marked worse, never better
     changed: set[str] = set()
+    shoe = (listing.color, listing.brand, listing.model_name, listing.category)
     for field_name in ("title", "brand", "model_name", "color"):
         value = getattr(body, field_name)
         if value is None:
@@ -804,6 +811,8 @@ def edit_contents(db: Session, cfg: Settings, storage: Storage, listing: Listing
     if body.category is not None and body.category != listing.category:
         listing.category = body.category
         changed.add("name")
+    if shoe != (listing.color, listing.brand, listing.model_name, listing.category):
+        drop_model(listing)  # staff gave the 3D for that colour of that shoe, not for this one
     if body.audience is not None:  # a fact about the pair, not words or photos to check again: it stays on sale
         listing.audience = body.audience
     if body.condition is not None and body.condition.value != listing.condition:
@@ -831,6 +840,7 @@ def edit_contents(db: Session, cfg: Settings, storage: Storage, listing: Listing
             replace_photos(listing, body.photos)
             changed.add("photos")
             listing.promo_state, listing.promo_url = None, None  # the promo video showed the old photos
+            drop_model(listing)  # and the 3D was matched to them by staff
     if added:
         added_frames = sum(p.angle == "frame" for p in added)
         if added_frames:

@@ -1,0 +1,11 @@
+{
+  "name": "vitrina-viewer",
+  "private": true,
+  "description": "The listing page's 3D stage, built into app/assets/viewer",
+  "dependencies": {
+    "three": "0.160.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.24.0"
+  }
+}

@@ -707,7 +707,7 @@ class ShowcaseStopsHint extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(top: 8),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(tr('360° айналымнан кейін сатып алушы үстін, табанын және жақын көріністі көреді. Бір-бір фото қосыңыз:'),
+        Text(tr('Сатып алушы «Фото» бөлімінде үстін, табанын және жақын көріністі де көреді. Бір-бір фото қосыңыз:'),
             style: theme.textTheme.bodySmall),
         const SizedBox(height: 6),
         Wrap(spacing: 8, runSpacing: 8, children: [

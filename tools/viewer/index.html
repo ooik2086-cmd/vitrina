@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="kk">
+<head>
+<meta charset="utf-8">
+<!-- Only this page's own script and models; nothing from the internet, no inline script. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; img-src 'self' blob: data:; connect-src 'self' blob: data:">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<style>
+/* The scene as the app's photos have it (ShowcaseScene): light #E8E6EE, dark #0E0E14, a soft halo behind the shoe. */
+html,body{margin:0;height:100%;overflow:hidden;background:#E8E6EE}
+#stage{position:fixed;inset:0;background:#E8E6EE;touch-action:none;transition:background-color .3s;
+ -webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;--halo:rgba(255,255,255,.95)}
+#stage.dark{background:#0E0E14;--halo:rgba(150,132,230,.30)}
+.halo{position:absolute;inset:0;background:radial-gradient(circle closest-side at 50% 50%,var(--halo) 0%,transparent 88%);pointer-events:none}
+canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+</style>
+</head>
+<body>
+<div id="stage"><div class="halo"></div><canvas id="c"></canvas></div>
+<script src="viewer.js"></script>
+</body>
+</html>

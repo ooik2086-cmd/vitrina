@@ -7,15 +7,18 @@ import 'package:share_plus/share_plus.dart';
 
 import '../api.dart';
 import '../labels.dart';
+import '../net_image.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../widgets/color_choice.dart';
 import '../widgets/common.dart';
 import '../widgets/delivery_eta.dart';
 import '../widgets/delivery_sheet.dart';
+import '../widgets/listing_lines.dart';
 import '../widgets/questions.dart';
 import '../widgets/size_guide.dart';
-import '../widgets/scroll_showcase.dart';
+import '../widgets/model_stage.dart';
+import '../widgets/scroll_showcase.dart' show ShowcaseScene;
 import '../widgets/spin_viewer.dart';
 import '../widgets/studio.dart';
 import 'chat_screen.dart';
@@ -29,19 +32,9 @@ import '../i18n.dart';
 import '../my_size.dart';
 import '../recent.dart';
 
-const _minSpinFrames = 8;
-
 class ListingScreen extends StatefulWidget {
   const ListingScreen(
-      {super.key,
-      required this.listingId,
-      this.cover,
-      this.coverIsCutout = false,
-      this.sizeLabel,
-      this.atDetails = false,
-      this.listing,
-      this.pending,
-      this.view});
+      {super.key, required this.listingId, this.cover, this.coverIsCutout = false, this.listing, this.pending});
   final int listingId;
 
   /// The listing, already fetched: the page shows it at once.
@@ -49,18 +42,6 @@ class ListingScreen extends StatefulWidget {
 
   /// The listing's request, already sent: the page waits for it instead of sending another.
   final Future<Listing>? pending;
-
-  /// What the showcase opens showing (ShowcasePlan.viewAt): another colour picked there shows the same.
-  final ShowcaseView? view;
-
-  /// How long a colour picked on the showcase may wait for its listing and photo; slower, it opens at its cover.
-  static const switchBudget = Duration(milliseconds: 700);
-
-  /// The size the buyer had picked on another colour of this model: picked here too when it is in stock.
-  final String? sizeLabel;
-
-  /// Opens past the showcase, at the title, as when another colour was picked there.
-  final bool atDetails;
 
   /// The photo the catalog card showed: it flies in and stays while the listing loads.
   final String? cover;
@@ -73,6 +54,8 @@ class ListingScreen extends StatefulWidget {
 }
 
 class _ListingScreenState extends State<ListingScreen> {
+  /// The listing shown: another colour of the model takes its place on this page (see [_openColor]).
+  late int _id = widget.listingId;
   late Future<Listing> _listing;
   late Listing? _ready = widget.listing;
   late Future<Listing>? _pending = widget.pending;
@@ -86,20 +69,24 @@ class _ListingScreenState extends State<ListingScreen> {
   bool _favorite = false;
   bool _ordering = false;
   bool _showPhotos = false;
-  final _scroll = ScrollController(); // drives the scroll-turned showcase at the top
-  final _showcase = GlobalKey<ScrollShowcaseState>();
-  final _sizesKey = GlobalKey();
-  bool _scrollLocked = false; // the showcase is zoomed in or being pinched
-  Brightness? _stageTop; // how dark the showcase stage under the status bar is, while it is there
 
-  /// The page has moved under the bar: the bar takes the page's canvas, so neither the stage's own buttons nor the
-  /// details run under its round buttons (they did, one over the other). While the shoe turns in place it stays
-  /// clear. Only the bar listens: the page is not built again for it. Opened at the details, it starts solid.
-  late final _barSolid = ValueNotifier<bool>(widget.atDetails);
-  // How dark the showcase stage over the bottom bar is, while it reaches down to it. Only the bar listens, so the
-  // page is not built again as the stage scrolls past.
-  final _stageBottom = ValueNotifier<Brightness?>(null);
-  double? _darkPhotos; // the height of the Photo tab's dark scan photos, which run under the status bar too
+  /// The 3D could not open: the stage shows the photos, with no switch to a 3D that is not there.
+  bool _noModel = false;
+  final _scroll = ScrollController();
+  final _model = GlobalKey<ModelStageState>();
+  final _sizesKey = GlobalKey();
+  Brightness? _stageTop; // how dark the stage under the status bar is, while it is there
+
+  /// The stage's scene, light or dark, the same for the 3D and the photos; the buyer's choice holds for the app run.
+  static bool? _darkChoice;
+  bool _dark = false;
+
+  /// The stage's height, from the last build.
+  double _stage = 0;
+
+  /// The page has moved under the bar: the bar takes the page's canvas, so the details do not run under its round
+  /// buttons. Only the bar listens: the page is not built again for it.
+  final _barSolid = ValueNotifier<bool>(false);
   Offer? _offer; // the signed-in buyer's latest offer on this listing
   // One key per order attempt: a retried tap after a lost response returns the same order.
   String _orderKey = newIdempotencyKey();
@@ -110,29 +97,16 @@ class _ListingScreenState extends State<ListingScreen> {
   @override
   void initState() {
     super.initState();
-    _scroll.addListener(_followPhotos);
-    _scroll.addListener(_followBar);
+    _scroll.addListener(_followStage);
   }
 
-  /// The stage's height; a new one (the phone turned, the window resized) changes how far it is held, with no scroll.
-  double _stageFor(double height) {
-    if (_stage != height) WidgetsBinding.instance.addPostFrameCallback((_) => _followBar());
-    return _stage = height;
-  }
-
-  /// Also run after the stage's stretch may have changed with no scroll: the phone turned, a reload, the tabs.
-  void _followBar() {
-    if (!mounted || !_scroll.hasClients) return;
-    final held = _showPhotos ? 0.0 : (_showcase.currentState?.travel ?? 0.0); // where the stage starts to move up
-    _barSolid.value = _scroll.offset > held + 0.5;
-  }
-
-  /// On the Photo tab a dark scan's photos sit under the status bar until scrolled past: its icons go light there.
-  void _followPhotos() {
-    if (!_showPhotos || !mounted) return;
-    final h = _darkPhotos;
+  /// The bar goes solid once the page moves under it, and its icons follow the scene of the stage under them.
+  void _followStage() {
+    if (!mounted) return;
     final offset = _scroll.hasClients ? _scroll.offset : 0.0;
-    final top = h != null && offset < h - MediaQuery.viewPaddingOf(context).top ? Brightness.dark : null;
+    _barSolid.value = offset > 0.5;
+    final under = offset < _stage - MediaQuery.viewPaddingOf(context).top;
+    final top = under ? (_dark ? Brightness.dark : Brightness.light) : null;
     if (top != _stageTop) setState(() => _stageTop = top);
   }
 
@@ -153,7 +127,6 @@ class _ListingScreenState extends State<ListingScreen> {
   @override
   void dispose() {
     _scroll.dispose();
-    _stageBottom.dispose();
     _barSolid.dispose();
     super.dispose();
   }
@@ -163,16 +136,14 @@ class _ListingScreenState extends State<ListingScreen> {
     _ready = null; // a reload fetches again
     final pending = _pending;
     _pending = null;
-    _listing =
-        shown(ready != null ? Future.value(ready) : pending ?? SessionScope.of(context).api.listing(widget.listingId));
+    _listing = shown(ready != null ? Future.value(ready) : pending ?? SessionScope.of(context).api.listing(_id));
     _listing.then((l) {
       if (l.status == 'published') rememberViewed(l);
     }, onError: (_) {});
   }
 
   /// Similar goods are a suggestion: when they do not load the row is left out.
-  void _loadSimilar() =>
-      _similar = SessionScope.of(context).api.similar(widget.listingId).catchError((_) => <Listing>[]);
+  void _loadSimilar() => _similar = SessionScope.of(context).api.similar(_id).catchError((_) => <Listing>[]);
 
   /// After a failed load, «Try again» fetches every part of the page, not only the listing.
   void _reload() {
@@ -188,9 +159,10 @@ class _ListingScreenState extends State<ListingScreen> {
     final session = SessionScope.of(context);
     if (!session.signedIn) return;
     if (_offerError != null) setState(() => _offerRetrying = true);
+    final id = _id;
     try {
-      final mine = await session.api.offers(listingId: widget.listingId);
-      if (!mounted) return;
+      final mine = await session.api.offers(listingId: id);
+      if (!mounted || id != _id) return; // another colour opened meanwhile: its own offers are asked for
       setState(() {
         _offerError = null;
         if (mine.isEmpty) return;
@@ -199,7 +171,9 @@ class _ListingScreenState extends State<ListingScreen> {
       });
     } catch (e) {
       // An agreed price that did not load must not be lost without a word: the buyer would pay the full price.
-      if (mounted && _offer == null) setState(() => _offerError = e is ApiException && e.passing ? e : null);
+      if (mounted && id == _id && _offer == null) {
+        setState(() => _offerError = e is ApiException && e.passing ? e : null);
+      }
     } finally {
       if (mounted && _offerRetrying) setState(() => _offerRetrying = false);
     }
@@ -228,7 +202,7 @@ class _ListingScreenState extends State<ListingScreen> {
     final on = !alerts.contains(size.id);
     try {
       await SessionScope.of(context).api.setStockAlert(l.id, size.id, on);
-      if (!mounted) return;
+      if (!mounted || l.id != _id) return;
       setState(() => _alerts = on ? (alerts..add(size.id)) : (alerts..remove(size.id)));
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(on
@@ -256,10 +230,10 @@ class _ListingScreenState extends State<ListingScreen> {
 
   Future<void> _toggleFavorite() => once((this, #favorite), () async {
         if (!await _ensureSignedIn() || !mounted) return;
-        final on = !_favorite;
+        final on = !_favorite, id = _id;
         try {
-          await SessionScope.of(context).api.setFavorite(widget.listingId, on);
-          if (mounted) setState(() => _favorite = on);
+          await SessionScope.of(context).api.setFavorite(id, on);
+          if (mounted && id == _id) setState(() => _favorite = on);
         } catch (e) {
           if (mounted) showError(context, e);
         }
@@ -287,7 +261,8 @@ class _ListingScreenState extends State<ListingScreen> {
           itemPriceTiyn: offer == null ? listing.priceTiyn : min(offer.priceTiyn, listing.priceTiyn),
           deliveryPriceTiyn: listing.deliveryPriceTiyn),
     );
-    if (checkout == null || !mounted) return;
+    // Another colour opened meanwhile: its size is not this pair's, so nothing is ordered.
+    if (checkout == null || !mounted || listing.id != _id) return;
     setState(() => _ordering = true);
     try {
       final session = SessionScope.of(context);
@@ -414,7 +389,7 @@ class _ListingScreenState extends State<ListingScreen> {
             }
             return Stack(children: [
               Hero(
-                tag: 'listing-${widget.listingId}',
+                tag: 'listing-$_id',
                 // Only the shoe: the page may open on a dark stage or the photos as taken, so no backdrop flashes.
                 child: CoverPhoto(
                     image: coverImage(cover),
@@ -431,140 +406,180 @@ class _ListingScreenState extends State<ListingScreen> {
     );
   }
 
-  void _relay(PointerEvent e) => _showcase.currentState?.handlePointer(e);
-
-  /// Past the turning shoe to the title and details.
-  /// Height of the showcase's stage, from the last build that showed it; null without one.
-  double? _stage;
-
-  /// Scroll offset where the details begin below the showcase, just under the app bar.
-  double? _detailsAt(Listing l) => _stage == null
-      ? null
-      : ScrollShowcase.travelFor(_stage!, ShowcasePlan.of(l).steps.length) +
-          _stage! -
-          MediaQuery.paddingOf(context).top -
-          kToolbarHeight;
-
   /// The colour picked and being fetched; a later pick takes its place.
   int? _pendingColor;
 
-  /// Another colour of this model, in place of this one: back still leads where the buyer came from. The size they
-  /// picked comes along, and from the details they land at the details again. Picked on the showcase, it opens
-  /// showing what this one shows (the same angle of the turn, or the same stop) when it arrives in time.
-  Future<void> _openColor(Listing l, Colorway c, {required bool atDetails}) async {
+  /// Another colour of this model, in place of this one, on this same page: the 3D stays open and only the shoe's
+  /// colour changes, at the same turn and zoom, and the page stays where it was. The size the buyer picked comes
+  /// along when that colour has it.
+  Future<void> _openColor(Listing l, Colorway c) async {
     if (_pendingColor == c.id) return;
-    final route = ModalRoute.of(context);
-    final thumb = c.thumbUrl;
-    var view = atDetails ? null : _showcase.currentState?.view;
-    if (view != null && !ScrollShowcase.mayCarry(view, l)) view = null;
-    Listing? next;
-    Future<Listing>? pending;
-    if (view != null) {
-      setState(() => _pendingColor = c.id); // the ring moves to it at once
-      final api = SessionScope.of(context).api;
-      final watch = Stopwatch()..start();
-      final fetch = api.listing(c.id);
-      try {
-        next = await fetch.timeout(ListingScreen.switchBudget);
-        final carried = ScrollShowcase.carry(view, l, next);
-        final image = carried == null ? null : ScrollShowcase.firstImageAt(next, carried);
-        final left = ListingScreen.switchBudget - watch.elapsed;
-        if (image != null && mounted && left > Duration.zero) {
-          await precacheImage(image, context, onError: (_, __) {}).timeout(left, onTimeout: () {});
-        }
-      } on TimeoutException {
-        pending = fetch; // the page waits for the request already made instead of making another
-      } catch (e) {
-        debugPrint('colour ${c.id} could not be fetched ahead: $e');
-        pending = fetch; // the page shows the error and its retry
-      }
-      if (!mounted || _pendingColor != c.id) return; // gone, or a later pick took over
-      // Back pressed, or a sheet or the login opened meanwhile: replacing now would replace that instead.
-      if (route?.isCurrent != true) {
-        setState(() => _pendingColor = null);
-        return;
-      }
-      view = _showcase.currentState?.view ?? view; // the buyer may have scrolled on while it came
-      // A slow colour opens at its cover rather than jumping there later; the other colour's turn shows the same
-      // side, when it can tell which of its frames that is.
-      view = next == null ? null : ScrollShowcase.carry(view, l, next);
+    setState(() => _pendingColor = c.id); // the ring moves to it at once
+    final Listing next;
+    try {
+      next = await SessionScope.of(context).api.listing(c.id);
+    } catch (e) {
+      if (!mounted || _pendingColor != c.id) return;
+      setState(() => _pendingColor = null);
+      showError(context, e);
+      return;
     }
+    if (!mounted || _pendingColor != c.id) return; // gone, or a later pick took over
     final size = l.sizes.where((s) => s.id == _sizeId).firstOrNull?.label;
-    // This colour's small copies go before the next colour decodes its own; the shoe on the stage stays for the fade.
-    _showcase.currentState?.release();
-    Navigator.of(context).pushReplacement(PageRouteBuilder(
-      transitionDuration: const Duration(milliseconds: 200),
-      reverseTransitionDuration: const Duration(milliseconds: 200),
-      pageBuilder: (_, __, ___) => ListingScreen(
-          listingId: c.id,
-          listing: next,
-          pending: pending,
-          cover: thumb,
-          coverIsCutout: c.cutout && thumb != null,
-          sizeLabel: size,
-          atDetails: atDetails,
-          view: view),
-      // The same shoe in another colour: a quick fade, not a new page sliding in.
-      transitionsBuilder: (_, animation, __, child) => FadeTransition(opacity: animation, child: child),
-    ));
+    setState(() {
+      _id = next.id;
+      _pendingColor = null;
+      _listing = Future.value(next);
+      // The size picked here, or else the buyer's own saved size, as when a page opens.
+      _sizeId = size == null
+          ? bestFit(next.sizes, mySize.value)?.id
+          : next.sizes.where((s) => s.available && s.label == size).firstOrNull?.id;
+      _photosReady = null;
+      // What belonged to the other colour: its offer, its stock alerts, its order attempt.
+      _offer = null;
+      _offerError = null;
+      _alerts = null;
+      _favorite = false;
+      _noModel = false;
+      _orderKey = newIdempotencyKey();
+      _loadSimilar();
+    });
+    if (next.status == 'published') rememberViewed(next);
+    // The same model in another colour is shown at once, with no new "ready": its photos come down now.
+    if (l.model != null && l.model?.url == next.model?.url) _readyPhotos(next);
+    _loadOffer();
   }
 
-  void _toDetails(Listing l) {
-    final at = _detailsAt(l);
-    if (!_scroll.hasClients || at == null) return;
-    final to = min(_scroll.position.maxScrollExtent, at);
-    if (MediaQuery.of(context).disableAnimations) {
-      _scroll.jumpTo(to);
-    } else {
-      _scroll.animateTo(to, duration: const Duration(milliseconds: 500), curve: Curves.easeInOut);
-    }
-  }
+  /// This pair's sizes with the insole length the seller measured; a tap picks one. The general chart is under it.
+  Future<void> _sizeChart(Listing l) => showPageSheet<void>(context,
+      title: tr('Өлшем кестесі'),
+      builder: (sheet) => ListingSizeChart(
+            sizes: l.sizes,
+            selected: _sizeId,
+            onPick: (s) {
+              setState(() => _sizeId = s.id);
+              Navigator.of(sheet).pop();
+            },
+            onGuide: () async {
+              Navigator.of(sheet).pop();
+              if (await showSizeGuide(context) != null && mounted) setState(() {});
+            },
+          ));
+
+  /// The seller's reviews in a sheet over the page, as on the approved demo.
+  Future<void> _reviews(Listing l) => showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        useSafeArea: true,
+        showDragHandle: true,
+        clipBehavior: Clip.antiAlias,
+        builder: (_) => FractionallySizedBox(
+          heightFactor: 0.86,
+          child: SellerReviewsScreen(
+              sellerId: l.sellerId, shopName: l.shopName ?? tr('Сатушы'), rating: l.sellerRating, inSheet: true),
+        ),
+      );
 
   void _toSizes(Listing l) {
-    void show() {
-      final sizes = _sizesKey.currentContext;
-      if (sizes == null || !mounted) return;
-      Scrollable.ensureVisible(sizes,
-          alignment: 0.3,
-          duration: MediaQuery.of(context).disableAnimations ? Duration.zero : const Duration(milliseconds: 500));
-    }
+    final sizes = _sizesKey.currentContext;
+    if (sizes == null || !mounted) return;
+    Scrollable.ensureVisible(sizes,
+        alignment: 0.3,
+        duration: MediaQuery.of(context).disableAnimations ? Duration.zero : const Duration(milliseconds: 500));
+  }
 
-    // Behind a long showcase the sizes are not built yet: go past it first, then bring them into view.
-    final at = _detailsAt(l);
-    if (_sizesKey.currentContext == null && at != null && _scroll.hasClients) {
-      _scroll.jumpTo(min(_scroll.position.maxScrollExtent, at));
-      WidgetsBinding.instance.addPostFrameCallback((_) => show());
-    } else {
-      show();
+  /// The stage: the shoe in 3D, or its photos, on the light or dark scene, with the switch between the scenes.
+  Widget _stageView(Listing l, double height) {
+    final model = _noModel ? null : l.model;
+    final scene = _dark ? ShowcaseScene.dark : ShowcaseScene.light;
+    // A scan's photos are themselves cut out: they stand on the scene; photos as taken fill the square.
+    final scan = l.backdrop != null && l.photos.every((p) => p.processedUrl == p.originalUrl);
+    final photos = ColoredBox(
+      color: scan ? scene.ink : Brand.studio,
+      // Its own per colour: another colour's photos start at their first, not at the page the last one was on.
+      child: PhotoGallery(key: ValueKey(l.id), dark: scan && _dark, urls: [for (final p in l.photos) p.originalUrl]),
+    );
+    final first = l.photos.firstOrNull;
+    // The catalog's photo flies to the cover (the 3D itself never flies: a WebView cannot be moved mid-flight).
+    final cover = Hero(
+      tag: 'listing-${l.id}',
+      child: first == null
+          ? const SizedBox.shrink()
+          : CoverPhoto(
+              image: coverImage(first.processedUrl ?? first.originalUrl),
+              cutout: scan || (first.processedUrl ?? first.originalUrl) != first.originalUrl,
+              fit: BoxFit.contain,
+              errorBuilder: (_, __, ___) => const SizedBox.shrink()),
+    );
+    return SizedBox(
+      height: height,
+      child: Material(
+        type: MaterialType.transparency,
+        child: Stack(fit: StackFit.expand, children: [
+          if (model == null)
+            Hero(tag: 'listing-${l.id}', child: photos)
+          else
+            // The 3D stays alive under the photos, so going back to it shows the shoe at once, as it was.
+            IndexedStack(index: _showPhotos ? 1 : 0, sizing: StackFit.expand, children: [
+              ModelStage(
+                key: _model,
+                model: model,
+                dark: _dark,
+                paused: _showPhotos,
+                cover: cover,
+                // The photos come down after the shoe, not alongside it on a weak line.
+                onReady: () {
+                  if (mounted) _readyPhotos(l);
+                },
+                onBroken: () {
+                  if (mounted) setState(() => _noModel = true);
+                },
+              ),
+              photos,
+            ]),
+          if (model != null || scan)
+            Positioned(
+              right: 12,
+              bottom: 12,
+              child: _RoundButton(
+                key: const Key('scene'),
+                dark: _dark,
+                tooltip: tr('Фонды ауыстыру: ашық не қараңғы'),
+                onTap: () {
+                  setState(() => _dark = _darkChoice = !_dark);
+                  _followStage();
+                },
+                child: const Icon(Icons.contrast_rounded),
+              ),
+            ),
+        ]),
+      ),
+    );
+  }
+
+  /// The photos are made ready while the 3D shows, so the Фото tab opens at once.
+  void _readyPhotos(Listing l) {
+    if (_photosReady == l.id) return;
+    _photosReady = l.id;
+    final side = min((MediaQuery.sizeOf(context).width * MediaQuery.devicePixelRatioOf(context)).round(), 2000);
+    for (final p in l.photos) {
+      precacheImage(ResizeImage.resizeIfNeeded(side, null, netImage(p.originalUrl)), context, onError: (_, __) {});
     }
   }
+
+  int? _photosReady;
 
   Widget _body(BuildContext context, Listing l) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final frames = l.frames;
-    final hasSpin = frames.length >= _minSpinFrames;
-    final scan = l.backdrop != null && l.photos.every((p) => p.processedUrl == p.originalUrl);
-    final darkScan = scan && l.backdrop == 'dark';
+    final dark = theme.brightness == Brightness.dark;
     final fit = bestFit(l.sizes, mySize.value);
+    final hasModel = l.model != null && !_noModel;
     if (!_fitChecked) {
       _fitChecked = true; // pick the buyer's saved size once; after that their taps decide
-      final kept = l.sizes.where((s) => s.available && s.label == widget.sizeLabel).firstOrNull;
-      _sizeId ??= kept?.id ?? fit?.id;
-      if (widget.atDetails) {
-        // The showcase sets its height while building: go past it once the page is laid out.
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          final at = mounted ? _detailsAt(l) : null;
-          if (at != null && _scroll.hasClients) _scroll.jumpTo(min(_scroll.position.maxScrollExtent, at));
-        });
-      } else if (widget.view case final view?) {
-        // The same, to what the other colour showed.
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          final stage = _stage;
-          final at = mounted && stage != null ? ScrollShowcase.offsetFor(l, stage, view) : null;
-          if (at != null && _scroll.hasClients) _scroll.jumpTo(min(_scroll.position.maxScrollExtent, at));
-        });
-      }
+      _sizeId ??= fit?.id;
+      _dark = _darkChoice ?? l.backdrop == 'dark';
+      WidgetsBinding.instance.addPostFrameCallback((_) => _followStage());
     }
     final selected = l.sizes.where((s) => s.id == _sizeId).firstOrNull;
     final me = SessionScope.of(context).me;
@@ -577,391 +592,263 @@ class _ListingScreenState extends State<ListingScreen> {
       Expanded(
         child: LayoutBuilder(
           builder: (context, viewport) {
-            // The Photo tab's square, as laid out below: as wide as the page, at most 560 high.
-            _darkPhotos = darkScan ? min(viewport.maxWidth, 560.0) : null;
-            return Listener(
-              // Above the list, so a second finger reaches the showcase even while the first one is scrolling.
-              onPointerDown: _relay,
-              onPointerMove: _relay,
-              onPointerUp: _relay,
-              onPointerCancel: _relay,
-              child: ListView(
-                  controller: _scroll,
-                  padding: EdgeInsets.zero,
-                  physics: _scrollLocked ? const NeverScrollableScrollPhysics() : null,
-                  children: [
-                    if (hasSpin && !_showPhotos)
-                      ScrollShowcase(
-                          key: _showcase,
-                          listing: l,
-                          scroll: _scroll,
-                          stageHeight: _stageFor(viewport.maxHeight),
-                          onLock: (locked) {
-                            if (mounted && locked != _scrollLocked) setState(() => _scrollLocked = locked);
-                          },
-                          onPhotos: () {
-                            if (_scroll.hasClients) _scroll.jumpTo(0);
-                            setState(() {
-                              _showPhotos = true;
-                              _stage = null;
-                            });
-                            WidgetsBinding.instance.addPostFrameCallback((_) {
-                              _followPhotos(); // once laid out
-                              _followBar();
-                            });
-                          },
-                          onStageTop: (top) {
-                            if (!mounted) return;
-                            // Told again after the stage's height or photos change: its stretch may have too.
-                            _followBar();
-                            if (_barSolid.value) {
-                              _stageTop = top; // under the solid bar it shows nothing: kept for when it clears
-                            } else if (top != _stageTop) {
-                              setState(() => _stageTop = top);
-                            }
-                          },
-                          onStageBottom: (at) {
-                            if (mounted) _stageBottom.value = at;
-                          },
-                          onColor: (c) => _openColor(l, c, atDetails: false),
-                          pendingColor: _pendingColor,
-                          onDetails: () => _toDetails(l))
-                    else
-                      // Square on a phone; on a tablet or the web the photo stops growing so the details stay in view.
-                      ConstrainedBox(
-                        constraints: const BoxConstraints(maxHeight: 560),
-                        child: AspectRatio(
-                          aspectRatio: 1,
-                          child: Hero(
-                            tag: 'listing-${l.id}',
-                            // The photo tab always shows the photos exactly as taken, so buyers can check the unedited originals.
-                            child: DecoratedBox(
-                              decoration: showcaseBackground(l.showcaseStyle),
-                              child: Material(
-                                type: MaterialType.transparency,
-                                child: ColoredBox(
-                                  // A scan's photos are themselves cut out: they stand on the scene the 360° view has.
-                                  color:
-                                      scan ? (darkScan ? ShowcaseScene.dark : ShowcaseScene.light).ink : Brand.studio,
-                                  child: PhotoGallery(dark: darkScan, urls: [for (final p in l.photos) p.originalUrl]),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
+            // As the approved demo: most of the screen, at most 560 high, never under 300; but always a strip under
+            // it to scroll the page by (the stage takes every finger on it), as on a phone held sideways.
+            _stage = l.photos.isEmpty && !hasModel
+                ? 0
+                : min(max(300.0, min(viewport.maxHeight * 0.62, 560.0)), max(160.0, viewport.maxHeight - 140));
+            return ListView(controller: _scroll, padding: EdgeInsets.zero, children: [
+              // Kept when the page scrolls it away, so scrolling back does not open the 3D again.
+              if (_stage > 0) _KeptAlive(child: _stageView(l, _stage)),
+              if (hasModel)
+                Padding(
+                  padding: contentPadding(context, const EdgeInsets.fromLTRB(20, 14, 20, 0)),
+                  // 42 high as on the approved demo, on every phone: two wide halves, each easy to hit.
+                  child: SizedBox(
+                    height: 42,
+                    child: SegmentedButton<bool>(
+                      key: const Key('stage-switch'),
+                      showSelectedIcon: false,
+                      style: ButtonStyle(
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        iconSize: const WidgetStatePropertyAll(18),
+                        textStyle:
+                            WidgetStatePropertyAll(weight(theme.textTheme.labelLarge!, 700).copyWith(fontSize: 15)),
                       ),
-                    if (hasSpin && _showPhotos) // in the 360° view the switch sits on the viewer itself
-                      Padding(
-                        padding: contentPadding(context, const EdgeInsets.fromLTRB(20, 14, 20, 0)),
-                        child: SegmentedButton<bool>(
-                          showSelectedIcon: false,
-                          segments: [
-                            ButtonSegment(value: false, icon: Icon(Icons.threesixty), label: Text('360°')),
-                            ButtonSegment(
-                                value: true, icon: Icon(Icons.photo_library_outlined), label: Text(tr('Фото'))),
-                          ],
-                          selected: {_showPhotos},
-                          onSelectionChanged: (v) {
-                            if (_scroll.hasClients) _scroll.jumpTo(0); // the showcase's stretch of page comes or goes
-                            setState(() {
-                              _showPhotos = v.first;
-                              _stage = null; // set again by the showcase when it is built
-                            });
-                            WidgetsBinding.instance.addPostFrameCallback((_) => _followBar());
-                          },
-                        ),
-                      ),
+                      segments: [
+                        const ButtonSegment(value: false, icon: Icon(Icons.threesixty), label: Text('360°')),
+                        ButtonSegment(
+                            value: true, icon: const Icon(Icons.photo_library_outlined), label: Text(tr('Фото'))),
+                      ],
+                      selected: {_showPhotos},
+                      onSelectionChanged: (v) => setState(() => _showPhotos = v.first),
+                    ),
+                  ),
+                ),
+              Padding(
+                padding: contentPadding(context, const EdgeInsets.fromLTRB(20, 20, 20, 24)),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(l.title, style: theme.textTheme.headlineSmall),
+                  // New or worn is said up front, never only inside the description: it is what arrives.
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(
+                        [
+                          label(conditions, l.condition),
+                          if (l.authenticity == 'verified' || l.authenticity == 'documented')
+                            label(authenticity, l.authenticity),
+                        ].join(' · '),
+                        key: const Key('condition-line'),
+                        style: theme.textTheme.bodyLarge?.copyWith(color: scheme.onSurfaceVariant)),
+                  ),
+                  const SizedBox(height: 6),
+                  ColorChoice(listing: l, pending: _pendingColor, onPick: (c) => _openColor(l, c)),
+                  const SizedBox(height: 8),
+                  // The sizes right under the colours, as on the approved demo: one row of small circles.
+                  Text.rich(
+                    key: _sizesKey,
+                    TextSpan(children: [
+                      TextSpan(text: '${tr('Өлшемі')}: ', style: TextStyle(color: scheme.onSurfaceVariant)),
+                      TextSpan(text: selected?.label ?? tr('таңдаңыз'), style: weight(theme.textTheme.bodyLarge!, 650)),
+                      // The pair's own measured insole, as the seller gave it: what the foot will feel.
+                      if (selected != null)
+                        TextSpan(
+                            text: ' · ${trf('{0} см', [selected.insoleCm])}',
+                            style: TextStyle(color: scheme.onSurfaceVariant)),
+                    ]),
+                    style: theme.textTheme.bodyLarge,
+                  ),
+                  Transform.translate(
+                    offset: const Offset(-4, 0), // the first circle lines up with the text, not its touch margin
+                    child: SizeCircles(
+                      sizes: l.sizes,
+                      selected: _sizeId,
+                      alerted: _alerts ?? l.stockAlerts,
+                      onPick: (s) => setState(() => _sizeId = s.id),
+                      onSoldOut: own ? null : (s) => _toggleStockAlert(l, s),
+                    ),
+                  ),
+                  if (!own && l.sizes.any((s) => !s.available))
+                    Text(tr('Қалмаған өлшемді басыңыз: қайта шыққанда хабарлаймыз.'),
+                        style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
+                  if (mySize.value != null && fit == null)
                     Padding(
-                      padding: contentPadding(context, const EdgeInsets.fromLTRB(20, 20, 20, 24)),
-                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Text(l.title, style: theme.textTheme.headlineSmall),
-                        const SizedBox(height: 6),
-                        ColorChoice(listing: l, onPick: (c) => _openColor(l, c, atDetails: true)),
-                        const SizedBox(height: 6),
-                        PriceLine(listing: l, style: weight(theme.textTheme.headlineSmall!, 800)),
-                        if (l.wasPriceTiyn != null)
-                          Padding(
-                            key: const Key('sale-honest'),
-                            padding: const EdgeInsets.only(top: 2),
-                            child: Text(tr('Сызылған баға: соңғы 30 күндегі ең төмен баға.'),
-                                style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
-                          ),
-                        const SizedBox(height: 4),
-                        Text(
-                          l.deliveryPriceTiyn == 0
-                              ? tr('Жеткізу тегін')
-                              : trf('Жеткізу {0}', [formatTenge(l.deliveryPriceTiyn)]),
-                          style: theme.textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
-                        ),
-                        DeliveryEta(listingId: l.id),
-                        if (l.soldRecently > 0 || l.savedBy > 0)
-                          Padding(
-                            key: const Key('popularity'),
-                            padding: const EdgeInsets.only(top: 4),
-                            child: Row(children: [
-                              Icon(Icons.local_fire_department_outlined, size: 18, color: Brand.accent),
-                              const SizedBox(width: 6),
-                              Expanded(
-                                child: Text(
-                                  [
-                                    if (l.soldRecently > 0) trf('30 күнде {0} жұп сатып алынды', [l.soldRecently]),
-                                    if (l.savedBy > 0) trf('{0} адам таңдаулыға қосты', [l.savedBy]),
-                                  ].join(' · '),
-                                  style: theme.textTheme.bodyMedium,
-                                ),
-                              ),
-                            ]),
-                          ),
-                        if (away != null) ...[
-                          const SizedBox(height: 12),
-                          Container(
-                            key: const Key('seller-away'),
-                            padding: const EdgeInsets.all(14),
-                            decoration: BoxDecoration(
-                                color: scheme.surfaceContainerHighest,
-                                borderRadius: BorderRadius.circular(Brand.radius)),
-                            child: Row(children: [
-                              const Icon(Icons.beach_access_outlined),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Text(trf(
-                                    'Сатушы {0} дейін демалыста. Тапсырысты ол оралғанда беруге болады, ал қазір таңдаулыға қосып не сатушыға жаза аласыз.',
-                                    [formatDay(away)])),
-                              ),
-                            ]),
-                          ),
-                        ],
-                        const SizedBox(height: 20),
-                        Card(
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                            child: Column(children: [
-                              _Fact(
-                                  icon: Icons.sell_outlined,
-                                  name: tr('Баға деңгейі'),
-                                  value: l.segment == null ? tr('Деректер әлі аз') : label(segments, l.segment)),
-                              const Divider(),
-                              _Fact(
-                                  icon: Icons.auto_awesome_outlined,
-                                  name: tr('Жағдайы'),
-                                  value: label(conditions, l.condition)),
-                              const Divider(),
-                              if (l.audience != null) ...[
-                                _Fact(
-                                    icon: Icons.person_outline,
-                                    name: tr('Кімге арналған'),
-                                    value: label(audiences, l.audience)),
-                                const Divider(),
-                              ],
-                              _Fact(
-                                  icon: Icons.verified_outlined,
-                                  name: tr('Түпнұсқалығы'),
-                                  value: label(authenticity, l.authenticity)),
-                              const Divider(),
-                            ]),
-                          ),
-                        ),
-                        if ((l.defects ?? '').isNotEmpty) ...[
-                          const SizedBox(height: 12),
-                          Container(
-                            padding: const EdgeInsets.all(16),
-                            decoration: BoxDecoration(
-                                color: scheme.errorContainer, borderRadius: BorderRadius.circular(Brand.radius)),
-                            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                              Icon(Icons.report_outlined, color: scheme.onErrorContainer),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Text(trf('Ақаулары: {0}', [l.defects]),
-                                    style: TextStyle(color: scheme.onErrorContainer)),
-                              ),
-                            ]),
-                          ),
-                        ],
-                        const SizedBox(height: 24),
-                        Row(key: _sizesKey, children: [
-                          Expanded(child: Text(tr('Өлшем'), style: theme.textTheme.titleMedium)),
-                          Flexible(
-                            child: TextButton.icon(
-                              key: const Key('size-guide'),
-                              onPressed: () async {
-                                if (await showSizeGuide(context) != null && mounted) setState(() {});
-                              },
-                              icon: const Icon(Icons.straighten, size: 18),
-                              label: Text(tr('Өлшем кестесі')),
-                            ),
-                          ),
-                        ]),
-                        const SizedBox(height: 12),
-                        Wrap(spacing: 8, runSpacing: 8, children: [
-                          for (final s in l.sizes)
-                            _SizeTile(
-                              size: s,
-                              selected: _sizeId == s.id,
-                              alerted: (_alerts ?? l.stockAlerts).contains(s.id),
-                              onTap: () => setState(() => _sizeId = s.id),
-                              onSoldOutTap: me?.id == l.sellerId ? null : () => _toggleStockAlert(l, s),
-                            ),
-                        ]),
-                        if (me?.id != l.sellerId && l.sizes.any((s) => !s.available)) ...[
-                          const SizedBox(height: 8),
-                          Text(tr('Қалмаған өлшемді басыңыз: қайта шыққанда хабарлаймыз.'),
-                              style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
-                        ],
-                        if (l.sizeFit != null) ...[const SizedBox(height: 12), SizeFitNote(fit: l.sizeFit!)],
-                        if (mySize.value != null) ...[
-                          const SizedBox(height: 10),
-                          Row(children: [
-                            Icon(fit == null ? Icons.info_outline : Icons.check_circle_outline,
-                                size: 18, color: fit == null ? scheme.onSurfaceVariant : Brand.accent),
-                            const SizedBox(width: 6),
-                            Expanded(
-                              child: Text(
-                                fit == null
-                                    ? trf('Сіздің өлшеміңізге ({0} см) сай өлшем жоқ', [mySize.value])
-                                    : trf('Сіздің өлшеміңізге ({0} см) сай: {1}', [mySize.value, fit.label]),
-                                style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
-                              ),
-                            ),
-                          ]),
-                        ],
-                        if (_offer != null && _offer!.status != 'ordered' && _offer!.status != 'withdrawn') ...[
-                          const SizedBox(height: 16),
-                          OfferStatusCard(offer: _offer!, onChanged: (o) => setState(() => _offer = o)),
-                        ],
-                        if (_offer == null && _offerError != null) ...[
-                          const SizedBox(height: 16),
-                          Card(
-                            margin: EdgeInsets.zero,
-                            child: RetryLine(
-                                key: const Key('offer-retry'),
-                                what: tr('Сіздің ұсыныстарыңыз'),
-                                error: _offerError,
-                                busy: _offerRetrying,
-                                onRetry: _loadOffer),
-                          ),
-                        ],
-                        if (canOffer) ...[
-                          const SizedBox(height: 16),
-                          SizedBox(
-                            width: double.infinity,
-                            child: OutlinedButton.icon(
-                              key: const Key('make-offer'),
-                              onPressed: selected == null ? null : () => _makeOffer(l, selected),
-                              icon: const Icon(Icons.local_offer_outlined),
-                              label: Text(selected == null ? tr('Баға ұсыну үшін өлшемді таңдаңыз') : tr('Баға ұсыну')),
-                            ),
-                          ),
-                        ],
-                        if ((l.description ?? '').isNotEmpty) ...[
-                          const SizedBox(height: 24),
-                          Text(tr('Сипаттама'), style: theme.textTheme.titleMedium),
-                          const SizedBox(height: 8),
-                          Text(l.description!, style: theme.textTheme.bodyLarge),
-                        ],
-                        QuestionsSection(listingId: l.id, sellerId: l.sellerId),
-                        const SizedBox(height: 24),
-                        Card(
-                          child: Column(children: [
-                            ListTile(
-                              contentPadding: const EdgeInsets.fromLTRB(16, 6, 12, 0),
-                              leading: CircleAvatar(
-                                backgroundColor: scheme.primary,
-                                foregroundColor: scheme.onPrimary,
-                                child: Text((l.shopName ?? tr('С')).characters.first.toUpperCase()),
-                              ),
-                              title: Text(l.shopName ?? tr('Сатушы'), style: theme.textTheme.titleSmall),
-                              subtitle: Row(children: [
-                                if (l.sellerRating != null) ...[
-                                  Stars(value: l.sellerRating!, size: 14),
-                                  const SizedBox(width: 6),
-                                  Text('${l.sellerRating!.toStringAsFixed(1)} · '),
-                                ],
-                                Flexible(
-                                  child: Text(
-                                    [
-                                      if (l.sellerCity != null) l.sellerCity!,
-                                      trf('{0} пікір', [l.sellerReviews])
-                                    ].join(' · '),
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                              ]),
-                              trailing: const Icon(Icons.chevron_right),
-                              onTap: () => Navigator.of(context)
-                                  .push(MaterialPageRoute(builder: (_) => ShopScreen(sellerId: l.sellerId))),
-                            ),
-                            if (SessionScope.of(context).me?.id != l.sellerId)
-                              Padding(
-                                padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
-                                child: SizedBox(
-                                  width: double.infinity,
-                                  child: OutlinedButton.icon(
-                                    onPressed: () => _chat(l),
-                                    icon: const Icon(Icons.chat_bubble_outline_rounded),
-                                    label: Text(tr('Сатушыға жазу')),
-                                  ),
-                                ),
-                              )
-                            else
-                              const SizedBox(height: 8),
-                          ]),
-                        ),
-                        if (SessionScope.of(context).me?.id != l.sellerId)
-                          Align(
-                            alignment: Alignment.centerLeft,
-                            child: TextButton.icon(
-                              onPressed: () => _report(l),
-                              icon: const Icon(Icons.flag_outlined, size: 18),
-                              label: Text(tr('Тауар туралы шағымдану')),
-                              style: TextButton.styleFrom(foregroundColor: scheme.onSurfaceVariant),
-                            ),
-                          ),
-                        const SizedBox(height: 12),
-                        Container(
-                          padding: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                              color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(Brand.radius)),
-                          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                            Icon(_payments ? Icons.shield_outlined : Icons.chat_bubble_outline_rounded),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Text(
-                                tr(_payments ? protectionText : directDealText),
-                                style: theme.textTheme.bodySmall,
-                              ),
-                            ),
-                          ]),
-                        ),
-                        _SimilarRow(items: _similar),
-                      ]),
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(trf('Сіздің өлшеміңізге ({0} см) сай өлшем жоқ', [mySize.value]),
+                          style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
+                    ),
+                  // One small line: what buyers said about the size (the bars in a sheet), and the size chart.
+                  Wrap(crossAxisAlignment: WrapCrossAlignment.center, spacing: 16, children: [
+                    if (l.sizeFit case final sizeFit?)
+                      _SmallLink(
+                        key: const Key('fit-line'),
+                        text: '${fitWords(sizeFit.verdict)} ›',
+                        color: switch ((sizeFit.verdict == 'small' || sizeFit.verdict == 'large', dark)) {
+                          (true, false) => const Color(0xFF8A5F00),
+                          (true, true) => const Color(0xFFE0B04A),
+                          (false, false) => const Color(0xFF276B43), // 5.6:1 on the paper
+                          (false, true) => const Color(0xFF6CC48E),
+                        },
+                        onTap: () => showPageSheet<void>(context,
+                            title: tr('Өлшемі қалай келді'), builder: (_) => SizeFitNote(fit: sizeFit)),
+                      ),
+                    _SmallLink(
+                      key: const Key('size-guide'),
+                      text: tr('Өлшем кестесі'),
+                      underline: true,
+                      onTap: () => _sizeChart(l),
                     ),
                   ]),
-            );
+                  const SizedBox(height: 4),
+                  PriceLine(listing: l, style: weight(theme.textTheme.headlineSmall!, 800)),
+                  if (l.wasPriceTiyn != null)
+                    Padding(
+                      key: const Key('sale-honest'),
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(tr('Сызылған баға: соңғы 30 күндегі ең төмен баға.'),
+                          style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
+                    ),
+                  // Offering a price only once there is a size to offer it for.
+                  if (canOffer && selected != null)
+                    _SmallLink(
+                        key: const Key('make-offer'),
+                        text: tr('Бағаңызды ұсыну'),
+                        underline: true,
+                        onTap: () => _makeOffer(l, selected)),
+                  if (_offer != null && _offer!.status != 'ordered' && _offer!.status != 'withdrawn') ...[
+                    const SizedBox(height: 12),
+                    OfferStatusCard(offer: _offer!, onChanged: (o) => setState(() => _offer = o)),
+                  ],
+                  if (_offer == null && _offerError != null) ...[
+                    const SizedBox(height: 12),
+                    Card(
+                      margin: EdgeInsets.zero,
+                      child: RetryLine(
+                          key: const Key('offer-retry'),
+                          what: tr('Сіздің ұсыныстарыңыз'),
+                          error: _offerError,
+                          busy: _offerRetrying,
+                          onRetry: _loadOffer),
+                    ),
+                  ],
+                  if ((l.defects ?? '').isNotEmpty) ...[
+                    // Never folded away: what is wrong with the pair is said where the price is.
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                          color: scheme.errorContainer, borderRadius: BorderRadius.circular(Brand.radius)),
+                      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Icon(Icons.report_outlined, color: scheme.onErrorContainer),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child:
+                              Text(trf('Ақаулары: {0}', [l.defects]), style: TextStyle(color: scheme.onErrorContainer)),
+                        ),
+                      ]),
+                    ),
+                  ],
+                  const SizedBox(height: 6),
+                  // The reviews, the description and the questions, each one calm line that opens a sheet.
+                  if (l.sellerRating case final rating? when l.sellerReviews > 0)
+                    LineButton(
+                      key: const Key('reviews-line'),
+                      leading: const Icon(Icons.star_rounded, size: 20, color: Color(0xFFE0A100)),
+                      title: rating.toStringAsFixed(1),
+                      detail: trf('{0} пікір', [l.sellerReviews]),
+                      onTap: () => _reviews(l),
+                    ),
+                  LineButton(
+                    key: const Key('description-line'),
+                    title: tr('Сипаттама'),
+                    detail: descriptionLine(l),
+                    onTap: () =>
+                        showPageSheet<void>(context, title: tr('Сипаттама'), builder: (_) => ListingFacts(listing: l)),
+                  ),
+                  QuestionsLine(listingId: l.id, sellerId: l.sellerId),
+                  const SizedBox(height: 6),
+                  Text(
+                    l.deliveryPriceTiyn == 0
+                        ? tr('Жеткізу тегін')
+                        : trf('Жеткізу {0}', [formatTenge(l.deliveryPriceTiyn)]),
+                    style: theme.textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
+                  ),
+                  DeliveryEta(listingId: l.id),
+                  if (l.soldRecently > 0 || l.savedBy > 0)
+                    Padding(
+                      key: const Key('popularity'),
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Row(children: [
+                        Icon(Icons.local_fire_department_outlined, size: 18, color: Brand.accent),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            [
+                              if (l.soldRecently > 0) trf('30 күнде {0} жұп сатып алынды', [l.soldRecently]),
+                              if (l.savedBy > 0) trf('{0} адам таңдаулыға қосты', [l.savedBy]),
+                            ].join(' · '),
+                            style: theme.textTheme.bodyMedium,
+                          ),
+                        ),
+                      ]),
+                    ),
+                  if (away != null) ...[
+                    const SizedBox(height: 12),
+                    Container(
+                      key: const Key('seller-away'),
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                          color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(Brand.radius)),
+                      child: Row(children: [
+                        const Icon(Icons.beach_access_outlined),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(trf(
+                              'Сатушы {0} дейін демалыста. Тапсырысты ол оралғанда беруге болады, ал қазір таңдаулыға қосып не сатушыға жаза аласыз.',
+                              [formatDay(away)])),
+                        ),
+                      ]),
+                    ),
+                  ],
+                  const SizedBox(height: 16),
+                  _SellerRow(listing: l, own: own, onMessage: () => _chat(l)),
+                  if (SessionScope.of(context).me?.id != l.sellerId)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton.icon(
+                        onPressed: () => _report(l),
+                        icon: const Icon(Icons.flag_outlined, size: 18),
+                        label: Text(tr('Тауар туралы шағымдану')),
+                        style: TextButton.styleFrom(foregroundColor: scheme.onSurfaceVariant),
+                      ),
+                    ),
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                        color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(Brand.radius)),
+                    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Icon(_payments ? Icons.shield_outlined : Icons.chat_bubble_outline_rounded),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          tr(_payments ? protectionText : directDealText),
+                          style: theme.textTheme.bodySmall,
+                        ),
+                      ),
+                    ]),
+                  ),
+                  _SimilarRow(items: _similar),
+                ]),
+              ),
+            ]);
           },
         ),
       ),
-      // Under the 360° stage the bar takes the scene's panel colour, as on the demo page, and goes back to the page's
-      // own once the details come up; its button keeps the one colour every buy button has.
-      ValueListenableBuilder(
-        valueListenable: _stageBottom,
-        builder: (context, stage, child) {
-          // Only while the 360° view is what the page shows: not on the Photo tab, nor once a reload took it away.
-          final scene = hasSpin && !_showPhotos ? stage : null;
-          final barTheme = scene == null ? theme : sceneBarTheme(theme, scene);
-          final page = theme.extension<AppCanvas>()?.overlay ??
-              (theme.brightness == Brightness.dark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark);
-          return AnnotatedRegion<SystemUiOverlayStyle>(
-            // Android's own buttons under the bar take its colour too.
-            value: scene == null
-                ? page
-                : page.copyWith(
-                    systemNavigationBarColor: barTheme.colorScheme.surface,
-                    systemNavigationBarDividerColor: barTheme.colorScheme.outlineVariant,
-                    systemNavigationBarIconBrightness: scene == Brightness.dark ? Brightness.light : Brightness.dark),
-            // At once, as the stage above it changes: a fade would pass through grey words on a grey bar.
-            child: Theme(data: barTheme, child: child!),
-          );
-        },
+      AnnotatedRegion<SystemUiOverlayStyle>(
+        // Android's own buttons under the bar take the page's look.
+        value: theme.extension<AppCanvas>()?.overlay ??
+            (theme.brightness == Brightness.dark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark),
         child: Builder(builder: (context) {
           final theme = Theme.of(context);
           final scheme = theme.colorScheme;
@@ -985,9 +872,10 @@ class _ListingScreenState extends State<ListingScreen> {
                                       ? tr('Сатушыға жазу')
                                       : selected == null
                                           ? tr('Өлшемді таңдаңыз')
+                                          // The size picked, on the button: no doubt which pair is bought.
                                           : deal != null
-                                              ? tr('Келісілген бағамен алу')
-                                              : tr('Тапсырыс беру');
+                                              ? '${tr('Келісілген бағамен алу')} · ${selected.label}'
+                                              : '${tr('Сатып алу')} · ${selected.label}';
                   final label =
                       Text(tr('Жиыны'), style: theme.textTheme.labelMedium?.copyWith(color: scheme.onSurfaceVariant));
                   final price = Text(formatTenge(itemPrice + l.deliveryPriceTiyn),
@@ -1048,33 +936,6 @@ class _ListingScreenState extends State<ListingScreen> {
     ]);
   }
 }
-
-final _sceneBarThemes = Expando<Map<Brightness, ThemeData>>();
-
-/// The [page]'s theme in the 360° scene's colours, for the bottom bar while the stage reaches down to it. Only the
-/// colours change, so nothing else about the bar (its text, its buttons) moves.
-ThemeData sceneBarTheme(ThemeData page, Brightness b) => (_sceneBarThemes[page] ??= {}).putIfAbsent(b, () {
-      final scene = b == Brightness.dark ? ShowcaseScene.dark : ShowcaseScene.light;
-      return page.copyWith(
-        colorScheme: page.colorScheme.copyWith(
-            brightness: b,
-            surface: scene.panel,
-            onSurface: scene.fg,
-            onSurfaceVariant: scene.muted,
-            outlineVariant: scene.line),
-        textTheme: page.textTheme.apply(bodyColor: scene.fg, displayColor: scene.fg),
-        // A button that cannot be pressed, as the demo page's: the scene's line colour with its muted words, which
-        // read on the panel (the theme's faint default does not).
-        filledButtonTheme: FilledButtonThemeData(
-          style: (page.filledButtonTheme.style ?? const ButtonStyle()).copyWith(
-            backgroundColor:
-                WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.disabled) ? scene.line : null),
-            foregroundColor:
-                WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.disabled) ? scene.muted : null),
-          ),
-        ),
-      );
-    });
 
 /// Whether the buy button's [text] fits in two lines, no word broken, beside the [price] total in [width]: the total
 /// takes its width (up to 40%), a 16 gap, and the button pads its text 24 on each side (less with large text).
@@ -1153,90 +1014,6 @@ class _RoundButton extends StatelessWidget {
         color: dark ? ShowcaseScene.dark.fg : Brand.ink,
         onPressed: back ? () => Navigator.maybePop(context) : onTap,
         icon: child,
-      ),
-    );
-  }
-}
-
-class _Fact extends StatelessWidget {
-  const _Fact({required this.icon, required this.name, required this.value});
-  final IconData icon;
-  final String name;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 12),
-      child: Row(children: [
-        Icon(icon, size: 20, color: theme.colorScheme.onSurfaceVariant),
-        const SizedBox(width: 12),
-        Flexible(
-          child: Text(name, style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
-        ),
-        const SizedBox(width: 12),
-        Expanded(child: Text(value, textAlign: TextAlign.end, style: weight(theme.textTheme.bodyMedium!, 600))),
-      ]),
-    );
-  }
-}
-
-class _SizeTile extends StatelessWidget {
-  const _SizeTile(
-      {required this.size, required this.selected, required this.onTap, this.alerted = false, this.onSoldOutTap});
-  final ShoeSize size;
-  final bool selected;
-  final VoidCallback onTap;
-
-  /// A sold-out size the buyer asked to hear about; tapping a sold-out size toggles that.
-  final bool alerted;
-  final VoidCallback? onSoldOutTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final fg = selected ? scheme.onPrimary : (size.available ? scheme.onSurface : scheme.onSurfaceVariant);
-    // container: the tile is read as one button with this label, not as the two texts inside it.
-    return Semantics(
-      container: true,
-      button: true,
-      selected: selected,
-      enabled: size.available || onSoldOutTap != null,
-      label: trf('Өлшем {0}, {1} см{2}', [size.label, size.insoleCm, size.available ? '' : tr(', қалмады')]),
-      child: Material(
-        color: selected ? scheme.primary : scheme.surface,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(14),
-          side: BorderSide(color: selected ? scheme.primary : scheme.outlineVariant),
-        ),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(14),
-          onTap: size.available ? onTap : onSoldOutTap,
-          // At least 76 by 58, and taller or wider when large text needs it.
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(minWidth: 76, minHeight: 58),
-            child: Stack(alignment: Alignment.center, children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                child: Column(mainAxisSize: MainAxisSize.min, children: [
-                  Text(size.label,
-                      style: weight(theme.textTheme.titleSmall!, 700)
-                          .copyWith(color: fg, decoration: size.available ? null : TextDecoration.lineThrough)),
-                  Text(trf('{0} см', [size.insoleCm]), style: theme.textTheme.labelSmall?.copyWith(color: fg)),
-                ]),
-              ),
-              if (!size.available && onSoldOutTap != null)
-                Positioned(
-                  top: 4,
-                  right: 4,
-                  child: Icon(alerted ? Icons.notifications_active : Icons.notifications_none_rounded,
-                      key: Key('alert-${size.id}'), size: 14, color: alerted ? Brand.accent : scheme.onSurfaceVariant),
-                ),
-            ]),
-          ),
-        ),
       ),
     );
   }
@@ -1414,6 +1191,137 @@ class SizeFitNote extends StatelessWidget {
           legend('Сай', fit.trueToSize),
           legend('Үлкендеу', fit.large),
         ]),
+      ]),
+    );
+  }
+}
+
+/// Keeps [child] alive in a list while it is scrolled out of view.
+class _KeptAlive extends StatefulWidget {
+  const _KeptAlive({required this.child});
+  final Widget child;
+
+  @override
+  State<_KeptAlive> createState() => _KeptAliveState();
+}
+
+class _KeptAliveState extends State<_KeptAlive> with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    return widget.child;
+  }
+}
+
+/// A small text button on the page: 15 px, at least 48 high to tap.
+class _SmallLink extends StatelessWidget {
+  const _SmallLink({super.key, required this.text, required this.onTap, this.color, this.underline = false});
+  final String text;
+  final VoidCallback onTap;
+  final Color? color;
+  final bool underline;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final ink = color ?? theme.colorScheme.onSurface;
+    return Semantics(
+      button: true,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 48, minWidth: 48),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            widthFactor: 1,
+            child: Text(text,
+                style: weight(theme.textTheme.bodyMedium!, 600).copyWith(
+                    fontSize: 15,
+                    color: ink,
+                    decoration: underline ? TextDecoration.underline : null,
+                    decorationColor: ink)),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The seller in one row: who they are (tap for the shop) and a round button to write to them.
+class _SellerRow extends StatelessWidget {
+  const _SellerRow({required this.listing, required this.own, required this.onMessage});
+  final Listing listing;
+  final bool own;
+  final VoidCallback onMessage;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final l = listing;
+    final name = l.shopName ?? tr('Сатушы');
+    final muted = theme.textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant);
+    return Container(
+      key: const Key('seller-row'),
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      decoration: BoxDecoration(border: Border(top: BorderSide(color: scheme.outlineVariant))),
+      child: Row(children: [
+        Expanded(
+          child: InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: () =>
+                Navigator.of(context).push(MaterialPageRoute(builder: (_) => ShopScreen(sellerId: l.sellerId))),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(children: [
+                CircleAvatar(
+                  radius: 22,
+                  backgroundColor: scheme.onSurface,
+                  foregroundColor: scheme.surface,
+                  child: Text(name.characters.first.toUpperCase(),
+                      style: weight(theme.textTheme.titleMedium!, 800).copyWith(color: scheme.surface)),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(name, style: weight(theme.textTheme.bodyLarge!, 650)),
+                    Text.rich(
+                      TextSpan(children: [
+                        if (l.sellerRating != null) ...[
+                          // The star only marks the number, which says the rating: drawn, not read as a letter.
+                          const WidgetSpan(
+                              alignment: PlaceholderAlignment.middle,
+                              child: ExcludeSemantics(
+                                  child: Icon(Icons.star_rounded, size: 16, color: Color(0xFFE0A100)))),
+                          TextSpan(text: ' ${l.sellerRating!.toStringAsFixed(1)} · '),
+                        ],
+                        TextSpan(
+                            text: [
+                          if (l.sellerCity != null) l.sellerCity!,
+                          trf('{0} пікір', [l.sellerReviews])
+                        ].join(' · ')),
+                      ]),
+                      style: muted,
+                    ),
+                  ]),
+                ),
+              ]),
+            ),
+          ),
+        ),
+        if (!own) ...[
+          const SizedBox(width: 8),
+          IconButton.outlined(
+            key: const Key('seller-message'),
+            tooltip: tr('Сатушыға жазу'),
+            onPressed: onMessage,
+            icon: const Icon(Icons.chat_bubble_outline_rounded, size: 20),
+          ),
+        ],
       ]),
     );
   }
