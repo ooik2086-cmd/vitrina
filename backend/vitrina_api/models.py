@@ -7,8 +7,8 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 
-from sqlalchemy import (BigInteger, Boolean, Date, DateTime, ForeignKey, Index, Integer, LargeBinary, String, Text,
-                        UniqueConstraint, create_engine, func, select)
+from sqlalchemy import (JSON, BigInteger, Boolean, Date, DateTime, ForeignKey, Index, Integer, LargeBinary, String,
+                        Text, UniqueConstraint, create_engine, func, select)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 
 
@@ -71,6 +71,8 @@ class Listing(Base):
     title: Mapped[str] = mapped_column(String(120))
     category: Mapped[str] = mapped_column(String(30), index=True)
     audience: Mapped[str | None] = mapped_column(String(10))  # men|women|unisex|kids; None on pairs listed before it was asked
+    # Picked facts by key (vitrina_core/facts.py); SQL NULL when none picked, like every other empty column.
+    facts: Mapped[dict | None] = mapped_column(JSON(none_as_null=True))
     brand: Mapped[str | None] = mapped_column(String(60), index=True)
     model_name: Mapped[str | None] = mapped_column(String(80))
     color: Mapped[str] = mapped_column(String(40))

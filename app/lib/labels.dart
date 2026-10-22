@@ -43,6 +43,123 @@ const audiences = {
   'kids': 'Балаларға',
 };
 
+/// The facts a seller picks for a pair from ready options, never types (backend vitrina_core/facts.py, which keeps
+/// the same Kazakh names for staff): what it is made of, its season and country, and for some kinds of footwear one or
+/// two more. Each with its name.
+const factNames = {
+  'upper': 'Үсті',
+  'lining': 'Іші',
+  'sole': 'Табаны',
+  'season': 'Маусым',
+  'country': 'Елі',
+  'shaft': 'Қонышы',
+  'warmth': 'Жылуы',
+  'heel': 'Өкше',
+  'fastening': 'Бекітпесі',
+};
+
+const factOptions = <String, Map<String, String>>{
+  'upper': {
+    'leather': 'Табиғи былғары',
+    'faux_leather': 'Жасанды былғары',
+    'suede': 'Күдері',
+    'nubuck': 'Нубук',
+    'patent': 'Лак былғары',
+    'textile': 'Тоқыма',
+    'mesh': 'Желдетілетін тор',
+    'mixed': 'Аралас материал',
+    'rubber': 'Резеңке',
+    'eva': 'Жеңіл көбік (EVA)',
+    'felt': 'Киіз',
+  },
+  'lining': {
+    'leather': 'Табиғи былғары',
+    'textile': 'Тоқыма',
+    'fur': 'Табиғи мех',
+    'faux_fur': 'Жасанды мех',
+    'wool': 'Жүн',
+    'felt': 'Киіз',
+    'none': 'Астары жоқ',
+  },
+  'sole': {
+    'rubber': 'Резеңке',
+    'eva': 'Жеңіл көбік (EVA)',
+    'pu': 'Полиуретан',
+    'tpr': 'Термопластик (TPR)',
+    'leather': 'Былғары',
+  },
+  'season': {
+    'summer': 'Жаз',
+    'demi': 'Көктем-күз',
+    'winter': 'Қыс',
+    'all': 'Жыл бойы',
+  },
+  'country': {
+    'KZ': 'Қазақстан',
+    'TR': 'Түркия',
+    'CN': 'Қытай',
+    'RU': 'Ресей',
+    'KG': 'Қырғызстан',
+    'UZ': 'Өзбекстан',
+    'BY': 'Беларусь',
+    'VN': 'Вьетнам',
+    'IN': 'Үндістан',
+    'ID': 'Индонезия',
+    'IT': 'Италия',
+  },
+  'shaft': {
+    'ankle': 'Тобыққа дейін',
+    'mid_calf': 'Балтырдың ортасына дейін',
+    'knee': 'Тізеге дейін',
+    'over_knee': 'Тізеден жоғары',
+  },
+  'warmth': {
+    'none': 'Жылусыз',
+    'light': 'Аздап жылы',
+    'winter': 'Қысқы',
+  },
+  'heel': {
+    'flat': 'Өкшесіз',
+    'low': 'Аласа (3 см-ге дейін)',
+    'mid': 'Орташа (3–7 см)',
+    'high': 'Биік (7 см-ден жоғары)',
+  },
+  'fastening': {
+    'buckle': 'Тоға',
+    'velcro': 'Жабысқақ (липучка)',
+    'elastic': 'Резеңке бау',
+    'laces': 'Бау',
+    'none': 'Бекітпесіз',
+  },
+};
+
+/// Every pair has these; the kind of footwear adds its own (a winter boot is warm by its kind: no warmth to ask).
+const commonFacts = ['upper', 'lining', 'sole', 'season', 'country'];
+const factsByCategory = {
+  'boots': ['shaft', 'warmth'],
+  'boots_winter': ['shaft'],
+  'classic': ['heel'],
+  'heels': ['heel'],
+  'sandals': ['fastening'],
+  'kids': ['warmth', 'fastening'],
+};
+
+/// The facts asked for this kind of footwear, in the order a buyer reads them.
+List<String> factKeys(String? category) => [...commonFacts, ...?factsByCategory[category]];
+
+/// The facts as they would be saved for this kind of footwear: those it has, and any this app does not know (a newer
+/// server's, kept for the server to judge, never dropped unseen).
+Map<String, String> factsFor(String? category, Map<String, String> facts) => {
+      for (final MapEntry(:key, :value) in facts.entries)
+        if (factKeys(category).contains(key) || !factOptions.containsKey(key)) key: value
+    };
+
+/// A picked fact in the interface language, or null for one not known to this app (a newer server's).
+String? factText(String key, String option) => switch (factOptions[key]?[option]) {
+      final text? => tr(text),
+      null => null,
+    };
+
 // Segment, condition and authenticity are separate facts; the UI never merges them into one "quality" badge.
 const segments = {
   'economy': 'Эконом',

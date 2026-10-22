@@ -56,6 +56,8 @@ class ListingIn(BaseModel):
     showcase_style: Literal["clean", "premium", "dynamic"] = "clean"
     sizes: list[SizeIn] = Field(min_length=1, max_length=30)
     photos: list[PhotoIn] = Field(default_factory=list, max_length=60)
+    # Picked from ready options (vitrina_core/facts.py), checked against the kind of footwear when saved.
+    facts: dict[str, str] | None = Field(default=None, max_length=12)
 
     # "Черный" and "black" are stored as "қара": one colour of a model is one swatch.
     _color = field_validator("color", mode="before")(lambda v: canonical_color(v) if isinstance(v, str) else v)
@@ -90,6 +92,7 @@ class ListingPatch(BaseModel):
     add_photos: list[PhotoIn] | None = Field(default=None, max_length=60)
     add_sizes: list[SizeIn] | None = Field(default=None, max_length=30)
     cover_frame: str | None = Field(default=None, max_length=500)  # the 360° frame that matches the cover
+    facts: dict[str, str] | None = Field(default=None, max_length=12)  # all of them, replacing those kept; {} clears
 
     _color = field_validator("color", mode="before")(lambda v: canonical_color(v) if isinstance(v, str) else v)
 

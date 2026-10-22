@@ -5,6 +5,7 @@ from pathlib import Path
 from datetime import datetime, timedelta, timezone
 
 from vitrina_core.catalog import compute_bounds, normalize_query, Segment, MIN_SAMPLE
+from vitrina_core.facts import BY_CATEGORY, COMMON, FACTS, NAMES, clean_facts, named_facts
 from vitrina_core.colors import COLORS, PARTS, WORDS, canonical_color, color_list, color_query, matching_colors
 from vitrina_core.money import (
     CommissionRule, Entry, Ledger, LedgerError, PLATFORM_FEE, PROVIDER_CLEARING,
@@ -294,6 +295,41 @@ class ColorTests(unittest.TestCase):
         dart = APP_COLORS.read_text(encoding="utf-8")
         block = dart[dart.index("const shoeColors"):dart.index("};", dart.index("const shoeColors"))]
         self.assertEqual(re.findall(r"^  '([^']+)': Color", block, re.M), list(COLORS))
+
+class FactsTests(unittest.TestCase):
+    APP_LABELS = Path(__file__).resolve().parents[2] / "app" / "lib" / "labels.dart"
+
+    def test_facts_are_checked_and_ordered(self):
+        self.assertEqual(clean_facts({"country": "KZ", "upper": "suede"}, "boots"), {"upper": "suede", "country": "KZ"})
+        self.assertIsNone(clean_facts({}, "boots"))
+        self.assertEqual(clean_facts({"heel": "high", "sole": "pu"}, "sneakers"), {"sole": "pu"})  # not this kind's
+        for bad in ({"sole": "glass"}, {"colour": "red"}):
+            with self.assertRaises(ValueError):
+                clean_facts(bad, "sneakers")
+        # Saved before an option was withdrawn: kept where still known, never raising.
+        self.assertEqual(clean_facts({"sole": "glass", "upper": "mesh"}, "sneakers", stored=True), {"upper": "mesh"})
+        self.assertEqual(named_facts({"country": "KZ", "upper": "suede", "x": "y"}, "boots"),
+                         [["Үсті", "Күдері"], ["Елі", "Қазақстан"]])
+        self.assertEqual(named_facts(None, None), [])
+
+    @unittest.skipUnless(APP_LABELS.exists(), "the app is not next to the backend here")
+    def test_the_app_offers_the_same_facts_with_the_same_kazakh_names(self):
+        dart = self.APP_LABELS.read_text(encoding="utf-8")
+
+        def block(name):
+            return dart[dart.index(f"const {name}"):dart.index("\n};", dart.index(f"const {name}"))]
+        names = dict(re.findall(r"^  '(\w+)': '([^']*)',", block("factNames"), re.M))
+        options = {key: dict(re.findall(r"^    '(\w+)': '([^']*)',", body, re.M))
+                   for key, body in re.findall(r"^  '(\w+)': \{(.*?)^  \}", block("factOptions"), re.M | re.S)}
+        self.assertEqual({k: (names[k], options[k]) for k in names}, NAMES)
+        self.assertEqual(list(names), list(options))  # every fact named, every named fact with options
+        common = dart[dart.index("const commonFacts"):dart.index(";", dart.index("const commonFacts"))]
+        self.assertEqual(tuple(re.findall(r"'(\w+)'", common)), COMMON)
+        kinds = dart[dart.index("const factsByCategory"):dart.index("};", dart.index("const factsByCategory"))]
+        self.assertEqual({k: tuple(re.findall(r"'(\w+)'", v)) for k, v in re.findall(r"'(\w+)': \[([^\]]*)\]", kinds)},
+                         BY_CATEGORY)
+        self.assertEqual(FACTS, {k: tuple(o) for k, (_, o) in NAMES.items()})
+
 
 if __name__ == "__main__":
     unittest.main()

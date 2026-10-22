@@ -520,6 +520,10 @@ class Listing {
         authenticity = j['authenticity'] as String,
         defects = j['defects'] as String?,
         description = j['description'] as String?,
+        facts = {
+          for (final MapEntry(:key, :value) in ((j['facts'] as Map?) ?? const {}).entries)
+            if (key is String && value is String) key: value
+        },
         showcaseStyle = j['showcase_style'] as String,
         backdrop = j['backdrop'] as String?,
         model = j['model'] is Map ? ListingModel.fromJson((j['model'] as Map).cast<String, dynamic>()) : null,
@@ -568,6 +572,9 @@ class Listing {
 
   /// men | women | unisex | kids; null on a pair listed before it was asked.
   final String? audience;
+
+  /// The facts the seller picked (labels.dart factOptions), by key: none on a pair listed before they were asked.
+  final Map<String, String> facts;
   final String? brand;
   final String? modelName;
   final String color;
@@ -1209,6 +1216,7 @@ class Api {
           String? category,
           String? audience,
           String? condition,
+          Map<String, String>? facts,
           List<Map<String, String>>? photos,
           List<Map<String, String>>? addPhotos,
           List<Map<String, Object>>? addSizes,
@@ -1230,6 +1238,7 @@ class Api {
         if (category != null) 'category': category,
         if (audience != null) 'audience': audience,
         if (condition != null) 'condition': condition,
+        if (facts != null) 'facts': facts,
         if (photos != null) 'photos': photos,
         if (addPhotos != null) 'add_photos': addPhotos,
         if (addSizes != null) 'add_sizes': addSizes,

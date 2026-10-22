@@ -12,6 +12,7 @@ import '../labels.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import '../widgets/facts_fields.dart';
 import '../widgets/listing_contents.dart' show ShowcaseStopsHint;
 import 'spin_capture_screen.dart';
 import '../color_guess.dart';
@@ -121,6 +122,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
   String? _category; // chosen, or filled in from a photo: a default would file boots as sneakers
   String _condition = 'new_with_box';
   String? _audience; // asked, never assumed: a men's default would hide a women's pair from women
+  Map<String, String> _facts = {}; // picked, each optional
   String _style = 'clean';
   final _sizes = [_SizeRow()];
   final Map<String, _Upload> _photos = {};
@@ -217,6 +219,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
         'category': _category,
         'condition': _condition,
         'audience': _audience,
+        'facts': _facts,
         'style': _style,
         'model': _modelName,
         'sizes': [
@@ -283,6 +286,10 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
     _category = d['category'] as String?;
     _condition = d['condition'] as String? ?? 'new_with_box';
     _audience = d['audience'] as String?;
+    _facts = {
+      for (final MapEntry(:key, :value) in ((d['facts'] as Map?) ?? const {}).entries)
+        if (key is String && value is String) key: value
+    };
     _style = d['style'] as String? ?? 'clean';
     _modelName = d['model'] as String?;
     _suggestAsked = _brand.text.isNotEmpty;
@@ -387,6 +394,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
     _delivery.text = '${t.deliveryPriceTiyn ~/ 100}';
     _category = t.category;
     _audience = t.audience;
+    _facts = {...t.facts}; // the same shoe in another colour is made of the same
     _style = t.showcaseStyle;
     if (t.condition != 'defective') _condition = t.condition; // a defect belongs to one pair, with its own photos
     _suggestAsked = true; // brand and model are known already
@@ -423,6 +431,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
         for (final c in [_title, _brand, _color, _defects, _description, _price, _delivery]) c.text.trim(),
         _category,
         _audience,
+        for (final e in _facts.entries) '${e.key}=${e.value}',
         _condition,
         _style,
         for (final r in _sizes) '${r.label.text.trim()}|${r.cm.text.trim()}|${r.qty.text.trim()}',
@@ -649,6 +658,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
         'title': _title.text.trim(),
         'category': _category!,
         if (_audience != null) 'audience': _audience,
+        if (factsFor(_category, _facts) case final facts when facts.isNotEmpty) 'facts': facts,
         if (_brand.text.trim().isNotEmpty) 'brand': _brand.text.trim(),
         if (_modelName != null) 'model_name': _modelName,
         'color': _color.text.trim(),
@@ -911,7 +921,10 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
           decoration: InputDecoration(labelText: tr('Санаты')),
           items: [for (final e in categories.entries) DropdownMenuItem(value: e.key, child: Text(tr(e.value)))],
           validator: (v) => v == null ? tr('Түрін таңдаңыз') : null,
-          onChanged: (v) => setState(() => _category = v!),
+          onChanged: (v) => setState(() {
+            _category = v!;
+            _facts = factsFor(v, _facts); // a boot's height does not go with a sneaker
+          }),
         ),
         DropdownButtonFormField<String>(
           key: const Key('audience'),
@@ -956,6 +969,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
                 onPressed: _addDefect),
           ]),
         ],
+        FactsFields(category: _category, facts: _facts, onChanged: (f) => setState(() => _facts = f)),
         TextFormField(
             controller: _description,
             maxLines: 3,

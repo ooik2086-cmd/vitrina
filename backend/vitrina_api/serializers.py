@@ -147,7 +147,8 @@ def listing_out(db: Session, listing: Listing, *, owner: bool = False) -> dict:
         "delivery_price_tiyn": listing.delivery_price_tiyn,
         # Three separate facts, never merged into one "quality" label.
         "segment": segment_for(db, listing), "condition": listing.condition, "authenticity": listing.authenticity,
-        "defects": listing.defects, "description": listing.description, "showcase_style": listing.showcase_style,
+        "defects": listing.defects, "description": listing.description, "facts": listing.facts or {},
+        "showcase_style": listing.showcase_style,
         "backdrop": listing.backdrop, "cover_frame": cover_frame(listing), "model": model_out(listing),
         "angle_frames": angle_frames(listing),
         "sizes": [{"id": s.id, "label": s.label, "insole_cm": mm_to_cm(s.insole_mm), "available": s.quantity > 0,
@@ -347,7 +348,10 @@ LISTING_DETAILS = ("title", "brand", "model_name", "color", "category", "conditi
 
 
 def details_snapshot(listing: Listing) -> str:
-    return json.dumps({f: getattr(listing, f) for f in LISTING_DETAILS}, ensure_ascii=False)
+    details = {f: getattr(listing, f) for f in LISTING_DETAILS}
+    if listing.facts:  # what the buyer read it is made of; left out when none, so older snapshots keep their names
+        details["facts"] = listing.facts
+    return json.dumps(details, ensure_ascii=False)
 
 
 def ordered_details(order: Order) -> dict | None:

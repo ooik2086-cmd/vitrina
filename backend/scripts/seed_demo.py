@@ -23,20 +23,24 @@ LISTINGS = {
     "street": [
         {"title": "Жеңіл жүгіру кроссовкасы, қара", "color": "қара", "condition": "new_with_box",
          "price_tiyn": 3_290_000, "delivery_price_tiyn": 150_000, "showcase_style": "premium",
-         "description": "Тор матадан жеңіл кроссовка, көбік табан. Қорабы мен жапсырмасы бар."},
+         "description": "Тор матадан жеңіл кроссовка, көбік табан. Қорабы мен жапсырмасы бар.",
+         "facts": {"upper": "mesh", "lining": "textile", "sole": "eva", "season": "demi", "country": "TR"}},
         {"title": "Жеңіл кроссовка, қара, киілген", "color": "қара", "condition": "used_good",
          "defects": "Оң аяқтың табанында аздап сарғаю, тор мата бүтін.", "price_tiyn": 1_490_000,
-         "showcase_style": "clean", "sizes": [("42", "27", 1)]},
+         "showcase_style": "clean", "sizes": [("42", "27", 1)],
+         "facts": {"upper": "mesh", "lining": "textile", "sole": "eva", "season": "demi"}},
     ],
     "midnight": [
         {"title": "Жеңіл жүгіру кроссовкасы, көк", "color": "көк", "condition": "new_no_box",
          "price_tiyn": 2_990_000, "delivery_price_tiyn": 0, "showcase_style": "dynamic",
-         "description": "Күнделікті және жүгіруге. Қорабы жоқ, киілмеген."},
+         "description": "Күнделікті және жүгіруге. Қорабы жоқ, киілмеген.",
+         "facts": {"upper": "mesh", "lining": "textile", "sole": "eva", "season": "summer", "country": "TR"}},
     ],
     "beach": [
         {"title": "Жеңіл кроссовка, ақшыл қызғылт", "color": "қызғылт", "condition": "unworn_stored",
          "price_tiyn": 2_490_000, "delivery_price_tiyn": 120_000, "showcase_style": "clean",
-         "description": "Бір рет өлшеп көрілген, сақтауда тұрған."},
+         "description": "Бір рет өлшеп көрілген, сақтауда тұрған.",
+         "facts": {"upper": "textile", "lining": "textile", "sole": "eva", "season": "summer", "country": "CN"}},
     ],
 }
 

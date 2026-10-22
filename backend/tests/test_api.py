@@ -12,7 +12,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
 from PIL import Image
-from sqlalchemy import create_engine, delete, func, select
+from sqlalchemy import create_engine, delete, func, select, text
 
 os.environ.setdefault("VITRINA_LOG_LEVEL", "WARNING")  # keep test output to what failed
 
@@ -1327,6 +1327,105 @@ class ReportTests(ApiTestCase):
         self.assertEqual(r.json()["status"], "published")
         self.assertEqual(self.post(f"/admin/reports/{lid}/close", staff,
                                    {"action": "dismiss", "reason": "again"}).status_code, 404)
+
+
+class ListingFactsTests(ApiTestCase):
+    """What the pair is made of, its season and country, picked by the seller from ready options."""
+
+    def patch(self, lid, body):
+        return self.c.patch(f"/api/v1/listings/{lid}", json=body, headers=self.h(self.seller))
+
+    def draft(self, **over):
+        r = self.post("/listings", self.seller, {**LISTING, **over})
+        self.assertEqual(r.status_code, 201, r.text)
+        return r.json()
+
+    def test_facts_are_picked_from_the_options_of_the_kind_of_footwear(self):
+        boots = {"country": "TR", "upper": "leather", "warmth": "winter", "shaft": "knee", "season": "winter"}
+        listing = self.publish(category="boots", facts=boots)
+        # Kept in the order a buyer reads them: the five every pair has, then the kind's own.
+        self.assertEqual(list(listing["facts"].items()), [("upper", "leather"), ("season", "winter"),
+                                                          ("country", "TR"), ("shaft", "knee"), ("warmth", "winter")])
+        self.assertEqual(self.c.get(f"/api/v1/listings/{listing['id']}").json()["facts"], listing["facts"])
+        self.assertEqual(self.publish()["facts"], {})  # none picked: none shown
+        # A child's pair says how warm it is and how it fastens; a winter boot is warm by its kind.
+        kids = {"warmth": "winter", "fastening": "velcro", "upper": "eva"}
+        self.assertEqual(self.draft(category="kids", facts=kids)["facts"],
+                         {"upper": "eva", "warmth": "winter", "fastening": "velcro"})
+        self.assertEqual(self.draft(category="boots_winter", facts={"warmth": "none", "shaft": "knee"})["facts"],
+                         {"shaft": "knee"})
+        # A fact this kind does not have is let go (an older app's leftover), not a reason to refuse the listing.
+        self.assertEqual(self.draft(category="sneakers", facts={"shaft": "knee", "sole": "pu"})["facts"], {"sole": "pu"})
+
+        def refused(**over):
+            r = self.post("/listings", self.seller, {**LISTING, **over})
+            self.assertEqual(r.status_code, 422, r.text)
+        refused(facts={"upper": "gold"})  # not an option
+        refused(facts={"colour": "red"})  # not a fact
+        refused(facts={"country": "other"})  # says nothing: not offered
+        refused(facts={"upper": 3})
+
+    def test_a_draft_changes_its_facts_freely_and_the_kind_takes_its_own(self):
+        lid = self.draft(facts={"upper": "textile", "sole": "eva"})["id"]
+        r = self.patch(lid, {"facts": {"upper": "mesh", "sole": "eva", "season": "summer"}})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["facts"], {"upper": "mesh", "sole": "eva", "season": "summer"})  # all replaced
+        self.assertEqual(self.patch(lid, {"facts": {"heel": "gold"}}).status_code, 422)
+        self.assertEqual(self.patch(lid, {"price_tiyn": 4_000_000}).json()["facts"]["upper"], "mesh")  # left as is
+        self.assertEqual(self.patch(lid, {"facts": {}}).json()["facts"], {})
+
+        # A draft may change its kind: a boot's height goes with it, what it is made of stays, whether the facts
+        # come along in the same change or not.
+        boot = self.draft(category="boots", facts={"upper": "suede", "shaft": "ankle"})["id"]
+        self.assertEqual(self.patch(boot, {"category": "sneakers"}).json()["facts"], {"upper": "suede"})
+        boot = self.draft(category="boots", facts={"upper": "suede"})["id"]
+        r = self.patch(boot, {"category": "sneakers", "facts": {"upper": "nubuck", "shaft": "knee"}})
+        self.assertEqual((r.status_code, r.json()["facts"]), (200, {"upper": "nubuck"}))
+
+    def test_on_sale_a_picked_fact_stays_and_an_empty_one_may_be_picked(self):
+        listing = self.publish(facts={"upper": "faux_leather"})
+        lid = listing["id"]
+        # Buyers bought and reviewed it as faux leather: it cannot turn into leather, nor be taken off.
+        for facts in ({"upper": "leather"}, {}, {"season": "winter"}):
+            r = self.patch(lid, {"facts": facts})
+            self.assertEqual((r.status_code, r.json()["code"]), (409, "listing_locked"), facts)
+        r = self.patch(lid, {"facts": {"upper": "faux_leather", "country": "TR"}})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["facts"], {"upper": "faux_leather", "country": "TR"})
+        self.assertEqual(r.json()["status"], "published")  # picked, not typed: nothing to check again
+
+    def test_a_fact_no_longer_offered_never_stops_other_changes(self):
+        lid = self.publish(facts={"upper": "mesh"})["id"]
+        with self.db() as db:  # saved before an option was withdrawn
+            db.get(Listing, lid).facts = {"upper": "mesh", "country": "other"}
+            db.commit()
+        r = self.patch(lid, {"price_tiyn": 4_000_000})
+        self.assertEqual((r.status_code, r.json()["facts"]), (200, {"upper": "mesh"}))
+
+    def test_an_order_keeps_the_facts_the_buyer_read_and_staff_see_them(self):
+        listing = self.publish(facts={"upper": "leather"})
+        version = listing["photos_version"]
+        self.patch(listing["id"], {"facts": {"upper": "leather", "country": "IT"}})
+        fresh = self.c.get(f"/api/v1/listings/{listing['id']}").json()
+        self.assertNotEqual(fresh["photos_version"], version)  # a page read before the change cannot order
+        body = {"listing_id": listing["id"], "size_id": listing["sizes"][0]["id"], "photos_version": version}
+        r = self.post("/orders", self.buyer, body, **{"Idempotency-Key": "f1"})
+        self.assertEqual((r.status_code, r.json()["code"]), (409, "photos_changed"))
+        body["photos_version"] = fresh["photos_version"]
+        order = self.post("/orders", self.buyer, body, **{"Idempotency-Key": "f2"}).json()
+        details = self.c.get(f"/api/v1/orders/{order['id']}", headers=self.h(self.buyer)).json()["listing_details"]
+        self.assertEqual(details["facts"], {"upper": "leather", "country": "IT"})
+        ev = self.c.get(f"/api/v1/admin/orders/{order['id']}/evidence", headers=self.h(self.make_staff())).json()
+        self.assertEqual(ev["listing_facts"], [["Үсті", "Табиғи былғары"], ["Елі", "Италия"]])
+        # A pair with no facts keeps the copy (and so the version) it had before facts existed: no "facts" in it.
+        plain = self.publish()
+        body = {"listing_id": plain["id"], "size_id": plain["sizes"][0]["id"], "photos_version": plain["photos_version"]}
+        order = self.post("/orders", self.buyer, body, **{"Idempotency-Key": "f3"}).json()
+        details = self.c.get(f"/api/v1/orders/{order['id']}", headers=self.h(self.buyer)).json()["listing_details"]
+        self.assertNotIn("facts", details)
+        with self.db() as db:
+            # SQL NULL, like every other empty column, not the JSON word null
+            self.assertTrue(db.scalar(text("SELECT facts IS NULL FROM listings WHERE id = :i"), {"i": plain["id"]}))
 
 
 class FootwearKindsTests(ApiTestCase):

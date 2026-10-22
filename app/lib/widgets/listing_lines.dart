@@ -261,13 +261,18 @@ class ListingFacts extends StatelessWidget {
     final facts = [
       (tr('Түрі'), label(categories, l.category)),
       if (name.isNotEmpty) (tr('Атауы'), name),
+      // What the seller picked: what it is made of, season, country, the kind's own. Those not picked are left out.
+      for (final key in factKeys(l.category))
+        if (l.facts[key] case final option? when factText(key, option) != null)
+          (tr(factNames[key]!), factText(key, option)!),
       (tr('Жағдайы'), label(conditions, l.condition)),
       if (l.audience != null) (tr('Кімге арналған'), label(audiences, l.audience)),
       (tr('Түпнұсқалығы'), label(authenticity, l.authenticity)),
       if (l.segment != null) (tr('Баға деңгейі'), label(segments, l.segment)),
     ];
-    // With large text the two columns leave the values too narrow: each name then stands over its value.
-    final stacked = MediaQuery.textScalerOf(context).scale(16) > 22;
+    // With larger text the two columns leave the values too narrow (a long material word split in two): each name
+    // then stands over its value.
+    final stacked = MediaQuery.textScalerOf(context).scale(16) > 18;
     final muted = theme.textTheme.bodyLarge?.copyWith(color: theme.colorScheme.onSurfaceVariant);
     final strong = weight(theme.textTheme.bodyLarge!, 650);
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [

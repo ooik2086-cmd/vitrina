@@ -557,6 +557,50 @@ void main() {
     expect(find.text('Тексерілмеген'), findsOneWidget);
   });
 
+  test('every fact and its options can be read in Russian and English', () {
+    for (final text in [...factNames.values, for (final o in factOptions.values) ...o.values]) {
+      expect(ru[text], isNotNull, reason: text);
+      expect(en[text], isNotNull, reason: text);
+    }
+    for (final kind in factsByCategory.keys) {
+      expect(categories, contains(kind)); // a kind's own facts are asked of a kind the app has
+    }
+    expect(factNames.keys, orderedEquals(factOptions.keys)); // every fact named, every named fact with options
+  });
+
+  testWidgets('the description sheet lists the facts the seller picked, in reading order, and no others',
+      (tester) async {
+    final facts = {
+      'country': 'TR',
+      'upper': 'leather',
+      'shaft': 'knee',
+      'heel': 'high', // not a boot's fact: never shown on a boot
+      'sole': 'glass', // an option this app does not know (a newer server's): left out
+    };
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((_) async => jsonResponse({...listingJson(), 'category': 'boots', 'facts': facts})));
+    tester.view.physicalSize = const Size(400, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester
+        .pumpWidget(SessionScope(session: Session(api), child: const MaterialApp(home: ListingScreen(listingId: 7))));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('description-line')));
+    await tester.pumpAndSettle();
+    final sheet = find.byKey(const Key('facts'));
+    Finder inSheet(String text) => find.descendant(of: sheet, matching: find.text(text));
+    for (final text in ['Үсті', 'Табиғи былғары', 'Елі', 'Түркия', 'Қонышы', 'Тізеге дейін']) {
+      expect(inSheet(text), findsOneWidget, reason: text);
+    }
+    for (final text in ['Табаны', 'Іші', 'Маусым', 'Өкше']) {
+      expect(inSheet(text), findsNothing, reason: text); // not picked, or not this kind's: no empty rows
+    }
+    double y(String text) => tester.getTopLeft(inSheet(text)).dy;
+    expect([y('Атауы') < y('Үсті'), y('Үсті') < y('Елі'), y('Елі') < y('Қонышы')], everyElement(isTrue));
+    expect(y('Қонышы') < y('Жағдайы'), isTrue);
+  });
+
   testWidgets('the size chart is this pair\'s own: each size with its measured insole, and a tap picks it',
       (tester) async {
     final api = Api(

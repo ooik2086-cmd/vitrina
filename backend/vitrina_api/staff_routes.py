@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from vitrina_core.facts import named_facts
 from vitrina_core.orders import Actor, OrderStatus as S
 
 from . import services
@@ -377,7 +378,8 @@ def order_evidence(order_id: int, staff: User = Depends(staff_user), db: Session
     db.commit()
     return {"tracking_number": order.tracking_number, "dispute_reason": order.dispute_reason,
             "listing_title": order.listing_title, "listing_photos": ordered_photos(order),
-            "listing_details": ordered_details(order), "evidence": order_evidence_list(db, order, files),
+            "listing_details": (details := ordered_details(order)), "evidence": order_evidence_list(db, order, files),
+            "listing_facts": named_facts((details or {}).get("facts"), (details or {}).get("category")),
             "evidence_until": (until.isoformat() if (until := dispute_evidence_until(db, order)) else None),
             "evidence_requests": [{"reason": r.reason, "at": services.aware(r.at).isoformat()} for r in db.scalars(
                 select(AuditLog).where(AuditLog.action == "request_evidence", AuditLog.target == f"order:{order.id}")

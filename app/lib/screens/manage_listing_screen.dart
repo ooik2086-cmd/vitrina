@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:clock/clock.dart';
+import 'package:flutter/foundation.dart' show mapEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -15,6 +16,7 @@ import '../labels.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import '../widgets/facts_fields.dart';
 import '../widgets/listing_contents.dart';
 import '../widgets/questions.dart';
 import 'listing_editor_screen.dart';
@@ -60,6 +62,7 @@ class _ManageListingScreenState extends State<ManageListingScreen> with WidgetsB
   late String _category = _l.category;
   late String? _audience = _l.audience;
   late String _condition = _l.condition;
+  late Map<String, String> _facts = {..._l.facts};
   late final Map<int, int> _stock = {for (final s in _l.sizes) s.id: _count(s)};
 
   /// Whether the pending card found the photos ready, and for which photo set.
@@ -137,15 +140,21 @@ class _ManageListingScreenState extends State<ManageListingScreen> with WidgetsB
         ('category', _category, _l.category),
         ('audience', _audience, _l.audience),
         ('condition', _condition, _l.condition),
+        for (final k in factOptions.keys) ('fact:$k', _facts[k], _l.facts[k]),
       ];
 
+  /// The facts as they would be saved: those the kind of footwear has (and any this app does not know).
+  Map<String, String> get _shownFacts => factsFor(_category, _facts);
+
   /// Whether the page lets [value] be set for [key] now, as the name fields do: once on sale the shoe itself is
-  /// fixed (brand, model, category), whom it is for stays once said, and its condition can only get worse.
+  /// fixed (brand, model, category), whom it is for and each fact stay once said, and its condition can only get
+  /// worse.
   bool _canSet(String key, String? value) {
     final fresh = !_l.everOnSale;
     return switch (key) {
       'brand' || 'model' || 'category' => fresh,
       'audience' => fresh || _l.audience == null,
+      final fact when fact.startsWith('fact:') => fresh || _l.facts[fact.substring(5)] == null,
       'condition' => fresh || conditions.keys.skipWhile((c) => c != _l.condition).contains(value),
       _ => true,
     };
@@ -240,17 +249,24 @@ class _ManageListingScreenState extends State<ManageListingScreen> with WidgetsB
       setState(() {
         for (final (k, _, was) in _choices) {
           if (choices[k] case [final String? v, final String? from]) {
-            if (from != was || v == null || !_canSet(k, v)) {
+            // A fact taken off (null) comes back as taken off; every other choice is a value.
+            if (from != was || v == null && !k.startsWith('fact:') || !_canSet(k, v)) {
               skipped++;
               continue;
             }
             switch (k) {
               case 'category':
-                _category = v;
+                _category = v!;
               case 'audience':
                 _audience = v;
               case 'condition':
-                _condition = v;
+                _condition = v!;
+              case final fact when fact.startsWith('fact:'):
+                if (v == null) {
+                  _facts.remove(fact.substring(5));
+                } else {
+                  _facts[fact.substring(5)] = v;
+                }
             }
           }
         }
@@ -300,6 +316,7 @@ class _ManageListingScreenState extends State<ManageListingScreen> with WidgetsB
       _category = _l.category;
       _audience = _l.audience;
       _condition = _l.condition;
+      _facts = {..._l.facts};
       _stock
         ..clear()
         ..addAll({for (final s in _l.sizes) s.id: _count(s)});
@@ -467,7 +484,8 @@ class _ManageListingScreenState extends State<ManageListingScreen> with WidgetsB
           color: _edited(_color, _l.color),
           category: fresh && _category != _l.category ? _category : null,
           audience: _audience != _l.audience ? _audience : null,
-          condition: _condition != _l.condition ? _condition : null),
+          condition: _condition != _l.condition ? _condition : null,
+          facts: mapEquals(_shownFacts, _l.facts) ? null : _shownFacts),
       tr('Сақталды'),
       offline: tr('Байланыс жоқ. Өзгерістер жоғалған жоқ, осы бетте тұр.'),
     );
@@ -547,6 +565,7 @@ class _ManageListingScreenState extends State<ManageListingScreen> with WidgetsB
           !_l.everOnSale && _category != _l.category ||
           _audience != _l.audience ||
           _condition != _l.condition ||
+          !mapEquals(_shownFacts, _l.facts) ||
           _was.isNotEmpty);
 
   /// Back with changes not saved asks first: a seller who lost the connection, or forgot Save, keeps them.
@@ -841,6 +860,12 @@ class _ManageListingScreenState extends State<ManageListingScreen> with WidgetsB
                     onCategory: (v) => setState(() => _category = v),
                     onAudience: (v) => setState(() => _audience = v),
                     onCondition: (v) => setState(() => _condition = v),
+                  ),
+                  FactsFields(
+                    category: _category,
+                    facts: _facts,
+                    fixed: _l.everOnSale ? _l.facts.keys.toSet() : const {},
+                    onChanged: (f) => setState(() => _facts = f),
                   ),
                   const SizedBox(height: 24),
                   ListingContentsCard(

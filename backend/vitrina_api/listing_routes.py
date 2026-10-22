@@ -18,6 +18,7 @@ from sqlalchemy.orm.attributes import set_committed_value
 
 from vitrina_core.catalog import Authenticity, Condition, normalize_query
 from vitrina_core.colors import canonical_color
+from vitrina_core.facts import clean_facts
 from vitrina_core.orders import OrderStatus as S
 
 from . import services
@@ -460,8 +461,10 @@ def create_listing(body: ListingIn, request: Request, background: BackgroundTask
     frames = sum(p.angle == "frame" for p in body.photos)
     if 0 < frames < MIN_SPIN_FRAMES:
         raise ApiError(422, "too_few_frames")
+    facts = picked_facts(body.facts, body.category)
     listing = Listing(
-        seller_id=user.id, title=body.title, category=body.category, audience=body.audience, brand=body.brand,
+        seller_id=user.id, title=body.title, category=body.category, audience=body.audience, facts=facts,
+        brand=body.brand,
         model_name=body.model_name, color=body.color, condition=body.condition.value, defects=body.defects,
         description=body.description,
         price_tiyn=body.price_tiyn, delivery_price_tiyn=body.delivery_price_tiyn,
@@ -782,6 +785,14 @@ def drop_model(listing: Listing) -> None:
     listing.model_url = listing.model_hq_url = listing.model_variant = None
 
 
+def picked_facts(facts: dict[str, str] | None, category: str) -> dict[str, str] | None:
+    """The facts as sent (those this kind of footwear has), or 422 naming one that is not an option."""
+    try:
+        return clean_facts(facts, category)
+    except ValueError as e:
+        raise ApiError(422, "validation", f"facts.{e} is not an option here") from None
+
+
 def edit_contents(db: Session, cfg: Settings, storage: Storage, listing: Listing, body: ListingPatch,
                   user: User) -> set[str]:
     """Name, photos and sizes. Returns which kinds of content buyers see actually changed."""
@@ -790,7 +801,10 @@ def edit_contents(db: Session, cfg: Settings, storage: Storage, listing: Listing
                       or body.brand is not None and (body.brand.strip() or None) != listing.brand
                       or body.model_name is not None and (body.model_name.strip() or None) != listing.model_name
                       # whom it is for may be filled in on a pair listed before it was asked, not changed
-                      or body.audience is not None and listing.audience not in (None, body.audience)):
+                      or body.audience is not None and listing.audience not in (None, body.audience)
+                      # nor a fact once picked (it was bought and reviewed as that); an empty one may be picked
+                      or body.facts is not None and any(body.facts.get(k) != v
+                                                        for k, v in (listing.facts or {}).items())):
         raise ApiError(409, "listing_locked")
     if (not fresh and body.condition is not None
             and CONDITION_ORDER.index(body.condition.value) < CONDITION_ORDER.index(listing.condition)):
@@ -815,6 +829,12 @@ def edit_contents(db: Session, cfg: Settings, storage: Storage, listing: Listing
         drop_model(listing)  # staff gave the 3D for that colour of that shoe, not for this one
     if body.audience is not None:  # a fact about the pair, not words or photos to check again: it stays on sale
         listing.audience = body.audience
+    # Picked, not typed: nothing to check again either. Facts another kind of footwear does not have go with a change of
+    # kind (a boot's height on what is now a sneaker).
+    if body.facts is not None:
+        listing.facts = picked_facts(body.facts, listing.category)
+    elif listing.facts:
+        listing.facts = clean_facts(listing.facts, listing.category, stored=True)
     if body.condition is not None and body.condition.value != listing.condition:
         listing.condition = body.condition.value
         changed.add("text")

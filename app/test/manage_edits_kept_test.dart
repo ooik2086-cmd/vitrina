@@ -12,13 +12,20 @@ import 'package:vitrina/screens/manage_listing_screen.dart';
 import 'package:vitrina/session.dart';
 
 Map<String, dynamic> _listing(
-        {int id = 7, int price = 4500000, int count42 = 2, String status = 'published', String? audience = 'unisex'}) =>
+        {int id = 7,
+        int price = 4500000,
+        int count42 = 2,
+        String status = 'published',
+        String? audience = 'unisex',
+        Map<String, String> facts = const {},
+        bool everOnSale = true}) =>
     {
       'id': id,
       'status': status,
       'title': 'Nike Air Force 1',
       'category': 'sneakers',
       'audience': audience,
+      'facts': facts,
       'brand': 'Nike',
       'model_name': 'AF1',
       'color': 'ақ',
@@ -26,7 +33,7 @@ Map<String, dynamic> _listing(
       'delivery_price_tiyn': 150000,
       'condition': 'used_good',
       'authenticity': 'unverified',
-      'ever_on_sale': true,
+      'ever_on_sale': everOnSale,
       'showcase_style': 'clean',
       'description': 'Таза',
       'sizes': [
@@ -288,6 +295,106 @@ void main() {
     await tester.pumpAndSettle();
     expect(sent.single['audience'], 'women');
     expect(sent.single.containsKey('condition'), isFalse);
+  });
+
+  /// Scrolls down to the facts, below the name fields.
+  Future<void> facts(WidgetTester tester) async {
+    final page = find.byWidgetPredicate((w) => w is Scrollable && w.axis == Axis.vertical).first;
+    await tester.scrollUntilVisible(find.text('Аяқкиім туралы (міндетті емес)'), 300, scrollable: page);
+    await tester.drag(page, const Offset(0, -300)); // the facts below their heading
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('picked facts come back, a fact taken off too, unless the server has another meanwhile', (tester) async {
+    seed({
+      'choices': {
+        'fact:upper': ['mesh', 'textile'],
+        'fact:season': [null, 'summer'], // taken off
+        'fact:sole': ['eva', 'rubber'], // the server has none now
+      },
+    });
+    // Never on sale yet: every fact may still change.
+    final sent = await open(tester, _listing(facts: {'upper': 'textile', 'season': 'summer'}, everOnSale: false));
+    expect(find.byKey(const Key('edits-back')), findsOneWidget);
+    await facts(tester);
+    expect(find.byKey(const ValueKey('fact-upper-mesh')), findsOneWidget);
+    expect(find.byKey(const ValueKey('fact-season-null')), findsOneWidget);
+    expect(find.byKey(const ValueKey('fact-sole-null')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('save')));
+    await tester.pumpAndSettle();
+    expect(sent.single['facts'], {'upper': 'mesh'});
+  });
+
+  testWidgets('a fact picked on the page is saved; nothing changed sends none', (tester) async {
+    final sent = await open(tester, _listing(facts: {'upper': 'textile'}));
+    await tester.tap(find.byKey(const Key('save')));
+    await tester.pumpAndSettle();
+    expect(sent.single.containsKey('facts'), isFalse);
+    await facts(tester);
+    final country = find.byKey(const ValueKey('fact-country-null'));
+    await tester.ensureVisible(country);
+    await tester.pumpAndSettle();
+    await tester.tap(country);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Қазақстан').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('save')));
+    await tester.pumpAndSettle();
+    expect(sent.last['facts'], {'upper': 'textile', 'country': 'KZ'});
+  });
+
+  testWidgets('on sale a picked fact stays as it is; an empty one is picked; a kept change to it is not put back',
+      (tester) async {
+    seed({
+      'choices': {
+        'fact:upper': ['leather', 'faux_leather'], // bought and reviewed as faux leather
+        'fact:season': ['winter', null],
+      },
+    });
+    final sent = await open(tester, _listing(facts: {'upper': 'faux_leather'}));
+    await facts(tester);
+    expect(find.text('Таңдалғаны өзгермейді, бос қалғанын толтыруға болады.'), findsOneWidget);
+    final upper =
+        tester.widget<DropdownButtonFormField<String?>>(find.byKey(const ValueKey('fact-upper-faux_leather')));
+    expect(upper.onChanged, isNull); // shown, not offered
+    expect(find.byKey(const ValueKey('fact-season-winter')), findsOneWidget); // filling an empty one comes back
+    await tester.tap(find.byKey(const Key('save')));
+    await tester.pumpAndSettle();
+    expect(sent.single['facts'], {'upper': 'faux_leather', 'season': 'winter'});
+  });
+
+  testWidgets('a fact this app does not know is kept as it is: the page is not changed, and saving keeps it',
+      (tester) async {
+    // From a newer server: a fact this app has no field for, and an option it cannot name.
+    final sent = await open(tester, _listing(facts: {'upper': 'graphene', 'insole': 'memory_foam'}));
+    expect(find.byKey(const Key('edits-back')), findsNothing);
+    await tester.tap(find.byKey(const Key('save')));
+    await tester.pumpAndSettle();
+    expect(sent.single.containsKey('facts'), isFalse); // nothing changed, nothing sent
+    await facts(tester);
+    await tester.tap(find.byKey(const ValueKey('fact-country-null')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Қазақстан').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('save')));
+    await tester.pumpAndSettle();
+    expect(sent.last['facts'], {'upper': 'graphene', 'insole': 'memory_foam', 'country': 'KZ'});
+  });
+
+  testWidgets('dropping kept changes puts the facts back as the server has them', (tester) async {
+    seed({
+      'choices': {
+        'fact:upper': ['mesh', 'textile'],
+      },
+    });
+    await open(tester, _listing(facts: {'upper': 'textile'}, everOnSale: false));
+    await tester.tap(find.byKey(const Key('drop-edits')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('drop-edits-sure')));
+    await tester.pumpAndSettle();
+    await facts(tester);
+    expect(find.byKey(const ValueKey('fact-upper-textile')), findsOneWidget);
+    expect(find.byKey(const ValueKey('fact-upper-mesh')), findsNothing);
   });
 
   testWidgets('a worse condition comes back on a listing on sale; a better one cannot be set, so it does not',

@@ -453,6 +453,10 @@ class _OrderedDetails extends StatelessWidget {
           const SizedBox(height: 8),
           if (name.isNotEmpty) Text(name),
           Text(trf('Жағдайы: {0}', [label(conditions, details['condition'] as String?)])),
+          // What the seller said it is made of and where, as picked then (a newer server's facts this app can't name
+          // are left out).
+          for (final (key, option) in _facts(details))
+            if (factText(key, option) case final text?) Text('${tr(factNames[key]!)}: $text'),
           if (defects.isNotEmpty) Text(trf('Ақаулар: {0}', [defects])),
           if (description.isNotEmpty) ...[
             const SizedBox(height: 4),
@@ -461,6 +465,15 @@ class _OrderedDetails extends StatelessWidget {
         ]),
       ),
     );
+  }
+}
+
+/// The facts kept with an order, in the order a buyer reads them.
+Iterable<(String, String)> _facts(Map<String, dynamic> details) sync* {
+  final facts = details['facts'];
+  if (facts is! Map) return;
+  for (final key in factKeys(details['category'] as String?)) {
+    if (facts[key] case final String option) yield (key, option);
   }
 }
 

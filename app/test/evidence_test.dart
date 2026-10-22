@@ -56,6 +56,9 @@ Map<String, dynamic> order(String status, List<Map<String, dynamic>> items) => {
         'backfilled': false,
         'defects': 'Өкшесі сәл тозған',
         'description': null,
+        'category': 'boots',
+        // as picked when ordered; an option this app cannot name is left out
+        'facts': {'country': 'TR', 'upper': 'leather', 'sole': 'graphene'},
       },
       'evidence': items,
     };
@@ -83,6 +86,11 @@ void main() {
     expect(find.text('Nike · Air Max 90 · Ақ'), findsOneWidget);
     expect(find.text('Жағдайы: Киілген, жақсы'), findsOneWidget);
     expect(find.text('Ақаулар: Өкшесі сәл тозған'), findsOneWidget);
+    final details = find.byKey(const Key('ordered-details'));
+    expect(
+        [for (final e in find.descendant(of: details, matching: find.byType(Text)).evaluate()) (e.widget as Text).data]
+            .where((t) => t != null && (t.startsWith('Үсті') || t.startsWith('Елі') || t.startsWith('Табаны'))),
+        ['Үсті: Табиғи былғары', 'Елі: Түркия']); // what it was sold as, in reading order
     await tester.scrollUntilVisible(find.byKey(const Key('add-evidence')), 200,
         scrollable: find.byType(Scrollable).first);
     expect(find.textContaining('Сіз · 18.10 '), findsOneWidget);

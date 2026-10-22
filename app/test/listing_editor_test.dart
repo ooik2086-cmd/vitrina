@@ -654,6 +654,51 @@ void main() {
     expect(find.byKey(const Key('color-көк')), findsOneWidget);
   });
 
+  testWidgets('what the pair is made of is picked, not typed; a boot asks its height, a sneaker does not',
+      (tester) async {
+    final sent = <Map<String, dynamic>>[];
+    await open(tester, sent: sent);
+    await pickSides(tester);
+    await next(tester);
+    await tester.enterText(find.widgetWithText(TextFormField, 'Атауы'), 'Qadam етік');
+    await choose(tester, find.byKey(const Key('audience')), 'Әйелдерге');
+    await tester.tap(find.byKey(const Key('color-ақ')));
+    await tester.pump();
+    expect(find.byKey(const ValueKey('fact-shaft-null')), findsNothing); // no kind yet: the five every pair has
+    await choose(tester, find.byKey(const ValueKey('category-null')), 'Етік, бәтеңке');
+    await choose(tester, find.byKey(const ValueKey('fact-upper-null')), 'Күдері');
+    await choose(tester, find.byKey(const ValueKey('fact-country-null')), 'Түркия');
+    await choose(tester, find.byKey(const ValueKey('fact-shaft-null')), 'Тізеге дейін');
+    await choose(tester, find.byKey(const ValueKey('fact-country-TR')), 'Бос қалдыру'); // changed their mind
+    // Filed as sneakers after all: a boot's height goes, what it is made of stays.
+    await choose(tester, find.byKey(const ValueKey('category-boots')), 'Кроссовкалар');
+    expect(find.byKey(const ValueKey('fact-shaft-knee')), findsNothing);
+    await next(tester);
+    await tester.enterText(find.widgetWithText(TextFormField, 'Бағасы'), '30000');
+    await tester.enterText(find.widgetWithText(TextFormField, 'Өлшем'), '38');
+    await tester.enterText(find.widgetWithText(TextFormField, 'Ұлтарақ, см'), '24');
+    await tester.tap(find.text('Жариялау'));
+    await tester.pumpAndSettle();
+    expect(sent.single['facts'], {'upper': 'suede'});
+  });
+
+  testWidgets('a similar pair starts with the facts of the other: the same shoe is made of the same', (tester) async {
+    final sent = <Map<String, dynamic>>[];
+    await open(tester,
+        sent: sent,
+        template: Listing.fromJson({
+          ...listingJson(),
+          'facts': {'upper': 'leather', 'season': 'demi'}
+        }));
+    await pickSides(tester);
+    await next(tester);
+    expect(find.byKey(const ValueKey('fact-upper-leather')), findsOneWidget);
+    await next(tester);
+    await tester.tap(find.text('Жариялау'));
+    await tester.pumpAndSettle();
+    expect(sent.single['facts'], {'upper': 'leather', 'season': 'demi'});
+  });
+
   test('insole centimetres are read as sellers type them', () {
     expect(insoleCheck('27,5'), isNull);
     expect(insoleCheck('27.5'), isNull);
@@ -834,6 +879,8 @@ void main() {
     await next(tester);
     await fillDetails(tester, condition: 'Ақауы бар');
     await pick(tester, find.text('Ақау фотосы'));
+    await choose(tester, find.byKey(const ValueKey('fact-upper-null')), 'Күдері');
+    await choose(tester, find.byKey(const ValueKey('fact-shaft-null')), 'Тізеге дейін');
     await next(tester);
     await tester.enterText(find.widgetWithText(TextFormField, 'Бағасы'), '20000');
     await tester.enterText(find.widgetWithText(TextFormField, 'Өлшем'), '38');
@@ -857,6 +904,7 @@ void main() {
     expect(body, containsPair('category', 'boots'));
     expect(body, containsPair('audience', 'women'));
     expect(body, containsPair('title', 'Qadam етік'));
+    expect(body['facts'], {'upper': 'suede', 'shaft': 'knee'});
     expect(body['sizes'], [
       {'label': '38', 'insole_cm': '24,5', 'quantity': 1}
     ]);
