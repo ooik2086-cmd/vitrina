@@ -39,6 +39,14 @@ Future<void> once(Object key, Future<void> Function() action) async {
 /// Waits for [load] for a pull to refresh. A failure is shown on the screen, not thrown here as well.
 Future<void> settled(Future<Object?> load) => load.then((_) {}, onError: (_) {});
 
+/// A length counter shown only near the limit: until then a refusal under the field has the whole width to itself,
+/// which at large text is the difference between a readable line and a narrow column.
+Widget? nearLimitCounter(BuildContext context,
+        {required int currentLength, required bool isFocused, required int? maxLength}) =>
+    maxLength != null && currentLength >= maxLength * 0.8
+        ? Text('$currentLength/$maxLength', style: Theme.of(context).textTheme.bodySmall)
+        : null;
+
 /// A failed load in people's words: the server's own message when it sent one, never a raw exception.
 String errorText(Object? error) => error is ApiException ? error.message : tr('Серверге қосылу мүмкін болмады.');
 

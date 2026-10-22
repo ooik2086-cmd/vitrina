@@ -40,7 +40,7 @@ _LINK_RE = re.compile(r"(https?://|www\.)"
                       r"|(?<![\w@.-])[a-z0-9-]{2,}\.(kz|ru|com|net|org|me|cc|ee|io|su|uz|kg|link|site|shop|store|online)\b",
                       re.IGNORECASE)
 # A run of digits and separators that may hold a phone number. ASCII digits only, as the app reads them.
-_RUN_RE = re.compile(r"\+?[0-9][0-9\s\-().,]*[0-9]")
+_RUN_RE = re.compile(r"\+?\(?[0-9][0-9\s\-().,]*[0-9]")
 _TOKEN_RE = re.compile(r"[0-9]{1,2}[.,]5(?![0-9])|[0-9]+")  # 38.5 is one size
 # The digits of a phone number written with any separators: a Kazakh one without its 8 (701 123 45 67), with 8 or
 # +7, a Russian 8 9.., a Central Asian 99..; with a +, any international one.
@@ -49,7 +49,9 @@ _PHONE_RE = re.compile(r"7[0-9]{9}|[78][0-9]{10}|99[0-9]{10}")
 _LATIN_LOOK = str.maketrans("аеорсхукмтвіİı", "aeopcxykmtbiii")
 _CYRILLIC_LOOK = str.maketrans("aeopcxykmtABEKMHOPCTXY", "аеорсхукмтАВЕКМНОРСТХУ")  # and «Тeлеграм» with a Latin e
 _ZERO_RE = re.compile(r"(?<=[0-9])[OoОо](?=[0-9])")  # 8 7O1: a letter O between digits
-_INVISIBLE = dict.fromkeys(map(ord, "\u00ad\u180e\u200b\u200c\u200d\u2060\ufeff"))
+# Invisible and direction marks, which can hide a word from the rule and still show it whole.
+_INVISIBLE = dict.fromkeys(map(ord, "\u00ad\u180e\u200b\u200c\u200d\u200e\u200f\u202a\u202b\u202c\u202d\u202e"
+                                   "\u2060\u2066\u2067\u2068\u2069\ufeff"))
 _FULLWIDTH = {c: c - 0xFEE0 for c in range(0xFF01, 0xFF5F)}  # ８７０１ and ＠ typed on some keyboards
 
 
@@ -63,32 +65,83 @@ def _sizes(tokens: list[str]) -> bool:
     return len(values) > 1 and all(v <= 60 for v in values) and all(a < b for a, b in zip(values, values[1:]))
 
 
-def _has_phone(run: str) -> bool:
-    tokens = _TOKEN_RE.findall(run)
-    for i in range(len(tokens)):
-        digits = ""
+def _phones_in(run: re.Match):
+    """Where in a run of digits the phone numbers are (start, end in the text)."""
+    tokens = list(_TOKEN_RE.finditer(run.group()))
+    plus = run.group().startswith("+")
+    i = 0
+    while i < len(tokens):
+        digits, end = "", None
         for j in range(i, len(tokens)):
-            if j > i and tokens[j] == "000":
-                break  # prices: 75 000 80 000
-            digits += re.sub(r"[^0-9]", "", tokens[j])
+            digits += re.sub(r"[^0-9]", "", tokens[j].group())
             if len(digits) > 15:
                 break
-            if len(digits) < 10 or _sizes(tokens[i:j + 1]):
+            values = [t.group() for t in tokens[i:j + 1]]
+            if len(digits) < 10 or _sizes(values):
                 continue
-            if (i == 0 and run.startswith("+")) or _PHONE_RE.fullmatch(digits):
-                return True
-    return False
+            # Prices: 75 000 80 000, 7 000 10 000 12 000 (every other group 000). A phone may hold a 000 group
+            # (701 000 12 34), and with + in front it is a phone whatever it holds.
+            prices = len(values) > 1 and all(v == "000" for v in values[1::2])
+            if (i == 0 and plus) or _PHONE_RE.fullmatch(digits) and not prices:
+                end = j
+                break
+        if end is None:
+            i += 1
+            continue
+        yield run.start() + (0 if i == 0 else tokens[i].start()), run.start() + tokens[end].end()
+        i = end + 1
+
+
+_OPEN = "«“„\"'([‘"
+_CLOSE = "»”“\"')]’,;…"
+
+
+def _contact_spans(text: str):
+    """Where the contacts are in the (cleaned) text: links, sites, e-mails, @names and messengers first, then phones.
+    Lazy, so a yes-or-no question stops at the first."""
+    for look in (text, text.translate(_LATIN_LOOK), text.translate(_CYRILLIC_LOOK)):
+        for m in _LINK_RE.finditer(look):
+            start, end = m.span()
+            while start and not text[start - 1].isspace() and text[start - 1] not in _OPEN:
+                start -= 1  # the whole word: «Instagram-да», not «Instagram»
+            while end < len(text) and not text[end].isspace() and text[end] not in _CLOSE:
+                end += 1
+            if handle := re.match(r"\s*[^\s,;»”\"']+" if text[end - 1] == ":" else r":\s*[^\s,;»”\"']+", text[end:]):
+                end += handle.end()  # «Telegram: qadam», «тг: qadam»: the name goes too
+            yield start, end
+    for run in _RUN_RE.finditer(text):
+        yield from _phones_in(run)
+
+
+def _clean(text: str) -> str:
+    return _ZERO_RE.sub("0", text.translate(_INVISIBLE).translate(_FULLWIDTH))
+
+
+def find_contact(text: str | None) -> str | None:
+    """Every contact in the text (up to three, in the order written) as the seller wrote them, joined as «a», «b», so
+    a refusal shows what to take out; None when there is none. Sizes, prices and dates are not phones."""
+    if not text:
+        return None
+    text = _clean(text)
+    merged: list[list[int]] = []
+    for start, end in sorted(set(_contact_spans(text))):
+        if merged and start <= merged[-1][1] + 2 and not text[merged[-1][1]:start].strip(" :-"):
+            merged[-1][1] = max(merged[-1][1], end)  # «WhatsApp: +7 701 …» is one thing to take out
+        else:
+            merged.append([start, end])
+    parts = []
+    for start, end in merged[:3]:
+        part = text[start:end].strip().rstrip(".!?:-")
+        if part.count("(") > part.count(")"):
+            part = part.replace("(", "", 1).strip()
+        parts.append(part if len(part) <= 60 else part[:59] + "…")
+    return "», «".join(parts) or None
 
 
 def looks_like_contact(text: str | None) -> bool:
     """A phone number, a link, a site, an e-mail, an @name or a messenger, which public text and the shop page refuse
-    and the chat marks. Sizes, prices and dates are not phones."""
-    if not text:
-        return False
-    text = _ZERO_RE.sub("0", text.translate(_INVISIBLE).translate(_FULLWIDTH))
-    if any(_LINK_RE.search(t) for t in (text, text.translate(_LATIN_LOOK), text.translate(_CYRILLIC_LOOK))):
-        return True
-    return any(_has_phone(run.group()) for run in _RUN_RE.finditer(text))
+    and the chat marks."""
+    return bool(text) and next(_contact_spans(_clean(text)), None) is not None
 
 
 class ConversationIn(BaseModel):

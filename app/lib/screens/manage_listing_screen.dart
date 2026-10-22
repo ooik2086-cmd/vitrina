@@ -1056,6 +1056,13 @@ class ModerationCard extends StatelessWidget {
                 Expanded(child: Text(r)),
               ]),
             ),
+          if ((m?.found ?? '').isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Text(trf('Мынаны алып тастаңыз: «{0}»', [m!.found!]),
+                  key: const Key('moderation-found'),
+                  style: TextStyle(fontWeight: FontWeight.w700, fontVariations: const [FontVariation('wght', 700)])),
+            ),
           const SizedBox(height: 4),
           Text(
             rejected

@@ -24,7 +24,7 @@ from . import offers, payouts
 from .config import Settings
 from .deps import current_user, get_db, get_settings, now_utc, sha256
 from .errors import ApiError
-from .social import looks_like_contact
+from .social import find_contact
 from .models import (Block, Follow, Notification, Offer, SavedSearch, StockAlert, AuthToken, Favorite, Listing, Order,
                      OtpCode, PayoutAccount, User)
 from .api_common import ALMATY, PHONE_RE
@@ -318,8 +318,8 @@ def set_shop_about(body: ShopAboutIn, user: User = Depends(current_user), db: Se
     if not user.is_seller:
         raise ApiError(403, "seller_required")
     text = (body.text or "").strip() or None
-    if looks_like_contact(text):
-        raise ApiError(422, "contacts_not_allowed")
+    if found := find_contact(text):
+        raise ApiError(422, "contacts_not_allowed", found)
     user = db.merge(user)
     user.shop_about = text
     db.commit()

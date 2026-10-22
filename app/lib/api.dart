@@ -38,8 +38,14 @@ class ApiException implements Exception {
   final String? messageRu;
   final String? messageEn;
 
-  /// The server's message in the interface language.
-  String get message => _local ? tr(messageKk) : pick(messageKk, messageRu, messageEn);
+  /// The server's message in the interface language. A contacts refusal also quotes what the server found, so the
+  /// seller knows which part to take out.
+  String get message {
+    final text = _local ? tr(messageKk) : pick(messageKk, messageRu, messageEn);
+    final found = code == 'contacts_not_allowed' ? detail : null;
+    // The action first: at large text a long message may be cut, and this is the line the seller needs.
+    return found == null || found.isEmpty ? text : '${trf('Мынаны алып тастаңыз: «{0}»', [found])}\n$text';
+  }
 
   /// No answer at all: no network, the server is down, or it did not answer in time.
   bool get offline => code == 'network' || code == 'timeout';
@@ -188,12 +194,16 @@ class Moderation {
         reasonsEn = [
           for (final r in (j['reasons_en'] as List?) ?? (j['reasons_ru'] as List?) ?? j['reasons'] as List) r as String
         ],
-        note = j['note'] as String?;
+        note = j['note'] as String?,
+        found = j['found'] as String?;
   final List<String> flags;
   final List<String> reasonsKk;
   final List<String> reasonsRu;
   final List<String> reasonsEn;
   final String? note;
+
+  /// What the contacts check found, as written («WhatsApp», «8 701 …»).
+  final String? found;
 
   List<String> reasons(String lang) => switch (lang) { 'ru' => reasonsRu, 'en' => reasonsEn, _ => reasonsKk };
 }

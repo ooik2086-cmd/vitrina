@@ -14,7 +14,7 @@ from . import services
 from .deps import current_user, get_db, now_utc, optional_user
 from .errors import ApiError
 from .models import Listing, Question, User, question_waiting
-from .social import looks_like_contact
+from .social import find_contact
 
 router = APIRouter(prefix="/api/v1")
 
@@ -31,8 +31,8 @@ class AnswerIn(BaseModel):
 
 def clean(text: str) -> str:
     text = " ".join(text.split())
-    if looks_like_contact(text):
-        raise ApiError(422, "contacts_not_allowed")
+    if found := find_contact(text):
+        raise ApiError(422, "contacts_not_allowed", found)  # the app shows the seller which part to take out
     return text
 
 

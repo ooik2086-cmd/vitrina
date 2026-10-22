@@ -209,7 +209,10 @@ def moderation_out(listing: Listing) -> dict:
     return {"flags": flags, "reasons": [moderation.REASONS[c][0] for c in flags if c in moderation.REASONS],
             "reasons_ru": [moderation.REASONS[c][1] for c in flags if c in moderation.REASONS],
             "reasons_en": [moderation.REASONS[c][2] for c in flags if c in moderation.REASONS],
-            "note": listing.moderation_note}
+            "note": listing.moderation_note,
+            # What the contacts check found, so the seller knows what to take out; not once staff have cleared it.
+            "found": moderation.found_contacts(listing)
+            if "contacts" in flags and "contacts" not in (listing.moderation_cleared or "").split(",") else None}
 
 
 def order_out(order: Order) -> dict:

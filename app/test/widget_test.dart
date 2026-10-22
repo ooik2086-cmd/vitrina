@@ -65,7 +65,7 @@ import 'package:vitrina/widgets/filter_sheet.dart';
 import 'package:vitrina/widgets/spin_viewer.dart';
 import 'package:vitrina/widgets/studio.dart';
 
-import 'support/screens.dart' show screens, visit;
+import 'support/screens.dart' show loadFonts, screens, visit;
 
 Map<String, dynamic> listingJson({List<Map<String, dynamic>>? media}) => {
       'id': 7,
@@ -161,6 +161,10 @@ void main() {
                 'This size is out of stock.')
             .message,
         'This size is out of stock.');
+    expect(ApiException(422, 'contacts_not_allowed', 'Болмайды.', 'Instagram', 'Нельзя.', 'Not allowed.').message,
+        'Take this out: “Instagram”\nNot allowed.'); // what was found first, in the reader's language
+    expect(ApiException(422, 'validation', 'Қате.', 'title is too short', 'Ошибка.', 'Error.').message, 'Error.',
+        reason: 'another code keeps its detail for developers');
   });
 
   test('tenge formatting keeps integer tiyn', () {
@@ -2058,6 +2062,7 @@ void main() {
         'reasons': ['Байланыс тек VITRINA чатында.'],
         'reasons_ru': ['Связь только в чате VITRINA.'],
         'note': 'Телефонды алып тастаңыз',
+        'found': '8 701 123 45 67',
       },
     };
     tester.view.physicalSize = const Size(400, 1400);
@@ -2068,10 +2073,12 @@ void main() {
     expect(find.text('Тауар қайтарылды'), findsOneWidget);
     expect(find.text('Қызметкердің жазбасы: Телефонды алып тастаңыз'), findsOneWidget);
     expect(find.text('Байланыс тек VITRINA чатында.'), findsOneWidget);
+    expect(find.text('Мынаны алып тастаңыз: «8 701 123 45 67»'), findsOneWidget); // what the check found
     await tester.tap(find.byKey(const Key('publish')));
     await tester.pumpAndSettle();
     expect(posted, 'POST /api/v1/listings/7/publish');
     expect(find.text('Тауар тексерілуде'), findsOneWidget);
+    expect(find.byKey(const Key('moderation-found')), findsNothing); // an older server sends none
     expect(find.text('Тексеруге жіберілді'), findsOneWidget);
     expect(find.byKey(const Key('publish')), findsNothing);
   });
@@ -2760,6 +2767,58 @@ void main() {
     expect(find.text('Қайтару 3 күн ішінде.'), findsOneWidget);
   });
 
+  testWidgets('the shop page note counts its letters only near the limit', (tester) async {
+    final session = Session(Api(base: 'http://x/api/v1', client: MockClient((_) async => http.Response('{}', 500))))
+      ..update(Me.fromJson({'id': 1, 'phone': '+77010000001', 'is_seller': true}));
+    await tester
+        .pumpWidget(SessionScope(session: session, child: const MaterialApp(home: Scaffold(body: ShopAboutTile()))));
+    await tester.tap(find.byKey(const Key('shop-about-tile')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('shop-about-field')), 'а' * 399);
+    await tester.pump();
+    expect(find.textContaining('/500'), findsNothing);
+    await tester.enterText(find.byKey(const Key('shop-about-field')), 'а' * 400);
+    await tester.pump();
+    expect(find.text('400/500'), findsOneWidget);
+  });
+
+  testWidgets('at 360 wide and text ×2 the shop page refusal reads in full, what to take out first', (tester) async {
+    await loadFonts(tester); // the app's own font: the test font is far wider
+    tester.view.physicalSize = const Size(360, 720);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async => http.Response(
+            jsonEncode({
+              'code': 'contacts_not_allowed',
+              'message_kk': 'Телефон, сілтеме, почта, @атау не мессенджер (WhatsApp, Telegram, Instagram) жазуға '
+                  'болмайды. Байланыс тек VITRINA чатында.',
+              'detail': 'Instagram-да',
+            }),
+            422,
+            headers: {'content-type': 'application/json; charset=utf-8'})));
+    final session = Session(api)..update(Me.fromJson({'id': 1, 'phone': '+77010000001', 'is_seller': true}));
+    await tester.pumpWidget(SessionScope(
+        session: session,
+        child: MaterialApp(
+            builder: (c, child) =>
+                MediaQuery(data: MediaQuery.of(c).copyWith(textScaler: const TextScaler.linear(2)), child: child!),
+            home: const Scaffold(body: ShopAboutTile()))));
+    await tester.tap(find.byKey(const Key('shop-about-tile')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('shop-about-field')), 'Instagram-да көбірек сурет');
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('shop-about-save')));
+    await tester.pumpAndSettle();
+    final error = find.textContaining('Мынаны алып тастаңыз: «Instagram-да»\nТелефон');
+    expect(error, findsOneWidget);
+    expect(tester.renderObject<RenderParagraph>(find.descendant(of: error, matching: find.byType(RichText)))
+        .didExceedMaxLines, isFalse);
+    expect(tester.takeException(), isNull);
+    expect(find.byKey(const Key('shop-about-save')).hitTestable(), findsOneWidget, reason: 'Сақтау stays in reach');
+  });
+
   testWidgets('a shop page note the server refuses stays in the dialog with the reason, to fix and save again',
       (tester) async {
     final sent = <String?>[];
@@ -2773,6 +2832,7 @@ void main() {
                 jsonEncode({
                   'code': 'contacts_not_allowed',
                   'message_kk': 'Телефон, сілтеме, почта, @атау не мессенджер жазуға болмайды.',
+                  'detail': 'qadam@mail.ru',
                 }),
                 422,
                 headers: {'content-type': 'application/json; charset=utf-8'});
@@ -2797,12 +2857,15 @@ void main() {
     await tester.tap(find.byKey(const Key('shop-about-save')));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('shop-about-field')), findsOneWidget, reason: 'the dialog stays open');
-    expect(find.text('Телефон, сілтеме, почта, @атау не мессенджер жазуға болмайды.'), findsOneWidget);
+    expect(
+        find.text('Мынаны алып тастаңыз: «qadam@mail.ru»\nТелефон, сілтеме, почта, @атау не мессенджер жазуға болмайды.'),
+        findsOneWidget,
+        reason: 'the refusal says which part to take out');
     expect(find.text('Қайтару 3 күн. Жазыңыз: qadam@mail.ru'), findsOneWidget, reason: 'the text is kept');
     expect(find.text('Дүкен беті жаңартылды.'), findsNothing);
     await tester.enterText(find.byKey(const Key('shop-about-field')), 'Қайтару 3 күн.');
     await tester.pump();
-    expect(find.text('Телефон, сілтеме, почта, @атау не мессенджер жазуға болмайды.'), findsNothing);
+    expect(find.textContaining('Мынаны алып тастаңыз'), findsNothing);
     await tester.tap(find.byKey(const Key('shop-about-save')));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('shop-about-field')), findsNothing);

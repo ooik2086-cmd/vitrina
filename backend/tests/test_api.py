@@ -2168,6 +2168,8 @@ class ModerationTests(ApiTestCase):
         r = self.post(f"/listings/{lid}/publish", self.seller).json()
         self.assertEqual(r["status"], "moderation")
         self.assertIn("contacts", r["moderation"]["flags"])
+        self.assertEqual(r["moderation"]["found"], "инстаграмда: @qadam_store")  # the seller sees what to take out
+        self.assertIsNone(self.publish(description="Таза.")["moderation"]["found"])
 
     def test_a_price_edit_never_holds_a_page_over_words_a_newer_rule_reads(self):
         lid = self.publish(description="Бір маусым киілген.")["id"]
@@ -2211,8 +2213,10 @@ class ModerationTests(ApiTestCase):
         self.assertEqual(self.post(f"/listings/{lid}/publish", self.seller).json()["status"], "published")
         # Approving clears the same flag for later republishing.
         lid2 = self.draft(description="www.qadam.kz дүкенімізде көбірек")
-        self.post(f"/listings/{lid2}/publish", self.seller)
-        self.assertEqual(self.post(f"/admin/moderation/{lid2}/approve", staff).json()["status"], "published")
+        self.assertEqual(self.post(f"/listings/{lid2}/publish", self.seller).json()["moderation"]["found"], "www.qadam.kz")
+        approved = self.post(f"/admin/moderation/{lid2}/approve", staff).json()
+        self.assertEqual(approved["status"], "published")
+        self.assertIsNone(self.get(f"/listings/{lid2}", self.seller).json()["moderation"]["found"])  # cleared: nothing to take out
         self.assertEqual(self.post(f"/admin/moderation/{lid2}/approve", staff).status_code, 409)
         self.post(f"/listings/{lid2}/pause", self.seller)
         self.assertEqual(self.post(f"/listings/{lid2}/publish", self.seller).json()["status"], "published")
@@ -2589,8 +2593,8 @@ class AwayTests(ApiTestCase):
         seller_id = self.c.get(f"/api/v1/listings/{listing['id']}").json()["seller"]["id"]
         about = "Жөнелту 1 күнде. Өлшемі келмесе 3 күн ішінде қайтарамыз."
         self.assertEqual(self.put("/me/shop-about", self.buyer, {"text": about}).json()["code"], "seller_required")
-        self.assertEqual(self.put("/me/shop-about", self.seller, {"text": "WhatsApp +7 701 000 00 01"}).json()["code"],
-                         "contacts_not_allowed")
+        r = self.put("/me/shop-about", self.seller, {"text": "Жазыңыз: +7 701 000 00 01, Instagram: qadam."}).json()
+        self.assertEqual((r["code"], r["detail"]), ("contacts_not_allowed", "+7 701 000 00 01», «Instagram: qadam"))
         self.assertEqual(self.put("/me/shop-about", self.seller, {"text": "x" * 501}).status_code, 422)
         self.assertEqual(self.put("/me/shop-about", self.seller, {"text": f"  {about} "}).json()["shop_about"], about)
         self.assertEqual(self.c.get(f"/api/v1/sellers/{seller_id}").json()["about"], about)
@@ -3090,6 +3094,10 @@ class QuestionTests(ApiTestCase):
             r = self.post(f"/questions/{qid}/answer", self.seller, {"text": text})
             self.assertEqual(r.json()["code"], "contacts_not_allowed", text)
             self.assertIn("почта, @атау", r.json()["message_kk"])  # the refusal names what the seller wrote
+        found = {t: self.post(f"/questions/{qid}/answer", self.seller, {"text": t}).json()["detail"]
+                 for t in ("Инстаграмда көбірек сурет бар", "Жазыңыз: qadam@mail.ru.", "Иә, 40 41 бар, тел 8 701 123 45 67")}
+        self.assertEqual(found, {"Инстаграмда көбірек сурет бар": "Инстаграмда", "Жазыңыз: qadam@mail.ru.": "qadam@mail.ru",
+                                 "Иә, 40 41 бар, тел 8 701 123 45 67": "8 701 123 45 67"})  # what to take out
         for text in ("Бағасы 15 000 - 20 000 теңге", "Бойы 92 98 104 110 116", "US 8 8.5 9 9.5 10"):
             self.assertEqual(self.post(f"/questions/{qid}/answer", self.seller, {"text": text}).status_code, 200, text)
 

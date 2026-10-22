@@ -331,13 +331,14 @@ class _ShopAboutDialogState extends State<_ShopAboutDialog> {
           autofocus: true,
           maxLines: 5,
           maxLength: 500,
+          buildCounter: nearLimitCounter,
           onChanged: (_) {
             if (_error != null) setState(() => _error = null);
           },
           decoration: InputDecoration(
               hintText: tr('Мысалы: жөнелту мерзімі, қайтару шарты, жұмыс уақыты. Телефон мен сілтеме жазылмайды.'),
               errorText: _error == null ? null : errorText(_error),
-              errorMaxLines: 12),
+              errorMaxLines: 30),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: Text(tr('Болдырмау'))),

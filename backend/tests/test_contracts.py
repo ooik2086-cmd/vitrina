@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from vitrina_api.serializers import one_turn, showcase_parts
-from vitrina_api.social import looks_like_contact
+from vitrina_api.social import find_contact, looks_like_contact
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -59,6 +59,26 @@ class ContactRuleTest(unittest.TestCase):
             with self.subTest(text):
                 self.assertFalse(looks_like_contact(text))
 
+
+
+class FoundContactTest(unittest.TestCase):
+    """What a refusal quotes for the seller to take out: each contact whole, as written, in the order written."""
+
+    def test_what_the_seller_is_told_to_take_out(self):
+        cases = {
+            "Сұрақтар болса WhatsApp: +7 701 555 12 34": "WhatsApp: +7 701 555 12 34",  # the word and its number
+            "тг: qadam": "тг: qadam",
+            "Instagram, qadam@mail.ru, 8 701 123 45 67, t.me/q": "Instagram», «qadam@mail.ru», «8 701 123 45 67",
+            "тел (8 701 123 45 67)": "8 701 123 45 67",
+            "(70) 11-23-45-67": "(70) 11-23-45-67",
+            "„qadam@mail.ru“.": "qadam@mail.ru",
+            "Иә, 40 41 42 бар": None,
+        }
+        for text, want in cases.items():
+            with self.subTest(text):
+                self.assertEqual(find_contact(text), want)
+        long = find_contact("https://" + "a" * 80 + ".kz")
+        self.assertEqual((len(long), long[-1]), (60, "…"))  # cut with a mark, never silently
 
 if __name__ == "__main__":
     unittest.main()

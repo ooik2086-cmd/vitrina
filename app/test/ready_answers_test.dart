@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -28,6 +29,7 @@ http.Response _json(Object body, [int status = 200]) =>
 class _Server {
   bool payments = false;
   bool refuse = false; // the server refuses the answer's words
+  String? found; // and says what it found, with its full message
   String? answered; // the text sent as the answer
   bool answeredBefore = false; // the question already has an answer
 }
@@ -54,8 +56,12 @@ void main() {
       } else if (req.method == 'POST' && path == '/questions/7/answer' && server.refuse) {
         mine = _json({
           'code': 'contacts_not_allowed',
-          'message_kk': 'Жауапқа телефон не сілтеме жазуға болмайды.',
+          'message_kk': server.found == null
+              ? 'Жауапқа телефон не сілтеме жазуға болмайды.'
+              : 'Телефон, сілтеме, почта, @атау не мессенджер (WhatsApp, Telegram, Instagram) жазуға болмайды. '
+                  'Байланыс тек VITRINA чатында.',
           'message_ru': 'В ответе нельзя писать телефон или ссылку.',
+          if (server.found != null) 'detail': server.found,
         }, 422);
       } else if (req.method == 'GET' && path == '/listings/1/questions') {
         mine = _json({
@@ -220,6 +226,27 @@ void main() {
     await tester.pump();
     expect(find.text('Жауапқа телефон не сілтеме жазуға болмайды.'), findsNothing, reason: 'gone once changed');
   });
+
+  for (final text in [1.0, 1.3, 2.0]) {
+    testWidgets('at text ×$text the refusal says in full which part to take out', (tester) async {
+      final server = _Server()
+        ..refuse = true
+        ..found = 'WhatsApp: +7 701 555 12 34';
+      await open(tester, server, text: text);
+      await answer(tester);
+      await tester.enterText(field, 'Иә, бар. WhatsApp: +7 701 555 12 34');
+      await tester.pump();
+      await tester.tap(sendButton);
+      await settle(tester);
+      final error = find.textContaining('Мынаны алып тастаңыз: «WhatsApp: +7 701 555 12 34»');
+      expect(error, findsOneWidget);
+      final paragraph =
+          tester.renderObject<RenderParagraph>(find.descendant(of: error, matching: find.byType(RichText)));
+      expect(paragraph.didExceedMaxLines, isFalse, reason: 'no line of the refusal is cut off');
+      expect(find.textContaining(RegExp(r'^\d+/\d+$')), findsNothing, reason: 'no counter narrows it, far from the limit');
+      expect(tester.takeException(), isNull);
+    });
+  }
 
   testWidgets('words the seller wrote are kept: a ready answer is added after them', (tester) async {
     await open(tester, _Server());

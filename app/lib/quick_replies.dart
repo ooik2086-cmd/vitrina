@@ -80,7 +80,7 @@ final _link = RegExp(
     unicode: true);
 
 /// A run of digits and separators that may hold a phone number.
-final _run = RegExp(r'\+?[0-9][0-9\s\-().,]*[0-9]');
+final _run = RegExp(r'\+?\(?[0-9][0-9\s\-().,]*[0-9]');
 final _token = RegExp(r'[0-9]{1,2}[.,]5(?![0-9])|[0-9]+'); // 38.5 is one size
 
 /// The digits of a phone number written with any separators (see the server's _PHONE_RE).
@@ -94,7 +94,7 @@ const _cyrillicLook = {
   'B': 'В', 'E': 'Е', 'K': 'К', 'M': 'М', 'H': 'Н', 'O': 'О', 'P': 'Р', 'C': 'С', 'T': 'Т', 'X': 'Х', 'Y': 'У',
 };
 final _zero = RegExp(r'(?<=[0-9])[OoОо](?=[0-9])'); // 8 7O1: a letter O between digits
-final _invisible = RegExp('[­᠎​‌‍⁠﻿]');
+final _invisible = RegExp('[\u00ad\u180e\u200b-\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff]');
 
 /// Shoe sizes going up, 36 37 38 or 7 7.5 8: a list of them is not a phone number.
 bool _sizes(List<String> tokens) {
@@ -111,11 +111,13 @@ bool _hasPhone(String run) {
   for (var i = 0; i < tokens.length; i++) {
     var digits = '';
     for (var j = i; j < tokens.length; j++) {
-      if (j > i && tokens[j] == '000') break; // prices: 75 000 80 000
       digits += tokens[j].replaceAll(RegExp(r'[^0-9]'), '');
       if (digits.length > 15) break;
-      if (digits.length < 10 || _sizes(tokens.sublist(i, j + 1))) continue;
-      if ((i == 0 && run.startsWith('+')) || _phone.hasMatch(digits)) return true;
+      final values = tokens.sublist(i, j + 1);
+      if (digits.length < 10 || _sizes(values)) continue;
+      // Prices: 75 000 80 000, 7 000 10 000 12 000 (every other group 000), as the server reads them.
+      final prices = values.length > 1 && [for (var k = 1; k < values.length; k += 2) values[k]].every((v) => v == '000');
+      if ((i == 0 && run.startsWith('+')) || _phone.hasMatch(digits) && !prices) return true;
     }
   }
   return false;

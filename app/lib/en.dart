@@ -641,6 +641,7 @@ const en = <String, String>{
   'Атауы, бренді не үлгісі': 'Title, brand, or model',
   'Сай тауар жоқ.': 'No matching items.',
   'Жауап өріске қойылды.': 'Answer placed in the field.',
+  'Мынаны алып тастаңыз: «{0}»': 'Take this out: “{0}”',
   'Сұрақ күтеді': 'Questions waiting',
   'Жауапсыз сұрақ: {0}': 'Questions to answer: {0}',
   'Жауап күтетін сұрақ жоқ.': 'No questions waiting.',

@@ -372,8 +372,10 @@ class _TextSheetState extends State<_TextSheet> {
                   minLines: 2,
                   maxLines: 5,
                   maxLength: widget.maxLength,
+                  buildCounter: nearLimitCounter,
                   decoration: InputDecoration(
-                      hintText: widget.hint, errorText: _error == null ? null : errorText(_error), errorMaxLines: 4),
+                      // errorMaxLines: a refusal reads in full, at any text size; the sheet scrolls.
+                      hintText: widget.hint, errorText: _error == null ? null : errorText(_error), errorMaxLines: 30),
                   onChanged: (_) => setState(() => _error = null),
                 ),
               ),

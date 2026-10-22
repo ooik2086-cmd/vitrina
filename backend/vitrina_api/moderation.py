@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from vitrina_core.catalog import compute_bounds
 
 from .models import Listing, Media
-from .social import looks_like_contact
+from .social import find_contact, looks_like_contact
 
 log = logging.getLogger("vitrina.moderation")
 
@@ -37,9 +37,9 @@ CHECKED_ANGLES = ("front", "outer", "inner", "back", "top", "sole", "detail", "l
 FRAME_SAMPLE = 4
 
 REASONS = {
-    "contacts": ("Атауда не сипаттамада телефон, сілтеме, почта, @атау не мессенджер бар. Байланыс тек VITRINA чатында.",
-                 "В названии или описании есть телефон, ссылка, почта, @имя или мессенджер. Связь только в чате VITRINA.",
-                 "The title or description has a phone number, link, e-mail, @name or messenger. Contact happens only in VITRINA chat."),
+    "contacts": ("Тауардың мәтінінде телефон, сілтеме, почта, @атау не мессенджер бар. Байланыс тек VITRINA чатында.",
+                 "В тексте объявления есть телефон, ссылка, почта, @имя или мессенджер. Связь только в чате VITRINA.",
+                 "The listing's text has a phone number, link, e-mail, @name or messenger. Contact happens only in VITRINA chat."),
     "replica": ("Мәтінде көшірме тауар туралы сөз бар. Көшірме аяқкиім сатуға болмайды.",
                 "В тексте упоминается копия. Продавать копии обуви нельзя.",
                 "The text mentions a replica. Selling replica shoes isn't allowed."),
@@ -78,8 +78,17 @@ def ensure_hashes(db: Session, storage, listing: Listing) -> None:
                 log.info("moderation: cannot hash %s", m.original_url)
 
 
+def _words(listing: Listing) -> tuple[str | None, ...]:
+    return listing.title, listing.description, listing.defects
+
+
 def has_contacts(listing: Listing) -> bool:
-    return any(looks_like_contact(t) for t in (listing.title, listing.description, listing.defects))
+    return any(looks_like_contact(t) for t in _words(listing))
+
+
+def found_contacts(listing: Listing) -> str | None:
+    """What the contacts check found, as the seller wrote it, for the card that says what to take out."""
+    return next(filter(None, map(find_contact, _words(listing))), None)
 
 
 def mentions_replica(listing: Listing) -> bool:
