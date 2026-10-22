@@ -14,7 +14,6 @@ import '../session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/listing_contents.dart' show photoAngles;
-import '../widgets/spin_viewer.dart';
 import '../colors.dart';
 import '../i18n.dart';
 import 'chat_screen.dart';
@@ -836,7 +835,6 @@ class _OrderedPhotos extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final stills = photos.where((p) => p.angle != 'frame').toList();
-    final frames = photos.length - stills.length;
     return Card(
       key: const Key('ordered-photos'),
       child: Padding(
@@ -873,31 +871,6 @@ class _OrderedPhotos extends StatelessWidget {
                 ),
             ]),
           ),
-          if (frames > 0) ...[
-            const SizedBox(height: 4),
-            TextButton.icon(
-              key: const Key('ordered-spin'),
-              onPressed: () => showDialog<void>(
-                context: context,
-                builder: (context) => Dialog(
-                  backgroundColor: Brand.studio,
-                  insetPadding: const EdgeInsets.all(16),
-                  child: Column(mainAxisSize: MainAxisSize.min, children: [
-                    AspectRatio(
-                      aspectRatio: 1,
-                      child: SpinViewer(frameUrls: [
-                        for (final p in photos)
-                          if (p.angle == 'frame') p.url
-                      ]),
-                    ),
-                    TextButton(onPressed: () => Navigator.pop(context), child: Text(tr('Жабу'))),
-                  ]),
-                ),
-              ),
-              icon: const Icon(Icons.threesixty),
-              label: Text(trf('360° көрініс: {0} кадр', [frames])),
-            ),
-          ],
         ]),
       ),
     );

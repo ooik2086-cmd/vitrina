@@ -12,7 +12,6 @@ import '../screens/listing_screen.dart';
 import '../screens/login_screen.dart';
 import '../theme.dart';
 import '../i18n.dart';
-import 'card_turn.dart';
 import 'studio.dart';
 
 void showError(BuildContext context, Object error) {
@@ -362,11 +361,8 @@ class LanguageSwitch extends StatelessWidget {
 ImageProvider coverImage(String url) => ResizeImage.resizeIfNeeded(720, null, netImage(url));
 
 class ListingTile extends StatelessWidget {
-  const ListingTile({super.key, required this.listing, this.turns = true});
+  const ListingTile({super.key, required this.listing});
   final Listing listing;
-
-  /// A sideways drag turns the shoe; off in a sideways list, where that drag scrolls the list.
-  final bool turns;
 
   Widget _cover(String url) => CoverPhoto(
       image: coverImage(url),
@@ -393,13 +389,11 @@ class ListingTile extends StatelessWidget {
                 tag: 'listing-${listing.id}',
                 child: switch (cover) {
                   null => const Icon(Icons.image_outlined, color: Colors.black26),
-                  final cover when !turns => _cover(cover),
-                  final cover => CardTurn(listing: listing, cover: _cover(cover)),
+                  final cover => _cover(cover),
                 },
               ),
-              // The badges let a drag that starts on them turn the shoe underneath.
-              if (listing.frames.isNotEmpty)
-                const Positioned(left: 10, top: 10, child: IgnorePointer(child: Badge360())),
+              // The shoe turns in 3D on its page: the card only says so.
+              if (listing.model != null) const Positioned(left: 10, top: 10, child: IgnorePointer(child: Badge360())),
               if (listing.wasPriceTiyn != null)
                 Positioned(right: 10, top: 10, child: IgnorePointer(child: SaleBadge(listing: listing))),
             ]),

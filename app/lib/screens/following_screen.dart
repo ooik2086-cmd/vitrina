@@ -86,7 +86,7 @@ class _FollowingScreenState extends State<FollowingScreen> {
                 subtitle: Text([
                   if (s.city != null) s.city!,
                   trf('{0} тауар', [s.listings]),
-                  if (s.rating != null) '★ ${s.rating!.toStringAsFixed(1)}',
+                  if (s.rating != null) '★ ${ratingText(s.rating!)}',
                   if (s.awayUntil != null) trf('{0} дейін демалыста', [formatDay(s.awayUntil!)]),
                 ].join(' · ')),
                 trailing: const Icon(Icons.chevron_right),

@@ -346,63 +346,6 @@ void main() {
     expect(refused.where((c) => c.endsWith('/media')), hasLength(1)); // too large stays too large
   });
 
-  testWidgets('a 360° set goes three frames at a time, so weak mobile data is not choked', (tester) async {
-    final gate = Completer<void>();
-    final calls = await open(tester, hold: gate.future);
-    await tester.tap(find.text('Галереядан'));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 100));
-    expect(maxInFlight, 3);
-    gate.complete();
-    await tester.pumpAndSettle();
-    expect(calls.where((c) => c.endsWith('/media')), hasLength(24));
-    expect(maxInFlight, 3);
-    expect(find.text('24/24'), findsOneWidget);
-  });
-
-  testWidgets('a side photo taken while a 360° set is uploading goes ahead of the frames still waiting',
-      (tester) async {
-    final gate = Completer<void>();
-    await open(tester, hold: gate.future);
-    await tester.tap(find.text('Галереядан'));
-    await tester.pump();
-    await tester.tap(find.text('Алдынан *'));
-    for (var i = 0; i < 5; i++) {
-      await tester.pump(const Duration(milliseconds: 200)); // the sheet slides up; the frames keep spinning
-    }
-    await tester.tap(find.text('Камерамен түсіру'));
-    for (var i = 0; i < 5; i++) {
-      await tester.pump(const Duration(milliseconds: 200));
-    }
-    gate.complete();
-    await tester.pumpAndSettle();
-    expect(uploadOrder, hasLength(25));
-    expect(uploadOrder.indexOf('p.jpg'), 3); // right after the three frames already on their way
-  });
-
-  testWidgets('a new 360° set replaces one still on its way: the old frames waiting their turn are not sent',
-      (tester) async {
-    final gate = Completer<void>();
-    final calls = await open(tester, hold: gate.future);
-    await tester.tap(find.text('Галереядан'));
-    await tester.pump();
-    await tester.tap(find.text('Галереядан'));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 100));
-    gate.complete();
-    await tester.pumpAndSettle();
-    expect(calls.where((c) => c.endsWith('/media')), hasLength(27)); // 3 already on their way + the new 24
-    expect(maxInFlight, 3);
-    expect(find.text('24/24'), findsOneWidget);
-
-    maxInFlight = 0; // a third set, after the others finished, still goes three at a time
-    await tester.tap(find.text('Галереядан'));
-    await tester.pump();
-    await tester.pumpAndSettle();
-    expect(calls.where((c) => c.endsWith('/media')), hasLength(51));
-    expect(maxInFlight, 3);
-  });
-
   testWidgets('a side photo the server refused is taken again with a tap, the camera opens', (tester) async {
     final calls = await open(tester, fails: (n) => n == 1, failStatus: 413);
     await pickSides(tester);
@@ -479,24 +422,6 @@ void main() {
     expect(calls.where((c) => c.endsWith('/media')), hasLength(6));
     await next(tester);
     expect(step(tester), 'Бағасы мен өлшемі');
-  });
-
-  testWidgets('360° frames that did not upload are caught on the photo step and sent again, not shot again',
-      (tester) async {
-    final calls = await open(tester, fails: (n) => n > 4 && n <= 16); // half the frames fail
-    await pickSides(tester);
-    await tester.tap(find.text('Галереядан'));
-    await tester.pumpAndSettle();
-    await next(tester);
-    expect(find.text('Кейбір кадрлар жүктелмеді. Қайта түсірудің керегі жоқ, тек қайта жіберіңіз.'),
-        findsWidgets); // on the card, and as the reason
-    expect(step(tester), 'Фото');
-    await tester.tap(find.byKey(const Key('resend-frames')));
-    await tester.pumpAndSettle();
-    expect(calls.where((c) => c.endsWith('/media')), hasLength(40)); // only the 12 that failed go again
-    expect(find.text('24/24'), findsOneWidget);
-    await next(tester);
-    expect(step(tester), 'Тауар туралы');
   });
 
   testWidgets('a photo that fails after Next takes the seller back to the photos to send it again', (tester) async {
@@ -812,7 +737,11 @@ void main() {
       Session.editorDraftKey: jsonEncode({
         'photos': {
           'front': {'path': file.path}
-        }
+        },
+        // Kept by a version that still took the photo-frame 360°: left behind, never sent nor waited on.
+        'frames': [
+          {'path': '/gone/f0.jpg'}
+        ],
       })
     });
     final calls = await open(tester, settle: false);
@@ -828,6 +757,7 @@ void main() {
     expect((await kept())!['photos'], {
       'front': {'url': 'https://cdn/1.jpg', 'path': file.path}
     });
+    expect((await kept())!.containsKey('frames'), isFalse);
   });
 
   testWidgets('kept work belongs to who made it: a lapsed sign-in keeps it, another person never sees it',
@@ -870,12 +800,9 @@ void main() {
     expect((await kept())!['photos'], {'sole': anything});
   });
 
-  testWidgets('everything on the three steps comes back: details, sizes, a defect photo and the 360° frames',
-      (tester) async {
+  testWidgets('everything on the three steps comes back: details, sizes and a defect photo', (tester) async {
     await open(tester);
     await pickSides(tester);
-    await tester.tap(find.text('Галереядан'));
-    await tester.pumpAndSettle();
     await next(tester);
     await fillDetails(tester, condition: 'Ақауы бар');
     await pick(tester, find.text('Ақау фотосы'));
@@ -909,7 +836,7 @@ void main() {
       {'label': '38', 'insole_cm': '24,5', 'quantity': 1}
     ]);
     final angles = [for (final p in body['photos'] as List) (p as Map)['angle']];
-    expect(angles.where((a) => a == 'frame'), hasLength(24));
+    expect(angles.where((a) => a == 'frame'), isEmpty);
     expect(angles.where((a) => a == 'defect'), hasLength(1));
     expect(angles.toSet(), containsAll(requiredAngles.keys));
     expect(await kept(), isNull);

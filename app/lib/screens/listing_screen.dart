@@ -754,7 +754,7 @@ class _ListingScreenState extends State<ListingScreen> {
                     LineButton(
                       key: const Key('reviews-line'),
                       leading: const Icon(Icons.star_rounded, size: 20, color: Color(0xFFE0A100)),
-                      title: rating.toStringAsFixed(1),
+                      title: ratingText(rating),
                       detail: trf('{0} пікір', [l.sellerReviews]),
                       onTap: () => _reviews(l),
                     ),
@@ -1127,7 +1127,7 @@ class _SimilarRow extends StatelessWidget {
               clipBehavior: Clip.none,
               itemCount: list.length,
               separatorBuilder: (_, __) => const SizedBox(width: 12),
-              itemBuilder: (_, i) => SizedBox(width: 160, child: ListingTile(listing: list[i], turns: false)),
+              itemBuilder: (_, i) => SizedBox(width: 160, child: ListingTile(listing: list[i])),
             ),
           ),
         ]);
@@ -1297,7 +1297,7 @@ class _SellerRow extends StatelessWidget {
                               alignment: PlaceholderAlignment.middle,
                               child: ExcludeSemantics(
                                   child: Icon(Icons.star_rounded, size: 16, color: Color(0xFFE0A100)))),
-                          TextSpan(text: ' ${l.sellerRating!.toStringAsFixed(1)} · '),
+                          TextSpan(text: ' ${ratingText(l.sellerRating!)} · '),
                         ],
                         TextSpan(
                             text: [

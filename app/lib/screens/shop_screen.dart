@@ -220,7 +220,7 @@ class _ShopScreenState extends State<ShopScreen> {
                       const SizedBox(height: 16),
                       Row(children: [
                         _Fact(
-                          value: shop.rating?.toStringAsFixed(1) ?? '—',
+                          value: shop.rating == null ? '—' : ratingText(shop.rating!),
                           label: trf('{0} пікір', [shop.reviews]),
                           icon: Icons.star_rounded,
                           onTap: () => Navigator.of(context).push(MaterialPageRoute(

@@ -1371,7 +1371,7 @@ class _PromoCardState extends State<PromoCard> {
             'ready' => tr('Дайын. Видеоны ашып, телефонға сақтаңыз немесе сілтемесін жіберіңіз.'),
             'failed' => tr('Видео жасалмады. Қайта көріңіз.'),
             _ when rendering => tr('Видео жасалуда, бұл бірнеше секунд алады…'),
-            _ => tr('8 секундтық тік видео: 360° айналым, баға және музыка. Instagram, TikTok және WhatsApp үшін.'),
+            _ => tr('8 секундтық тік видео: фотолар, баға және музыка. Instagram, TikTok және WhatsApp үшін.'),
           },
           style: theme.textTheme.bodyMedium?.copyWith(color: Colors.white70),
         ),

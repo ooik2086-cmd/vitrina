@@ -120,7 +120,7 @@ class _SellerReviewsScreenState extends State<SellerReviewsScreen> {
           final items = snap.data!;
           return ListView(padding: contentPadding(context, const EdgeInsets.all(20)), children: [
             Row(children: [
-              Text(rating?.toStringAsFixed(1) ?? '—', style: theme.textTheme.headlineMedium),
+              Text(rating == null ? '—' : ratingText(rating), style: theme.textTheme.headlineMedium),
               const SizedBox(width: 12),
               Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Stars(value: rating ?? 0, size: 20),

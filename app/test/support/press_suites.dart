@@ -5,7 +5,6 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:vitrina/screens/spin_capture_screen.dart';
 
 import 'press.dart';
 import 'screens.dart';
@@ -38,9 +37,7 @@ Future<List<String>> pressAll(WidgetTester tester, Widget Function() screen, {Wi
       if (sent.isNotEmpty && !told()) {
         errors.add('"$label": nothing says the connection is down (${sent.join(', ')})');
       }
-      // The camera page waits for a camera, which a test has none of; it needs no connection.
-      if (find.byType(CircularProgressIndicator).hitTestable().evaluate().isNotEmpty &&
-          find.byType(SpinCaptureScreen).evaluate().isEmpty) {
+      if (find.byType(CircularProgressIndicator).hitTestable().evaluate().isNotEmpty) {
         errors.add('"$label": still spinning');
       }
     });

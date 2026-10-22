@@ -249,7 +249,7 @@ class _MyListingsScreenState extends State<MyListingsScreen> {
                                       : null),
                               TextSpan(
                                   text: ' · ${stockSummary(l)}'
-                                      '${l.frames.isNotEmpty ? ' · 360°' : ''}'
+                                      '${l.model != null ? ' · 360°' : ''}'
                                       '${l.photosPending ? ' · ${tr('фото өңделуде')}' : ''}'),
                               // Buyers waiting on an answer: the one thing on the line that asks the seller to act.
                               if (waiting > 0)

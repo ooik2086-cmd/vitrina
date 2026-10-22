@@ -9,11 +9,9 @@ import '../colors.dart';
 import '../i18n.dart';
 import '../labels.dart';
 import '../screens/listing_editor_screen.dart';
-import '../screens/spin_capture_screen.dart';
 import '../session.dart';
 import '../theme.dart';
 import 'common.dart';
-import 'scroll_showcase.dart' show ShowcasePlan;
 
 /// The server's own minimum (Settings.min_listing_photos) for a listing that is or was on sale.
 const _minPhotosOnSale = 4;
@@ -144,15 +142,10 @@ class _ListingContentsCardState extends State<ListingContentsCard> {
   final _picker = ImagePicker();
   bool _busy = false;
 
-  /// A 360° set some of whose frames did not go: kept with the addresses of those that did, so only the rest are
-  /// sent again, never shot again.
-  List<XFile>? _spinFiles;
-  final _spinUrls = <int, String>{};
   final _strip = ScrollController();
   final _note = GlobalKey();
 
   Listing get _l => widget.listing;
-  bool get _hasSpin => _l.media.any((m) => m.angle == 'frame');
 
   /// Where the strip starts so the first marked photo shows, with the photo before it for context.
   double _firstMarked() {
@@ -277,23 +270,6 @@ class _ListingContentsCardState extends State<ListingContentsCard> {
     await _run((api) async => api.editListing(_l.id, addPhotos: await _upload(api, [file], angle)), tr('Фото қосылды'));
   }
 
-  Future<void> _addSpin() async {
-    final frames = await Navigator.of(context)
-        .push<List<XFile>>(MaterialPageRoute(builder: (_) => const SpinCaptureScreen(), fullscreenDialog: true));
-    if (frames == null || frames.isEmpty) return;
-    setState(() {
-      _spinFiles = frames;
-      _spinUrls.clear();
-    });
-    await _sendSpin();
-  }
-
-  Future<void> _sendSpin() => _run((api) async {
-        final l = await api.editListing(_l.id, addPhotos: await _upload(api, _spinFiles!, 'frame', into: _spinUrls));
-        if (mounted) setState(() => _spinFiles = null);
-        return l;
-      }, tr('360° көрініс қосылды'));
-
   Future<void> _removePhoto(int index) async {
     final name = tr(photoAngles[_l.media[index].angle] ?? 'Фото');
     final sure = await confirmAction(context,
@@ -304,37 +280,6 @@ class _ListingContentsCardState extends State<ListingContentsCard> {
         if (i != index) {'url': _l.media[i].originalUrl, 'angle': _l.media[i].angle}
     ];
     await _run((api) => api.editListing(_l.id, photos: keep), tr('Фото өшірілді'));
-  }
-
-  Future<void> _removeSpin() async {
-    final sure = await confirmAction(context,
-        title: tr('360° көріністі өшіру керек пе?'), action: tr('Өшіру'), destructive: true);
-    if (!sure || !mounted) return;
-    final keep = [
-      for (final m in _l.media)
-        if (m.angle != 'frame') {'url': m.originalUrl, 'angle': m.angle}
-    ];
-    await _run((api) => api.editListing(_l.id, photos: keep), tr('360° көрініс өшірілді'));
-  }
-
-  Future<void> _pickCoverFrame() async {
-    // The server matches the cover after the photos are processed: start from its latest choice, not the one this
-    // page loaded with.
-    setState(() => _busy = true);
-    var l = _l;
-    try {
-      l = await SessionScope.of(context).api.listing(_l.id);
-      if (mounted) widget.onChanged(l);
-    } catch (_) {
-      // offline: the picker still works from what this page has
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-    if (!mounted) return;
-    final picked = await showModalBottomSheet<String>(
-        context: context, isScrollControlled: true, builder: (_) => CoverFramePicker(listing: l));
-    if (picked == null || picked == l.coverFrame || !mounted) return;
-    await _run((api) => api.editListing(_l.id, coverFrame: picked), tr('360° айналым осы бұрыштан басталады'));
   }
 
   Future<void> _addSize() async {
@@ -349,7 +294,6 @@ class _ListingContentsCardState extends State<ListingContentsCard> {
       for (var i = 0; i < _l.media.length; i++)
         if (_l.media[i].angle != 'frame') i
     ];
-    final frames = _l.media.where((m) => m.angle == 'frame').length;
     // The server's rule for a listing that was on sale: the main sides and defect close-ups stay, and so does the
     // count publishing asks for. Orders keep their own copy of what they were placed on.
     bool removable(int i) {
@@ -360,7 +304,7 @@ class _ListingContentsCardState extends State<ListingContentsCard> {
     }
 
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Semantics(header: true, child: Text(tr('Фото, 360° және өлшемдер'), style: theme.textTheme.titleMedium)),
+      Semantics(header: true, child: Text(tr('Фото және өлшемдер'), style: theme.textTheme.titleMedium)),
       const SizedBox(height: 4),
       Text(
         _l.everOnSale
@@ -464,13 +408,6 @@ class _ListingContentsCardState extends State<ListingContentsCard> {
           icon: const Icon(Icons.add_photo_alternate_outlined),
           label: Text(tr('Фото қосу')),
         ),
-        if (!_hasSpin)
-          OutlinedButton.icon(
-            key: const Key('add-spin'),
-            onPressed: _busy ? null : _addSpin,
-            icon: const Icon(Icons.threesixty),
-            label: Text(tr('360° қосу')),
-          ),
         OutlinedButton.icon(
           key: const Key('add-size'),
           onPressed: _busy ? null : _addSize,
@@ -478,249 +415,8 @@ class _ListingContentsCardState extends State<ListingContentsCard> {
           label: Text(tr('Өлшем қосу')),
         ),
       ]),
-      if (_spinFiles != null && !_busy) ...[
-        const SizedBox(height: 8),
-        Text(tr('Кейбір кадрлар жүктелмеді. Қайта түсірудің керегі жоқ, тек қайта жіберіңіз.'),
-            style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.error)),
-        TextButton.icon(
-          key: const Key('resend-spin'),
-          onPressed: _sendSpin,
-          icon: const Icon(Icons.refresh),
-          label: Text(tr('Кадрларды қайта жіберу')),
-        ),
-      ],
-      if (_hasSpin) ...[
-        const SizedBox(height: 8),
-        Row(children: [
-          Expanded(child: Text(trf('360° көрініс: {0} кадр', [frames]), style: theme.textTheme.bodySmall)),
-          TextButton.icon(
-            key: const Key('remove-spin'),
-            onPressed: _busy ? null : _removeSpin,
-            icon: const Icon(Icons.delete_outline),
-            label: Text(tr('360° өшіру')),
-          ),
-        ]),
-        if (_l.frames.any((m) => m.noShoe))
-          Padding(
-            key: const Key('spin-no-shoe'),
-            padding: const EdgeInsets.only(bottom: 4),
-            child: Row(
-                key: photos.any((i) => _l.media[i].noShoe) ? null : _note,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(Icons.hide_image_outlined, size: 18, color: theme.colorScheme.error),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                        tr('Бір кадрында аяқкиім табылмады, сондықтан айналымның фоны алынбайды. Қайта түсіру үшін 360° өшіріп, жаңасын қосыңыз.'),
-                        style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.error)),
-                  ),
-                ]),
-          ),
-        // A scan turns from where the camera started; a listing without photos has only frames for a cover.
-        if (_l.photos.isNotEmpty && !ShowcasePlan.of(_l).scan)
-          ListTile(
-            key: const Key('cover-frame'),
-            contentPadding: EdgeInsets.zero,
-            leading: const Icon(Icons.flip_camera_android_outlined),
-            title: Text(tr('Айналым қай бұрыштан басталады')),
-            subtitle: Text(tr('Мұқабадағыдай бұрышты таңдаңыз: карточка мен тауар беті сол жерден айналады.')),
-            trailing: const Icon(Icons.chevron_right),
-            enabled: !_busy,
-            onTap: _pickCoverFrame,
-          ),
-        ShowcaseStopsHint(have: {for (final m in _l.media) m.angle}, onPick: _addPhotoAt, enabled: !_busy),
-      ],
       if (_busy) const Padding(padding: EdgeInsets.only(top: 8), child: LinearProgressIndicator()),
     ]);
-  }
-}
-
-/// The cover beside one 360° frame, and a slider through the frames: the seller sets the frame that shows the shoe
-/// as the cover does. Pops with that frame's original url.
-class CoverFramePicker extends StatefulWidget {
-  const CoverFramePicker({super.key, required this.listing});
-  final Listing listing;
-
-  @override
-  State<CoverFramePicker> createState() => _CoverFramePickerState();
-}
-
-class _CoverFramePickerState extends State<CoverFramePicker> {
-  late final List<MediaItem> _frames = widget.listing.frames;
-
-  /// The marked frame, else the frame that is the cover itself, else the first.
-  late int _at = () {
-    final l = widget.listing;
-    final marked = _frames.indexWhere((f) => f.originalUrl == l.coverFrame);
-    return marked >= 0 ? marked : math.max(0, _frames.indexWhere((f) => f.url == l.coverUrl));
-  }();
-
-  /// Frames whose picture has arrived; Save waits for the one shown, so what is saved is what the seller saw.
-  final _ready = <int>{};
-  bool _fetching = false;
-
-  ImageProvider _image(MediaItem m) => ResizeImage.resizeIfNeeded(480, null, netImage(m.thumbUrl ?? m.url));
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    if (_fetching) return;
-    _fetching = true;
-    // Nearest the starting frame first, so the slider shows each frame the moment it gets there.
-    final order = [for (var i = 0; i < _frames.length; i++) i]..sort((a, b) => (a - _at).abs() - (b - _at).abs());
-    () async {
-      for (final i in order) {
-        await precacheImage(_image(_frames[i]), context, onError: (_, __) {});
-        if (!mounted) return;
-        setState(() => _ready.add(i));
-      }
-    }();
-  }
-
-  void _go(int i) => setState(() => _at = i.clamp(0, _frames.length - 1));
-
-  Widget _photo(ImageProvider image, String label, double size, {bool loading = false}) {
-    final theme = Theme.of(context);
-    return Column(children: [
-      SizedBox.square(
-        dimension: size,
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(14),
-          child: ColoredBox(
-            color: Brand.studio, // cut-outs are transparent
-            child: Stack(fit: StackFit.expand, children: [
-              Image(
-                  image: image,
-                  fit: BoxFit.contain,
-                  gaplessPlayback: true, // the last frame stays while the next loads
-                  excludeFromSemantics: true, // the caption below says what it is
-                  errorBuilder: (_, __, ___) => const Icon(Icons.image_outlined, color: Colors.black54)),
-              if (loading)
-                const Center(
-                    child: SizedBox.square(
-                        dimension: 28, child: CircularProgressIndicator(strokeWidth: 3, color: Colors.black54))),
-            ]),
-          ),
-        ),
-      ),
-      const SizedBox(height: 6),
-      Text(label, style: theme.textTheme.labelMedium, textAlign: TextAlign.center),
-    ]);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final l = widget.listing;
-    final cover = l.photos.first;
-    final frame = _frames[_at];
-    final n = _frames.length;
-    final ready = _ready.contains(_at);
-    final screen = MediaQuery.sizeOf(context);
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
-        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          // Everything but the buttons scrolls, so a phone on its side or large text still reaches Save.
-          Flexible(
-            child: SingleChildScrollView(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                Text(tr('Айналым қай бұрыштан басталады'), style: theme.textTheme.titleLarge),
-                const SizedBox(height: 4),
-                Text(tr('Сырғытпаны жылжытып, мұқабадағыдай көрінетін кадрды табыңыз.'),
-                    style: theme.textTheme.bodySmall),
-                const SizedBox(height: 16),
-                LayoutBuilder(builder: (context, box) {
-                  // Side by side, as large as fits, but never taller than a third of the screen.
-                  final size = math.min((box.maxWidth - 12) / 2, screen.height * 0.35);
-                  return Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                    _photo(_image(cover), tr('Мұқаба'), size),
-                    const SizedBox(width: 12),
-                    _photo(_image(frame), trf('Кадр {0} / {1}', [_at + 1, n]), size, loading: !ready),
-                  ]);
-                }),
-                const SizedBox(height: 8),
-                Row(children: [
-                  IconButton(
-                    key: const Key('cover-frame-prev'),
-                    tooltip: tr('Алдыңғы кадр'),
-                    onPressed: _at > 0 ? () => _go(_at - 1) : null,
-                    icon: const Icon(Icons.chevron_left),
-                  ),
-                  Expanded(
-                    child: Slider(
-                      key: const Key('cover-frame-slider'),
-                      value: _at.toDouble(),
-                      max: (n - 1).toDouble(),
-                      semanticFormatterCallback: (v) => trf('Кадр {0} / {1}', [v.round() + 1, n]),
-                      onChanged: (v) => _go(v.round()),
-                    ),
-                  ),
-                  IconButton(
-                    key: const Key('cover-frame-next'),
-                    tooltip: tr('Келесі кадр'),
-                    onPressed: _at < n - 1 ? () => _go(_at + 1) : null,
-                    icon: const Icon(Icons.chevron_right),
-                  ),
-                ]),
-              ]),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Row(children: [
-            Expanded(child: OutlinedButton(onPressed: () => Navigator.pop(context), child: Text(tr('Болдырмау')))),
-            const SizedBox(width: 12),
-            Expanded(
-              child: FilledButton(
-                  key: const Key('cover-frame-save'),
-                  onPressed: ready ? () => Navigator.pop(context, frame.originalUrl) : null,
-                  child: Text(tr('Сақтау'))),
-            ),
-          ]),
-        ]),
-      ),
-    );
-  }
-}
-
-/// After the 360° turn the showcase scrolls on to the top, the sole and a close-up. This asks the seller for the
-/// ones still missing, one tap each; a stop without its photo is simply skipped on the listing page.
-class ShowcaseStopsHint extends StatelessWidget {
-  const ShowcaseStopsHint({super.key, required this.have, required this.onPick, this.enabled = true});
-
-  /// Angles the listing already has a photo for.
-  final Set<String> have;
-  final ValueChanged<String> onPick;
-  final bool enabled;
-
-  static const stops = {'top': 'Үстінен', 'sole': 'Табаны', 'detail': 'Жақыннан (тігіс, логотип)'};
-
-  @override
-  Widget build(BuildContext context) {
-    final missing = [
-      for (final a in stops.keys)
-        if (!have.contains(a)) a
-    ];
-    if (missing.isEmpty) return const SizedBox.shrink();
-    final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.only(top: 8),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(tr('Сатып алушы «Фото» бөлімінде үстін, табанын және жақын көріністі де көреді. Бір-бір фото қосыңыз:'),
-            style: theme.textTheme.bodySmall),
-        const SizedBox(height: 6),
-        Wrap(spacing: 8, runSpacing: 8, children: [
-          for (final a in missing)
-            ActionChip(
-              key: Key('stop-$a'),
-              avatar: const Icon(Icons.add_a_photo_outlined, size: 18),
-              label: Text(tr(stops[a]!)),
-              onPressed: enabled ? () => onPick(a) : null,
-            ),
-        ]),
-      ]),
-    );
   }
 }
 

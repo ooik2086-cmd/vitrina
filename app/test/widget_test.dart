@@ -2,9 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
-import 'dart:ui' as ui;
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/rendering.dart';
@@ -12,7 +10,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:vitrina/net_image.dart';
 import 'package:vitrina/api.dart';
 import 'package:vitrina/chat_drafts.dart';
 import 'package:vitrina/appearance.dart';
@@ -50,7 +47,6 @@ import 'package:vitrina/screens/profile_screen.dart';
 import 'package:vitrina/screens/saved_searches_screen.dart';
 import 'package:vitrina/screens/seller_reviews_screen.dart';
 import 'package:vitrina/screens/shop_screen.dart';
-import 'package:vitrina/screens/spin_capture_screen.dart';
 import 'package:vitrina/widgets/shop_sale.dart';
 import 'package:vitrina/en.dart';
 import 'package:vitrina/ru.dart';
@@ -58,12 +54,9 @@ import 'package:vitrina/session.dart';
 import 'package:vitrina/widgets/common.dart';
 import 'package:vitrina/widgets/delivery_sheet.dart';
 import 'package:vitrina/widgets/questions.dart';
-import 'package:vitrina/widgets/scroll_showcase.dart';
 import 'package:vitrina/widgets/size_guide.dart';
-import 'package:vitrina/widgets/card_turn.dart';
 import 'package:vitrina/widgets/filter_sheet.dart';
 import 'package:vitrina/widgets/spin_viewer.dart';
-import 'package:vitrina/widgets/studio.dart';
 
 import 'support/screens.dart' show loadFonts, screens, visit;
 
@@ -1147,9 +1140,9 @@ void main() {
 
   test('listing quality counts what the page has and puts the biggest gap first', () {
     final bare = listingQuality(Listing.fromJson(listingJson()));
-    // No 360°, no extra angles, no description, not proven; brand, model, defects and stock are there.
-    expect(bare.score, 100 - 25 - 15 - 15 - 15);
-    expect(bare.tips.first.points, 25);
+    // No extra angles, no description, not proven; brand, model, defects and stock are there.
+    expect(bare.score, 100 - 15 - 15 - 15);
+    expect(bare.tips.first.points, 15);
     expect(bare.verdict, 'Толықтыруға болады');
     Map<String, dynamic> m(String angle) =>
         {'original_url': 'https://x/$angle.jpg', 'processed_url': null, 'angle': angle};
@@ -1167,7 +1160,7 @@ void main() {
     expect(full.verdict, 'Өте жақсы');
   });
 
-  test('the seller is told to retake the turn and which photos the model found no shoe in', () {
+  test('the seller is told which photos the model found no shoe in', () {
     Map<String, dynamic> m(String angle, {bool noShoe = false, String? url}) => {
           'original_url': url ?? 'https://x/$angle.jpg',
           'processed_url': null,
@@ -1188,12 +1181,9 @@ void main() {
       ]),
       ...done,
     }));
-    expect(q.score, 100 - 10 - 5);
-    expect(q.tips.map((t) => t.text), [
-      startsWith('360° айналымды қайта түсіріңіз'),
-      startsWith('Мына фотоларды қайта түсіріңіз: Алдынан, Табаны.'),
-    ]);
-    // A scan's sole stop is a frame of the turn: one picture, told about once.
+    expect(q.score, 100 - 5);
+    expect(q.tips.map((t) => t.text), [startsWith('Мына фотоларды қайта түсіріңіз: Алдынан, Табаны.')]);
+    // An old scan's sole stop is a frame of its turn, which buyers no longer see: nothing to retake.
     final scan = listingQuality(Listing.fromJson({
       ...listingJson(media: [
         for (var i = 0; i < 12; i++) m('frame', noShoe: i == 10, url: 'https://x/f$i.jpg'),
@@ -1203,11 +1193,11 @@ void main() {
       ]),
       ...done,
     }));
-    expect(scan.tips.map((t) => t.points), [10]);
+    expect(scan.tips, isEmpty);
     // A buyer's copy of the page carries no such flag.
     expect(listingQuality(Listing.fromJson(listingJson(media: [m('frame')..remove('no_shoe')]))).tips,
         isNot(contains(predicate((QualityTip t) => t.text.contains('табылмады')))));
-    // Every gap at once still scores 0, not below.
+    // Every gap at once: 100 less each tip's points (the old 360° frames no longer count).
     final bare = listingJson(media: [m('front', noShoe: true)]);
     expect(
         listingQuality(Listing.fromJson({
@@ -1219,7 +1209,7 @@ void main() {
             {'id': 1, 'label': '42', 'insole_cm': '27,0', 'available': false}
           ],
         })).score,
-        0);
+        20);
   });
 
   test('order deadline speaks to whoever can still act on it', () {
@@ -1597,12 +1587,6 @@ void main() {
     expect(seen.url.path, '/api/v1/media');
     expect(seen.headers['Authorization'], 'Bearer tok');
     expect(seen.headers['Content-Type'], startsWith('multipart/form-data'));
-  });
-
-  test('spin progress ring repaints only when the count changes', () {
-    final a = SpinProgressPainter(captured: 3, target: spinTargetFrames);
-    expect(a.shouldRepaint(SpinProgressPainter(captured: 3, target: spinTargetFrames)), isFalse);
-    expect(a.shouldRepaint(SpinProgressPainter(captured: 4, target: spinTargetFrames)), isTrue);
   });
 
   testWidgets('the colour is picked from a list, or typed when it is not on it', (tester) async {
@@ -3187,10 +3171,8 @@ void main() {
     expect(find.text('Тапсырыс берген кездегі фото'), findsOneWidget);
     expect(find.descendant(of: find.byKey(const Key('ordered-photos')), matching: find.byType(ClipRRect)),
         findsNWidgets(2));
-    expect(find.text('360° көрініс: 8 кадр'), findsOneWidget);
-    await tester.tap(find.byKey(const Key('ordered-spin')));
-    await tester.pump();
-    expect(find.byType(SpinViewer), findsOneWidget);
+    // The old 360° frames are no longer shown anywhere: the stills say what was bought.
+    expect(find.textContaining('кадр'), findsNothing);
   });
 
   testWidgets('confirming receipt asks first and says where the money goes', (tester) async {
@@ -3481,15 +3463,6 @@ void main() {
       expect(inView(tester, find.byKey(const Key('photos-no-shoe'))), isTrue);
     });
 
-    testWidgets('a 360° frame with no shoe found brings its own line into view', (tester) async {
-      await tapNote(tester, 'photo_no_shoe', size: const Size(360, 640), textScale: 1.5, media: [
-        for (final p in twoPhotos) {...p, 'no_shoe': false},
-        for (var i = 0; i < 8; i++)
-          {'original_url': 'https://cdn/f$i.jpg', 'processed_url': null, 'angle': 'frame', 'no_shoe': i == 3},
-      ]);
-      expect(inView(tester, find.byKey(const Key('spin-no-shoe'))), isTrue);
-    });
-
     testWidgets('another tip opens the page from the top, even on a listing with a marked photo', (tester) async {
       await tapNote(tester, 'listing_tip');
       expect(offset(tester), 0);
@@ -3538,101 +3511,6 @@ void main() {
       {'original_url': 'https://cdn/b.jpg', 'processed_url': null, 'angle': 'outer'},
     ];
 
-    final spinFrames = [
-      for (var i = 0; i < 8; i++)
-        {
-          'original_url': 'https://cdn/f$i.jpg',
-          'processed_url': null,
-          'thumb_url': 'https://cdn/t$i.webp',
-          'angle': 'frame'
-        }
-    ];
-
-    testWidgets('the seller sets which 360° frame matches the cover', (tester) async {
-      final listing = listingJson(media: [...photos, ...spinFrames]);
-      // The server matched the cover after this page loaded: the picker starts from its match.
-      final sent = await show(tester, listing, fresh: {...listing, 'cover_frame': 'https://cdn/f2.jpg'});
-      await tester.ensureVisible(find.byKey(const Key('cover-frame')));
-      await tester.tap(find.byKey(const Key('cover-frame')));
-      await tester.pumpAndSettle();
-      expect(find.text('Кадр 3 / 8'), findsOneWidget);
-      await tester.tap(find.byKey(const Key('cover-frame-next')));
-      await tester.pumpAndSettle();
-      expect(find.text('Кадр 4 / 8'), findsOneWidget);
-      final slider = find.byKey(const Key('cover-frame-slider'));
-      final box = tester.getRect(slider);
-      await tester.tapAt(Offset(box.left + 24 + (box.width - 48) * 5 / 7, box.center.dy)); // the sixth frame
-      await tester.pumpAndSettle();
-      expect(find.text('Кадр 6 / 8'), findsOneWidget);
-      await tester.tap(find.byKey(const Key('cover-frame-save')));
-      await tester.pumpAndSettle();
-      expect(sent, [
-        {'cover_frame': 'https://cdn/f5.jpg'}
-      ]);
-    });
-
-    testWidgets('the frame picker fits a phone on its side with large text', (tester) async {
-      final sent = await show(tester, listingJson(media: [...photos, ...spinFrames]), size: const Size(800, 400));
-      tester.platformDispatcher.textScaleFactorTestValue = 2;
-      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
-      await tester.ensureVisible(find.byKey(const Key('cover-frame')));
-      await tester.tap(find.byKey(const Key('cover-frame')));
-      await tester.pumpAndSettle();
-      expect(tester.takeException(), isNull);
-      expect(tester.getRect(find.byKey(const Key('cover-frame-save'))).bottom, lessThanOrEqualTo(400));
-      await tester.tap(find.byKey(const Key('cover-frame-prev')), warnIfMissed: false); // at the first frame: off
-      await tester.tap(find.byKey(const Key('cover-frame-save')));
-      await tester.pumpAndSettle();
-      expect(sent, [
-        {'cover_frame': 'https://cdn/f0.jpg'}
-      ]);
-    });
-
-    testWidgets('a scan has no frame picker: it turns from where the camera started', (tester) async {
-      final scan = [
-        for (var i = 0; i < 12; i++)
-          {
-            'original_url': 'https://cdn/s$i.jpg',
-            'processed_url': null,
-            'thumb_url': 'https://cdn/st$i.webp',
-            'angle': 'frame'
-          }
-      ];
-      await show(
-          tester,
-          listingJson(media: [
-            ...photos,
-            {'original_url': 'https://cdn/s10.jpg', 'processed_url': null, 'thumb_url': null, 'angle': 'top'},
-            ...scan
-          ]));
-      expect(find.byKey(const Key('remove-spin')), findsOneWidget);
-      expect(find.byKey(const Key('cover-frame')), findsNothing);
-    });
-
-    testWidgets('a photo the model found no shoe in is marked, and the turn says how to take it again', (tester) async {
-      final handle = tester.ensureSemantics();
-      await show(
-          tester,
-          listingJson(media: [
-            {...photos[0], 'no_shoe': true},
-            photos[1],
-            for (final (i, f) in spinFrames.indexed) {...f, 'no_shoe': i == 3},
-          ]));
-      expect(find.byKey(const Key('no-shoe-0')), findsOneWidget);
-      expect(find.byKey(const Key('no-shoe-1')), findsNothing);
-      expect(find.bySemanticsLabel('Алдынан: аяқкиім табылмады, фоны алынбайды'), findsOneWidget);
-      expect(find.byKey(const Key('spin-no-shoe')), findsOneWidget);
-      expect(find.byKey(const Key('photos-no-shoe')), findsOneWidget);
-      handle.dispose();
-    });
-
-    testWidgets('a turn and photos the model found a shoe in carry no such mark', (tester) async {
-      await show(tester, listingJson(media: [...photos, ...spinFrames]));
-      expect(find.byKey(const Key('no-shoe-0')), findsNothing);
-      expect(find.byKey(const Key('spin-no-shoe')), findsNothing);
-      expect(find.byKey(const Key('photos-no-shoe')), findsNothing);
-    });
-
     testWidgets('one Save sends only the name fields the seller changed', (tester) async {
       final sent = await show(
           tester, {...listingJson(media: photos), 'ever_on_sale': true, 'condition': 'used_excellent'},
@@ -3666,7 +3544,7 @@ void main() {
     testWidgets('an added size is checked and saved at once; photos buyers saw cannot be removed', (tester) async {
       final sent = await show(tester, {...listingJson(media: photos), 'ever_on_sale': true});
       expect(find.byKey(const Key('remove-photo-0')), findsNothing);
-      expect(find.byKey(const Key('add-spin')), findsOneWidget);
+      expect(find.byKey(const Key('add-spin')), findsNothing); // the old 360° frames are no longer taken
       await tester.tap(find.byKey(const Key('add-size')));
       await tester.pumpAndSettle();
       await tester.enterText(find.byKey(const Key('size-label')), 'EU 44');
@@ -3714,7 +3592,7 @@ void main() {
       expect(find.byKey(const Key('source-gallery')), findsOneWidget);
     });
 
-    testWidgets('after sale a photo can be replaced while the page keeps four, and the 360° view removed',
+    testWidgets('after sale an extra photo can go while the page keeps four; old 360° frames are not shown',
         (tester) async {
       final five = [
         for (final (i, a) in ['front', 'outer', 'inner', 'back', 'sole'].indexed)
@@ -3731,43 +3609,15 @@ void main() {
       tester.view.physicalSize = const Size(800, 2400);
       await tester.pump();
       expect(find.byKey(const Key('remove-photo-4')), findsOneWidget); // an extra one may go
-      await tester.tap(find.byKey(const Key('remove-spin')));
+      expect(find.byKey(const Key('remove-spin')), findsNothing);
+      expect(find.textContaining('кадр'), findsNothing);
+      await tester.tap(find.byKey(const Key('remove-photo-4')));
       await tester.pumpAndSettle();
-      expect(find.text('360° көріністі өшіру керек пе?'), findsOneWidget);
       await tester.tap(find.byKey(const Key('confirm-action')));
       await tester.pumpAndSettle();
-      expect((sent.single['photos'] as List).length, 5);
-      expect((sent.single['photos'] as List).any((p) => (p as Map)['angle'] == 'frame'), isFalse);
-    });
-
-    testWidgets('a listing with a 360° view offers no second one', (tester) async {
-      final frames = [
-        for (var i = 0; i < 8; i++) {'original_url': 'https://cdn/f$i.jpg', 'processed_url': null, 'angle': 'frame'}
-      ];
-      await show(tester, listingJson(media: [...photos, ...frames]));
-      expect(find.byKey(const Key('add-spin')), findsNothing);
-      expect(find.text('360° көрініс: 8 кадр'), findsOneWidget);
-    });
-
-    testWidgets('with a 360° view the seller is asked for the missing top, sole and close-up, one tap each',
-        (tester) async {
-      final frames = [
-        for (var i = 0; i < 8; i++) {'original_url': 'https://cdn/f$i.jpg', 'processed_url': null, 'angle': 'frame'}
-      ];
-      await show(
-          tester,
-          listingJson(media: [
-            ...photos,
-            {'original_url': 'https://cdn/s.jpg', 'processed_url': null, 'angle': 'sole'},
-            ...frames
-          ]));
-      expect(find.byKey(const Key('stop-top')), findsOneWidget);
-      expect(find.byKey(const Key('stop-sole')), findsNothing); // already there
-      expect(find.byKey(const Key('stop-detail')), findsOneWidget);
-      await tester.tap(find.byKey(const Key('stop-top')));
-      await tester.pumpAndSettle();
-      expect(find.byKey(const Key('source-camera')), findsOneWidget); // straight to the camera, no angle question
-      expect(find.byKey(const Key('angle-top')), findsNothing);
+      final kept = sent.single['photos'] as List;
+      expect(kept.any((p) => (p as Map)['angle'] == 'sole'), isFalse);
+      expect(kept.length, 4 + 8); // the frames stay stored for orders placed on them
     });
 
     testWidgets('without a 360° view there is nothing to ask for', (tester) async {
@@ -3912,546 +3762,4 @@ void main() {
     expect(tester.widget<FilledButton>(find.byType(FilledButton)).onPressed, isNull);
     await tester.pumpWidget(const SizedBox()); // stops the timer
   });
-
-  group('the catalog card turns the shoe', () {
-    Map<String, dynamic> frame(int i, {bool cut = true, bool thumb = true}) => {
-          'original_url': 'https://cdn/f$i.jpg',
-          'processed_url': cut ? 'https://cdn/f$i.webp' : null,
-          'thumb_url': thumb ? 'https://cdn/t$i.webp' : null,
-          'angle': 'frame',
-        };
-    Listing listing(List<Map<String, dynamic>> frames, {int id = 7}) => Listing.fromJson({
-          ...listingJson(media: [
-            {'original_url': 'https://cdn/side.jpg', 'processed_url': 'https://cdn/side.webp', 'angle': 'side'},
-            ...frames,
-          ]),
-          'id': id,
-        });
-    final failing = <String>{};
-    ui.Image? picture;
-    setUp(() => CardTurn.network = (url) => _TestFrame(url, picture!, failing));
-    tearDown(() {
-      CardTurn.network = netImage;
-      failing.clear();
-    });
-
-    /// The frame on the card, or null when the cover shows.
-    String? shown(WidgetTester tester) {
-      final found = find.byKey(const Key('card-turn-frame'));
-      if (found.evaluate().isEmpty) return null;
-      expect(find.byType(CoverPhoto), findsNothing); // never the cover and a frame together
-      final image = tester.widget<Image>(found).image as ResizeImage;
-      return (image.imageProvider as _TestFrame).url;
-    }
-
-    Future<void> pumpTile(WidgetTester tester, Listing l, {bool turns = true}) async {
-      picture ??= await tester.runAsync(() => createTestImage(width: 4, height: 3));
-      await tester.pumpWidget(MaterialApp(
-          home: Scaffold(
-              body: ListView(children: [
-        Center(child: SizedBox(width: 200, child: ListingTile(listing: l, turns: turns))),
-        const SizedBox(height: 2000),
-      ]))));
-    }
-
-    Future<TestGesture> hold(WidgetTester tester, double frames, {int of = 12}) async {
-      final g = await tester.startGesture(tester.getCenter(find.byKey(const Key('card-turn'))));
-      for (var i = 0; i < 10; i++) {
-        await g.moveBy(Offset(-CardTurn.turnDrag(200) / of * frames / 10, 0));
-        await tester.pump(const Duration(milliseconds: 16));
-      }
-      return g;
-    }
-
-    testWidgets('a narrow feed card on a small phone turns no faster than the shortest turn', (tester) async {
-      picture ??= await tester.runAsync(() => createTestImage(width: 4, height: 3));
-      await tester.pumpWidget(MaterialApp(
-          home: Scaffold(
-              body: ListView(children: [
-        Center(
-            child: SizedBox(width: 130, child: ListingTile(listing: listing([for (var i = 0; i < 12; i++) frame(i)])))),
-        const SizedBox(height: 2000),
-      ]))));
-      expect(130 * ShowcasePlan.turnWidths, lessThan(CardTurn.minTurnDrag));
-      final g = await tester.startGesture(tester.getCenter(find.byKey(const Key('card-turn'))));
-      for (var i = 0; i < 10; i++) {
-        await g.moveBy(Offset(-CardTurn.minTurnDrag * 3.5 / 12 / 10, 0));
-        await tester.pump(const Duration(milliseconds: 16));
-      }
-      expect(shown(tester), 'https://cdn/t3.webp'); // under a third of the shortest turn: a quarter round
-      await g.up();
-    });
-
-    test('the listing page and the card start the turn at the frame matching the cover', () {
-      final l = Listing.fromJson({
-        ...listingJson(media: [
-          {'original_url': 'https://cdn/side.jpg', 'processed_url': 'https://cdn/side.webp', 'angle': 'side'},
-          for (var i = 0; i < 12; i++) frame(i),
-        ]),
-        'cover_frame': 'https://cdn/f9.jpg',
-      });
-      expect(ShowcasePlan.of(l).steps.first.media.first.originalUrl, 'https://cdn/f9.jpg');
-      expect(ShowcasePlan.of(l).steps.first.media.length, 12); // the whole turn, only started elsewhere
-      expect(CardTurn.framesOf(l).first.originalUrl, 'https://cdn/f9.jpg');
-      final unset = listing([for (var i = 0; i < 12; i++) frame(i)]);
-      expect(ShowcasePlan.of(unset).steps.first.media.first.originalUrl, 'https://cdn/f0.jpg');
-      // A scan turns from where the camera started, on the page and on the card alike.
-      final scan = Listing.fromJson({
-        ...listingJson(media: [
-          {'original_url': 'https://cdn/side.jpg', 'processed_url': 'https://cdn/side.webp', 'angle': 'side'},
-          {...frame(10), 'angle': 'top'},
-          for (var i = 0; i < 12; i++) frame(i),
-        ]),
-        'cover_frame': 'https://cdn/f3.jpg',
-      });
-      expect(ShowcasePlan.of(scan).scan, isTrue);
-      expect(ShowcasePlan.of(scan).steps.first.media.first.originalUrl, 'https://cdn/f0.jpg');
-      expect(CardTurn.framesOf(scan).first.originalUrl, 'https://cdn/f0.jpg');
-    });
-
-    test('through at most 24 frames of one turn, from the cover, and only when it turns as the listing page does', () {
-      expect(CardTurn.framesOf(listing([for (var i = 0; i < 7; i++) frame(i)])), isEmpty);
-      final many = CardTurn.framesOf(listing([for (var i = 0; i < 100; i++) frame(i)]));
-      expect(many.length, CardTurn.maxFrames);
-      expect(many.first.originalUrl, 'https://cdn/f0.jpg');
-      expect(many.last.originalUrl, 'https://cdn/f95.jpg'); // spread over the whole turn
-      // A turn ends where its first frame comes round again.
-      expect(CardTurn.framesOf(listing([for (var i = 0; i < 10; i++) frame(i), frame(0), frame(11)])).length, 10);
-      // When the cover is a frame of the turn, the turn starts there.
-      final fromCover = Listing.fromJson(listingJson(media: [
-        {'original_url': 'https://cdn/f4.jpg', 'processed_url': 'https://cdn/f4.webp', 'angle': 'side'},
-        for (var i = 0; i < 12; i++) frame(i),
-      ]));
-      expect([for (final m in CardTurn.framesOf(fromCover).take(2)) m.originalUrl],
-          ['https://cdn/f4.jpg', 'https://cdn/f5.jpg']);
-      // No small copy of a frame, or cut-outs for only some frames: the card does not turn.
-      expect(CardTurn.framesOf(listing([for (var i = 0; i < 11; i++) frame(i), frame(11, thumb: false)])), isEmpty);
-      expect(CardTurn.framesOf(listing([for (var i = 0; i < 11; i++) frame(i), frame(11, cut: false)])), isEmpty);
-      expect(CardTurn.framesOf(listing([for (var i = 0; i < 12; i++) frame(i, cut: false)])).length, 12);
-    });
-
-    testWidgets('a sideways drag turns it, and on release it turns back to the cover', (tester) async {
-      await pumpTile(tester, listing([for (var i = 0; i < 12; i++) frame(i)]));
-      expect(shown(tester), isNull);
-      expect(find.byType(CoverPhoto), findsOneWidget);
-      final g = await hold(tester, 3.5);
-      expect(shown(tester), 'https://cdn/t3.webp');
-      await g.up();
-      await tester.pump(const Duration(milliseconds: 60));
-      expect(shown(tester), isNotNull); // turning back
-      await tester.pumpAndSettle();
-      expect(shown(tester), isNull);
-      expect(find.byType(CoverPhoto), findsOneWidget);
-    });
-
-    testWidgets('dragging the other way goes round past the start to the end of the turn', (tester) async {
-      await pumpTile(tester, listing([for (var i = 0; i < 12; i++) frame(i)]));
-      final g = await hold(tester, -1.5);
-      expect(shown(tester), 'https://cdn/t10.webp');
-      await g.up();
-      await tester.pumpAndSettle();
-    });
-
-    testWidgets('a scroll does not turn it', (tester) async {
-      await pumpTile(tester, listing([for (var i = 0; i < 12; i++) frame(i)]));
-      final g = await tester.startGesture(tester.getCenter(find.byKey(const Key('card-turn'))));
-      await g.moveBy(const Offset(0, -60));
-      await tester.pump();
-      expect(shown(tester), isNull);
-      await g.up();
-    });
-
-    testWidgets('a frame that fails to load keeps the last good one', (tester) async {
-      failing.add('https://cdn/t2.webp');
-      await pumpTile(tester, listing([for (var i = 0; i < 12; i++) frame(i)]));
-      final g = await hold(tester, 1.5);
-      expect(shown(tester), 'https://cdn/t1.webp');
-      await g.moveBy(const Offset(-25, 0));
-      await tester.pump();
-      await tester.pump();
-      expect(find.byType(CoverPhoto), findsNothing); // not the cover in the middle of the turn
-      // The shoe last decoded is still drawn.
-      expect(tester.widgetList<RawImage>(find.byType(RawImage)).where((r) => r.image != null), isNotEmpty);
-      await g.up();
-      await tester.pumpAndSettle();
-    });
-
-    testWidgets('a card that becomes another shoe or gets new photos starts again from its cover', (tester) async {
-      await pumpTile(tester, listing([for (var i = 0; i < 12; i++) frame(i)]));
-      final g = await hold(tester, 2.5);
-      expect(shown(tester), 'https://cdn/t2.webp');
-      // The same listing with reshot frames, while the finger is still down.
-      await pumpTile(
-          tester,
-          listing([
-            for (var i = 0; i < 12; i++) {...frame(i), 'thumb_url': 'https://cdn/new$i.webp'}
-          ]));
-      expect(shown(tester), isNull);
-      await g.moveBy(const Offset(-30, 0)); // no crash: the drag belonged to the old photos
-      await tester.pump();
-      await g.up();
-      await tester.pumpAndSettle();
-      final again = await hold(tester, 1.5);
-      expect(shown(tester), 'https://cdn/new1.webp');
-      await again.up();
-      await tester.pumpAndSettle();
-      expect(tester.takeException(), isNull);
-    });
-
-    testWidgets('with reduced motion it shows the cover as soon as the finger lifts', (tester) async {
-      picture ??= await tester.runAsync(() => createTestImage(width: 4, height: 3));
-      await tester.pumpWidget(MaterialApp(
-          home: MediaQuery(
-              data: const MediaQueryData(disableAnimations: true),
-              child: Scaffold(
-                  body: Center(
-                      child: SizedBox(
-                          width: 200,
-                          child: ListingTile(listing: listing([for (var i = 0; i < 12; i++) frame(i)]))))))));
-      final g = await hold(tester, 3.5);
-      expect(shown(tester), isNotNull);
-      await g.up();
-      await tester.pump();
-      expect(shown(tester), isNull);
-    });
-
-    testWidgets('screen readers get a plain card, not a scrollable', (tester) async {
-      final semantics = tester.ensureSemantics();
-      await pumpTile(tester, listing([for (var i = 0; i < 12; i++) frame(i)]));
-      final actions = <SemanticsAction>{};
-      void visit(SemanticsNode n) {
-        final data = n.getSemanticsData();
-        for (final a in [SemanticsAction.scrollLeft, SemanticsAction.scrollRight]) {
-          if (data.hasAction(a)) actions.add(a);
-        }
-        n.visitChildren((c) {
-          visit(c);
-          return true;
-        });
-      }
-
-      visit(tester.getSemantics(find.byType(ListingTile)));
-      expect(actions, isEmpty);
-      semantics.dispose();
-    });
-
-    testWidgets('in a sideways list the drag scrolls the list instead', (tester) async {
-      await pumpTile(tester, listing([for (var i = 0; i < 12; i++) frame(i)]), turns: false);
-      expect(find.byKey(const Key('card-turn')), findsNothing);
-    });
-
-    group('side by side in compare', () {
-      String? shownIn(WidgetTester tester, int id) {
-        final found = find.descendant(
-            of: find.byKey(Key('compare-open-$id')), matching: find.byKey(const Key('card-turn-frame')));
-        if (found.evaluate().isEmpty) return null;
-        final image = tester.widget<Image>(found).image as ResizeImage;
-        return (image.imageProvider as _TestFrame).url;
-      }
-
-      Future<TestGesture> turn(WidgetTester tester, int id, double share) async {
-        final head =
-            find.descendant(of: find.byKey(Key('compare-open-$id')), matching: find.byKey(const Key('card-turn')));
-        final drag = CardTurn.turnDrag(tester.getSize(head).width);
-        final g = await tester.startGesture(tester.getCenter(head));
-        for (var i = 0; i < 10; i++) {
-          await g.moveBy(Offset(-drag * share / 10, 0));
-          await tester.pump(const Duration(milliseconds: 16));
-        }
-        return g;
-      }
-
-      Future<void> pumpCompare(WidgetTester tester, List<Listing> items) async {
-        picture ??= await tester.runAsync(() => createTestImage(width: 4, height: 3));
-        await tester.pumpWidget(MaterialApp(home: CompareScreen(items: items)));
-      }
-
-      Listing marked(int id, Map<String, int> sides, {String cover = 'outer'}) => Listing.fromJson({
-            ...listingJson(media: [
-              {'original_url': 'https://cdn/c$id.jpg', 'processed_url': 'https://cdn/c$id.webp', 'angle': cover},
-              for (var i = 0; i < 12; i++) frame(i),
-            ]),
-            'id': id,
-            'angle_frames': {for (final MapEntry(:key, :value) in sides.entries) key: 'https://cdn/f$value.jpg'},
-          });
-
-      testWidgets('a drag on one shoe turns the others to the same side, and they stay there to be looked at',
-          (tester) async {
-        await pumpCompare(tester, [
-          listing([for (var i = 0; i < 12; i++) frame(i)]),
-          listing([for (var i = 0; i < 24; i++) frame(i)], id: 8),
-        ]);
-        expect(find.byKey(const Key('compare-turn-hint')), findsOneWidget);
-        final g = await turn(tester, 7, 3.2 / 12);
-        expect((shownIn(tester, 7), shownIn(tester, 8)), ('https://cdn/t3.webp', 'https://cdn/t6.webp'));
-        await g.up();
-        await tester.pumpAndSettle();
-        expect((shownIn(tester, 7), shownIn(tester, 8)), ('https://cdn/t3.webp', 'https://cdn/t6.webp'));
-        // The other shoe carries on from there.
-        final g2 = await turn(tester, 8, 2 / 24);
-        expect((shownIn(tester, 7), shownIn(tester, 8)), ('https://cdn/t4.webp', 'https://cdn/t8.webp'));
-        await g2.up();
-      });
-
-      testWidgets('a shoe picked while the others are turned takes their angle; dropping one leaves the rest',
-          (tester) async {
-        await pumpCompare(tester, [
-          listing([for (var i = 0; i < 12; i++) frame(i)]),
-          listing([for (var i = 0; i < 12; i++) frame(i)], id: 8),
-          listing([for (var i = 0; i < 12; i++) frame(i)], id: 9),
-        ]);
-        final g = await turn(tester, 8, 3.2 / 12);
-        await g.up();
-        await tester.tap(find.byKey(const Key('compare-pick-9')));
-        await tester.pump();
-        await tester.pump();
-        expect((shownIn(tester, 7), shownIn(tester, 8), shownIn(tester, 9)),
-            ('https://cdn/t3.webp', 'https://cdn/t3.webp', 'https://cdn/t3.webp'));
-        await tester.tap(find.byKey(const Key('compare-pick-7')));
-        await tester.pump();
-        await tester.pump();
-        expect((shownIn(tester, 8), shownIn(tester, 9)), ('https://cdn/t3.webp', 'https://cdn/t3.webp'));
-      });
-
-      testWidgets('shoes turned either way, or with the front photo as the cover, show the same side together',
-          (tester) async {
-        await pumpCompare(tester, [
-          marked(7, {'outer': 0, 'front': 3}),
-          marked(8, {'outer': 0, 'front': 9}), // turned the other way
-          marked(9, {'front': 0, 'outer': 3}, cover: 'front'), // starts at the toe, turned the other way too
-        ]);
-        await tester.tap(find.byKey(const Key('compare-pick-9')));
-        await tester.pump();
-        final g = await turn(tester, 7, 3.2 / 12);
-        expect((shownIn(tester, 7), shownIn(tester, 8), shownIn(tester, 9)),
-            ('https://cdn/t3.webp', 'https://cdn/t9.webp', 'https://cdn/t0.webp'));
-        await g.up();
-      });
-
-      testWidgets('one tap shows every shoe from the same side, without dragging', (tester) async {
-        tester.view.physicalSize = const Size(2400, 3600); // 800 by 1200, room for the sides under the shoes
-        addTearDown(tester.view.reset);
-        await pumpCompare(tester, [
-          marked(7, {'outer': 0, 'front': 3}),
-          marked(8, {'outer': 0, 'front': 9})
-        ]);
-        await tester.pump();
-        bool on(String side) => tester.widget<ChoiceChip>(find.byKey(Key('compare-side-$side'))).selected;
-        expect(on('cover'), isTrue);
-        tester.takeAnnouncements();
-        await tester.tap(find.byKey(const Key('compare-side-front')));
-        await tester.pump();
-        expect(tester.takeAnnouncements().map((a) => a.message), ['Алдынан: барлық аяқкиім']);
-        expect((shownIn(tester, 7), shownIn(tester, 8)), ('https://cdn/t3.webp', 'https://cdn/t9.webp'));
-        expect((on('front'), on('cover')), (true, false));
-        await tester.tap(find.byKey(const Key('compare-side-back')));
-        await tester.pump();
-        expect((shownIn(tester, 7), shownIn(tester, 8)), ('https://cdn/t9.webp', 'https://cdn/t3.webp'));
-        // A drag leaves the named sides; the covers come back with one tap.
-        final g = await turn(tester, 7, 1 / 12);
-        await g.up();
-        await tester.pump();
-        expect(['outer', 'front', 'inner', 'back', 'cover'].where(on), isEmpty);
-        await tester.tap(find.byKey(const Key('compare-side-cover')));
-        await tester.pump();
-        expect((shownIn(tester, 7), shownIn(tester, 8)), (null, null));
-      });
-
-      testWidgets('a screen reader presses the side chips and hears which side each shoe shows', (tester) async {
-        tester.view.physicalSize = const Size(2400, 3600);
-        addTearDown(tester.view.reset);
-        final semantics = tester.ensureSemantics();
-        await pumpCompare(tester, [
-          marked(7, {'outer': 0, 'front': 3}),
-          marked(8, {'outer': 0, 'front': 9}),
-          listing([for (var i = 0; i < 12; i++) frame(i)], id: 9), // turns, but which way is a guess
-        ]);
-        await tester.tap(find.byKey(const Key('compare-pick-9')));
-        await tester.pump();
-        await tester.pump();
-        // Only the chip says 'Алдынан' before it is pressed; the covers carry no side.
-        expect(find.semantics.byLabel('Алдынан'), findsOne);
-        expect(find.semantics.byLabel('Барлық аяқкиімді бір жағынан көрсету'), findsOne);
-        tester.takeAnnouncements();
-        tester.semantics.tap(find.semantics.byLabel('Алдынан'));
-        await tester.pump();
-        // Heard at once, as the pictures that change sit above the chips, out of focus: one shoe cannot show it.
-        expect(tester.takeAnnouncements().map((a) => a.message), ['Бұл жағынан фото жоқ: 1']);
-        expect((shownIn(tester, 7), shownIn(tester, 8)), ('https://cdn/t3.webp', 'https://cdn/t9.webp'));
-        expect(tester.getSemantics(find.byKey(const Key('compare-side-front'))).flagsCollection.isSelected,
-            ui.Tristate.isTrue);
-        // Each shoe's picture is read with its title, which opens the listing.
-        String heard(int id) => tester.getSemantics(find.byKey(Key('compare-shown-$id'))).label;
-        for (final id in [7, 8]) {
-          expect(heard(id), startsWith('Алдынан\n'));
-          // One stop per shoe: no extra unlabelled image split off the picture.
-          expect(tester.getSemantics(find.byKey(Key('compare-shown-$id'))).childrenCount, 0);
-        }
-        // The shoe that cannot show it says so once: the visible caption is not read a second time.
-        expect(heard(9), startsWith('Бұл жағынан фото жоқ\n'));
-        expect('Бұл жағынан фото жоқ'.allMatches(heard(9)), hasLength(1));
-        // A drag claims no side, so no picture says one any more.
-        final g = await turn(tester, 7, 1 / 12);
-        await g.up();
-        await tester.pump();
-        for (final id in [7, 8, 9]) {
-          expect(heard(id), isNot(contains('\n')), reason: 'only the title once the side is dragged away');
-        }
-        tester.semantics.tap(find.semantics.byLabel('Өкшесі'));
-        await tester.pump();
-        expect(heard(7), startsWith('Өкшесі\n'));
-        tester.semantics.tap(find.semantics.byLabel('Негізгі фото'));
-        await tester.pump();
-        for (final id in [7, 8, 9]) {
-          expect(heard(id), isNot(contains('\n')), reason: 'only the title once the covers are back');
-        }
-        expect(tester.takeAnnouncements().map((a) => a.message), ['Бұл жағынан фото жоқ: 1'],
-            reason: 'the covers are heard on the chip itself');
-        semantics.dispose();
-      });
-
-      testWidgets('a side picked by name is shown only where the sides are known; the others say so', (tester) async {
-        tester.view.physicalSize = const Size(2400, 3600);
-        addTearDown(tester.view.reset);
-        await pumpCompare(tester, [
-          marked(7, {'outer': 0, 'front': 3}),
-          marked(8, {'outer': 0, 'front': 9}),
-          listing([for (var i = 0; i < 12; i++) frame(i)], id: 9), // turns, but which way is a guess
-        ]);
-        await tester.tap(find.byKey(const Key('compare-pick-9')));
-        await tester.pump();
-        await tester.pump();
-        expect(find.byKey(const Key('compare-no-side-9')), findsNothing);
-        await tester.tap(find.byKey(const Key('compare-side-front')));
-        await tester.pump();
-        expect((shownIn(tester, 7), shownIn(tester, 8), shownIn(tester, 9)),
-            ('https://cdn/t3.webp', 'https://cdn/t9.webp', null));
-        expect(find.byKey(const Key('compare-no-side-9')), findsOneWidget);
-        expect(find.byKey(const Key('compare-no-side-7')), findsNothing);
-        await tester.tap(find.byKey(const Key('compare-side-outer')));
-        await tester.pump();
-        expect((shownIn(tester, 7), shownIn(tester, 8), shownIn(tester, 9)),
-            ('https://cdn/t0.webp', 'https://cdn/t0.webp', null));
-        await tester.tap(find.byKey(const Key('compare-side-inner')));
-        await tester.pump();
-        expect((shownIn(tester, 7), shownIn(tester, 8)), ('https://cdn/t6.webp', 'https://cdn/t6.webp'));
-        // A drag claims no side, so every shoe follows it again.
-        final g = await turn(tester, 7, 1 / 12);
-        await g.up();
-        await tester.pump();
-        expect(shownIn(tester, 9), isNotNull);
-        expect(find.byKey(const Key('compare-no-side-9')), findsNothing);
-      });
-
-      testWidgets('no side chips unless two shoes have known sides; dropping one brings the covers back',
-          (tester) async {
-        tester.view.physicalSize = const Size(2400, 3600);
-        addTearDown(tester.view.reset);
-        await pumpCompare(tester, [
-          marked(7, {'outer': 0, 'front': 3}),
-          listing([for (var i = 0; i < 12; i++) frame(i)], id: 8),
-          marked(9, {'outer': 0, 'front': 3}),
-        ]);
-        expect(find.byKey(const Key('compare-turn-hint')), findsOneWidget);
-        expect(find.byKey(const Key('compare-side-front')), findsNothing);
-        await tester.tap(find.byKey(const Key('compare-pick-9')));
-        await tester.pump();
-        await tester.pump();
-        await tester.tap(find.byKey(const Key('compare-side-back')));
-        await tester.pump();
-        expect((shownIn(tester, 7), shownIn(tester, 9)), ('https://cdn/t9.webp', 'https://cdn/t9.webp'));
-        // Without a second known shoe the chips go, and with them the named side.
-        await tester.tap(find.byKey(const Key('compare-pick-9')));
-        await tester.pump();
-        await tester.pump();
-        expect(find.byKey(const Key('compare-side-cover')), findsNothing);
-        expect((shownIn(tester, 7), shownIn(tester, 8)), (null, null));
-      });
-
-      test('the shared angle lays each turn through its sides, whichever way and however evenly it goes', () {
-        const outer = 0.0, front = 0.25, inner = 0.5, back = 0.75;
-        final even = TurnMap({});
-        expect(even.place(front), closeTo(0.25, 1e-9));
-        final back3 = TurnMap({outer: 0, front: 0.75}); // turned the other way
-        expect(back3.place(front), closeTo(0.75, 1e-9));
-        expect(back3.place(inner), closeTo(0.5, 1e-9));
-        final uneven = TurnMap({outer: 0.9, front: 0.35, inner: 0.5, back: 0.65});
-        expect(uneven.place(front), closeTo(0.35, 1e-9));
-        expect(uneven.place(0.125), closeTo((0.9 + 0.225) % 1, 1e-9)); // half way from outer to front
-        // A front matched to the heel contradicts the rest: only the first side is kept.
-        final mixed = TurnMap({outer: 0, front: 0.25, inner: 0.1, back: 0.6});
-        expect(mixed.place(front), closeTo(0.25, 1e-9));
-        for (final map in [
-          even,
-          back3,
-          uneven,
-          mixed,
-          TurnMap({front: 0}),
-          TurnMap({inner: 0.4, back: 0.1})
-        ]) {
-          for (var a = 0.0; a < 1; a += 0.05) {
-            final back = map.angle(map.place(a));
-            expect(min((back - a).abs(), 1 - (back - a).abs()), lessThan(1e-9), reason: '$a');
-          }
-        }
-      });
-
-      testWidgets('three narrow shoes on a small phone need a longer drag to turn once round', (tester) async {
-        tester.view.physicalSize = const Size(960, 2400); // 320 by 800
-        addTearDown(tester.view.reset);
-        await pumpCompare(tester, [
-          listing([for (var i = 0; i < 12; i++) frame(i)]),
-          listing([for (var i = 0; i < 12; i++) frame(i)], id: 8),
-          listing([for (var i = 0; i < 12; i++) frame(i)], id: 9),
-        ]);
-        await tester.tap(find.byKey(const Key('compare-pick-9')));
-        await tester.pump();
-        await tester.pump();
-        final head =
-            find.descendant(of: find.byKey(const Key('compare-open-7')), matching: find.byKey(const Key('card-turn')));
-        expect(tester.getSize(head).width * ShowcasePlan.turnWidths, lessThan(CardTurn.minTurnDrag));
-        final g = await tester.startGesture(tester.getCenter(head));
-        for (var i = 0; i < 10; i++) {
-          await g.moveBy(Offset(-CardTurn.minTurnDrag * 3.2 / 12 / 10, 0));
-          await tester.pump(const Duration(milliseconds: 16));
-        }
-        expect(shownIn(tester, 7), 'https://cdn/t3.webp'); // a quarter of the shortest turn: a quarter round
-        await g.up();
-      });
-
-      testWidgets('no hint when only one of the shoes can turn', (tester) async {
-        await pumpCompare(tester, [
-          listing([for (var i = 0; i < 12; i++) frame(i)]),
-          listing([for (var i = 0; i < 12; i++) frame(i, thumb: false)], id: 8),
-        ]);
-        expect(find.byKey(const Key('compare-turn-hint')), findsNothing);
-        final g = await turn(tester, 7, 3.2 / 12);
-        expect((shownIn(tester, 7), shownIn(tester, 8)), ('https://cdn/t3.webp', null));
-        await g.up();
-      });
-    });
-  });
-}
-
-/// A frame that is decoded at once, or fails, without the network.
-class _TestFrame extends ImageProvider<_TestFrame> {
-  const _TestFrame(this.url, this.picture, this.failing);
-  final String url;
-  final ui.Image picture;
-  final Set<String> failing;
-
-  @override
-  Future<_TestFrame> obtainKey(ImageConfiguration configuration) => SynchronousFuture(this);
-
-  @override
-  ImageStreamCompleter loadImage(_TestFrame key, ImageDecoderCallback decode) =>
-      OneFrameImageStreamCompleter(failing.contains(url)
-          ? Future.error(StateError('no $url'))
-          : SynchronousFuture(ImageInfo(image: picture.clone())));
-
-  @override
-  bool operator ==(Object other) => other is _TestFrame && other.url == url;
-
-  @override
-  int get hashCode => url.hashCode;
 }

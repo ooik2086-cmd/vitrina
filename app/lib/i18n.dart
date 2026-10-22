@@ -56,3 +56,9 @@ String trf(String kk, List<Object?> args) {
   }
   return text;
 }
+
+/// A star rating as people here write it: "4,8" (English keeps "4.8").
+String ratingText(double r) {
+  final s = r.toStringAsFixed(1);
+  return appLanguage.value == 'en' ? s : s.replaceAll('.', ',');
+}

@@ -13,8 +13,6 @@ import '../session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/facts_fields.dart';
-import '../widgets/listing_contents.dart' show ShowcaseStopsHint;
-import 'spin_capture_screen.dart';
 import '../color_guess.dart';
 import '../colors.dart';
 import '../i18n.dart';
@@ -32,7 +30,6 @@ const optionalAngles = {
 const detailAngles = {'top', 'sole', 'detail', 'label'};
 const _defectRequired = {'used_good', 'defective'};
 const _resendPhotoText = 'Кейбір фото жүктелмеді. Белгісі бар фотоны басып, қайта жіберіңіз.';
-const _resendFramesText = 'Кейбір кадрлар жүктелмеді. Қайта түсірудің керегі жоқ, тек қайта жіберіңіз.';
 const _retakePhotoText = 'Фото қабылданбады. Белгісі бар фотоны басып, басқасын түсіріңіз.';
 
 class _SizeRow {
@@ -71,14 +68,14 @@ class _Cancelled implements Exception {
   const _Cancelled();
 }
 
-/// Sends a few photos at a time: two dozen 360° frames at once choke weak mobile data, so the rest wait their turn.
+/// Sends a few photos at a time: many at once choke weak mobile data, so the rest wait their turn.
 class _Pool {
   _Pool(this.size);
   final int size;
   var _running = 0;
   final _waiting = <Completer<void>>[];
 
-  /// [first] puts the job ahead of those waiting: a side photo is not held up behind two dozen 360° frames.
+  /// [first] puts the job ahead of those waiting: the photo just taken goes before older ones still queued.
   Future<T> run<T>(Future<T> Function() job, {bool first = false}) async {
     if (_running < size) {
       _running++;
@@ -127,7 +124,6 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
   final _sizes = [_SizeRow()];
   final Map<String, _Upload> _photos = {};
   final List<_Upload> _defectPhotos = [];
-  List<_Upload> _frames = [];
   bool _saving = false;
   int _step = 0; // photos, then the pair, then price and sizes
   final _picker = ImagePicker();
@@ -227,7 +223,6 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
         ],
         'photos': {for (final e in _photos.entries) e.key: _kept(e.value)},
         'defect_photos': [for (final d in _defectPhotos) _kept(d)],
-        'frames': [for (final f in _frames) _kept(f)],
       };
 
   List<(String, TextEditingController)> get _fields => [
@@ -279,7 +274,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
 
   /// Puts kept work on the page; an empty map gives a blank page, for starting over.
   void _apply(Map<String, dynamic> d) {
-    _cancel([..._photos.values, ..._defectPhotos, ..._frames]);
+    _cancel([..._photos.values, ..._defectPhotos]);
     for (final (k, c) in _fields) {
       c.text = d[k] as String? ?? (k == 'delivery' ? '0' : '');
     }
@@ -330,7 +325,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
     _defectPhotos
       ..clear()
       ..addAll([for (final j in d['defect_photos'] as List? ?? []) _revive(j, fresh)].nonNulls);
-    _frames = [for (final j in d['frames'] as List? ?? []) _revive(j, fresh, frame: true)].nonNulls.toList();
+    // A draft from before the photo-frame 360° was taken out may still hold 'frames': they are left behind unsent.
     // Kept photos: the colour is guessed again while none is set.
     if (_color.text.trim().isEmpty) {
       if (_photos['outer']?.path case final path?) {
@@ -345,7 +340,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
 
   /// A kept photo: done if it went lately, otherwise sent again from the phone. A file the phone has since
   /// cleared fails to read, and its tile asks for another photo.
-  _Upload? _revive(Object? kept, bool fresh, {bool detail = false, bool frame = false}) {
+  _Upload? _revive(Object? kept, bool fresh, {bool detail = false}) {
     if (kept is! Map) return null;
     final path = kept['path'] as String?;
     if (kept['url'] case final String url when fresh) {
@@ -353,7 +348,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
         ..url = url
         ..future = Future.value(url);
     }
-    if (path != null) return _startUpload(XFile(path), detail: detail, frame: frame);
+    if (path != null) return _startUpload(XFile(path), detail: detail);
     return null;
   }
 
@@ -416,7 +411,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _keep(); // the last change, before the timer would have kept it
-    _cancel([..._photos.values, ..._defectPhotos, ..._frames]); // nothing more is sent for a page that was left
+    _cancel([..._photos.values, ..._defectPhotos]); // nothing more is sent for a page that was left
     for (final c in [_title, _brand, _color, _defects, _description, _price, _delivery]) {
       c.dispose();
     }
@@ -436,7 +431,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
         _style,
         for (final r in _sizes) '${r.label.text.trim()}|${r.cm.text.trim()}|${r.qty.text.trim()}',
         ..._photos.keys,
-        '${_defectPhotos.length}/${_frames.length}',
+        '${_defectPhotos.length}',
       ].join('\u0000');
 
   bool get _dirty => _snapshot() != _initial;
@@ -462,14 +457,14 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
     }
   }
 
-  _Upload _startUpload(XFile file, {bool detail = false, bool frame = false}) {
+  _Upload _startUpload(XFile file, {bool detail = false}) {
     final api = _api;
     late final _Upload u;
     u = _Upload(
         () => _pool.run(() async {
               if (u.cancelled) throw const _Cancelled();
               return api.uploadPhotoPatiently(await file.readAsBytes(), file.name, detail: detail);
-            }, first: !frame),
+            }, first: true),
         path: file.path.isEmpty ? null : file.path);
     return _send(u);
   }
@@ -608,28 +603,6 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
     if (file != null) setState(() => _defectPhotos.add(_startUpload(file)));
   }
 
-  Future<void> _captureSpin() async {
-    final frames = await Navigator.of(context)
-        .push<List<XFile>>(MaterialPageRoute(builder: (_) => const SpinCaptureScreen(), fullscreenDialog: true));
-    if (frames == null) return;
-    _cancel(_frames);
-    setState(() => _frames = [for (final f in frames) _startUpload(f, frame: true)]);
-  }
-
-  Future<void> _pickSpinFromGallery() async {
-    final files = await _picker.pickMultiImage(maxWidth: 2000, maxHeight: 2000, imageQuality: 90);
-    if (files.isEmpty) return;
-    if (files.length < spinMinFrames) {
-      if (mounted) {
-        showError(
-            context, ApiException(422, 'too_few_frames', trf('360° үшін кемінде {0} кадр керек.', [spinMinFrames])));
-      }
-      return;
-    }
-    _cancel(_frames);
-    setState(() => _frames = [for (final f in files) _startUpload(f, frame: true)]);
-  }
-
   int? _tiyn(String text) {
     final v = int.tryParse(text.replaceAll(RegExp(r'\s'), ''));
     return v == null ? null : v * 100;
@@ -652,7 +625,6 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
       final photos = <Map<String, String>>[
         for (final e in _photos.entries) {'url': await e.value.future, 'angle': e.key},
         for (final d in _defectPhotos) {'url': await d.future, 'angle': 'defect'},
-        for (final f in _frames) {'url': await f.future, 'angle': 'frame'},
       ];
       final body = {
         'title': _title.text.trim(),
@@ -695,7 +667,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
     } catch (e) {
       if (!mounted) return;
       // An upload that failed after Next: back to the step that shows it, so it can be taken again.
-      final failedStep = [..._photos.values, ..._frames].any((u) => u.error != null)
+      final failedStep = _photos.values.any((u) => u.error != null)
           ? 0
           : _defectPhotos.any((d) => d.error != null)
               ? 1
@@ -741,10 +713,6 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
       _sayFailed(_photos.values, _resendPhotoText);
       return false;
     }
-    if (_frames.any((f) => f.error != null)) {
-      _sayFailed(_frames, _resendFramesText);
-      return false;
-    }
     return true;
   }
 
@@ -775,8 +743,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final uploading =
-        [..._photos.values, ..._defectPhotos, ..._frames].where((u) => u.url == null && u.error == null).length;
+    final uploading = [..._photos.values, ..._defectPhotos].where((u) => u.url == null && u.error == null).length;
     return PopScope(
       canPop: _step == 0 && !_dirty,
       onPopInvokedWithResult: (didPop, _) {
@@ -838,7 +805,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
                 const Icon(Icons.content_copy_rounded, size: 20),
                 const SizedBox(width: 10),
                 Expanded(
-                  child: Text(trf('«{0}» мәліметтері көшірілді. Фото мен 360° кадрларды осы жұптан жаңадан түсіріңіз.',
+                  child: Text(trf('«{0}» мәліметтері көшірілді. Фотоларды осы жұптан жаңадан түсіріңіз.',
                       [widget.template!.title])),
                 ),
               ]),
@@ -856,53 +823,6 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
               onTap: _photos[e.key]?.error != null ? () => _retryAngle(e.key) : () => _pickAngle(e.key),
             ),
         ]),
-        const SizedBox(height: 16),
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Row(children: [
-                const Icon(Icons.threesixty),
-                const SizedBox(width: 8),
-                Expanded(child: Text(tr('360° көрініс'), style: theme.textTheme.titleSmall)),
-                if (_frames.isNotEmpty)
-                  Text('${_frames.where((f) => f.url != null).length}/${_frames.length}',
-                      style: theme.textTheme.bodySmall),
-              ]),
-              const SizedBox(height: 4),
-              Text(
-                trf('Міндетті емес, бірақ сатып алушы тауарды жан-жағынан көреді. Аяқкиімді аздап бұрып, {0} шақты кадр түсіріңіз.',
-                    [spinTargetFrames]),
-                style: theme.textTheme.bodySmall,
-              ),
-              if (_frames.isNotEmpty)
-                ShowcaseStopsHint(have: {
-                  for (final e in _photos.entries)
-                    if (e.value.error == null) e.key
-                }, onPick: _pickAngle),
-              if (_frames.any((f) => f.error != null)) ...[
-                Text(tr(_resendFramesText), style: TextStyle(color: theme.colorScheme.error)),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: TextButton.icon(
-                      key: const Key('resend-frames'),
-                      onPressed: () => _resend(_frames),
-                      icon: const Icon(Icons.refresh),
-                      label: Text(tr('Кадрларды қайта жіберу'))),
-                ),
-              ],
-              const SizedBox(height: 8),
-              Wrap(spacing: 8, children: [
-                FilledButton.tonalIcon(
-                    onPressed: _captureSpin, icon: const Icon(Icons.photo_camera_outlined), label: Text(tr('Түсіру'))),
-                OutlinedButton.icon(
-                    onPressed: _pickSpinFromGallery,
-                    icon: const Icon(Icons.photo_library_outlined),
-                    label: Text(tr('Галереядан'))),
-              ]),
-            ]),
-          ),
-        ),
       ];
 
   List<Widget> _detailStep() => [

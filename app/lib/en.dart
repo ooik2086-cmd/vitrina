@@ -339,8 +339,8 @@ const en = <String, String>{
       'Done. Open the video and save it to your phone or send the link.',
   'Видео жасалмады. Қайта көріңіз.': 'Couldn\'t create the video. Please try again.',
   'Видео жасалуда, бұл бірнеше секунд алады…': 'Creating the video, this takes a few seconds…',
-  '8 секундтық тік видео: 360° айналым, баға және музыка. Instagram, TikTok және WhatsApp үшін.':
-      'An 8-second vertical video: 360° view, price, and music. For Instagram, TikTok, and WhatsApp.',
+  '8 секундтық тік видео: фотолар, баға және музыка. Instagram, TikTok және WhatsApp үшін.':
+      'An 8-second vertical video: photos, price, and music. For Instagram, TikTok, and WhatsApp.',
   'Ашу': 'Open',
   'Сілтеме көшірілді': 'Link copied',
   'Сілтемені көшіру': 'Copy link',
@@ -518,8 +518,8 @@ const en = <String, String>{
   'Жаңадан бастау': 'Start over',
   'Ұқсас тауар': 'Similar listing',
   'Ұқсас тауар қосу': 'Add similar listing',
-  '«{0}» мәліметтері көшірілді. Фото мен 360° кадрларды осы жұптан жаңадан түсіріңіз.':
-      'Details of «{0}» copied. Retake the photos and 360° frames with this pair.',
+  '«{0}» мәліметтері көшірілді. Фотоларды осы жұптан жаңадан түсіріңіз.':
+      'Details of «{0}» copied. Retake the photos with this pair.',
   'Тапсырыс, төлем, чат және баға ұсынысы туралы хабарламалар әрқашан келеді: олар сіздің ақшаңыз бен тауарыңызға қатысты.':
       'Notifications about orders, payments, chat, and offers always come: they concern your money and items.',
   'Хабарлама баптаулары': 'Notification settings',
@@ -655,7 +655,6 @@ const en = <String, String>{
   'Жауапсыз сұрақ: {0}': 'Questions to answer: {0}',
   'Жауап күтетін сұрақ жоқ.': 'No questions waiting.',
   'Қалдығы аз': 'Few left',
-  '360° витрина': '360° showcase',
   'Бар өлшемдер': 'Sizes in stock',
   'Барлығы, жеткізумен': 'Total with delivery',
   'Бренд': 'Brand',
@@ -679,8 +678,8 @@ const en = <String, String>{
   'Өлшеміңіз: {0} см': 'Your size: {0} cm',
   'Өткізу': 'Skip',
   'Аяқкиімді 360° айналдырып көріңіз': 'Spin the shoes 360°',
-  'Әр витрина сатушының өз фотоларынан жасалады. Саусақпен айналдырып, тігісі мен табанына дейін қараңыз.':
-      'Every showcase is built from the seller\'s own photos. Rotate with your finger and examine everything, down to the seams and sole.',
+  'Аяқкиімді саусақпен кез келген жаққа бұрап, екі саусақпен жақындатыңыз. Тігісі мен табанына дейін көресіз.':
+      'Turn the shoe any way with your finger and zoom in with two fingers. You see everything, down to the seams and sole.',
   'Ақшаңыз қорғалған': 'Your money is protected',
   'Төлем VITRINA-да сақталады. Сатушы оны тауарды алғаныңызды растағаннан кейін ғана алады.':
       'Payment is held by VITRINA. The seller gets it only after you confirm you received the item.',
@@ -742,8 +741,8 @@ const en = <String, String>{
       'These rules are a draft: they will be finalised once the payment partner is connected and a lawyer has reviewed them.',
   'Жеткізілгеннен кейін {0} күн ішінде тапсырыс бетінде «Қайтару» батырмасын басып, себебін жазыңыз. Сатушы мақұлдаса, ақша қайтарылады. Сатушы келіспесе не жауап бермесе, қолдау қызметі шешеді. Келесі жолы қателеспеу үшін профильге табан ұзындығын сантиметрмен енгізіңіз.':
       'Within {0} days of delivery, tap “Return” on the order page and write the reason. If the seller approves, the money comes back. If the seller disagrees or does not answer, support decides. To get it right next time, add your foot length in centimetres to your profile.',
-  'Сатушы аяқкиімді айналдыра отырып түсірген шын фотолар. Оларды саусақпен бұрап, тігісі мен табанына дейін көресіз. Жасанды интеллект аяқкиімнің пішіні мен түсін өзгертпейді, тек фонды тазартады.':
-      'Real photos the seller took while turning the shoe. Spin them with your finger and look at every seam down to the sole. AI never changes the shoe’s shape or colour; it only cleans up the background.',
+  'Аяқкиімнің 3D үлгісі. Оны саусақпен кез келген жаққа бұрап, екі саусақпен жақындатып, тігісі мен табанына дейін көресіз. Қасында сатушының өз фотолары да бар.':
+      'A 3D model of the shoe. Turn it any way with your finger and zoom in with two fingers, down to the seams and sole. The seller\'s own photos are right beside it.',
   'Тапсырыс бетінде «Дау ашу» басып, себебін жазыңыз, фотосын сатушымен чатқа жіберіңіз. Дау шешілгенше ақша ешкімге өтпейді. Қолдау қызметі екі жақтың да түсіндірмесін және чатты қарап, шешім шығарады.':
       'Tap “Open dispute” on the order page and write the reason; send photos to the seller in the chat. Until the dispute is settled the money goes to no one. Support reads both sides and the chat, then decides.',
   'Тапсырыс жасаған соң {0} минут ішінде төлейсіз, әйтпесе ол жойылып, өлшем басқаларға ашылады. Сатушы {1} сағат ішінде қабылдап, {3} күн ішінде жіберуі керек, әйтпесе ақша өзі қайтарылады. Сәлемдеме қолыңызға тигенде «Тауарды алдым» басыңыз. Тексеруге {2} күн бар: растамасаңыз да, қайтару не дау ашпасаңыз, тапсырыс өзі аяқталып, ақша сатушыға өтеді.':
@@ -760,7 +759,7 @@ const en = <String, String>{
   'Өлшемі келмесе ше?': 'What if the size doesn’t fit?',
   'Тауар сипаттамаға сай болмаса?': 'What if the item doesn’t match the description?',
   'Түпнұсқа екенін қалай білемін?': 'How do I know it’s genuine?',
-  '360° витрина деген не?': 'What is the 360° showcase?',
+  '360° көрініс деген не?': 'What is the 360° view?',
   'Неге чаттан шықпау керек?': 'Why stay in the app’s chat?',
   'Сызылған баға: соңғы 30 күндегі ең төмен баға.': 'Crossed-out price: the lowest of the last 30 days.',
   'Қабылдауды күтетін тапсырыс': 'Orders to accept',
@@ -963,7 +962,7 @@ const en = <String, String>{
   'Атауы мен сипаты': 'Name and details',
   'Түсін жазыңыз': 'Enter the colour',
   'Фото бар': 'Photo added',
-  'Фото, 360° және өлшемдер': 'Photos, 360° and sizes',
+  'Фото және өлшемдер': 'Photos and sizes',
   'Қосқан әр фото мен өлшем бірден сақталады.': 'Each photo and size you add is saved right away.',
   'Өшіру: {0}': 'Delete: {0}',
   'Кодты қайта жіберу': 'Send the code again',
@@ -1147,7 +1146,6 @@ const en = <String, String>{
   'Алтын түсті ме?': 'Is it gold?',
   'Қара-ақ па?': 'Is it black and white?',
   'Түрлі түсті ме?': 'Is it multicolour?',
-  '360° айналым осы бұрыштан басталады': 'The 360° turn now starts from this angle',
   'Айналым қай бұрыштан басталады': 'Where the turn starts',
   'Алдыңғы кадр': 'Previous frame',
   'Келесі кадр': 'Next frame',
@@ -1163,8 +1161,6 @@ const en = <String, String>{
   'Сырғытпаны жылжытып, мұқабадағыдай көрінетін кадрды табыңыз.':
       'Move the slider to find the frame that looks like the cover.',
   'Түсті алып тастау': 'Remove colour',
-  '360° айналымды қайта түсіріңіз: бір кадрында аяқкиім табылмады, сондықтан фоны алынбайды. Аяқкиімнен ерекшеленетін біркелкі фонда, оны әр кадрға толық сыйғызыңыз.':
-      'Retake the 360° view: no shoe was found in one of its frames, so its background is not removed. Shoot on a plain background that contrasts with the shoe, with the whole shoe in every frame.',
   'Мына фотоларды қайта түсіріңіз: {0}. Оларда аяқкиім табылмады, сондықтан фоны алынбайды. Аяқкиімнен ерекшеленетін біркелкі фонда түсіріңіз.':
       'Retake these photos: {0}. No shoe was found in them, so their background is not removed. Shoot on a plain background that contrasts with the shoe.',
   '{0}: аяқкиім табылмады, фоны алынбайды': '{0}: no shoe found, background not removed',

@@ -35,15 +35,6 @@ class ListingQuality {
 
 ListingQuality listingQuality(Listing l) {
   final tips = <QualityTip>[];
-  if (l.frames.length < min360Frames) {
-    tips.add(QualityTip(25, tr('360° витрина қосыңыз: сатып алушы аяқкиімді жан-жағынан айналдырып көреді.')));
-  }
-  // The cut-out job stops a part of the turn at its first frame with no shoe and keeps that part as taken, so the
-  // seller is asked to take the turn again, not told a count of frames; a single frame cannot be retaken anyway.
-  if (l.frames.any((m) => m.noShoe)) {
-    tips.add(QualityTip(10,
-        tr('360° айналымды қайта түсіріңіз: бір кадрында аяқкиім табылмады, сондықтан фоны алынбайды. Аяқкиімнен ерекшеленетін біркелкі фонда, оны әр кадрға толық сыйғызыңыз.')));
-  }
   // A scan's top and sole photos are frames of the turn too: told about once, above.
   final frameUrls = {for (final f in l.frames) f.originalUrl};
   final noShoe = [
