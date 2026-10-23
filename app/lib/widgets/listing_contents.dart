@@ -12,6 +12,7 @@ import '../screens/listing_editor_screen.dart';
 import '../session.dart';
 import '../theme.dart';
 import 'common.dart';
+import 'listing_video.dart';
 
 /// The server's own minimum (Settings.min_listing_photos) for a listing that is or was on sale.
 const _minPhotosOnSale = 4;
@@ -416,6 +417,8 @@ class _ListingContentsCardState extends State<ListingContentsCard> {
         ),
       ]),
       if (_busy) const Padding(padding: EdgeInsets.only(top: 8), child: LinearProgressIndicator()),
+      const SizedBox(height: 20),
+      ListingVideoSection(listing: _l, onChanged: widget.onChanged, picker: _picker),
     ]);
   }
 }

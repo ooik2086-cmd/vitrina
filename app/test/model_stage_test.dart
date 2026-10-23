@@ -13,6 +13,10 @@ import 'package:vitrina/viewer_host_io.dart';
 import 'package:vitrina/widgets/color_choice.dart';
 import 'package:vitrina/widgets/spin_viewer.dart' show PhotoGallery;
 import 'package:vitrina/widgets/model_stage.dart';
+import 'package:vitrina/widgets/video_pane.dart';
+import 'package:video_player_platform_interface/video_player_platform_interface.dart';
+
+import 'support/fake_video.dart';
 
 /// The 3D page as a test sees it: the scripts the stage runs in it, and what it answers.
 class FakeView implements ModelView {
@@ -75,7 +79,9 @@ Map<String, dynamic> colorway(int id, String color, {bool current = false}) => {
 
 const model = {'url': 'https://cdn/shoe-1024.glb', 'hq_url': 'https://cdn/shoe-2048.glb'};
 
-Map<String, dynamic> listing(int id, {String color = 'көк', String? variant = 'midnight', bool withModel = true}) => {
+Map<String, dynamic> listing(int id,
+        {String color = 'көк', String? variant = 'midnight', bool withModel = true, bool withVideo = false}) =>
+    {
       'id': id,
       'status': 'published',
       'title': 'Кроссовка $color',
@@ -100,6 +106,13 @@ Map<String, dynamic> listing(int id, {String color = 'көк', String? variant =
       'seller': {'id': 3, 'shop_name': 'Qadam Store', 'city': 'Алматы'},
       'colors': [colorway(3, 'көк', current: id == 3), colorway(4, 'қызғылт', current: id == 4)],
       if (withModel) 'model': {...model, 'variant': variant},
+      if (withVideo)
+        'video': {
+          'state': 'ready',
+          'url': 'https://cdn.example/v$id.mp4',
+          'poster_url': 'https://cdn.example/v$id.jpg',
+          'seconds': 9
+        },
     };
 
 /// Starts the stage's server outside the test clock (a socket opens only in real time), so a page that loads in a
@@ -341,15 +354,19 @@ void main() {
       await tester.pumpAndSettle();
     }
 
-    testWidgets('a shoe with a model opens in 3D, with a small 360°/Фото switch', (tester) async {
+    testWidgets('a shoe with a model opens in 3D, with a small 360°/Фото/Видео switch as on the demo', (tester) async {
       await open(tester, listing(3));
       expect(find.byType(ModelStage), findsOneWidget);
       final toggle = find.byKey(const Key('stage-switch'));
       final segment = find.descendant(of: toggle, matching: find.byType(TextButton)).first;
-      expect(tester.getSize(toggle).height, 42); // its border included
-      expect(tester.getSize(segment).width, greaterThan(140)); // each half wide and easy to hit
+      expect(tester.getSize(toggle).height, 48); // the demo's 42, made the smallest a finger is sure to hit
+      expect(tester.getSize(segment).width, greaterThan(100)); // each third wide and easy to hit
       expect(find.text('360°'), findsOneWidget);
       expect(find.text('Фото'), findsOneWidget);
+      expect(find.text('Видео'), findsOneWidget); // always there, as on the demo, even before the seller adds one
+      await tester.tap(find.text('Видео'));
+      await tester.pump();
+      expect(find.text('Сатушы әлі видео қоспаған'), findsOneWidget);
     });
 
     testWidgets('Фото shows the photos at once and keeps the 3D open, paused, for 360° to come back to',
@@ -434,6 +451,72 @@ void main() {
       expect(find.byType(ModelStage), findsNothing);
       expect(find.byType(PhotoGallery), findsOneWidget);
       expect(find.byKey(const Key('stage-switch')), findsNothing);
+    });
+
+    testWidgets('the seller\'s video is a third tab: its poster first, played on a tap, paused by another tab',
+        (tester) async {
+      final video = FakeVideoPlatform();
+      VideoPlayerPlatform.instance = video;
+      await warmHost(tester);
+      await open(tester, listing(3, withVideo: true));
+      await pageLoaded(tester, maker);
+      maker.post({'type': 'ready'});
+      await tester.pump();
+      final toggle = find.byKey(const Key('stage-switch'));
+      expect(find.descendant(of: toggle, matching: find.byType(TextButton)), findsNWidgets(3));
+      for (final part in find.descendant(of: toggle, matching: find.byType(TextButton)).evaluate()) {
+        expect(
+            tester.getSize(find.byWidget(part.widget)).width, greaterThanOrEqualTo(96)); // a third, still easy to hit
+      }
+      expect(find.byType(VideoPane), findsNothing); // nothing of it until asked for
+      await tester.tap(find.text('Видео'));
+      await tester.pump();
+      expect(maker.views.single.scripts.last, 'vitrina.setPaused(true)'); // the 3D rests meanwhile
+      expect(find.byKey(const Key('video-play')), findsOneWidget);
+      expect(video.made, isEmpty); // the poster only: nothing comes down before a tap
+      expect(find.byKey(const Key('scene')), findsNothing); // the scene button is the 3D's and the photos'
+      await tester.tap(find.byKey(const Key('video-play')));
+      await tester.pumpAndSettle();
+      expect(video.made, ['https://cdn.example/v3.mp4']);
+      expect(video.calls, contains('play'));
+      expect(find.byKey(const Key('fake-video')), findsOneWidget);
+      await tester.tap(find.text('Фото'));
+      await tester.pump();
+      expect(video.calls.last, 'pause');
+      await tester.tap(find.text('Видео'));
+      await tester.pump();
+      expect(video.made, hasLength(1)); // kept where it was, not opened again
+      expect(find.byKey(const Key('fake-video')), findsOneWidget);
+    });
+
+    testWidgets('a video that does not open says so on its poster, and a tap tries again', (tester) async {
+      final video = FakeVideoPlatform()..fail = true;
+      VideoPlayerPlatform.instance = video;
+      await open(tester, listing(3, withModel: false, withVideo: true));
+      // No 3D: the switch has the photos and the video.
+      expect(find.text('360°'), findsNothing);
+      await tester.tap(find.text('Видео'));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('video-play')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('video-failed')), findsOneWidget);
+      video.fail = false;
+      await tester.tap(find.byKey(const Key('video-play')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('fake-video')), findsOneWidget);
+    });
+
+    testWidgets('another colour without a video goes back to the photos', (tester) async {
+      VideoPlayerPlatform.instance = FakeVideoPlatform();
+      await open(tester, listing(3, withModel: false, withVideo: true));
+      listings[4] = listing(4, color: 'қызғылт', withModel: false);
+      await tester.tap(find.text('Видео'));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('color-4')));
+      await tester.pumpAndSettle();
+      expect(find.byType(VideoPane), findsNothing);
+      expect(find.text('Видео'), findsNothing);
+      expect(find.byType(PhotoGallery), findsOneWidget);
     });
 
     testWidgets('a shoe without a model shows its photos, with no switch', (tester) async {

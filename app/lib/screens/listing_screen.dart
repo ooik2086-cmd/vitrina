@@ -12,7 +12,6 @@ import '../session.dart';
 import '../theme.dart';
 import '../widgets/color_choice.dart';
 import '../widgets/common.dart';
-import '../widgets/delivery_eta.dart';
 import '../widgets/delivery_sheet.dart';
 import '../widgets/listing_lines.dart';
 import '../widgets/questions.dart';
@@ -20,6 +19,7 @@ import '../widgets/size_guide.dart';
 import '../widgets/model_stage.dart';
 import '../widgets/scroll_showcase.dart' show ShowcaseScene;
 import '../widgets/spin_viewer.dart';
+import '../widgets/video_pane.dart';
 import '../widgets/studio.dart';
 import 'chat_screen.dart';
 import 'help_screen.dart';
@@ -59,7 +59,6 @@ class _ListingScreenState extends State<ListingScreen> {
   late Future<Listing> _listing;
   late Listing? _ready = widget.listing;
   late Future<Listing>? _pending = widget.pending;
-  Future<List<Listing>>? _similar;
 
   /// Why the buyer's own offer did not load, while that may pass; buying waits until it is known.
   Object? _offerError;
@@ -68,7 +67,10 @@ class _ListingScreenState extends State<ListingScreen> {
   bool _fitChecked = false;
   bool _favorite = false;
   bool _ordering = false;
-  bool _showPhotos = false;
+  _Pane _pane = _Pane.turn;
+
+  /// The video is built at the first tap on its tab, then kept (paused) while another tab shows.
+  bool _videoOpened = false;
 
   /// The 3D could not open: the stage shows the photos, with no switch to a 3D that is not there.
   bool _noModel = false;
@@ -114,7 +116,6 @@ class _ListingScreenState extends State<ListingScreen> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     _loadListing();
-    if (_similar == null) _loadSimilar();
     _loadOffer();
     _loadPayments();
   }
@@ -142,14 +143,10 @@ class _ListingScreenState extends State<ListingScreen> {
     }, onError: (_) {});
   }
 
-  /// Similar goods are a suggestion: when they do not load the row is left out.
-  void _loadSimilar() => _similar = SessionScope.of(context).api.similar(_id).catchError((_) => <Listing>[]);
-
   /// After a failed load, «Try again» fetches every part of the page, not only the listing.
   void _reload() {
     setState(() {
       _loadListing();
-      _loadSimilar();
     });
     _loadPayments();
     if (_offer == null) _loadOffer();
@@ -441,8 +438,8 @@ class _ListingScreenState extends State<ListingScreen> {
       _alerts = null;
       _favorite = false;
       _noModel = false;
+      _videoOpened = false; // another colour, another video (or none)
       _orderKey = newIdempotencyKey();
-      _loadSimilar();
     });
     if (next.status == 'published') rememberViewed(next);
     // The same model in another colour is shown at once, with no new "ready": its photos come down now.
@@ -488,9 +485,28 @@ class _ListingScreenState extends State<ListingScreen> {
         duration: MediaQuery.of(context).disableAnimations ? Duration.zero : const Duration(milliseconds: 500));
   }
 
+  /// What the stage shows now: the tab picked, while this colour has it; else the 3D, else the photos.
+  _Pane _shown(Listing l) => switch (_pane) {
+        _Pane.video when (l.video?.ready ?? false) || (l.model != null && !_noModel) => _Pane.video,
+        _Pane.photos => _Pane.photos,
+        _ => l.model != null && !_noModel ? _Pane.turn : _Pane.photos,
+      };
+
   /// The stage: the shoe in 3D, or its photos, on the light or dark scene, with the switch between the scenes.
   Widget _stageView(Listing l, double height) {
     final model = _noModel ? null : l.model;
+    final shown = _shown(l);
+    final video = l.video?.ready ?? false ? l.video : null;
+    // Built once the Видео tab is first shown (also after a colour change made on it), never before: no data spent.
+    final videoPane = video != null && (_videoOpened || shown == _Pane.video)
+        ? VideoPane(
+            key: ValueKey(video.url),
+            url: video.url!,
+            posterUrl: video.posterUrl,
+            seconds: video.seconds,
+            active: shown == _Pane.video,
+            background: (_dark ? ShowcaseScene.dark : ShowcaseScene.light).ink)
+        : null;
     final scene = _dark ? ShowcaseScene.dark : ShowcaseScene.light;
     // A scan's photos are themselves cut out: they stand on the scene; photos as taken fill the square.
     final scan = l.backdrop != null && l.photos.every((p) => p.processedUrl == p.originalUrl);
@@ -516,16 +532,21 @@ class _ListingScreenState extends State<ListingScreen> {
       child: Material(
         type: MaterialType.transparency,
         child: Stack(fit: StackFit.expand, children: [
-          if (model == null)
+          if (model == null && videoPane == null)
             Hero(tag: 'listing-${l.id}', child: photos)
+          else if (model == null)
+            IndexedStack(index: shown == _Pane.video ? 1 : 0, sizing: StackFit.expand, children: [
+              Hero(tag: 'listing-${l.id}', child: photos),
+              videoPane!,
+            ])
           else
             // The 3D stays alive under the photos, so going back to it shows the shoe at once, as it was.
-            IndexedStack(index: _showPhotos ? 1 : 0, sizing: StackFit.expand, children: [
+            IndexedStack(index: shown.index, sizing: StackFit.expand, children: [
               ModelStage(
                 key: _model,
                 model: model,
                 dark: _dark,
-                paused: _showPhotos,
+                paused: shown != _Pane.turn,
                 cover: cover,
                 // The photos come down after the shoe, not alongside it on a weak line.
                 onReady: () {
@@ -536,8 +557,9 @@ class _ListingScreenState extends State<ListingScreen> {
                 },
               ),
               photos,
+              videoPane ?? (video == null ? _NoVideo(scene: scene) : const SizedBox.shrink()),
             ]),
-          if (model != null || scan)
+          if ((model != null || scan) && shown != _Pane.video)
             Positioned(
               right: 12,
               bottom: 12,
@@ -569,12 +591,18 @@ class _ListingScreenState extends State<ListingScreen> {
 
   int? _photosReady;
 
+  /// A part of the stage switch: its word whole, made smaller only where very large text would not fit.
+  Widget _switchLabel(String text) => FittedBox(fit: BoxFit.scaleDown, child: Text(text, maxLines: 1));
+
   Widget _body(BuildContext context, Listing l) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final dark = theme.brightness == Brightness.dark;
     final fit = bestFit(l.sizes, mySize.value);
     final hasModel = l.model != null && !_noModel;
+    final hasVideo = l.video?.ready ?? false;
+    // Three parts with very large text: the words alone, so each is read whole; and only then made to fit.
+    final roomy = !hasModel || MediaQuery.textScalerOf(context).scale(15) <= 21;
     if (!_fitChecked) {
       _fitChecked = true; // pick the buyer's saved size once; after that their taps decide
       _sizeId ??= fit?.id;
@@ -600,28 +628,45 @@ class _ListingScreenState extends State<ListingScreen> {
             return ListView(controller: _scroll, padding: EdgeInsets.zero, children: [
               // Kept when the page scrolls it away, so scrolling back does not open the 3D again.
               if (_stage > 0) _KeptAlive(child: _stageView(l, _stage)),
-              if (hasModel)
+              if (hasModel || hasVideo)
                 Padding(
                   padding: contentPadding(context, const EdgeInsets.fromLTRB(20, 14, 20, 0)),
-                  // 42 high as on the approved demo, on every phone: two wide halves, each easy to hit.
+                  // As on the approved demo, but 48 high, not 42: the smallest a finger is sure to hit, for every part.
                   child: SizedBox(
-                    height: 42,
-                    child: SegmentedButton<bool>(
+                    height: 48,
+                    child: SegmentedButton<_Pane>(
                       key: const Key('stage-switch'),
                       showSelectedIcon: false,
                       style: ButtonStyle(
                         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        visualDensity: const VisualDensity(vertical: 2), // 40 + 8
                         iconSize: const WidgetStatePropertyAll(18),
+                        padding: roomy ? null : const WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 6)),
                         textStyle:
                             WidgetStatePropertyAll(weight(theme.textTheme.labelLarge!, 700).copyWith(fontSize: 15)),
                       ),
                       segments: [
-                        const ButtonSegment(value: false, icon: Icon(Icons.threesixty), label: Text('360°')),
+                        if (hasModel)
+                          ButtonSegment(
+                              value: _Pane.turn,
+                              icon: roomy ? const Icon(Icons.threesixty) : null,
+                              label: _switchLabel('360°')),
                         ButtonSegment(
-                            value: true, icon: const Icon(Icons.photo_library_outlined), label: Text(tr('Фото'))),
+                            value: _Pane.photos,
+                            icon: roomy ? const Icon(Icons.photo_library_outlined) : null,
+                            label: _switchLabel(tr('Фото'))),
+                        // Always beside the 360°, as on the approved demo: without a video it says so calmly.
+                        if (hasModel || hasVideo)
+                          ButtonSegment(
+                              value: _Pane.video,
+                              icon: roomy ? const Icon(Icons.play_circle_outline_rounded) : null,
+                              label: _switchLabel(tr('Видео'))),
                       ],
-                      selected: {_showPhotos},
-                      onSelectionChanged: (v) => setState(() => _showPhotos = v.first),
+                      selected: {_shown(l)},
+                      onSelectionChanged: (v) => setState(() {
+                        _pane = v.first;
+                        if (_pane == _Pane.video) _videoOpened = true;
+                      }),
                     ),
                   ),
                 ),
@@ -629,18 +674,6 @@ class _ListingScreenState extends State<ListingScreen> {
                 padding: contentPadding(context, const EdgeInsets.fromLTRB(20, 20, 20, 24)),
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Text(l.title, style: theme.textTheme.headlineSmall),
-                  // New or worn is said up front, never only inside the description: it is what arrives.
-                  Padding(
-                    padding: const EdgeInsets.only(top: 2),
-                    child: Text(
-                        [
-                          label(conditions, l.condition),
-                          if (l.authenticity == 'verified' || l.authenticity == 'documented')
-                            label(authenticity, l.authenticity),
-                        ].join(' · '),
-                        key: const Key('condition-line'),
-                        style: theme.textTheme.bodyLarge?.copyWith(color: scheme.onSurfaceVariant)),
-                  ),
                   const SizedBox(height: 6),
                   ColorChoice(listing: l, pending: _pendingColor, onPick: (c) => _openColor(l, c)),
                   const SizedBox(height: 8),
@@ -668,15 +701,6 @@ class _ListingScreenState extends State<ListingScreen> {
                       onSoldOut: own ? null : (s) => _toggleStockAlert(l, s),
                     ),
                   ),
-                  if (!own && l.sizes.any((s) => !s.available))
-                    Text(tr('Қалмаған өлшемді басыңыз: қайта шыққанда хабарлаймыз.'),
-                        style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
-                  if (mySize.value != null && fit == null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 2),
-                      child: Text(trf('Сіздің өлшеміңізге ({0} см) сай өлшем жоқ', [mySize.value]),
-                          style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
-                    ),
                   // One small line: what buyers said about the size (the bars in a sheet), and the size chart.
                   Wrap(crossAxisAlignment: WrapCrossAlignment.center, spacing: 16, children: [
                     if (l.sizeFit case final sizeFit?)
@@ -700,14 +724,11 @@ class _ListingScreenState extends State<ListingScreen> {
                     ),
                   ]),
                   const SizedBox(height: 4),
-                  PriceLine(listing: l, style: weight(theme.textTheme.headlineSmall!, 800)),
-                  if (l.wasPriceTiyn != null)
-                    Padding(
-                      key: const Key('sale-honest'),
-                      padding: const EdgeInsets.only(top: 2),
-                      child: Text(tr('Сызылған баға: соңғы 30 күндегі ең төмен баға.'),
-                          style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
-                    ),
+                  // The price alone, as on the approved demo.
+                  FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(formatTenge(l.priceTiyn),
+                          key: const Key('price'), style: weight(theme.textTheme.headlineSmall!, 800))),
                   // Offering a price only once there is a size to offer it for.
                   if (canOffer && selected != null)
                     _SmallLink(
@@ -762,8 +783,25 @@ class _ListingScreenState extends State<ListingScreen> {
                     key: const Key('description-line'),
                     title: tr('Сипаттама'),
                     detail: descriptionLine(l),
-                    onTap: () =>
-                        showPageSheet<void>(context, title: tr('Сипаттама'), builder: (_) => ListingFacts(listing: l)),
+                    // What the demo has no room for on the page is kept here: the buyer's protection and a report.
+                    onTap: () => showPageSheet<void>(context,
+                        title: tr('Сипаттама'),
+                        builder: (sheet) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                              ListingFacts(listing: l),
+                              const SizedBox(height: 16),
+                              Text(tr(_payments ? protectionText : directDealText), style: theme.textTheme.bodyMedium),
+                              if (!own)
+                                TextButton.icon(
+                                  key: const Key('report'),
+                                  onPressed: () {
+                                    Navigator.pop(sheet);
+                                    _report(l);
+                                  },
+                                  icon: const Icon(Icons.flag_outlined, size: 18),
+                                  label: Text(tr('Тауар туралы шағымдану')),
+                                  style: TextButton.styleFrom(foregroundColor: scheme.onSurfaceVariant),
+                                ),
+                            ])),
                   ),
                   QuestionsLine(listingId: l.id, sellerId: l.sellerId),
                   const SizedBox(height: 6),
@@ -773,25 +811,6 @@ class _ListingScreenState extends State<ListingScreen> {
                         : trf('Жеткізу {0}', [formatTenge(l.deliveryPriceTiyn)]),
                     style: theme.textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
                   ),
-                  DeliveryEta(listingId: l.id),
-                  if (l.soldRecently > 0 || l.savedBy > 0)
-                    Padding(
-                      key: const Key('popularity'),
-                      padding: const EdgeInsets.only(top: 4),
-                      child: Row(children: [
-                        Icon(Icons.local_fire_department_outlined, size: 18, color: Brand.accent),
-                        const SizedBox(width: 6),
-                        Expanded(
-                          child: Text(
-                            [
-                              if (l.soldRecently > 0) trf('30 күнде {0} жұп сатып алынды', [l.soldRecently]),
-                              if (l.savedBy > 0) trf('{0} адам таңдаулыға қосты', [l.savedBy]),
-                            ].join(' · '),
-                            style: theme.textTheme.bodyMedium,
-                          ),
-                        ),
-                      ]),
-                    ),
                   if (away != null) ...[
                     const SizedBox(height: 12),
                     Container(
@@ -812,33 +831,6 @@ class _ListingScreenState extends State<ListingScreen> {
                   ],
                   const SizedBox(height: 16),
                   _SellerRow(listing: l, own: own, onMessage: () => _chat(l)),
-                  if (SessionScope.of(context).me?.id != l.sellerId)
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: TextButton.icon(
-                        onPressed: () => _report(l),
-                        icon: const Icon(Icons.flag_outlined, size: 18),
-                        label: Text(tr('Тауар туралы шағымдану')),
-                        style: TextButton.styleFrom(foregroundColor: scheme.onSurfaceVariant),
-                      ),
-                    ),
-                  const SizedBox(height: 12),
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                        color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(Brand.radius)),
-                    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Icon(_payments ? Icons.shield_outlined : Icons.chat_bubble_outline_rounded),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          tr(_payments ? protectionText : directDealText),
-                          style: theme.textTheme.bodySmall,
-                        ),
-                      ),
-                    ]),
-                  ),
-                  _SimilarRow(items: _similar),
                 ]),
               ),
             ]);
@@ -958,6 +950,26 @@ bool _buyFitsBeside(BuildContext context, String text, String price, double widt
     p.dispose();
   }
   return fits;
+}
+
+/// The Видео part while the seller has added no video: said calmly on the scene, never an empty square.
+class _NoVideo extends StatelessWidget {
+  const _NoVideo({required this.scene});
+  final ShowcaseScene scene;
+
+  @override
+  Widget build(BuildContext context) => ColoredBox(
+        key: const Key('no-video'),
+        color: scene.ink,
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Text(tr('Сатушы әлі видео қоспаған'),
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: scene.fg.withValues(alpha: 0.7))),
+          ),
+        ),
+      );
 }
 
 /// The bar's canvas once the page has moved under it: the page's own, laid out at the screen's size and cut to the
@@ -1100,38 +1112,6 @@ class _ReportSheetState extends State<ReportSheet> {
           ]),
         ),
       ),
-    );
-  }
-}
-
-/// Look-alike listings found by their photos; hidden when there are none.
-class _SimilarRow extends StatelessWidget {
-  const _SimilarRow({required this.items});
-  final Future<List<Listing>>? items;
-
-  @override
-  Widget build(BuildContext context) {
-    return FutureBuilder<List<Listing>>(
-      future: items,
-      builder: (context, snap) {
-        final list = snap.data ?? const <Listing>[];
-        if (list.isEmpty) return const SizedBox.shrink();
-        return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const SizedBox(height: 28),
-          Text(tr('Ұқсас тауарлар'), style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 12),
-          SizedBox(
-            height: 160 + listingTileTextExtent(context),
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              clipBehavior: Clip.none,
-              itemCount: list.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 12),
-              itemBuilder: (_, i) => SizedBox(width: 160, child: ListingTile(listing: list[i])),
-            ),
-          ),
-        ]);
-      },
     );
   }
 }
@@ -1326,3 +1306,6 @@ class _SellerRow extends StatelessWidget {
     );
   }
 }
+
+/// What the stage shows: the 3D turn, the photos or the seller's video.
+enum _Pane { turn, photos, video }

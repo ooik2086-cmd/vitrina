@@ -151,6 +151,7 @@ def listing_out(db: Session, listing: Listing, *, owner: bool = False) -> dict:
         "showcase_style": listing.showcase_style,
         "backdrop": listing.backdrop, "cover_frame": cover_frame(listing), "model": model_out(listing),
         "angle_frames": angle_frames(listing),
+        "video": video_out(listing, owner=owner),
         "sizes": [{"id": s.id, "label": s.label, "insole_cm": mm_to_cm(s.insole_mm), "available": s.quantity > 0,
                    **({"quantity": s.quantity} if owner else {})} for s in listing.sizes],
         "media": [{"original_url": m.original_url, "processed_url": m.processed_url, "thumb_url": m.thumb_url,
@@ -319,6 +320,30 @@ def listing_cover(listing: Listing) -> str | None:
 PHOTOS_PENDING_FOR = timedelta(days=1)
 
 
+# A video still being made after this long was lost with a restart: the seller is told it failed, to send it again.
+VIDEO_STUCK_AFTER = timedelta(minutes=30)
+
+
+def video_state(listing: Listing) -> str | None:
+    state = listing.video_state
+    at = services.aware(listing.video_at)
+    if state == "processing" and (at is None or now_utc() - at > VIDEO_STUCK_AFTER):
+        return "failed"
+    return state
+
+
+def video_out(listing: Listing, *, owner: bool) -> dict | None:
+    """The seller's own video: for buyers only once it is ready to play; the seller also sees it being made or
+    failed."""
+    state = video_state(listing)
+    if state == "ready":
+        return {"state": state, "url": listing.video_url, "poster_url": listing.video_poster_url,
+                "seconds": listing.video_seconds}
+    if owner and state is not None:
+        return {"state": state, "url": None, "poster_url": None, "seconds": listing.video_seconds}
+    return None
+
+
 def photos_pending(listing: Listing) -> bool:
     """For the seller: the photos they just gave are still being prepared (cut out, small copies for scrolling, the
     360° start), so buyers see them as taken for now. The small copies are made last, after the cut-outs."""
@@ -351,6 +376,8 @@ def details_snapshot(listing: Listing) -> str:
     details = {f: getattr(listing, f) for f in LISTING_DETAILS}
     if listing.facts:  # what the buyer read it is made of; left out when none, so older snapshots keep their names
         details["facts"] = listing.facts
+    if listing.video_state == "ready":  # the video the buyer watched; left out when none, as facts are
+        details["video"] = listing.video_url
     return json.dumps(details, ensure_ascii=False)
 
 

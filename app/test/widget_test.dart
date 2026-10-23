@@ -468,12 +468,20 @@ void main() {
     expect(find.text('Кімге арналған'), findsNothing);
   });
 
-  testWidgets('product page shows real demand only when the server sends it', (tester) async {
-    Map<String, dynamic>? popularity = {'sold_30d': 2, 'favorites': 5};
+  testWidgets('product page stays as calm as the approved demo: no demand line, no similar row', (tester) async {
+    const popularity = {'sold_30d': 2, 'favorites': 5};
+    final paths = <String>[];
     final api = Api(
         base: 'http://x/api/v1',
         client: MockClient((req) async {
-          if (req.url.path.endsWith('/similar')) return jsonResponse({'items': []});
+          paths.add(req.url.path);
+          if (req.url.path.endsWith('/similar')) {
+            return jsonResponse({
+              'items': [
+                {...listingJson(), 'id': 9}
+              ]
+            });
+          }
           return jsonResponse({...listingJson(), 'popularity': popularity});
         }));
     tester.view.physicalSize = const Size(400, 1800);
@@ -482,12 +490,10 @@ void main() {
     await tester
         .pumpWidget(SessionScope(session: Session(api), child: const MaterialApp(home: ListingScreen(listingId: 7))));
     await tester.pumpAndSettle();
-    expect(find.text('30 күнде 2 жұп сатып алынды · 5 адам таңдаулыға қосты'), findsOneWidget);
-    popularity = null;
-    await tester
-        .pumpWidget(SessionScope(session: Session(api), child: const MaterialApp(home: ListingScreen(listingId: 8))));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('popularity')), findsNothing);
+    expect(find.textContaining('сатып алынды'), findsNothing);
+    expect(find.textContaining('таңдаулыға қосты'), findsNothing);
+    expect(find.text('Ұқсас тауарлар'), findsNothing);
+    expect(paths.where((p) => p.endsWith('/similar')), isEmpty); // not even asked for
   });
 
   testWidgets('tapping a sold-out size asks to hear when it is back, and again turns it off', (tester) async {
@@ -511,7 +517,6 @@ void main() {
         .pumpWidget(SessionScope(session: Session(api), child: const MaterialApp(home: ListingScreen(listingId: 7))));
     await tester.pumpAndSettle();
     expect(find.byIcon(Icons.notifications_active), findsNothing);
-    expect(find.text('Қалмаған өлшемді басыңыз: қайта шыққанда хабарлаймыз.'), findsOneWidget);
     await tester.tap(find.text('43'));
     await tester.pumpAndSettle();
     expect(find.text('43 өлшемі қайта шыққанда хабарлаймыз.'), findsOneWidget);
@@ -541,12 +546,13 @@ void main() {
     await tester.tap(find.text('42'));
     await tester.pump();
     expect(find.text('Сатып алу · 42'), findsOneWidget);
-    // Worn or new is on the page itself, not only in the description.
-    expect(find.text('Киілген, жақсы'), findsOneWidget);
+    // As on the approved demo, worn or new is said in the description (and the defects box above), not under the name.
+    expect(find.text('Киілген, жақсы'), findsNothing);
     await tester.tap(find.byKey(const Key('description-line')));
     await tester.pumpAndSettle();
     expect(find.text('Баға деңгейі'), findsNothing); // no invented segment, and no empty row, while data is thin
-    expect(find.text('Киілген, жақсы'), findsNWidgets(2));
+    expect(find.text('Киілген, жақсы'), findsOneWidget);
+    expect(find.byKey(const Key('report')), findsOneWidget); // a report stays one tap away, in the description
     expect(find.text('Тексерілмеген'), findsOneWidget);
   });
 

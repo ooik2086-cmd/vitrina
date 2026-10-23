@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -25,16 +26,18 @@ from .storage import MAX_UPLOAD_BYTES, make_private_storage, make_storage
 from .api_common import log
 from .auth_routes import OTP_REQUESTS_PER_ADDRESS_PER_HOUR
 from .order_routes import EVIDENCE_TRIES_PER_HOUR
+from .video import VIDEO_UPLOAD_BYTES
+from .video_routes import VIDEO_TRIES_PER_HOUR
 from .search_routes import IMAGE_SEARCH_PER_MINUTE, SlidingWindowLimiter
 from .sms import make_sender
 from .webhook_routes import hooks
 from . import (auth_routes, listing_routes, order_routes, saved_search_routes, search_routes, seller_routes,
-               staff_routes)
+               staff_routes, video_routes)
 
 # Included in this order, which is the order paths are matched in: a literal path such as /listings/suggest must
 # come before a pattern such as /listings/{listing_id} with the same method.
 ROUTE_MODULES = (auth_routes, listing_routes, search_routes, seller_routes, saved_search_routes, order_routes,
-                 staff_routes)
+                 staff_routes, video_routes)
 
 
 def logging_setup() -> None:
@@ -51,8 +54,11 @@ def logging_setup() -> None:
     root.propagate = False
 
 
-# Largest request body accepted: one photo or video upload plus the multipart framing around it.
+# Largest request body accepted: one photo or video upload plus the multipart framing around it; a seller's own video
+# of a pair (up to a minute) is larger, and only its own address takes one that size.
 MAX_REQUEST_BYTES = MAX_UPLOAD_BYTES + 64 * 1024
+MAX_VIDEO_REQUEST_BYTES = VIDEO_UPLOAD_BYTES + 64 * 1024
+VIDEO_UPLOAD_PATH = re.compile(r"/api/v1/listings/\d+/video")
 # The console loads only its own files; share pages may also show photos from the media host.
 ADMIN_CSP = "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' https: data:; media-src 'self' https:; frame-ancestors 'none'"
 SHARE_CSP = "default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'unsafe-inline'; img-src 'self' https: data:; media-src 'self' https:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
@@ -99,6 +105,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.otp_limiter = SlidingWindowLimiter(OTP_REQUESTS_PER_ADDRESS_PER_HOUR, 3600)
     app.state.sms = make_sender(settings)
     app.state.evidence_limiter = SlidingWindowLimiter(EVIDENCE_TRIES_PER_HOUR, 3600)
+    app.state.video_limiter = SlidingWindowLimiter(VIDEO_TRIES_PER_HOUR, 3600)
     app.add_exception_handler(ApiError, api_error_handler)
 
     async def validation_handler(request: Request, exc: RequestValidationError):
@@ -123,8 +130,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request.state.request_id = request.headers.get("X-Request-ID") or secrets.token_hex(8)
         # Refuse oversized bodies before anything parses them; uploads are the only large requests we accept.
         length = request.headers.get("content-length")
-        if length is not None and (not length.isdigit() or int(length) > MAX_REQUEST_BYTES):
-            return await api_error_handler(request, ApiError(413, "file_too_large"))
+        video = request.method == "POST" and VIDEO_UPLOAD_PATH.fullmatch(request.url.path) is not None
+        cap = MAX_VIDEO_REQUEST_BYTES if video else MAX_REQUEST_BYTES
+        if length is not None and (not length.isdigit() or int(length) > cap):
+            return await api_error_handler(request, ApiError(413, "video_too_large" if video else "file_too_large"))
         response = await call_next(request)
         response.headers["X-Request-ID"] = request.state.request_id
         response.headers.setdefault("X-Content-Type-Options", "nosniff")

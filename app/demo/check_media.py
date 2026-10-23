@@ -71,6 +71,12 @@ def check(answers: dict, root: Path) -> list[str]:
                     path = root / u.split("/demo/media/", 1)[1] if u and "/demo/media/" in u else None
                     if path is None or not path.is_file() or path.read_bytes()[:4] != b"glTF":
                         problems.append(f"listing {node['id']} 3D model: not a model in the demo media: {u}")
+            if isinstance(node.get("video"), dict) and "id" in node:
+                # The «Видео» tab shows a broken player when its file is missing: say so here.
+                for u, head in ((node["video"].get("url"), b"ftyp"), (node["video"].get("poster_url"), b"\xff\xd8")):
+                    path = root / u.split("/demo/media/", 1)[1] if u and "/demo/media/" in u else None
+                    if path is None or not path.is_file() or head not in path.read_bytes()[:12]:
+                        problems.append(f"listing {node['id']} video: not in the demo media: {u}")
             if "media" in node and "id" in node and isinstance(node["media"], list):
                 for m in node["media"]:
                     owned.setdefault(node["id"], set()).update(

@@ -112,6 +112,21 @@ class Promo {
   final String? url;
 }
 
+/// The seller's own video of the pair (the «Видео» tab), up to a minute. Buyers only get one that is ready; the seller
+/// also sees it being made ('processing') or 'failed'.
+class ListingVideo {
+  ListingVideo.fromJson(Map<String, dynamic> j)
+      : state = j['state'] as String,
+        url = j['url'] as String?,
+        posterUrl = j['poster_url'] as String?,
+        seconds = j['seconds'] as int?;
+  final String state;
+  final String? url;
+  final String? posterUrl;
+  final int? seconds;
+  bool get ready => state == 'ready' && url != null;
+}
+
 /// Catalog filters a buyer saved; a new listing that matches them arrives as a notification.
 class SavedSearch {
   SavedSearch.fromJson(Map<String, dynamic> j)
@@ -544,6 +559,7 @@ class Listing {
         sellerReviews = ((j['seller'] as Map)['reviews'] as int?) ?? 0,
         stats = j['stats'] == null ? null : ListingStats.fromJson(j['stats'] as Map<String, dynamic>),
         promo = j['promo'] == null ? null : Promo.fromJson(j['promo'] as Map<String, dynamic>),
+        video = j['video'] is Map ? ListingVideo.fromJson((j['video'] as Map).cast<String, dynamic>()) : null,
         moderation = j['moderation'] == null ? null : Moderation.fromJson(j['moderation'] as Map<String, dynamic>),
         sizeFit = j['size_fit'] == null ? null : SizeFit.fromJson(j['size_fit'] as Map<String, dynamic>),
         stockAlerts = {for (final id in (j['stock_alerts'] as List?) ?? const []) id as int},
@@ -630,6 +646,9 @@ class Listing {
   /// Only on the seller's own listings.
   final ListingStats? stats;
   final Promo? promo;
+
+  /// The seller's own video; null when there is none (or, for buyers, none ready yet).
+  final ListingVideo? video;
   final Moderation? moderation;
 
   /// 360° frames in upload order: real photos only, nothing generated in between.
@@ -1263,6 +1282,25 @@ class Api {
   /// Starts rendering the promo video; poll [listing] until promo.state is no longer "rendering".
   Future<Listing> makePromo(int id, String lang) async =>
       Listing.fromJson(await _send('POST', '/listings/$id/promo', body: {'lang': lang}) as Map<String, dynamic>);
+
+  /// Sends the seller's video of the pair (at most a minute; the server checks and makes it smaller, then shows it).
+  /// Read from [bytes] as it goes, never all in memory; [onProgress] hears the share sent so far, 0 to 1.
+  Future<Listing> addListingVideo(int id, Stream<List<int>> bytes, int length, String filename,
+      {void Function(double sent)? onProgress}) async {
+    var sent = 0;
+    final counted = bytes.map((chunk) {
+      sent += chunk.length;
+      onProgress?.call(length == 0 ? 1 : min(1, sent / length));
+      return chunk;
+    });
+    final req = http.MultipartRequest('POST', Uri.parse('$base/listings/$id/video'))
+      ..headers.addAll({'Accept': 'application/json', if (token != null) 'Authorization': 'Bearer $token'})
+      ..files.add(http.MultipartFile('file', counted, length, filename: filename));
+    return Listing.fromJson(await _upload(req, limit: uploadLimit(length)) as Map<String, dynamic>);
+  }
+
+  Future<Listing> removeListingVideo(int id) async =>
+      Listing.fromJson(await _send('DELETE', '/listings/$id/video') as Map<String, dynamic>);
 
   Future<Listing> pauseListing(int id) async =>
       Listing.fromJson(await _send('POST', '/listings/$id/pause') as Map<String, dynamic>);

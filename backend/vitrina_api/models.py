@@ -105,6 +105,13 @@ class Listing(Base):
     views: Mapped[int] = mapped_column(Integer, default=0, server_default="0")  # product page opens by others
     promo_state: Mapped[str | None] = mapped_column(String(12))  # rendering | ready | failed; None = never made
     promo_url: Mapped[str | None] = mapped_column(String(500))
+    # The seller's own video of the pair, up to a minute, made smaller by the server (vitrina_api/video.py): processing
+    # while that runs (since video_at), then ready with its address, poster frame and length, or failed.
+    video_state: Mapped[str | None] = mapped_column(String(12))
+    video_url: Mapped[str | None] = mapped_column(String(500))
+    video_poster_url: Mapped[str | None] = mapped_column(String(500))
+    video_seconds: Mapped[int | None] = mapped_column(Integer)
+    video_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Automatic publish checks (see moderation.py): what they flagged, what staff already cleared, and the
     # reason staff gave when sending a listing back. Codes are comma-separated.
     moderation_flags: Mapped[str | None] = mapped_column(String(200))
