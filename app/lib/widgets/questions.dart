@@ -84,7 +84,8 @@ class _QuestionsSectionState extends State<QuestionsSection> {
                 child: widget.inSheet
                     ? const SizedBox.shrink()
                     : Text(tr('Сұрақ-жауап'), style: theme.textTheme.titleMedium)),
-            if (items.isNotEmpty)
+            // In the sheet, as on the approved demo, the buyer sees the answers themselves; the seller the way to answer.
+            if (items.isNotEmpty && (!widget.inSheet || seller))
               TextButton(
                 key: const Key('questions-all'),
                 onPressed: _all,
@@ -105,7 +106,7 @@ class _QuestionsSectionState extends State<QuestionsSection> {
                     onRetry: _reload),
               ),
             )
-          else if (visible.isEmpty && !seller)
+          else if ((visible.isEmpty || widget.inSheet) && !seller)
             Padding(
               padding: const EdgeInsets.only(bottom: 4),
               child: Text(tr('Өлшемі, қорабы не жағдайы туралы сұраңыз: жауапты бәрі көреді.'),
@@ -115,8 +116,25 @@ class _QuestionsSectionState extends State<QuestionsSection> {
             Text(tr('Әзірге сұрақ жоқ.'),
                 key: const Key('no-questions'),
                 style: theme.textTheme.bodyLarge?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
-          for (final q in visible) QuestionTile(question: q),
-          if (!seller)
+          for (final q in visible) QuestionTile(question: q, card: widget.inSheet),
+          if (!seller && widget.inSheet)
+            Padding(
+              padding: const EdgeInsets.only(top: 14),
+              child: OutlinedButton(
+                key: const Key('ask-question'),
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size.fromHeight(52),
+                  backgroundColor: theme.colorScheme.surface,
+                  foregroundColor: theme.colorScheme.onSurface,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  side: BorderSide(color: theme.colorScheme.outlineVariant),
+                  textStyle: weight(theme.textTheme.bodyLarge!, 700),
+                ),
+                onPressed: _ask,
+                child: Text(tr('Сұрақ қою')),
+              ),
+            )
+          else if (!seller)
             Align(
               alignment: Alignment.centerLeft,
               child: OutlinedButton.icon(
@@ -215,14 +233,37 @@ Future<bool> askQuestion(BuildContext context, int listingId) async {
 }
 
 class QuestionTile extends StatelessWidget {
-  const QuestionTile({super.key, required this.question, this.trailing});
+  const QuestionTile({super.key, required this.question, this.trailing, this.card = false});
   final Question question;
   final Widget? trailing;
+
+  /// As on the approved demo's sheet: a white card, the question, then "Сатушы: …" under it.
+  final bool card;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final q = question;
+    if (card) {
+      final muted = theme.textTheme.bodyLarge?.copyWith(color: theme.colorScheme.onSurfaceVariant, height: 1.45);
+      return Container(
+        width: double.infinity,
+        margin: const EdgeInsets.only(top: 12),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+            // White on the paper, as on the demo; at night a step lighter than the sheet, so the card still shows.
+            color: theme.brightness == Brightness.dark
+                ? theme.colorScheme.surfaceContainerHigh
+                : theme.colorScheme.surface,
+            borderRadius: BorderRadius.circular(18)),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(q.text, style: weight(theme.textTheme.bodyLarge!, 700)),
+          const SizedBox(height: 6),
+          Text(q.answer != null ? '${tr('Сатушы')}: ${q.answer}' : trf('{0} · жауап күтуде', [formatDay(q.askedAt)]),
+              style: muted),
+        ]),
+      );
+    }
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [

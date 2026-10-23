@@ -1227,4 +1227,12 @@ const en = <String, String>{
   'Көру': 'Watch',
   'Ойнату': 'Play',
   'Тоқтата тұру': 'Pause',
+  'Кіші': 'Runs small',
+  'Үлкен': 'Runs large',
+  '{0} сатып алушының пікірі бойынша.': 'Based on {0} buyers.',
+  'Табаныңызды өкшеден ең ұзын саусаққа дейін өлшеңіз. Ішкі табан ұзындығын сатушы өлшеген.':
+      'Measure your foot from the heel to the longest toe. The seller measured the insole length.',
+  'Ішкі табан, мм': 'Insole, mm',
+  'ішкі табан {0} мм': 'insole {0} mm',
+  'Деректерді сатушы дайын нұсқалардан таңдаған.': 'The seller picked these details from ready options.',
 };

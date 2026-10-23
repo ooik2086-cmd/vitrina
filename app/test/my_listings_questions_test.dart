@@ -28,9 +28,9 @@ http.Response _json(Object body, [int status = 200]) =>
 /// What the server has: the seller's listings, questions waiting on each, and what the app asked for.
 class _Shop {
   var ids = [3, 2, 1];
-  final waiting = <int, int>{1: 2, 2: 0, 3: 1, 4: 0, 5: 0, 6: 0};
+  final waiting = <int, int>{1: 2, 2: 0, 3: 1, 4: 0, 6: 0, 7: 0};
   final status = <int, String>{
-    for (final id in [1, 2, 3, 4, 5, 6]) id: 'published'
+    for (final id in [1, 2, 3, 4, 6, 7]) id: 'published'
   };
   bool sendsCount = true; // false: a server from before the count
   bool offline = false; // the one-listing count fails
@@ -113,7 +113,7 @@ void main() {
   }
 
   Finder tile(String title) => find.ancestor(of: find.text(title), matching: find.byType(ListTile));
-  String title(int id) => (recorded['GET /listings/$id'] as Map)['title'] as String;
+  String title(int id) => namedWithColor(Listing.fromJson((recorded['GET /listings/$id'] as Map).cast()));
   Finder waitingOn(int id, String text) =>
       find.descendant(of: tile(title(id)), matching: find.textContaining(text, findRichText: true));
   final chip = find.byKey(const Key('status-questions'));
@@ -191,7 +191,7 @@ void main() {
   });
 
   testWidgets('a search that hides them does not claim no questions are waiting', (tester) async {
-    final shop = _Shop()..ids = [6, 5, 4, 3, 2, 1]; // six listings bring the search box
+    final shop = _Shop()..ids = [7, 6, 4, 3, 2, 1]; // six listings bring the search box
     await open(tester, shop, screen: const MyListingsScreen(status: 'questions'));
     await tester.enterText(find.byKey(const Key('my-listings-search')), 'zzz');
     await tester.pump();
@@ -260,7 +260,8 @@ void main() {
 
   testWidgets('a late, older answer does not bring back a number', (tester) async {
     final shop = _Shop();
-    await open(tester, shop);
+    // Tall enough that the listing's page shows its questions row, which asks for its number, at once.
+    await open(tester, shop, size: const Size(360, 2400));
     // Each visit asks twice: the listing's own page, then the list on coming back. The list's first ask, made
     // while 2 were waiting, is held; the second, after the answer, comes back at once with 0.
     final held = Completer<void>();

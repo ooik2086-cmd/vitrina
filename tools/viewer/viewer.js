@@ -35,7 +35,7 @@ scene.add(pivot);
 const X = new THREE.Vector3(1, 0, 0), Y = new THREE.Vector3(0, 1, 0), q = new THREE.Quaternion();
 const aniso = renderer.capabilities.getMaxAnisotropy();
 let dirty = true, vx = 0, vy = 0, zoom = 1, zoomT = 1, r = 1;
-let parser = null, meshes = [], model = null, variant = null;
+let parser = null, meshes = [], model = null, variant = null, tint = null;
 
 const dpr = () => Math.min(window.devicePixelRatio || 1, 3); // full sharpness while moving too
 function frame() {
@@ -115,12 +115,58 @@ function use(gltf, list) {
   r = Math.max(size.x, size.z);
 }
 
-// Dresses a copy's meshes in the colour [name] (a KHR_materials_variants variant); the default one when unknown.
-// [still] says whether that colour is still wanted: a colour picked after it never gets painted over.
-async function dress(p, list, name, still) {
+// A colour the model was not made in, as on the approved demo: the variant's coloured parts take hue [h], saturation
+// [sat] and lightness times [k]; white sole, dark laces and lining stay as they are. Worked out per pixel in the
+// shader, in sRGB as the demo did on its canvas, so a tint costs no new picture: no memory and no wait to switch.
+const TINT_GLSL = `
+uniform vec3 vitrinaTint;
+vec3 vtSrgb(vec3 c) {
+  return mix(1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, c * 12.92, vec3(lessThanEqual(c, vec3(0.0031308))));
+}
+vec3 vtLinear(vec3 c) {
+  return mix(pow(c * 0.9478672986 + 0.0521327014, vec3(2.4)), c * 0.0773993808, vec3(lessThanEqual(c, vec3(0.04045))));
+}
+vec3 vtTint(vec3 linear) {
+  vec3 c = vtSrgb(clamp(linear, 0.0, 1.0));
+  float mx = max(c.r, max(c.g, c.b)), mn = min(c.r, min(c.g, c.b)), l = (mx + mn) * 0.5;
+  float s0 = mx == mn ? 0.0 : (mx - mn) / (1.0 - abs(2.0 * l - 1.0));
+  if (s0 < 0.07 || l < 0.14 || l > 0.94) return linear;
+  float L = min(0.92, l * vitrinaTint.z), C = (1.0 - abs(2.0 * L - 1.0)) * vitrinaTint.y, hp = vitrinaTint.x / 60.0;
+  float x = C * (1.0 - abs(mod(hp, 2.0) - 1.0)), m0 = L - C * 0.5;
+  vec3 r = hp < 1.0 ? vec3(C, x, 0.0) : hp < 2.0 ? vec3(x, C, 0.0) : hp < 3.0 ? vec3(0.0, C, x)
+         : hp < 4.0 ? vec3(0.0, x, C) : hp < 5.0 ? vec3(x, 0.0, C) : vec3(C, 0.0, x);
+  return vtLinear(clamp(r + m0, 0.0, 1.0));
+}
+`;
+const MAP_TINTED = THREE.ShaderChunk.map_fragment.replace(
+  'diffuseColor *= sampledDiffuseColor;', 'sampledDiffuseColor.rgb = vtTint(sampledDiffuseColor.rgb);\n\tdiffuseColor *= sampledDiffuseColor;');
+// Three numbers, hue taken round the circle, saturation 0–1 and a lightness factor 0–2; anything else is no tint.
+const tintOf = t => Array.isArray(t) && t.length === 3 && t.every(Number.isFinite)
+  ? [((t[0] % 360) + 360) % 360, Math.min(1, Math.max(0, t[1])), Math.min(2, Math.max(0, t[2]))] : null;
+function tintedCopy(base, [h, sat, k]) {
+  const m = base.clone();
+  m.userData.plain = base;
+  const tint = { value: new THREE.Vector3(h, sat, k) };
+  m.onBeforeCompile = shader => {
+    shader.uniforms.vitrinaTint = tint;
+    shader.fragmentShader = TINT_GLSL + shader.fragmentShader.replace('#include <map_fragment>', MAP_TINTED);
+  };
+  m.customProgramCacheKey = () => 'vitrina-tint'; // one program for every tint: only the uniform differs
+  return m;
+}
+
+// Dresses a copy's meshes in the colour [name] (a KHR_materials_variants variant; the default one when unknown),
+// tinted by [tint] when given. [still] says whether that colour is still wanted: a colour picked after it never gets
+// painted over.
+async function dress(p, list, name, tint, still) {
   const names = p.json.extensions?.KHR_materials_variants?.variants?.map(v => v.name) ?? [];
   const idx = names.indexOf(name);
   for (const mesh of list) {
+    const was = mesh.material.userData.plain ? mesh.material : null;
+    if (was) {
+      mesh.material = was.userData.plain; // a tint is never tinted again
+      was.dispose(); // its own copy only: the textures are the plain material's
+    }
     const a = p.associations.get(mesh);
     if (idx >= 0 && a && a.meshes !== undefined) {
       const prim = p.json.meshes[a.meshes].primitives[a.primitives];
@@ -131,6 +177,8 @@ async function dress(p, list, name, still) {
         mesh.material = material;
       }
     }
+    const t = tintOf(tint);
+    if (t && mesh.material.map) mesh.material = tintedCopy(mesh.material, t);
     for (const v of Object.values(mesh.material)) {
       if (v?.isTexture && v.anisotropy !== aniso) { v.anisotropy = aniso; v.needsUpdate = true; }
     }
@@ -138,11 +186,12 @@ async function dress(p, list, name, still) {
 }
 
 // Another colour of the shoe shown. Picked before the shoe has come, it is the colour the shoe comes in.
-async function paint(name) {
+async function paint(name, t = null) {
   variant = name;
+  tint = t;
   if (!parser) return;
-  const p = parser, still = () => p === parser && variant === name; // a newer copy or colour takes over
-  await dress(p, meshes, name, still);
+  const p = parser, still = () => p === parser && variant === name && tint === t; // a newer copy or colour takes over
+  await dress(p, meshes, name, t, still);
   if (!still()) return;
   dirty = true;
   kick();
@@ -151,12 +200,13 @@ async function paint(name) {
 // Brings a copy in, dressed in the colour wanted by the time it is (which may change while it dresses).
 async function bring(gltf, mine) {
   const list = meshesOf(gltf);
-  let name;
+  let name, t;
   do {
     name = variant;
-    await dress(gltf.parser, list, name, () => mine === loading);
+    t = tint;
+    await dress(gltf.parser, list, name, t, () => mine === loading);
     if (mine !== loading) return false;
-  } while (name !== variant);
+  } while (name !== variant || t !== tint);
   use(gltf, list);
   return true;
 }
@@ -164,10 +214,11 @@ async function bring(gltf, mine) {
 let loading = 0;
 // [load] tells which load of the app's this is: ready and error carry it back, so a late answer for a model no longer
 // wanted is not taken for the one now coming.
-async function load({ url, hq = null, variant: name = null, dark = false, reduceMotion = false, view = null, load: n = 0 }) {
+async function load({ url, hq = null, variant: name = null, tint: t = null, dark = false, reduceMotion = false, view = null, load: n = 0 }) {
   const mine = ++loading;
   reduce = reduceMotion;
   variant = name;
+  tint = t;
   setBackground(dark);
   try {
     const gltf = await loader.loadAsync(url);
@@ -263,7 +314,7 @@ c.addEventListener('webglcontextlost', e => { e.preventDefault(); post('lost', {
 
 window.vitrina = {
   load,
-  setVariant: name => paint(name),
+  setVariant: (name, t = null) => paint(name, t),
   setBackground,
   // While the photos show, nothing is drawn; back on the 3D, the last picture is drawn again.
   setPaused(p) { paused = !!p; if (!paused) { dirty = true; kick(); } },

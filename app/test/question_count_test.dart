@@ -42,7 +42,9 @@ void main() {
     addTearDown(tester.view.reset);
     await loadFonts(tester);
     final demoClient = (await tester.runAsync(() => DemoClient.load()))!;
-    Map<String, Object?> listing() => {...demo.cast<String, Object?>(), 'status': q.status};
+    // Six sizes, as these cases were written for: the page's rows sit where the scrolling below expects them.
+    Map<String, Object?> listing() =>
+        {...demo.cast<String, Object?>(), 'sizes': (demo['sizes'] as List).take(6).toList(), 'status': q.status};
     final client = MockClient.streaming((req, body) async {
       final path = req.url.path.replaceFirst('/api/v1', '');
       http.Response? mine;

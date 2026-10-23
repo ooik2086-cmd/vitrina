@@ -183,6 +183,7 @@ class ModelStageState extends State<ModelStage> {
       'url': host.modelAt(model.url),
       'hq': model.hqUrl == null ? null : host.modelAt(model.hqUrl!),
       'variant': model.variant,
+      'tint': model.tint,
       'dark': widget.dark,
       'reduceMotion': MediaQuery.of(context).disableAnimations,
       'view': view ?? widget.view,
@@ -210,8 +211,8 @@ class ModelStageState extends State<ModelStage> {
     if (old.model.url != widget.model.url) {
       _host?.warm(widget.model.url);
       _swap();
-    } else if (old.model.variant != widget.model.variant) {
-      view.run('vitrina.setVariant(${jsonEncode(widget.model.variant)})');
+    } else if (old.model.variant != widget.model.variant || !listEquals(old.model.tint, widget.model.tint)) {
+      view.run('vitrina.setVariant(${jsonEncode(widget.model.variant)}, ${jsonEncode(widget.model.tint)})');
     }
     if (old.dark != widget.dark) view.run('vitrina.setBackground(${widget.dark})');
     if (old.paused != widget.paused) view.run('vitrina.setPaused(${widget.paused || _covered})');

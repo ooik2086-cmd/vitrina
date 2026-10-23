@@ -15,7 +15,6 @@ import '../widgets/common.dart';
 import '../widgets/delivery_sheet.dart';
 import '../widgets/listing_lines.dart';
 import '../widgets/questions.dart';
-import '../widgets/size_guide.dart';
 import '../widgets/model_stage.dart';
 import '../widgets/scroll_showcase.dart' show ShowcaseScene;
 import '../widgets/spin_viewer.dart';
@@ -447,7 +446,7 @@ class _ListingScreenState extends State<ListingScreen> {
     _loadOffer();
   }
 
-  /// This pair's sizes with the insole length the seller measured; a tap picks one. The general chart is under it.
+  /// This pair's sizes with the insole length the seller measured; a tap picks one.
   Future<void> _sizeChart(Listing l) => showPageSheet<void>(context,
       title: tr('Өлшем кестесі'),
       builder: (sheet) => ListingSizeChart(
@@ -456,10 +455,6 @@ class _ListingScreenState extends State<ListingScreen> {
             onPick: (s) {
               setState(() => _sizeId = s.id);
               Navigator.of(sheet).pop();
-            },
-            onGuide: () async {
-              Navigator.of(sheet).pop();
-              if (await showSizeGuide(context) != null && mounted) setState(() {});
             },
           ));
 
@@ -714,7 +709,7 @@ class _ListingScreenState extends State<ListingScreen> {
                           (false, true) => const Color(0xFF6CC48E),
                         },
                         onTap: () => showPageSheet<void>(context,
-                            title: tr('Өлшемі қалай келді'), builder: (_) => SizeFitNote(fit: sizeFit)),
+                            title: fitWords(sizeFit.verdict), builder: (_) => SizeFitNote(fit: sizeFit)),
                       ),
                     _SmallLink(
                       key: const Key('size-guide'),
@@ -788,8 +783,12 @@ class _ListingScreenState extends State<ListingScreen> {
                         title: tr('Сипаттама'),
                         builder: (sheet) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                               ListingFacts(listing: l),
-                              const SizedBox(height: 16),
-                              Text(tr(_payments ? protectionText : directDealText), style: theme.textTheme.bodyMedium),
+                              // As on the approved demo, no protection text here (it is at the order); only a deal
+                              // straight with the seller is warned of, as the buyer's money is then not held.
+                              if (!_payments) ...[
+                                const SizedBox(height: 16),
+                                Text(tr(directDealText), style: theme.textTheme.bodyMedium),
+                              ],
                               if (!own)
                                 TextButton.icon(
                                   key: const Key('report'),
@@ -1124,55 +1123,42 @@ class SizeFitNote extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final (headline, advice) = switch (fit.verdict) {
-      'small' => (tr('Кішілеу келеді'), tr('Жарты өлшем үлкенін алыңыз')),
-      'large' => (tr('Үлкендеу келеді'), tr('Жарты өлшем кішісін алыңыз')),
-      _ => (tr('Өлшеміне сай келеді'), tr('Әдеттегі өлшеміңізді алыңыз')),
+    final muted = theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant);
+    final advice = switch (fit.verdict) {
+      'small' => '${tr('Жарты өлшем үлкенін алыңыз')}.',
+      'large' => '${tr('Жарты өлшем кішісін алыңыз')}.',
+      _ => '${tr('Әдеттегі өлшеміңізді алыңыз')}.',
     };
-    Widget part(int n, Color color) =>
-        n == 0 ? const SizedBox.shrink() : Expanded(flex: n, child: Container(height: 6, color: color));
-    Widget legend(String label, int n) =>
-        Text('${tr(label)} $n', style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant));
-    return Container(
-      key: const Key('size-fit'),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-          color: scheme.surface,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: scheme.outlineVariant)),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          const Icon(Icons.straighten_rounded, size: 20),
-          const SizedBox(width: 8),
-          Expanded(flex: 3, child: Text(headline, style: weight(theme.textTheme.titleSmall!, 700))),
-          Flexible(
-            flex: 2,
-            child: Text(trf('{0} сатып алушы', [fit.answers]),
-                textAlign: TextAlign.end, style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
-          ),
-        ]),
-        const SizedBox(height: 4),
-        Text(advice, style: theme.textTheme.bodyMedium),
-        const SizedBox(height: 10),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(3),
-          child: Row(children: [
-            part(fit.small, const Color(0xFFE8A23A)),
-            if (fit.small > 0 && fit.trueToSize > 0) const SizedBox(width: 2),
-            part(fit.trueToSize, const Color(0xFF2E9E6A)),
-            if (fit.large > 0 && fit.small + fit.trueToSize > 0) const SizedBox(width: 2),
-            part(fit.large, const Color(0xFF5B7FD6)),
+    final parts = [
+      (fit.small, const Color(0xFFE0A54A)),
+      (fit.trueToSize, const Color(0xFF3E9B6A)),
+      (fit.large, const Color(0xFF5B7FD6)),
+    ].where((p) => p.$1 > 0);
+    return Column(key: const Key('size-fit'), crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text(advice, style: theme.textTheme.bodyLarge),
+      const SizedBox(height: 14),
+      // As on the approved demo: one 8 px bar, each answer's share in its colour, 3 px apart.
+      ClipRRect(
+        borderRadius: BorderRadius.circular(4),
+        child: SizedBox(
+          height: 8,
+          child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            for (final (i, (n, color)) in parts.indexed) ...[
+              if (i > 0) const SizedBox(width: 3),
+              Expanded(flex: n, child: ColoredBox(color: color)),
+            ],
           ]),
         ),
-        const SizedBox(height: 6),
-        Wrap(alignment: WrapAlignment.spaceBetween, spacing: 12, children: [
-          legend('Кішілеу', fit.small),
-          legend('Сай', fit.trueToSize),
-          legend('Үлкендеу', fit.large),
-        ]),
+      ),
+      const SizedBox(height: 8),
+      Wrap(spacing: 16, runSpacing: 4, children: [
+        Text('${tr('Кіші')}: ${fit.small}', style: muted),
+        Text('${tr('Сай')}: ${fit.trueToSize}', style: muted),
+        Text('${tr('Үлкен')}: ${fit.large}', style: muted),
       ]),
-    );
+      const SizedBox(height: 12),
+      Text(trf('{0} сатып алушының пікірі бойынша.', [fit.answers]), style: muted),
+    ]);
   }
 }
 

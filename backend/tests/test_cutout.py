@@ -1102,10 +1102,12 @@ DEMO = Path(__file__).resolve().parents[2] / "app" / "demo"
 
 
 # CI checks out the whole repository, so there a missing demo is a failure, not a skip.
-@unittest.skipUnless((DEMO / "api.json").exists() or os.environ.get("CI"), "the app is not next to the backend here")
+@unittest.skipUnless((DEMO / "scan_sides.json").exists() or os.environ.get("CI"),
+                     "the app is not next to the backend here")
 class RealPhotoSideTests(unittest.TestCase):
-    """The side matching on the demo's shoes: the camera scan (1, and 3 in another colour) and the rendered scan (2,
-    and 4 in another colour), whose sides were checked by eye (the toe faces the viewer at the front,
+    """The side matching on the scans the demo once listed (kept in app/demo/scan_sides.json since the demo shows the
+    approved demo's shoe): the camera scan (1, and 3 in another colour) and the rendered scan (2, and 4 in another
+    colour), whose sides were checked by eye (the toe faces the viewer at the front,
     the heel at the back). A seller's own shot is made from a frame a little off the side checked: smaller, moved,
     brighter and tilted."""
 
@@ -1137,12 +1139,12 @@ class RealPhotoSideTests(unittest.TestCase):
         from types import SimpleNamespace
         from vitrina_api.cutout import side_frames
         from vitrina_api.serializers import one_turn
-        answers = json.loads((DEMO / "api.json").read_text())
+        scans = json.loads((DEMO / "scan_sides.json").read_text())
 
         def read(url):
             return (DEMO / "media" / url.split("/demo/media/")[1]).read_bytes()
         for lid, checked in self.CHECKED.items():
-            listing = answers[f"GET /listings/{lid}"]
+            listing = scans[str(lid)]
             media = [SimpleNamespace(**m) for m in listing["media"]]
             turn, _ = one_turn(media)
             n, urls = len(turn), [m.original_url for m in turn]

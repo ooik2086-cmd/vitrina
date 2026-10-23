@@ -241,8 +241,50 @@ void main() {
       expect(view.scripts.single, startsWith('vitrina.load('));
       view.scripts.clear();
       await stage(tester, key: key, dark: true, paused: true, m: ListingModel.fromJson({...model, 'variant': 'beach'}));
-      expect(view.scripts, ['vitrina.setVariant("beach")', 'vitrina.setBackground(true)', 'vitrina.setPaused(true)']);
+      expect(view.scripts,
+          ['vitrina.setVariant("beach", null)', 'vitrina.setBackground(true)', 'vitrina.setPaused(true)']);
       expect(maker.views, hasLength(1));
+    });
+
+    testWidgets('a colour made by tint goes with the load, and a new tint alone repaints the same 3D', (tester) async {
+      await warmHost(tester);
+      final key = GlobalKey<ModelStageState>();
+      final red = {
+        ...model,
+        'variant': 'beach',
+        'tint': [0, .62, .66],
+      };
+      await stage(tester, key: key, m: ListingModel.fromJson(red));
+      await pageLoaded(tester, maker);
+      maker.post({'type': 'ready'});
+      await tester.pump();
+      final view = maker.views.single;
+      expect(view.scripts.single, contains('"tint":[0.0,0.62,0.66]'));
+      view.scripts.clear();
+      await stage(tester,
+          key: key,
+          m: ListingModel.fromJson({
+            ...red,
+            'tint': [145, .38, .58]
+          }));
+      expect(view.scripts, ['vitrina.setVariant("beach", [145.0,0.38,0.58])']);
+      view.scripts.clear();
+      await stage(tester,
+          key: key,
+          m: ListingModel.fromJson({
+            ...red,
+            'tint': [145, .38, .58]
+          }));
+      expect(view.scripts, isEmpty, reason: 'the same tint again is no change');
+      await stage(tester, key: key, m: ListingModel.fromJson({...red, 'tint': 'red'}));
+      expect(view.scripts, ['vitrina.setVariant("beach", null)'], reason: 'a tint that is not three numbers is none');
+      // Out of range is brought in: hue round the circle, saturation 0–1, lightness factor 0–2.
+      expect(
+          ListingModel.fromJson({
+            ...red,
+            'tint': [-30, 1.5, 9]
+          }).tint,
+          [330, 1, 2]);
     });
 
     testWidgets('the phone taking the drawing back after the shoe showed brings the photos, and the page is left be',
@@ -424,7 +466,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(asked, contains('/api/v1/listings/4'));
       expect(maker.views, hasLength(1)); // the stage was not opened again
-      expect(view.scripts, ['vitrina.setVariant("beach")']);
+      expect(view.scripts, ['vitrina.setVariant("beach", null)']);
       expect(tester.widget<Text>(find.byKey(const Key('color-name'))).textSpan!.toPlainText(), 'Түсі: қызғылт');
       expect(page.pixels, closeTo(200, 10)); // where it was, not back at the top
       expect(tester.getSemantics(find.bySemanticsLabel(RegExp('^Өлшем 42'))), isSemantics(isSelected: true));

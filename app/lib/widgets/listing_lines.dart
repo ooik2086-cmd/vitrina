@@ -105,62 +105,59 @@ String fitWords(String verdict) => switch (verdict) {
       _ => tr('Өлшеміне сай'),
     };
 
-/// The size chart of this very pair: each size with the insole length the seller measured, sold-out ones said so; a
-/// tap picks the size. Under it, the way to find one's own size ([onGuide]).
+/// The size chart of this very pair, as on the approved demo: how to measure, then each size with the insole the
+/// seller measured, in millimetres; a tap on a size still on sale picks it.
 class ListingSizeChart extends StatelessWidget {
-  const ListingSizeChart(
-      {super.key, required this.sizes, required this.selected, required this.onPick, required this.onGuide});
+  const ListingSizeChart({super.key, required this.sizes, required this.selected, required this.onPick});
   final List<ShoeSize> sizes;
   final int? selected;
   final ValueChanged<ShoeSize> onPick;
-  final VoidCallback onGuide;
+
+  /// "26,3" cm as the seller gave it, said in millimetres: "263".
+  static String mm(String cm) {
+    final v = double.tryParse(cm.replaceAll(',', '.'));
+    return v == null ? cm : (v * 10).round().toString();
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final muted = theme.textTheme.bodyLarge?.copyWith(color: scheme.onSurfaceVariant);
-    final strong = weight(theme.textTheme.bodyLarge!, 650);
+    final line = BorderSide(color: scheme.outlineVariant);
+    final head = weight(theme.textTheme.bodyMedium!, 600).copyWith(color: scheme.onSurfaceVariant);
+    final cell = theme.textTheme.bodyLarge!.copyWith(fontFeatures: const [FontFeature.tabularFigures()]);
+    // A size no longer on sale is struck through and muted, as its circle on the page.
+    final gone = cell.copyWith(color: scheme.onSurfaceVariant, decoration: TextDecoration.lineThrough);
+    Widget row(Widget a, Widget b, {Widget? end}) => Container(
+          constraints: const BoxConstraints(minHeight: 48),
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+          decoration: BoxDecoration(border: Border(bottom: line)),
+          child: Row(children: [Expanded(child: a), Expanded(child: b), if (end != null) end]),
+        );
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6),
-        child: Row(children: [
-          Expanded(child: Text(tr('Өлшем'), style: muted)),
-          Expanded(flex: 2, child: Text(tr('Ұлтарақ ұзындығы'), style: muted)),
-        ]),
-      ),
+      Text(tr('Табаныңызды өкшеден ең ұзын саусаққа дейін өлшеңіз. Ішкі табан ұзындығын сатушы өлшеген.'),
+          style: theme.textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant)),
+      const SizedBox(height: 8),
+      row(Text(tr('Өлшемі'), style: head), Text(tr('Ішкі табан, мм'), style: head)),
       for (final s in sizes)
         Semantics(
           button: s.available,
           selected: s.id == selected,
-          child: InkWell(
-            key: Key('chart-${s.id}'),
-            onTap: s.available ? () => onPick(s) : null,
-            borderRadius: BorderRadius.circular(8),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(minHeight: 48),
-              child: Row(children: [
-                Expanded(
-                    child: Text(s.label,
-                        style: strong.copyWith(
-                            color: s.available ? null : scheme.onSurfaceVariant,
-                            decoration: s.available ? null : TextDecoration.lineThrough))),
-                Expanded(
-                  flex: 2,
-                  child: Text(
-                      s.available ? trf('{0} см', [s.insoleCm]) : '${trf('{0} см', [s.insoleCm])} · ${tr('қалмады')}',
-                      style: s.available ? strong : muted),
-                ),
-                if (s.id == selected) Icon(Icons.check_rounded, color: scheme.onSurface),
-              ]),
+          label: [
+            s.label,
+            trf('ішкі табан {0} мм', [mm(s.insoleCm)]),
+            if (!s.available) tr('қалмады')
+          ].join(', '),
+          child: ExcludeSemantics(
+            child: InkWell(
+              key: Key('chart-${s.id}'),
+              onTap: s.available ? () => onPick(s) : null,
+              child: row(Text(s.label, style: s.available ? cell : gone),
+                  Text(mm(s.insoleCm), style: s.available ? cell : gone),
+                  end: s.id == selected ? Icon(Icons.check_rounded, color: scheme.onSurface) : null),
             ),
           ),
         ),
-      const SizedBox(height: 8),
-      Align(
-        alignment: AlignmentDirectional.centerStart,
-        child: LineButton(key: const Key('size-guide-how'), title: tr('Аяғыңыздың өлшемін табу'), onTap: onGuide),
-      ),
     ]);
   }
 }
@@ -212,6 +209,9 @@ Future<T?> showPageSheet<T>(BuildContext context, {required String title, requir
     isScrollControlled: true,
     showDragHandle: true,
     useSafeArea: true,
+    // The page's paper, as on the approved demo, so a sheet reads as part of the page (the night canvas is a
+    // gradient: there the sheet keeps its own dark colour).
+    backgroundColor: Theme.of(context).extension<AppCanvas>()?.decoration.color,
     builder: (context) {
       final theme = Theme.of(context);
       return ConstrainedBox(
@@ -265,9 +265,12 @@ class ListingFacts extends StatelessWidget {
       for (final key in factKeys(l.category))
         if (l.facts[key] case final option? when factText(key, option) != null)
           (tr(factNames[key]!), factText(key, option)!),
-      (tr('Жағдайы'), label(conditions, l.condition)),
+      // As on the approved demo a new pair with its box lists only what it is; any other says its state (worn, or no
+      // box), and a checked one says that.
+      if (l.condition != 'new_with_box') (tr('Жағдайы'), label(conditions, l.condition)),
       if (l.audience != null) (tr('Кімге арналған'), label(audiences, l.audience)),
-      (tr('Түпнұсқалығы'), label(authenticity, l.authenticity)),
+      if (l.authenticity == 'verified' || l.authenticity == 'documented')
+        (tr('Түпнұсқалығы'), label(authenticity, l.authenticity)),
       if (l.segment != null) (tr('Баға деңгейі'), label(segments, l.segment)),
     ];
     // With larger text the two columns leave the values too narrow (a long material word split in two): each name
@@ -303,6 +306,9 @@ class ListingFacts extends StatelessWidget {
         const SizedBox(height: 14),
         Text(l.description!, key: const Key('description'), style: theme.textTheme.bodyLarge?.copyWith(height: 1.5)),
       ],
+      const SizedBox(height: 14),
+      Text(tr('Деректерді сатушы дайын нұсқалардан таңдаған.'),
+          style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
     ]);
   }
 }

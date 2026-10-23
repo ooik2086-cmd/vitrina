@@ -1,11 +1,17 @@
 {
  "about": "How the demo listings split into showcase parts (see showcase_parts.json): each part's size and first frame, and the frames in one turn. Written by backend/scripts/showcase_contract.py.",
  "listings": {
-  "GET /listings/6": {"sizes": [108, 40, 56, 1], "starts": ["https://raw.githubusercontent.com/ooik2086-cmd/vitrina/claude/initial-code/app/demo/media/scan/b55f5a9954eb5f9ed3a48c5810c1cceb.webp", "https://raw.githubusercontent.com/ooik2086-cmd/vitrina/claude/initial-code/app/demo/media/scan/41abcc99b3843cd8c524e8835db23a4a.webp", "https://raw.githubusercontent.com/ooik2086-cmd/vitrina/claude/initial-code/app/demo/media/scan/fa7088fc61ddce3906d15ee1b87bdc83.webp", "https://raw.githubusercontent.com/ooik2086-cmd/vitrina/claude/initial-code/app/demo/media/scan/7f24de2d9128bddaefbcca4a65a6deb2.webp"], "turn": 80},
-  "GET /listings/4": {"sizes": [108, 40, 56, 1], "starts": ["https://raw.githubusercontent.com/ooik2086-cmd/vitrina/claude/initial-code/app/demo/media/scan/86128b1d5da329496fc770319023f977.webp", "https://raw.githubusercontent.com/ooik2086-cmd/vitrina/claude/initial-code/app/demo/media/scan/87eb0356524653f820a9bce3d7743f25.webp", "https://raw.githubusercontent.com/ooik2086-cmd/vitrina/claude/initial-code/app/demo/media/scan/6ffdd79b77424cd66024a6f45dd0f3a2.webp", "https://raw.githubusercontent.com/ooik2086-cmd/vitrina/claude/initial-code/app/demo/media/scan/1ea70b00d6085ee84a4b29f4407dce74.webp"], "turn": 80},
-  "GET /listings/3": {"sizes": [108, 40, 56, 1], "starts": ["https://raw.githubusercontent.com/ooik2086-cmd/vitrina/claude/initial-code/app/demo/media/scan/f2e751a60d18e354f516ea389ec74960.webp", "https://raw.githubusercontent.com/ooik2086-cmd/vitrina/claude/initial-code/app/demo/media/scan/9b2412ec7d07a44cfca287611b4df0e9.webp", "https://raw.githubusercontent.com/ooik2086-cmd/vitrina/claude/initial-code/app/demo/media/scan/b99bb7efcb077160acd57e9c62b601ad.webp", "https://raw.githubusercontent.com/ooik2086-cmd/vitrina/claude/initial-code/app/demo/media/scan/0b3a7e27fd2b497f7e0dd079be06e764.webp"], "turn": 80},
-  "GET /listings/2": {"sizes": [108, 40, 56, 1], "starts": ["https://raw.githubusercontent.com/ooik2086-cmd/vitrina/claude/initial-code/app/demo/media/scan/b55f5a9954eb5f9ed3a48c5810c1cceb.webp", "https://raw.githubusercontent.com/ooik2086-cmd/vitrina/claude/initial-code/app/demo/media/scan/41abcc99b3843cd8c524e8835db23a4a.webp", "https://raw.githubusercontent.com/ooik2086-cmd/vitrina/claude/initial-code/app/demo/media/scan/fa7088fc61ddce3906d15ee1b87bdc83.webp", "https://raw.githubusercontent.com/ooik2086-cmd/vitrina/claude/initial-code/app/demo/media/scan/7f24de2d9128bddaefbcca4a65a6deb2.webp"], "turn": 80},
-  "GET /listings/1": {"sizes": [108, 40, 56, 1], "starts": ["https://raw.githubusercontent.com/ooik2086-cmd/vitrina/claude/initial-code/app/demo/media/scan/4541bfcff2f02b69f7f1b67220cdd616.webp", "https://raw.githubusercontent.com/ooik2086-cmd/vitrina/claude/initial-code/app/demo/media/scan/cc5221ed9d31cdfe425fcbaf7b240084.webp", "https://raw.githubusercontent.com/ooik2086-cmd/vitrina/claude/initial-code/app/demo/media/scan/0d312c32678a7ca792070c3b6de86005.webp", "https://raw.githubusercontent.com/ooik2086-cmd/vitrina/claude/initial-code/app/demo/media/scan/447a4f93a8d1203cead8d77c3359dd2f.webp"], "turn": 80},
-  "GET /listings/5": {"sizes": [36], "starts": ["https://raw.githubusercontent.com/ooik2086-cmd/vitrina/claude/initial-code/app/demo/media/1/7c3dc278fe88bd527c6e36f86e404de1.jpg"], "turn": 36}
+  "GET /listings/3": {"sizes": [], "starts": [], "turn": 0},
+  "GET /listings/1": {"sizes": [], "starts": [], "turn": 0},
+  "GET /listings/4": {"sizes": [], "starts": [], "turn": 0},
+  "GET /listings/2": {"sizes": [], "starts": [], "turn": 0},
+  "GET /listings/6": {"sizes": [], "starts": [], "turn": 0},
+  "GET /listings/7": {"sizes": [], "starts": [], "turn": 0},
+  "GET /listings/8": {"sizes": [], "starts": [], "turn": 0},
+  "GET /listings/9": {"sizes": [], "starts": [], "turn": 0},
+  "GET /listings/10": {"sizes": [], "starts": [], "turn": 0},
+  "GET /listings/11": {"sizes": [], "starts": [], "turn": 0},
+  "GET /listings/12": {"sizes": [], "starts": [], "turn": 0},
+  "GET /listings/13": {"sizes": [], "starts": [], "turn": 0}
  }
 }

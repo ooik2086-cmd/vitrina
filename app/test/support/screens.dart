@@ -292,7 +292,9 @@ Future<List<String>> visit(WidgetTester tester, String lang, Size size, double s
   if (main != null && main.position.maxScrollExtent > 0) {
     final up = main.widget.axisDirection == AxisDirection.up; // a chat runs from the bottom
     for (var i = 0; i < 20 && main.mounted && main.position.pixels < main.position.maxScrollExtent; i++) {
-      await tester.dragFrom(tester.getCenter(find.byWidget(main.widget)), Offset(0, up ? 300 : -300));
+      // From the side margin: a long text field in the middle scrolls its own text, not the page.
+      final box = tester.getRect(find.byWidget(main.widget));
+      await tester.dragFrom(Offset(box.left + 6, box.center.dy), Offset(0, up ? 300 : -300));
       await tester.pump(const Duration(milliseconds: 200));
       await look?.call(tester, errors); // each screenful, not only the first and the last
     }

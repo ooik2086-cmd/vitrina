@@ -412,10 +412,17 @@ void main() {
     expect(find.text('Кішілеу келеді ›'), findsOneWidget);
     await tester.tap(find.byKey(const Key('fit-line')));
     await tester.pumpAndSettle();
-    expect(find.text('Өлшемі қалай келді'), findsOneWidget); // the sheet's title; the verdict is in it once
+    // As on the approved demo: the verdict is the sheet's title, then the advice, the bar and each answer's count.
     expect(find.text('Кішілеу келеді'), findsOneWidget);
-    expect(find.text('Жарты өлшем үлкенін алыңыз'), findsOneWidget);
-    expect(find.text('5 сатып алушы'), findsOneWidget);
+    expect(find.text('Жарты өлшем үлкенін алыңыз.'), findsOneWidget);
+    for (final text in ['Кіші: 3', 'Сай: 2', 'Үлкен: 0', '5 сатып алушының пікірі бойынша.']) {
+      expect(find.text(text), findsOneWidget, reason: text);
+    }
+    // The bar shows: 3 small and 2 true, each its share of the width, 8 px high.
+    final parts = find.descendant(of: find.byKey(const Key('size-fit')), matching: find.byType(ColoredBox));
+    expect(parts, findsNWidgets(2));
+    expect([for (final e in parts.evaluate()) tester.getSize(find.byWidget(e.widget)).height], [8, 8]);
+    expect(tester.getSize(parts.first).width, greaterThan(tester.getSize(parts.last).width));
     SizeFit fit(int s, int t, int l) => SizeFit.fromJson({'answers': s + t + l, 'small': s, 'true': t, 'large': l});
     expect(fit(1, 8, 1).verdict, 'true');
     expect(fit(4, 2, 4).verdict, 'true'); // split both ways: no advice beats wrong advice
@@ -553,7 +560,9 @@ void main() {
     expect(find.text('Баға деңгейі'), findsNothing); // no invented segment, and no empty row, while data is thin
     expect(find.text('Киілген, жақсы'), findsOneWidget);
     expect(find.byKey(const Key('report')), findsOneWidget); // a report stays one tap away, in the description
-    expect(find.text('Тексерілмеген'), findsOneWidget);
+    // As on the approved demo, authenticity is said only when it was checked or comes with papers.
+    expect(find.text('Тексерілмеген'), findsNothing);
+    expect(find.text('Деректерді сатушы дайын нұсқалардан таңдаған.'), findsOneWidget);
   });
 
   test('every fact and its options can be read in Russian and English', () {
@@ -614,11 +623,23 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('size-guide')));
     await tester.pumpAndSettle();
-    expect(find.text('27,0 см'), findsOneWidget);
-    expect(find.text('27,5 см · қалмады'), findsOneWidget);
+    // As on the approved demo: how to measure, then each size with its insole in millimetres.
+    expect(find.textContaining('Табаныңызды өкшеден'), findsOneWidget);
+    expect(find.text('Ішкі табан, мм'), findsOneWidget);
+    expect(find.text('270'), findsOneWidget);
+    expect(find.text('275'), findsOneWidget);
+    final semantics = tester.ensureSemantics();
+    // Each row is read whole, sold out said too.
+    expect(find.bySemanticsLabel('43, ішкі табан 275 мм, қалмады'), findsOneWidget);
+    expect(find.bySemanticsLabel('42, ішкі табан 270 мм'), findsOneWidget);
+    semantics.dispose();
+    // Sold out is seen too: struck through.
+    final soldOut =
+        tester.widget<Text>(find.descendant(of: find.byKey(const Key('chart-2')), matching: find.text('43')));
+    expect(soldOut.style?.decoration, TextDecoration.lineThrough);
     await tester.tap(find.byKey(const Key('chart-2'))); // sold out: not picked
     await tester.pumpAndSettle();
-    expect(find.text('27,5 см · қалмады'), findsOneWidget);
+    expect(find.byKey(const Key('chart-2')), findsOneWidget);
     await tester.tap(find.byKey(const Key('chart-1')));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('chart-1')), findsNothing); // the sheet closed on the pick
@@ -977,14 +998,45 @@ void main() {
     expect((await api.search(q: 'обувь')).length, all.length);
   });
 
-  test('the demo offers each colour as the server would: closest condition, the same order on every colour', () async {
+  test('the demo offers the approved demo\'s shoe in its 12 colours, the same order on every colour', () async {
     final api = Api(base: 'http://demo/api/v1', client: await DemoClient.load())..token = demoToken;
-    final blue = await api.listing(3); // Runner 01, new without box
-    // Black: the new boxed pair (1), not the cheaper worn one (2); the rejected pair (5) and another shop's (6) never.
-    expect([for (final c in blue.colors) (c.id, c.current)], [(3, true), (1, false), (4, false)]);
+    final blue = await api.listing(3);
+    expect([for (final c in blue.colors) c.id]..sort(), [1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13]);
+    expect({for (final c in blue.colors) c.color}, hasLength(12));
+    expect(blue.colors.singleWhere((c) => c.current).id, 3);
+    // The three colours the model was made in show as made; the other nine are tints of the pink one.
+    for (final c in blue.colors) {
+      final m = (await api.listing(c.id)).model!;
+      final made = ['көк', 'қара', 'қызғылт'].contains(c.color);
+      expect(m.tint, made ? isNull : hasLength(3), reason: c.color);
+      if (!made) expect(m.variant, 'beach', reason: c.color);
+    }
     final black = await api.listing(1);
     expect([for (final c in black.colors) c.color], [for (final c in blue.colors) c.color]); // swatches keep places
     expect(black.colors.singleWhere((c) => c.current).id, 1);
+  });
+
+  test('the colours offered are as the server picks: closest condition, one shop, on sale', () {
+    Map<String, dynamic> pair(int id, String color, String condition, int price,
+            {int seller = 1, String status = 'published'}) =>
+        {
+          'id': id, 'status': status, 'category': 'sneakers', 'brand': 'Qadam', 'model_name': 'Runner 01', //
+          'color': color, 'condition': condition, 'price_tiyn': price, 'seller': {'id': seller},
+          'sizes': [
+            {'available': true}
+          ],
+          'media': <Object>[],
+        };
+    final blue = pair(3, 'көк', 'new_no_box', 2490000);
+    final all = [
+      blue,
+      pair(1, 'қара', 'new_with_box', 3290000),
+      pair(2, 'қара', 'used_good', 1490000), // cheaper, but worn: the new black is closer
+      pair(4, 'қызғылт', 'unworn_stored', 1990000),
+      pair(5, 'ақ', 'new_with_box', 3200000, status: 'rejected'),
+      pair(6, 'сұр', 'new_with_box', 2900000, seller: 4), // another shop's
+    ];
+    expect([for (final c in colorwaysOf(blue, all)) (c['id'], c['current'])], [(3, true), (1, false), (4, false)]);
   });
 
   test('order summary lists the price with its promo and says it is not a fiscal receipt', () {

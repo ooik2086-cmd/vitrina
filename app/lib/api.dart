@@ -244,10 +244,24 @@ class ListingModel {
   ListingModel.fromJson(Map<String, dynamic> j)
       : url = j['url'] as String,
         hqUrl = j['hq_url'] as String?,
-        variant = j['variant'] as String?;
+        variant = j['variant'] as String?,
+        tint = switch (j['tint']) {
+          // Hue round the circle, saturation 0–1, lightness factor 0–2 (the viewer holds to the same).
+          [num h, num s, num k] when [h, s, k].every((v) => v.isFinite) => [
+              (h % 360).toDouble(),
+              s.clamp(0, 1).toDouble(),
+              k.clamp(0, 2).toDouble(),
+            ],
+          _ => null,
+        };
   final String url;
   final String? hqUrl;
   final String? variant;
+
+  /// A colour the model was not made in: hue (0–360), saturation and a lightness factor laid over [variant]'s
+  /// coloured parts, as on the approved demo. Null shows [variant] as made. Only the demo's data has it so far: the
+  /// server sends none (a seller's pair is shown in the colour it was made in).
+  final List<double>? tint;
 }
 
 /// Brand, model and category read off look-alike listings already on VITRINA. Any field may be null.

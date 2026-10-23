@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../net_image.dart';
 import '../api.dart';
+import '../colors.dart';
 import '../session.dart';
 import '../theme.dart';
 import 'listing_editor_screen.dart';
@@ -176,6 +177,7 @@ class _MyListingsScreenState extends State<MyListingsScreen> {
                   onChanged: (_) => setState(() {}),
                   decoration: InputDecoration(
                     hintText: tr('Атауы, бренді не үлгісі'),
+                    hintMaxLines: 2, // whole at large text, in Russian too
                     prefixIcon: const Icon(Icons.search),
                     isDense: true,
                     suffixIcon: _query.text.isEmpty
@@ -239,7 +241,7 @@ class _MyListingsScreenState extends State<MyListingsScreen> {
                                       fit: BoxFit.cover,
                                       errorBuilder: (_, __, ___) => const Icon(Icons.broken_image_outlined)),
                             ),
-                            title: Text(l.title),
+                            title: Text(namedWithColor(l)),
                             subtitle: Text.rich(TextSpan(children: [
                               // A listing sent back or hidden needs the seller: its word stands out, the rest stays calm.
                               TextSpan(
@@ -270,4 +272,11 @@ class _MyListingsScreenState extends State<MyListingsScreen> {
       ),
     );
   }
+}
+
+/// A listing's title with its colour after it, unless the title already says it: one model in many colours reads as
+/// many rows, not one title over and over.
+String namedWithColor(Listing l) {
+  final color = colorName(l.color);
+  return color.isEmpty || l.title.toLowerCase().contains(color.toLowerCase()) ? l.title : '${l.title}, $color';
 }
