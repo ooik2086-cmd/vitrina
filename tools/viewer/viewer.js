@@ -44,7 +44,10 @@ function frame() {
   renderer.setPixelRatio(dpr());
   renderer.setSize(w, h, false);
   camera.aspect = w / h;
-  camera.position.set(0, 0, 2.05 * r / Math.min(1, camera.aspect) / zoom);
+  // Far enough that the shoe's whole sphere fits the narrower side, so turned any way (toe or heel to the camera,
+  // which brings it nearer and larger) it is never cut off (Aza, 2026-10-23); zoomed in, it may be.
+  const half = Math.atan(Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * Math.min(1, camera.aspect));
+  camera.position.set(0, 0, r / Math.sin(half) / zoom);
   camera.updateProjectionMatrix();
   dirty = true;
   kick();
@@ -111,8 +114,7 @@ function use(gltf, list) {
   const box = new THREE.Box3().setFromObject(model);
   model.position.sub(box.getCenter(new THREE.Vector3()));
   pivot.add(model);
-  const size = box.getSize(new THREE.Vector3());
-  r = Math.max(size.x, size.z);
+  r = box.getSize(new THREE.Vector3()).length() / 2; // the radius of the sphere round the shoe
 }
 
 // A colour the model was not made in, as on the approved demo: the variant's coloured parts take hue [h], saturation

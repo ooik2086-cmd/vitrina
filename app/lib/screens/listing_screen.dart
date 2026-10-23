@@ -508,7 +508,8 @@ class _ListingScreenState extends State<ListingScreen> {
     final photos = ColoredBox(
       color: scan ? scene.ink : Brand.studio,
       // Its own per colour: another colour's photos start at their first, not at the page the last one was on.
-      child: PhotoGallery(key: ValueKey(l.id), dark: scan && _dark, urls: [for (final p in l.photos) p.originalUrl]),
+      child: PhotoGallery(
+          key: ValueKey(l.id), dark: scan && _dark, cutout: scan, urls: [for (final p in l.photos) p.originalUrl]),
     );
     final first = l.photos.firstOrNull;
     // The catalog's photo flies to the cover (the 3D itself never flies: a WebView cannot be moved mid-flight).
@@ -615,11 +616,12 @@ class _ListingScreenState extends State<ListingScreen> {
       Expanded(
         child: LayoutBuilder(
           builder: (context, viewport) {
-            // As the approved demo: most of the screen, at most 560 high, never under 300; but always a strip under
+            // Most of the screen, at most 640 high, never under 300: a little taller than the approved demo (Aza: the
+            // turned shoe was cut off), so the 3D fits it whole at any angle at its usual size. Always a strip under
             // it to scroll the page by (the stage takes every finger on it), as on a phone held sideways.
             _stage = l.photos.isEmpty && !hasModel
                 ? 0
-                : min(max(300.0, min(viewport.maxHeight * 0.62, 560.0)), max(160.0, viewport.maxHeight - 140));
+                : min(max(300.0, min(viewport.maxHeight * 0.7, 640.0)), max(160.0, viewport.maxHeight - 140));
             return ListView(controller: _scroll, padding: EdgeInsets.zero, children: [
               // Kept when the page scrolls it away, so scrolling back does not open the 3D again.
               if (_stage > 0) _KeptAlive(child: _stageView(l, _stage)),

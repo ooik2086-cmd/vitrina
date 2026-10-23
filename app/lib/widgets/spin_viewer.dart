@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import '../net_image.dart';
 import '../theme.dart';
 import '../i18n.dart';
+import 'blur_fill.dart';
 import 'scroll_showcase.dart' show ShowcaseScene;
 
 /// 360° view built from a sequence of real photos taken around the product.
@@ -164,9 +165,13 @@ class _SpinViewerState extends State<SpinViewer> {
 
 /// Swipeable gallery with page dots, for the angle photos and for listings without a frame sequence.
 class PhotoGallery extends StatefulWidget {
-  const PhotoGallery({super.key, required this.urls, this.dark = false});
+  const PhotoGallery({super.key, required this.urls, this.dark = false, this.cutout = false});
   final List<String> urls;
   final bool dark; // the photos stand on a dark scene: the page dots go light
+
+  /// Cut-out photos stand on the scene; photos as taken stand on their own colours (see BlurFill). Either way a
+  /// photo of any shape shows whole, nothing cut off.
+  final bool cutout;
 
   @override
   State<PhotoGallery> createState() => _PhotoGalleryState();
@@ -174,23 +179,46 @@ class PhotoGallery extends StatefulWidget {
 
 class _PhotoGalleryState extends State<PhotoGallery> {
   int _page = 0;
+  bool _zoomed = false; // a photo zoomed in pans under the finger instead of turning the page
+  final _pages = PageController();
+
+  @override
+  void dispose() {
+    _pages.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     if (widget.urls.isEmpty) {
       return const ColoredBox(color: Brand.studio, child: Center(child: Icon(Icons.image_not_supported_outlined)));
     }
-    // Decoded at the size shown: a 3200 px photo decoded whole is 40 MB.
-    final side = (MediaQuery.sizeOf(context).width * MediaQuery.devicePixelRatioOf(context)).round();
+    // Decoded at the size shown: a 3200 px photo decoded whole is 40 MB. Only the photo zoomed in is decoded at twice
+    // that (up to 2000 px), so it stays sharp at 3×.
+    final side = MediaQuery.sizeOf(context).width * MediaQuery.devicePixelRatioOf(context);
     return Stack(children: [
       PageView(
-        onPageChanged: (p) => setState(() => _page = p),
+        controller: _pages,
+        physics: _zoomed ? const NeverScrollableScrollPhysics() : null,
+        onPageChanged: (p) => setState(() {
+          _page = p;
+          _zoomed = false;
+        }),
         children: [
-          for (final u in widget.urls)
-            Image(
-                image: ResizeImage.resizeIfNeeded(math.min(side, 2000), null, netImage(u)),
-                fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => const Center(child: Icon(Icons.broken_image_outlined))),
+          for (final (n, u) in widget.urls.indexed)
+            _ZoomPhoto(
+              active: n == _page,
+              onZoomed: (z) {
+                if (z != _zoomed) setState(() => _zoomed = z);
+              },
+              backdrop: widget.cutout ? null : BlurFill(url: u),
+              photo: Image(
+                  image: ResizeImage.resizeIfNeeded(
+                      math.min((side * (n == _page && _zoomed ? 2 : 1)).round(), 2000), null, netImage(u)),
+                  fit: BoxFit.contain,
+                  gaplessPlayback: true,
+                  errorBuilder: (_, __, ___) => const Center(child: Icon(Icons.broken_image_outlined))),
+            ),
         ],
       ),
       Positioned(
@@ -214,4 +242,91 @@ class _PhotoGalleryState extends State<PhotoGallery> {
       ),
     ]);
   }
+}
+
+/// One photo that zooms as on the approved demo: two fingers up to 3×, a double tap to 2.5× where tapped and back,
+/// eased; zoomed in, one finger moves it. Another page shown, it is back at 1×. The [backdrop] stays still behind it,
+/// painted once rather than on every frame of a zoom.
+class _ZoomPhoto extends StatefulWidget {
+  const _ZoomPhoto({required this.photo, this.backdrop, required this.active, required this.onZoomed});
+  final Widget photo;
+  final Widget? backdrop;
+  final bool active;
+  final ValueChanged<bool> onZoomed;
+
+  @override
+  State<_ZoomPhoto> createState() => _ZoomPhotoState();
+}
+
+class _ZoomPhotoState extends State<_ZoomPhoto> with SingleTickerProviderStateMixin {
+  final _view = TransformationController();
+  late final _ease = AnimationController(vsync: this, duration: const Duration(milliseconds: 260))
+    ..addListener(() => _view.value = _anim!.value);
+  Animation<Matrix4>? _anim;
+  Offset _tap = Offset.zero;
+  bool _zoomed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Told the moment the zoom crosses 1×, by fingers or by the eased double tap alike.
+    _view.addListener(() {
+      final z = _view.value.getMaxScaleOnAxis() > 1.01;
+      if (z == _zoomed) return;
+      setState(() => _zoomed = z);
+      widget.onZoomed(z);
+    });
+  }
+
+  @override
+  void didUpdateWidget(_ZoomPhoto old) {
+    super.didUpdateWidget(old);
+    if (old.active && !widget.active) {
+      _ease.stop();
+      _view.value = Matrix4.identity();
+    }
+  }
+
+  @override
+  void dispose() {
+    _ease.dispose();
+    _view.dispose();
+    super.dispose();
+  }
+
+  void _toggle() {
+    final Matrix4 end;
+    if (_zoomed) {
+      end = Matrix4.identity();
+    } else {
+      const s = 2.5;
+      end = Matrix4.identity()
+        ..translateByDouble(-_tap.dx * (s - 1), -_tap.dy * (s - 1), 0, 1)
+        ..scaleByDouble(s, s, 1, 1);
+    }
+    _anim = Matrix4Tween(begin: _view.value, end: end).animate(CurvedAnimation(parent: _ease, curve: Curves.easeOut));
+    if (MediaQuery.of(context).disableAnimations) {
+      _view.value = end;
+    } else {
+      _ease.forward(from: 0);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Stack(fit: StackFit.expand, children: [
+        if (widget.backdrop != null) RepaintBoundary(child: widget.backdrop),
+        GestureDetector(
+          onDoubleTapDown: (d) => _tap = d.localPosition,
+          onDoubleTap: _toggle,
+          child: InteractiveViewer(
+            transformationController: _view,
+            minScale: 1,
+            maxScale: 3,
+            panEnabled: _zoomed,
+            clipBehavior: Clip.hardEdge,
+            onInteractionStart: (_) => _ease.stop(),
+            child: SizedBox.expand(child: widget.photo),
+          ),
+        ),
+      ]);
 }

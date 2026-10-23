@@ -3,6 +3,7 @@ import 'package:video_player/video_player.dart';
 
 import '../i18n.dart';
 import '../net_image.dart';
+import 'blur_fill.dart';
 
 /// "1:05" for a video's length or place in it.
 String clockText(Duration d) => '${d.inMinutes}:${(d.inSeconds % 60).toString().padLeft(2, '0')}';
@@ -71,17 +72,21 @@ class _VideoPaneState extends State<VideoPane> {
     final video = _video;
     return ColoredBox(
       color: widget.background,
-      child: video == null
-          ? _poster(context)
-          : ValueListenableBuilder<VideoPlayerValue>(
-              valueListenable: video,
-              builder: (context, v, _) => v.isInitialized
-                  ? _playing(context, video, v)
-                  : Stack(fit: StackFit.expand, children: [
-                      _posterImage(),
-                      const Center(child: CircularProgressIndicator(color: Colors.white)),
-                    ]),
-            ),
+      child: Stack(fit: StackFit.expand, children: [
+        // A video of any shape shows whole, on its own colours (see BlurFill) rather than on bars.
+        if (widget.posterUrl != null) BlurFill(url: widget.posterUrl!),
+        video == null
+            ? _poster(context)
+            : ValueListenableBuilder<VideoPlayerValue>(
+                valueListenable: video,
+                builder: (context, v, _) => v.isInitialized
+                    ? _playing(context, video, v)
+                    : Stack(fit: StackFit.expand, children: [
+                        _posterImage(),
+                        const Center(child: CircularProgressIndicator(color: Colors.white)),
+                      ]),
+              ),
+      ]),
     );
   }
 
