@@ -25,6 +25,8 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  integration_test:
+    sdk: flutter
   flutter_lints: ^5.0.0
   image_picker_platform_interface: ^2.11.2
   camera_platform_interface: ^2.15.0

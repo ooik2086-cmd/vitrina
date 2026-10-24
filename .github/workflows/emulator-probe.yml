@@ -1,0 +1,31 @@
+name: Emulator probe
+on:
+  push:
+    branches: [claude/emulator-probe]
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
+      - uses: actions/setup-java@v4
+        with: {distribution: temurin, java-version: "17"}
+      - uses: subosito/flutter-action@v2
+        with: {channel: stable, cache: true}
+      - run: cd app && flutter pub get && flutter build apk --debug --target-platform android-x64 --dart-define=DEMO=true -t integration_test/probe_test.dart
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: false
+          script: bash probe.sh
+          working-directory: app
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: probe, path: "app/probe-out"}
