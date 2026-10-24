@@ -16,7 +16,6 @@ import 'screens/orders_screen.dart';
 import 'screens/profile_screen.dart';
 import 'session.dart';
 import 'theme.dart';
-import 'widgets/model_stage.dart';
 import 'i18n.dart';
 import 'my_size.dart';
 import 'quick_replies.dart';
@@ -33,6 +32,7 @@ Future<void> main() async {
   await restoreThemeMode();
   final Session session;
   if (demoMode) {
+    await restoreCarried();
     session = Session(Api(client: await DemoClient.load()))..api.token = demoToken;
     session.update(await session.api.me());
   } else {
@@ -41,8 +41,6 @@ Future<void> main() async {
     unawaited(session.api.paymentsOn());
   }
   runApp(VitrinaApp(session: session));
-  // The first listing opened finds its 3D page already up, made once the catalog has shown.
-  WidgetsBinding.instance.addPostFrameCallback((_) => Timer(const Duration(seconds: 2), ModelStage.keepOneReady));
 }
 
 String _deviceLanguage() {

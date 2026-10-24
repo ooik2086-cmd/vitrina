@@ -60,7 +60,10 @@ for i, (lid, name, variant, tint) in enumerate(COLOURS):
     # The catalog card's turn: its cover's own small copy first, then the 23 pictures round from render.mjs.
     m['turn'] = [media[0]['thumb_url']] + [put(webp(src / 't' / f'{f:02d}.png'), 'webp') for f in range(1, 24)]
     # The 3D's own first picture (first.mjs), shown the moment the page opens while the 3D loads behind it.
-    m['first_url'] = put(webp(R / 'first' / f'{lid}.png'), 'webp')
+    # In app/demo/first, which the demo app carries inside itself (pubspec): it shows with no internet at all.
+    first = webp(R / 'first' / f'{i}.png'); fn = hashlib.md5(first).hexdigest() + '.webp'
+    (demo / 'first').mkdir(exist_ok=True); (demo / 'first' / fn).write_bytes(first)
+    m['first_url'] = BASE.replace('/media/', '/first/') + fn
     new[lid] = {
         'id': lid, 'status': 'published', 'title': 'Жеңіл жүгіру кроссовкасы', 'category': 'sneakers', 'brand': None,
         'model_name': 'Foam Run Light', 'color': name, 'price_tiyn': 2110000, 'was_price_tiyn': None,

@@ -10,6 +10,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 
 import '../api.dart';
+import '../demo.dart' show carriedAsset;
 import '../i18n.dart';
 import '../net_image.dart';
 import '../viewer_host_web.dart' if (dart.library.io) '../viewer_host_io.dart';
@@ -77,31 +78,50 @@ class ModelStage extends StatefulWidget {
   static const patience = Duration(seconds: 25);
   static const longest = Duration(seconds: 90);
 
-  /// Gets [model] ready before its page opens (a finger on its card): its first picture and its model come down.
+  /// Gets [model]'s first picture ready before its page opens (a finger on its card): a small file, so a touch that
+  /// turns into a scroll costs little. The model itself comes down once the page opens.
   static void prepare(BuildContext context, ListingModel model) {
-    if (model.firstUrl case final first?) precacheImage(netImage(first), context, onError: (_, __) {});
-    if (_real) ViewerHost.instance.then((host) => host?.warm(model.url));
+    if (model.firstUrl case final first?) precacheImage(firstImage(first, context), context, onError: (_, __) {});
   }
 
   /// Opens a stage's page ahead of time, hidden, so the next listing's 3D needs only its model: the page, three.js
-  /// and the phone's web engine are already up. One at a time; made after the app opens and after each stage closes.
+  /// and the phone's web engine are already up. Only once a 3D has been looked at, only while no stage is open, and
+  /// one at a time; given up while the app is in the background or the phone is short of memory, and for good where
+  /// the phone cannot draw 3D.
   static Future<void> keepOneReady() async {
-    if (_spare != null || _making || !_real) return;
-    _making = true;
-    try {
-      _spare = await _open(Brightness.light);
-    } catch (e) {
+    if (_spare != null || _making != null || _live > 0 || _noSpare || !_real) return;
+    _guardSpare();
+    final making = _making = _open(Brightness.light).catchError((Object e) {
       debugPrint('3D stage: $e');
-    } finally {
-      _making = false;
-    }
+      return null;
+    });
+    final view = await making;
+    _making = null;
+    // Opened only as the next stage asked: it took this one already.
+    if (_taken.remove(view)) return;
+    _spare = view;
   }
 
   /// The stage draws with a phone's WebView, not a test's stand-in.
   static bool get _real => maker == _webView && !kIsWeb && WebViewPlatform.instance != null;
 
   static _WebModelView? _spare;
-  static bool _making = false;
+  static Future<_WebModelView?>? _making;
+  static final _taken = <_WebModelView?>{};
+  static int _live = 0; // stages open now
+  static bool _noSpare = false; // this phone cannot draw 3D: no page is opened ahead
+  static _SpareGuard? _spareGuard;
+
+  static void _guardSpare() {
+    if (_spareGuard != null) return;
+    WidgetsBinding.instance.addObserver(_spareGuard = _SpareGuard());
+  }
+
+  /// Lets go of the page kept ready (the app went to the background, or the phone is short of memory).
+  static void _dropSpare() {
+    _spare?.dispose();
+    _spare = null;
+  }
 
   @override
   State<ModelStage> createState() => ModelStageState();
@@ -119,6 +139,7 @@ class ModelStageState extends State<ModelStage> {
   @override
   void initState() {
     super.initState();
+    ModelStage._live++;
     _wait();
     final scene = widget.dark ? Brightness.dark : Brightness.light;
     ModelStage.maker(scene, _message).then((view) {
@@ -139,9 +160,11 @@ class ModelStageState extends State<ModelStage> {
   @override
   void dispose() {
     _patience?.cancel();
+    _settle?.cancel();
     _view?.dispose();
-    if (widget.model.firstUrl case final first?) netImage(first).evict();
-    // The next listing opened finds a page ready, made once this one has gone.
+    _first?.evict();
+    ModelStage._live--;
+    // The next listing opened finds a page ready, made once this one has gone and no other stage has opened.
     if (ModelStage._real) Timer(const Duration(seconds: 1), ModelStage.keepOneReady);
     super.dispose();
   }
@@ -194,6 +217,11 @@ class ModelStageState extends State<ModelStage> {
         if (_broken) return;
         _patience?.cancel();
         setState(() => _ready = true);
+        // Once the 3D has faded in over it, the first picture goes.
+        _settle?.cancel();
+        _settle = Timer(_fade(context) + const Duration(milliseconds: 60), () {
+          if (mounted && _ready) setState(() => _settled = true);
+        });
         if (widget.paused || _covered) _view?.run('vitrina.setPaused(true)');
         widget.onReady?.call();
       case 'error':
@@ -275,12 +303,18 @@ class ModelStageState extends State<ModelStage> {
   }
 
   bool _settled = false; // the 3D has faded in over the first picture, which then goes
+  ImageProvider? _first; // the first picture as shown, let go of with the stage
+  Timer? _settle;
+
+  static Duration _fade(BuildContext context) =>
+      MediaQuery.disableAnimationsOf(context) ? Duration.zero : const Duration(milliseconds: 240);
 
   @override
   Widget build(BuildContext context) {
     final scene = widget.dark ? ShowcaseScene.dark : ShowcaseScene.light;
     final view = _view;
-    final first = _broken || _settled ? null : widget.model.firstUrl;
+    final firstUrl = _broken || _settled ? null : widget.model.firstUrl;
+    final first = firstUrl == null ? null : _first = firstImage(firstUrl, context);
     return Semantics(
       // Names what is there, not finger gestures a screen reader's user cannot make; the Фото tab is beside it.
       label: tr('Аяқкиімнің 3D көрінісі'),
@@ -289,14 +323,11 @@ class ModelStageState extends State<ModelStage> {
         // Only the 3D itself on the stage, no photo in front of it (Aza, 2026-10-24): its own first picture, or a quiet
         // line, until it draws, then the shoe fades in. The photos stand in only when the 3D cannot open.
         child: Stack(fit: StackFit.expand, children: [
-          if (first != null) IgnorePointer(child: FirstPicture(url: first, scene: scene, loading: _loading(scene))),
+          if (first != null) IgnorePointer(child: FirstPicture(image: first, scene: scene, loading: _loading(scene))),
           if (view != null && !_broken)
             AnimatedOpacity(
               opacity: _ready ? 1 : 0,
-              duration: MediaQuery.disableAnimationsOf(context) ? Duration.zero : const Duration(milliseconds: 240),
-              onEnd: () {
-                if (mounted && _ready && !_settled) setState(() => _settled = true);
-              },
+              duration: _fade(context),
               child: ExcludeSemantics(child: view.widget),
             ),
           if (_broken) IgnorePointer(child: widget.cover),
@@ -313,20 +344,40 @@ class ModelStageState extends State<ModelStage> {
       );
 }
 
+/// The 3D's first picture: carried inside the demo app, else from the internet and kept; decoded no larger than the
+/// screen's narrower side needs (the stage is as wide as the screen).
+ImageProvider firstImage(String url, BuildContext context) {
+  final side =
+      math.min(1080, (MediaQuery.sizeOf(context).shortestSide * MediaQuery.devicePixelRatioOf(context)).round());
+  return ResizeImage.resizeIfNeeded(
+      side,
+      null,
+      switch (carriedAsset(url)) {
+        final asset? => AssetImage(asset),
+        null => netImage(url),
+      });
+}
+
 /// The 3D's own first picture on the scene and its halo, at the very size and place the stage's 3D draws the shoe:
-/// the viewer fits the shoe's sphere to the stage's narrower side with a 30° tall view, and a square picture made
-/// the same way matches it here (on a tall stage slightly larger, as its camera's side angle is narrower). [loading]
-/// shows until the picture has come.
-class FirstPicture extends StatelessWidget {
-  const FirstPicture({super.key, required this.url, required this.scene, required this.loading});
-  final String url;
+/// the viewer's camera sees 30° across the stage's narrower side from a fixed distance, so a square picture made the
+/// same way is the shoe exactly, at the narrower side's size. [loading] shows until the picture first comes; another
+/// colour's picture then takes its place without a gap.
+class FirstPicture extends StatefulWidget {
+  const FirstPicture({super.key, required this.image, required this.scene, required this.loading});
+  final ImageProvider image;
   final ShowcaseScene scene;
   final Widget loading;
 
-  static const _halfFov = math.pi / 12; // the viewer's camera: 30° tall
+  @override
+  State<FirstPicture> createState() => _FirstPictureState();
+}
+
+class _FirstPictureState extends State<FirstPicture> {
+  bool _came = false;
 
   @override
   Widget build(BuildContext context) {
+    final scene = widget.scene;
     return DecoratedBox(
       key: const Key('model-first'),
       // The viewer page's halo: radial-gradient(circle closest-side, halo 0%, transparent 88%).
@@ -334,28 +385,36 @@ class FirstPicture extends StatelessWidget {
           gradient: RadialGradient(
               radius: 0.5, colors: [scene.halo, scene.halo.withValues(alpha: 0)], stops: const [0, 0.88])),
       child: LayoutBuilder(builder: (context, box) {
-        final a = box.maxWidth / box.maxHeight;
-        final side =
-            a >= 1 ? box.maxHeight : box.maxWidth * math.cos(math.atan(math.tan(_halfFov) * a)) / math.cos(_halfFov);
-        return OverflowBox(
-          minWidth: 0,
-          minHeight: 0,
-          maxWidth: side,
-          maxHeight: side,
+        final side = math.min(box.maxWidth, box.maxHeight);
+        return Center(
           child: Image(
-            image: netImage(url),
+            image: widget.image,
             width: side,
             height: side,
             fit: BoxFit.contain,
             gaplessPlayback: true,
             excludeFromSemantics: true,
-            frameBuilder: (_, child, frame, sync) => frame == null && !sync ? loading : child,
-            errorBuilder: (_, __, ___) => loading,
+            frameBuilder: (_, child, frame, sync) {
+              if (frame != null || sync) _came = true;
+              return _came ? child : widget.loading;
+            },
+            errorBuilder: (_, __, ___) => widget.loading,
           ),
         );
       }),
     );
   }
+}
+
+/// Lets go of the page kept ready when the app goes to the background or the phone is short of memory.
+class _SpareGuard with WidgetsBindingObserver {
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.detached) ModelStage._dropSpare();
+  }
+
+  @override
+  void didHaveMemoryPressure() => ModelStage._dropSpare();
 }
 
 /// Tells the stage when Android stopped its WebView's page process (low memory): without this the whole app would
@@ -366,9 +425,19 @@ final _gone = <int, VoidCallback>{};
 Future<ModelView?> _webView(Brightness scene, void Function(String message) onMessage) async {
   // No WebView here (the web, widget tests): the listing shows its photos.
   if (kIsWeb || WebViewPlatform.instance == null) return null;
-  // The page kept ready, when it is still whole; else one opened now.
+  // The page kept ready (waited for while it is still opening), when it is still whole; else one opened now.
   var view = ModelStage._spare;
   ModelStage._spare = null;
+  final making = ModelStage._making;
+  if (view == null && making != null) {
+    view = await making;
+    // Whichever of the two heard first: the page is this stage's, not kept for the next.
+    if (ModelStage._spare == view) {
+      ModelStage._spare = null;
+    } else {
+      ModelStage._taken.add(view);
+    }
+  }
   if (view != null && (view._dead || view._lost)) {
     view.dispose();
     view = null;
@@ -435,11 +504,16 @@ class _WebModelView implements ModelView {
 
   void _heard(String message) {
     try {
-      switch ((jsonDecode(message) as Map)['type']) {
+      final m = jsonDecode(message) as Map;
+      switch (m['type']) {
         case 'page':
           _paged = true;
         case 'lost':
           _lost = true;
+          // This phone has no WebGL: no page is opened ahead again (each would fail the same).
+          if (m['message'] == 'no webgl') ModelStage._noSpare = true;
+        case 'error' when _listener == null:
+          _lost = true; // a page that did not load is not given to a stage
       }
     } catch (_) {}
     _listener?.call(message);

@@ -18,8 +18,7 @@ jobs:
         with: {distribution: temurin, java-version: "17"}
       - uses: subosito/flutter-action@v2
         with: {channel: stable, cache: true}
-      - if: false
-        run: cd app && flutter pub get && flutter build apk --debug --target-platform android-x64 --dart-define=DEMO=true -t integration_test/probe_test.dart
+      - run: cd app && flutter pub get && flutter build apk --debug --target-platform android-x64 --dart-define=DEMO=true -t integration_test/probe_test.dart
       - uses: reactivecircus/android-emulator-runner@v2
         env:
           GH_TOKEN: ${{ github.token }}
@@ -29,7 +28,7 @@ jobs:
           target: google_apis
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: false
-          script: bash probe-release.sh
+          script: bash probe.sh
           working-directory: app
       - uses: actions/upload-artifact@v4
         if: always()

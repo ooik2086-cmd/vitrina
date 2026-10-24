@@ -27,7 +27,7 @@ void main() {
     await wait(t, 6000);
     for (var round = 0; round < 2; round++) {
       print('PROBE open listing round $round');
-      await t.tap(find.byType(ListingTile).first);
+      await t.tap(round == 0 ? find.byType(ListingTile).first : find.text('21 100 ₸').first);
       final start = DateTime.now();
       var shown = false;
       var firstSeen = -1, loadingSeen = false;

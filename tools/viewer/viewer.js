@@ -37,6 +37,7 @@ const aniso = renderer.capabilities.getMaxAnisotropy();
 let dirty = true, vx = 0, vy = 0, zoom = 1, zoomT = 1, r = 1;
 let parser = null, meshes = [], model = null, variant = null, tint = null;
 
+const FOV = THREE.MathUtils.degToRad(30); // what the stage's narrower side sees
 const dpr = () => Math.min(window.devicePixelRatio || 1, 3); // full sharpness while moving too
 function frame() {
   const w = st.clientWidth, h = st.clientHeight;
@@ -45,9 +46,11 @@ function frame() {
   renderer.setSize(w, h, false);
   camera.aspect = w / h;
   // Far enough that the shoe's whole sphere fits the narrower side, so turned any way (toe or heel to the camera,
-  // which brings it nearer and larger) it is never cut off (Aza, 2026-10-23); zoomed in, it may be.
-  const half = Math.atan(Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * Math.min(1, camera.aspect));
-  camera.position.set(0, 0, r / Math.sin(half) / zoom);
+  // which brings it nearer and larger) it is never cut off (Aza, 2026-10-23); zoomed in, it may be. The narrower side
+  // always sees 30°, from the same distance: a tall stage shows more above and below, the shoe itself exactly as on a
+  // square one, so the app's first picture (made square) matches it to the pixel.
+  camera.fov = w < h ? THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(FOV / 2) * h / w)) : 30;
+  camera.position.set(0, 0, r / Math.sin(FOV / 2) / zoom);
   camera.updateProjectionMatrix();
   dirty = true;
   kick();
@@ -221,7 +224,11 @@ async function load({ url, hq = null, variant: name = null, tint: t = null, dark
   reduce = reduceMotion;
   variant = name;
   tint = t;
+  // At once, not through the colour's slow change: a page opened ahead of time starts light.
+  st.style.transition = 'none';
   setBackground(dark);
+  void st.offsetWidth;
+  st.style.transition = '';
   try {
     const gltf = await loader.loadAsync(url);
     if (mine !== loading || !(await bring(gltf, mine))) return;
@@ -229,7 +236,10 @@ async function load({ url, hq = null, variant: name = null, tint: t = null, dark
       pivot.quaternion.set(view[0], view[1], view[2], view[3]).normalize();
       zoom = zoomT = Math.min(3, Math.max(1, view[4]));
     } else {
+      // As the first picture shows it, whatever a finger did on that picture before the shoe came.
       pivot.quaternion.setFromAxisAngle(X, 0.2);
+      vx = vy = 0;
+      zoom = zoomT = 1;
     }
     // A page opened ahead of time (the app keeps one ready) may get its model before it is on the screen: the first
     // picture is drawn, and said to be, only once the stage has its size.
@@ -238,6 +248,9 @@ async function load({ url, hq = null, variant: name = null, tint: t = null, dark
     frame();
     renderer.render(scene, camera);
     dirty = false;
+    // Said once that picture is on the screen (two frames on), so the app's fade shows the shoe from its start.
+    await shown();
+    if (mine !== loading) return;
     post('ready', { load: n });
   } catch (e) {
     if (mine === loading) post('error', { message: String(e?.message || e), load: n });
@@ -252,6 +265,10 @@ async function load({ url, hq = null, variant: name = null, tint: t = null, dark
   } catch (e) { /* the light copy stays: it is the same shoe */ }
 }
 
+const shown = () => new Promise(done => {
+  const t = setTimeout(done, 300); // no frames come to a page off the screen
+  requestAnimationFrame(() => requestAnimationFrame(() => { clearTimeout(t); done(); }));
+});
 const sized = () => new Promise(done => {
   if (st.clientWidth && st.clientHeight) return done();
   const o = new ResizeObserver(() => { if (st.clientWidth && st.clientHeight) { o.disconnect(); done(); } });

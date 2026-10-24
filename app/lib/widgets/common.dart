@@ -398,7 +398,7 @@ class ListingTile extends StatelessWidget {
     final theme = Theme.of(context);
     final cover = listing.coverUrl;
     return GestureDetector(
-      // The 3D's first picture and model come down while the finger is still on the card.
+      // The 3D's first picture comes down while the finger is still on the card.
       onTapDown: listing.model == null ? null : (_) => ModelStage.prepare(context, listing.model!),
       onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => ListingScreen(listingId: listing.id))),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [

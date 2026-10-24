@@ -203,10 +203,10 @@ void main() {
       await stage(tester, m: ListingModel.fromJson({...model, 'first_url': 'https://cdn/first.webp'}));
       expect(find.byKey(const Key('model-first')), findsOneWidget);
       expect(find.byKey(const Key('cover')), findsNothing);
-      // The same size the 3D draws the shoe at: the square made for a 30° tall view, on a 3:4 stage 1.5% larger.
+      // The same size the 3D draws the shoe at: the viewer sees 30° across the narrower side, as the square picture.
       final picture =
           tester.widget<Image>(find.descendant(of: find.byKey(const Key('model-first')), matching: find.byType(Image)));
-      expect(picture.width, closeTo(360 * 0.98042 / 0.96593, 0.05));
+      expect(picture.width, 360);
       expect(tester.getCenter(find.byType(Image)), const Offset(180, 240));
       // Until the picture itself has come, the quiet line is on it.
       expect(find.byKey(const Key('model-loading')), findsOneWidget);
@@ -217,6 +217,25 @@ void main() {
       await tester.pump(const Duration(milliseconds: 300));
       expect(find.byKey(const Key('model-first')), findsNothing);
       expect(find.byKey(const Key('model-loading')), findsNothing);
+    });
+
+    testWidgets('with animations off, the 3D shows at once and the first picture goes', (tester) async {
+      await tester.pumpWidget(MediaQuery(
+        data: const MediaQueryData(disableAnimations: true),
+        child: MaterialApp(
+          home: ModelStage(
+              model: ListingModel.fromJson({...model, 'first_url': 'https://cdn/first.webp'}),
+              dark: false,
+              paused: false,
+              cover: const SizedBox(key: Key('cover'))),
+        ),
+      ));
+      await pageLoaded(tester, maker);
+      maker.post({'type': 'ready'});
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(tester.takeException(), isNull);
+      expect(find.byKey(const Key('model-first')), findsNothing);
     });
 
     testWidgets('a 3D that cannot open leaves the cover and tells the page, once', (tester) async {
