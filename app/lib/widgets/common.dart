@@ -179,6 +179,27 @@ String errorText(Object? error) => error is ApiException ? error.message : tr('Ð
 /// Widest a screen's text column grows on a tablet or the web; phones are narrower than this anyway.
 const maxContentWidth = 640.0;
 
+/// Every bottom sheet in the app. Its content stays above the phone's own buttons or gesture bar, which on new Android
+/// phones draw over the app (Aza, 2026-10-24: the sheet's last button sat under them and could not be pressed).
+Future<T?> showSheet<T>({
+  required BuildContext context,
+  required WidgetBuilder builder,
+  bool isScrollControlled = false,
+  bool? showDragHandle,
+  bool useSafeArea = false,
+  Color? backgroundColor,
+  Clip? clipBehavior,
+}) =>
+    showModalBottomSheet<T>(
+      context: context,
+      isScrollControlled: isScrollControlled,
+      showDragHandle: showDragHandle,
+      useSafeArea: useSafeArea,
+      backgroundColor: backgroundColor,
+      clipBehavior: clipBehavior,
+      builder: (context) => SafeArea(top: false, child: builder(context)),
+    );
+
 /// [base] padding widened at the sides so the column, padding included, stays [maxContentWidth] wide and centred,
 /// the same box [ContentWidth] draws, so capped lists, rows and chip strips line up on a wide screen.
 /// For lists, so the whole screen still scrolls and only the column narrows.
@@ -311,7 +332,7 @@ class SignInPrompt extends StatelessWidget {
 
 /// Camera or gallery, asked in a bottom sheet. Null when the person cancels.
 Future<XFile?> pickPhoto(BuildContext context, {String? title, String? subtitle}) async {
-  final source = await showModalBottomSheet<ImageSource>(
+  final source = await showSheet<ImageSource>(
     context: context,
     isScrollControlled: true,
     builder: (context) => SafeArea(

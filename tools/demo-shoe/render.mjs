@@ -9,7 +9,7 @@ const COLOURS = [['көк', 'midnight', null], ['қара', 'street', null], ['�
   ['қызыл', 'beach', [0, .62, .66]], ['бордо', 'beach', [345, .55, .42]], ['жасыл', 'beach', [145, .38, .58]],
   ['хаки', 'beach', [62, .22, .62]], ['сары', 'beach', [47, .78, .98]], ['қызғылт сары', 'beach', [26, .8, .82]],
   ['күлгін', 'beach', [268, .38, .62]], ['көгілдір', 'beach', [200, .55, .98]], ['сұр', 'beach', [0, 0, .78]]];
-const POSES = [[0.2, 0, 1], [0.3, -0.7, 1], [0.3, Math.PI - 0.7, 1], [Math.PI / 2 - 0.25, 0, 1], [-Math.PI / 2 - 0.15, 0, 1], [0.15, 0.35, 1.9]];
+const POSES = [[0.2, 0, 1], [0.3, -0.7, 1], [0.3, Math.PI - 0.7, 1], [Math.PI / 2 - 0.25, 0, 1], [-Math.PI / 2 - 0.15, 0, 0.88], [0.15, 0.35, 1.9]];
 const srv = http.createServer((q, r) => { const u = decodeURIComponent(q.url.split('?')[0]);
   const p = u.endsWith('.glb') ? path.join(models, path.basename(u)) : path.join(here, u);
   fs.readFile(p, (e, d) => { if (e) { r.writeHead(404); return r.end(); }

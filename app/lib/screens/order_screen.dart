@@ -499,7 +499,7 @@ class _EvidenceCardState extends State<_EvidenceCard> {
 
   Future<XFile?> _pick() async {
     final isBuyer = widget.meId == widget.order.buyerId;
-    final choice = await showModalBottomSheet<String>(
+    final choice = await showSheet<String>(
       context: context,
       isScrollControlled: true,
       builder: (context) => SafeArea(

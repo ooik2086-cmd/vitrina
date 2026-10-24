@@ -529,7 +529,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
   }
 
   Future<XFile?> _pick({double side = 2000}) async {
-    final source = await showModalBottomSheet<ImageSource>(
+    final source = await showSheet<ImageSource>(
       context: context,
       builder: (context) => SafeArea(
         child: Wrap(children: [

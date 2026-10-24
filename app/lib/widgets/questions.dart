@@ -214,7 +214,7 @@ class _QuestionsLineState extends State<QuestionsLine> {
 
 /// Opens the ask sheet; true when a question was sent.
 Future<bool> askQuestion(BuildContext context, int listingId) async {
-  final sent = await showModalBottomSheet<bool>(
+  final sent = await showSheet<bool>(
     context: context,
     isScrollControlled: true,
     showDragHandle: true,
@@ -321,7 +321,7 @@ class _QuestionsScreenState extends State<QuestionsScreen> {
       });
 
   Future<void> _answer(Question q) async {
-    final done = await showModalBottomSheet<bool>(
+    final done = await showSheet<bool>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,

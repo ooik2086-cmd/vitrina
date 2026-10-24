@@ -180,7 +180,7 @@ class _ListingScreenState extends State<ListingScreen> {
 
   Future<void> _makeOffer(Listing listing, ShoeSize size) async {
     if (!await _ensureSignedIn() || !mounted) return;
-    final offer = await showModalBottomSheet<Offer>(
+    final offer = await showSheet<Offer>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
@@ -247,7 +247,7 @@ class _ListingScreenState extends State<ListingScreen> {
       if (_offerError != null) return showError(context, _offerError!);
     }
     final offer = _offer?.status == 'accepted' && _offer!.sizeId == _sizeId ? _offer : null;
-    final checkout = await showModalBottomSheet<Checkout>(
+    final checkout = await showSheet<Checkout>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
@@ -309,7 +309,7 @@ class _ListingScreenState extends State<ListingScreen> {
 
   Future<void> _reportNow(Listing listing) async {
     if (!await _ensureSignedIn() || !mounted) return;
-    final sent = await showModalBottomSheet<bool>(
+    final sent = await showSheet<bool>(
       context: context,
       isScrollControlled: true,
       builder: (_) => ReportSheet(listingId: listing.id),
@@ -459,7 +459,7 @@ class _ListingScreenState extends State<ListingScreen> {
           ));
 
   /// The seller's reviews in a sheet over the page, as on the approved demo.
-  Future<void> _reviews(Listing l) => showModalBottomSheet<void>(
+  Future<void> _reviews(Listing l) => showSheet<void>(
         context: context,
         isScrollControlled: true,
         useSafeArea: true,

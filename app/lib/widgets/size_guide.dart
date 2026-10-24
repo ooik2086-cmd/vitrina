@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../i18n.dart';
 import '../my_size.dart';
 import '../theme.dart';
+import 'common.dart';
 
 /// A common conversion between foot length and shop sizes. Brands differ by up to half a size, which is why
 /// every listing also states each pair's insole length in centimetres.
@@ -27,7 +28,7 @@ const sizeChart = <({String cm, String eu, String uk, String usM, String usW})>[
 ];
 
 /// Opens the guide; returns the centimetres the buyer picked (also saved as their size), or null.
-Future<String?> showSizeGuide(BuildContext context) => showModalBottomSheet<String>(
+Future<String?> showSizeGuide(BuildContext context) => showSheet<String>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,

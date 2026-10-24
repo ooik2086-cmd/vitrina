@@ -204,7 +204,7 @@ class LineButton extends StatelessWidget {
 
 /// A sheet from the bottom with its title and a round close button, up to most of the screen, scrolling when long.
 Future<T?> showPageSheet<T>(BuildContext context, {required String title, required WidgetBuilder builder}) {
-  return showModalBottomSheet<T>(
+  return showSheet<T>(
     context: context,
     isScrollControlled: true,
     showDragHandle: true,

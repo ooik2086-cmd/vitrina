@@ -722,7 +722,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           ..showSnackBar(SnackBar(content: Text(tr('Бұл тауардың қалдығы жоқ.'))));
         return;
       }
-      final size = await showModalBottomSheet<ShoeSize>(
+      final size = await showSheet<ShoeSize>(
         context: context,
         isScrollControlled: true,
         showDragHandle: true,
@@ -1319,7 +1319,7 @@ class _QuickReplies extends StatelessWidget {
                   key: const Key('edit-quick-replies'),
                   avatar: const Icon(Icons.edit_outlined, size: 16),
                   label: Text(tr('Үлгілер')),
-                  onPressed: () => showModalBottomSheet<void>(
+                  onPressed: () => showSheet<void>(
                     context: context,
                     isScrollControlled: true,
                     showDragHandle: true,

@@ -78,8 +78,8 @@ class _EarningsScreenState extends State<EarningsScreen> {
   }
 
   Future<bool> _editAccount() async {
-    final saved = await showModalBottomSheet<bool>(
-        context: context, isScrollControlled: true, builder: (_) => const PayoutAccountSheet());
+    final saved =
+        await showSheet<bool>(context: context, isScrollControlled: true, builder: (_) => const PayoutAccountSheet());
     if (saved == true) await _reload();
     return saved == true;
   }

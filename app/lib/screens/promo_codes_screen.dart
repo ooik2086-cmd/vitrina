@@ -29,7 +29,7 @@ class _PromoCodesScreenState extends State<PromoCodesScreen> {
       });
 
   Future<void> _create() async {
-    final made = await showModalBottomSheet<bool>(
+    final made = await showSheet<bool>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,

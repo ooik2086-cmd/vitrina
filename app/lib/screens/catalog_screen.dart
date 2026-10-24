@@ -210,7 +210,7 @@ class _CatalogScreenState extends State<CatalogScreen> {
   }
 
   Future<void> _pickSize() async {
-    final picked = await showModalBottomSheet<String>(
+    final picked = await showSheet<String>(
       context: context,
       builder: (context) => const _SizeSheet(),
     );
@@ -230,7 +230,7 @@ class _CatalogScreenState extends State<CatalogScreen> {
   }
 
   Future<void> _pickFilter() async {
-    final picked = await showModalBottomSheet<CatalogFilter>(
+    final picked = await showSheet<CatalogFilter>(
       context: context,
       isScrollControlled: true,
       builder: (context) => FilterSheet(initial: _filter),

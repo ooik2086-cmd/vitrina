@@ -16,7 +16,7 @@ int salePrice(int tiyn, int percent) {
 }
 
 /// One cut for the whole shop, or ending the one that runs. Returns true when prices changed.
-Future<bool?> showShopSale(BuildContext context, List<Listing> listings) => showModalBottomSheet<bool>(
+Future<bool?> showShopSale(BuildContext context, List<Listing> listings) => showSheet<bool>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,

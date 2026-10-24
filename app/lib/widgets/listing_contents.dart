@@ -221,7 +221,7 @@ class _ListingContentsCardState extends State<ListingContentsCard> {
 
   Future<void> _addPhoto() async {
     final filled = {for (final m in _l.media) m.angle};
-    final angle = await showModalBottomSheet<String>(
+    final angle = await showSheet<String>(
       context: context,
       isScrollControlled: true,
       builder: (context) => SafeArea(
@@ -245,7 +245,7 @@ class _ListingContentsCardState extends State<ListingContentsCard> {
   }
 
   Future<void> _addPhotoAt(String angle) async {
-    final source = await showModalBottomSheet<ImageSource>(
+    final source = await showSheet<ImageSource>(
       context: context,
       builder: (context) => SafeArea(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
