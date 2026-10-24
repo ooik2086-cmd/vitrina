@@ -231,6 +231,10 @@ async function load({ url, hq = null, variant: name = null, tint: t = null, dark
     } else {
       pivot.quaternion.setFromAxisAngle(X, 0.2);
     }
+    // A page opened ahead of time (the app keeps one ready) may get its model before it is on the screen: the first
+    // picture is drawn, and said to be, only once the stage has its size.
+    await sized();
+    if (mine !== loading) return;
     frame();
     renderer.render(scene, camera);
     dirty = false;
@@ -247,6 +251,12 @@ async function load({ url, hq = null, variant: name = null, tint: t = null, dark
     frame();
   } catch (e) { /* the light copy stays: it is the same shoe */ }
 }
+
+const sized = () => new Promise(done => {
+  if (st.clientWidth && st.clientHeight) return done();
+  const o = new ResizeObserver(() => { if (st.clientWidth && st.clientHeight) { o.disconnect(); done(); } });
+  o.observe(st);
+});
 
 function setBackground(dark) {
   st.classList.toggle('dark', !!dark);

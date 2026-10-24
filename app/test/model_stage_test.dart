@@ -194,6 +194,31 @@ void main() {
       expect(find.bySemanticsLabel(RegExp('3D')), findsOneWidget);
     });
 
+    testWidgets(
+        'no wait shown: the 3D\'s own first picture stands where the shoe will be until the 3D fades in over it',
+        (tester) async {
+      // Aza, 2026-10-24: "3d ашылғанда ортада кішкене күтіп загрузка бар".
+      await tester.binding.setSurfaceSize(const Size(360, 480));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await stage(tester, m: ListingModel.fromJson({...model, 'first_url': 'https://cdn/first.webp'}));
+      expect(find.byKey(const Key('model-first')), findsOneWidget);
+      expect(find.byKey(const Key('cover')), findsNothing);
+      // The same size the 3D draws the shoe at: the square made for a 30° tall view, on a 3:4 stage 1.5% larger.
+      final picture =
+          tester.widget<Image>(find.descendant(of: find.byKey(const Key('model-first')), matching: find.byType(Image)));
+      expect(picture.width, closeTo(360 * 0.98042 / 0.96593, 0.05));
+      expect(tester.getCenter(find.byType(Image)), const Offset(180, 240));
+      // Until the picture itself has come, the quiet line is on it.
+      expect(find.byKey(const Key('model-loading')), findsOneWidget);
+      await pageLoaded(tester, maker);
+      maker.post({'type': 'ready'});
+      await tester.pump();
+      expect(find.byKey(const Key('model-first')), findsOneWidget); // still under the 3D while it fades in
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.byKey(const Key('model-first')), findsNothing);
+      expect(find.byKey(const Key('model-loading')), findsNothing);
+    });
+
     testWidgets('a 3D that cannot open leaves the cover and tells the page, once', (tester) async {
       var broken = 0;
       await stage(tester, onBroken: () => broken++);

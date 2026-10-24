@@ -4,7 +4,7 @@ in its 12 colours, from what render.mjs made:
     cd tools/demo-shoe
     NODE_PATH=../viewer/node_modules ../viewer/node_modules/.bin/esbuild render-page.js --bundle --format=esm \\
         --outfile=render-page.bundle.js
-    node render.mjs /tmp/shoe && python3 build.py /tmp/shoe
+    node render.mjs /tmp/shoe && node first.mjs /tmp/shoe/first && python3 build.py /tmp/shoe
 
 The listings the backend's side matching was checked on are kept in app/demo/scan_sides.json first.
 """
@@ -40,7 +40,7 @@ COLOURS = [(3, 'көк', 'midnight', None), (1, 'қара', 'street', None), (4,
 ANGLES = ['outer', 'front', 'back', 'top', 'sole', 'detail']
 INSOLE = [('37', '24,0'), ('38', '24,5'), ('39', '25,0'), ('40', '25,7'), ('41', '26,3'), ('42', '27,0'), ('43', '27,7'), ('44', '28,3')]
 seller = {'id': 1, 'shop_name': 'Qadam Store', 'city': 'Алматы', 'away_until': None, 'rating': 4.8, 'reviews': 23}
-model = {k: v for k, v in d['GET /listings/1']['model'].items() if k not in ('turn', 'tint')}
+model = {k: v for k, v in d['GET /listings/1']['model'].items() if k not in ('turn', 'tint', 'first_url')}
 new = {}
 for i, (lid, name, variant, tint) in enumerate(COLOURS):
     src = R / str(i)
@@ -59,6 +59,8 @@ for i, (lid, name, variant, tint) in enumerate(COLOURS):
     if tint: m['tint'] = tint
     # The catalog card's turn: its cover's own small copy first, then the 23 pictures round from render.mjs.
     m['turn'] = [media[0]['thumb_url']] + [put(webp(src / 't' / f'{f:02d}.png'), 'webp') for f in range(1, 24)]
+    # The 3D's own first picture (first.mjs), shown the moment the page opens while the 3D loads behind it.
+    m['first_url'] = put(webp(R / 'first' / f'{lid}.png'), 'webp')
     new[lid] = {
         'id': lid, 'status': 'published', 'title': 'Жеңіл жүгіру кроссовкасы', 'category': 'sneakers', 'brand': None,
         'model_name': 'Foam Run Light', 'color': name, 'price_tiyn': 2110000, 'was_price_tiyn': None,

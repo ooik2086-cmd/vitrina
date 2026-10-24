@@ -2,6 +2,8 @@ name: Emulator probe
 on:
   push:
     branches: [claude/emulator-probe]
+permissions:
+  contents: write
 jobs:
   probe:
     runs-on: ubuntu-24.04
@@ -29,3 +31,10 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with: {name: probe, path: "app/probe-out"}
+      - name: Shots to a branch
+        if: always()
+        run: |
+          cd app/probe-out
+          git init -q -b probe-shots && git add -A
+          git -c user.name=probe -c user.email=probe@local commit -qm shots
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" probe-shots:claude/probe-shots

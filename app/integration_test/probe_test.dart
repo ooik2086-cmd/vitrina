@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:vitrina/main.dart' as app;
 import 'package:vitrina/screens/onboarding_screen.dart';
+import 'package:vitrina/i18n.dart';
 import 'package:vitrina/widgets/common.dart';
 import 'package:vitrina/widgets/model_stage.dart';
 
@@ -22,21 +23,29 @@ void main() {
   testWidgets('probe', (t) async {
     await app.main();
     onboarded.value = true;
+    appLanguage.value = 'kk';
     await wait(t, 6000);
     for (var round = 0; round < 2; round++) {
       print('PROBE open listing round $round');
       await t.tap(find.byType(ListingTile).first);
       final start = DateTime.now();
       var shown = false;
+      var firstSeen = -1, loadingSeen = false;
       while (DateTime.now().difference(start).inSeconds < 60) {
         await wait(t, 100);
+        if (firstSeen < 0 && find.byKey(const Key('model-first')).evaluate().isNotEmpty &&
+            find.byKey(const Key('model-loading')).evaluate().isEmpty) {
+          firstSeen = DateTime.now().difference(start).inMilliseconds;
+        }
+        if (find.byKey(const Key('model-loading')).evaluate().isNotEmpty) loadingSeen = true;
         if (find.byType(ModelStage).evaluate().isNotEmpty && find.byKey(const Key('model-loading')).evaluate().isEmpty) {
           shown = true;
           break;
         }
       }
+      print('PROBE first picture shown after $firstSeen ms; loading line seen: $loadingSeen');
       print('PROBE 3D ready=$shown after ${DateTime.now().difference(start).inMilliseconds} ms');
-      print('PROBE MARK ready$round');
+      print('PROBE ${DateTime.now().toIso8601String()} MARK ready$round');
       await wait(t, 2500);
       final state = t.state<ModelStageState>(find.byType(ModelStage));
       print('PROBE view before: ${await state.view()}');
@@ -63,7 +72,7 @@ void main() {
       await b.up();
       await wait(t, 1500);
       print('PROBE view after pinch: ${await state.view()}');
-      print('PROBE MARK pinch$round');
+      print('PROBE ${DateTime.now().toIso8601String()} MARK pinch$round');
       // double tap
       final g2 = await t.startGesture(c, pointer: 9);
       await g2.up();
@@ -76,7 +85,7 @@ void main() {
         await t.tap(find.text('Видео'));
         await wait(t, 1500);
         print('PROBE play button: ${find.byKey(const Key('video-play')).evaluate().length}');
-        print('PROBE MARK videotab');
+        print('PROBE ${DateTime.now().toIso8601String()} MARK videotab');
         await t.tap(find.byKey(const Key('video-play')));
         final vs = DateTime.now();
         while (DateTime.now().difference(vs).inSeconds < 30) {
@@ -88,7 +97,7 @@ void main() {
         await wait(t, 3000);
         final time = find.byKey(const Key('video-time'));
         if (time.evaluate().isNotEmpty) print('PROBE video clock: ${(t.widget<Text>(time)).data}');
-        print('PROBE MARK videoplay');
+        print('PROBE ${DateTime.now().toIso8601String()} MARK videoplay');
         await wait(t, 2000);
       }
       await t.binding.handlePopRoute();

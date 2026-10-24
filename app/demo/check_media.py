@@ -71,11 +71,13 @@ def check(answers: dict, root: Path) -> list[str]:
                     path = root / u.split("/demo/media/", 1)[1] if u and "/demo/media/" in u else None
                     if path is None or not path.is_file() or path.read_bytes()[:4] != b"glTF":
                         problems.append(f"listing {node['id']} 3D model: not a model in the demo media: {u}")
-                # The catalog card turns through these: a missing one leaves the shoe stuck mid-turn.
-                for u in node["model"].get("turn") or []:
+                # The catalog card turns through these: a missing one leaves the shoe stuck mid-turn. The first
+                # picture stands on the stage while the 3D loads: missing, the stage would wait empty.
+                first = node["model"].get("first_url")
+                for u in [*(node["model"].get("turn") or []), *([first] if first else [])]:
                     path = root / u.split("/demo/media/", 1)[1] if "/demo/media/" in u else None
                     if path is None or not path.is_file() or path.read_bytes()[8:12] != b"WEBP":
-                        problems.append(f"listing {node['id']} card turn: not in the demo media: {u}")
+                        problems.append(f"listing {node['id']} card turn or first 3D picture: not in the demo media: {u}")
             if isinstance(node.get("video"), dict) and "id" in node:
                 # The «Видео» tab shows a broken player when its file is missing: say so here.
                 for u, head in ((node["video"].get("url"), b"ftyp"), (node["video"].get("poster_url"), b"\xff\xd8")):
