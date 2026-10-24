@@ -1,0 +1,21 @@
+10-24 09:47:18.910 I/ExoPlayerImpl( 1748): Init 2b660f5 [AndroidXMedia3/1.0.0-alpha03] [emu64xa, sdk_gphone64_x86_64, Google, 34]
+10-24 09:48:13.897 D/MediaCodec(  466): flushMediametrics
+10-24 09:48:13.901 I/MediaCodec(  466): MediaCodec will operate in async mode
+10-24 09:48:13.901 D/MediaCodec(  466): keep callback message for reclaim
+10-24 09:48:13.923 D/MediaCodec(  466): flushMediametrics
+10-24 09:48:19.380 I/ExoPlayerImpl( 4573): Init 1ecb63a [AndroidXMedia3/1.9.2] [emu64xa, sdk_gphone64_x86_64, Google, 34]
+10-24 09:48:20.934 I/DMCodecAdapterFactory( 4573): Creating an asynchronous MediaCodec adapter for track type video
+10-24 09:48:21.015 I/MediaCodec( 4573): MediaCodec will operate in async mode
+10-24 09:48:21.016 D/MediaCodec( 4573): flushMediametrics
+10-24 09:48:21.016 I/MediaCodec( 4573): [c2.goldfish.h264.decoder] setting surface generation to 4682753
+10-24 09:48:21.018 D/MediaCodec( 4573): keep callback message for reclaim
+10-24 09:48:28.189 I/ExoPlayerImpl( 4573): Release 1ecb63a [AndroidXMedia3/1.9.2] [emu64xa, sdk_gphone64_x86_64, Google, 34] [media3.common, media3.exoplayer, media3.decoder, media3.datasource, media3.extractor]
+10-24 09:48:28.207 D/MediaCodec( 4573): keep callback message for reclaim
+10-24 09:48:28.230 I/MediaCodec( 4573): [c2.goldfish.h264.decoder] setting surface generation to 4682754
+10-24 09:48:28.235 D/CCodecBufferChannel( 4573): [c2.goldfish.h264.decoder#542] MediaCodec discarded an unknown buffer
+10-24 09:48:28.235 D/CCodecBufferChannel( 4573): [c2.goldfish.h264.decoder#542] MediaCodec discarded an unknown buffer
+10-24 09:48:28.236 D/CCodecBufferChannel( 4573): [c2.goldfish.h264.decoder#542] MediaCodec discarded an unknown buffer
+10-24 09:48:28.236 D/CCodecBufferChannel( 4573): [c2.goldfish.h264.decoder#542] MediaCodec discarded an unknown buffer
+10-24 09:48:28.284 D/MediaCodec( 4573): flushMediametrics
+10-24 09:48:28.329 D/MediaCodec( 4573): flushMediametrics
+10-24 09:48:28.330 W/MediaCodec( 4573): no metrics handle found
