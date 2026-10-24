@@ -7,9 +7,9 @@ adb logcat -c
 (adb logcat -v time > probe-out/r-logcat.txt) &
 shot() { adb exec-out screencap -p > probe-out/r/$1.png; }
 adb shell monkey -p kz.vitrina.vitrina -c android.intent.category.LAUNCHER 1
-sleep 20; shot 01-catalog
-adb shell input swipe 160 500 160 300 400; sleep 3; shot 02-scrolled
-adb shell input tap 80 300; sleep 1; shot 03-open1s
+sleep 15; adb shell input tap 47 55; sleep 1; adb shell input tap 280 55; sleep 8; shot 01-catalog
+sleep 6; shot 02-catalog
+adb shell input tap 80 470; sleep 1; shot 03-open1s
 sleep 4; shot 04-open5s
 sleep 10; shot 05-open15s
 adb shell input tap 255 432; sleep 2; shot 06-videotab
