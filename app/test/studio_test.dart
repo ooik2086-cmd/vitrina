@@ -154,7 +154,7 @@ void main() {
     }, variant: TargetPlatformVariant.only(TargetPlatform.android));
   }
 
-  testWidgets('every platform\'s pages get the canvas, with that platform\'s own transition timing', (tester) async {
+  testWidgets('every platform\'s pages get the canvas, with the timing of the slide inside it', (tester) async {
     final theme = buildTheme(Brightness.light);
     for (final p in TargetPlatform.values) {
       final b = theme.pageTransitionsTheme.builders[p];

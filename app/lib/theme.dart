@@ -1,4 +1,4 @@
-import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
+import 'package:flutter/cupertino.dart' show CupertinoPageTransition, CupertinoPageTransitionsBuilder;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -54,20 +54,13 @@ class AppCanvas extends ThemeExtension<AppCanvas> {
       : AppCanvas(BoxDecoration.lerp(decoration, other.decoration, t)!, t < 0.5 ? overlay : other.overlay);
 }
 
-/// The canvas behind the navigator, for MaterialApp.builder: what shows while two pages cross in a transition,
-/// so the backdrop never dips to another colour.
+/// The canvas behind the navigator, for MaterialApp.builder: what shows at the very edge of a page sliding in, so
+/// the backdrop never dips to another colour.
 Widget canvasBehind(BuildContext context, Widget? child) =>
     DecoratedBox(decoration: AppCanvas.of(context).decoration, child: child);
 
-/// Each platform's own transition, with no colour of its own between the pages: the canvas shows there instead.
-const _transitions = <TargetPlatform, PageTransitionsBuilder>{
-  TargetPlatform.android: PredictiveBackPageTransitionsBuilder(fallbackColor: Colors.transparent),
-  TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
-  TargetPlatform.macOS: CupertinoPageTransitionsBuilder(),
-};
-
-/// Draws the canvas behind every page, inside the platform's own page transition, so a page coming in covers the
-/// one under it as before while every page shares the same backdrop. Scaffolds and app bars are see-through.
+/// Draws the canvas behind every page, inside its slide-in transition, so a page coming in covers the one under it
+/// whole while every page shares the same backdrop. Scaffolds and app bars are see-through.
 class OnCanvas extends PageTransitionsBuilder {
   const OnCanvas(this.inner);
   final PageTransitionsBuilder inner;
@@ -96,6 +89,21 @@ class OnCanvas extends PageTransitionsBuilder {
       ),
     );
   }
+}
+
+/// The iPhone's slide-in without its swipe from the left edge, which would take drags meant for the 3D shoe, the
+/// photos or a chart that start near that edge.
+class SlideIn extends PageTransitionsBuilder {
+  const SlideIn();
+
+  @override
+  Widget buildTransitions<T>(PageRoute<T> route, BuildContext context, Animation<double> animation,
+          Animation<double> secondaryAnimation, Widget child) =>
+      CupertinoPageTransition(
+          primaryRouteAnimation: animation,
+          secondaryRouteAnimation: secondaryAnimation,
+          linearTransition: false,
+          child: child);
 }
 
 ThemeData buildTheme(Brightness brightness) {
@@ -131,7 +139,12 @@ ThemeData buildTheme(Brightness brightness) {
     extensions: [canvas],
     pageTransitionsTheme: PageTransitionsTheme(builders: {
       for (final p in TargetPlatform.values)
-        p: OnCanvas(_transitions[p] ?? const ZoomPageTransitionsBuilder(backgroundColor: Colors.transparent)),
+        // A page slides in whole from the side and covers the one under it, on every platform. Android's own
+        // fade-and-zoom showed both pages at once, the new one see-through over the old (Aza, 2026-10-24). iPhones
+        // keep their swipe from the edge to go back; elsewhere the phone's own back does that.
+        p: OnCanvas(p == TargetPlatform.iOS || p == TargetPlatform.macOS
+            ? const CupertinoPageTransitionsBuilder()
+            : const SlideIn()),
     }),
     textTheme: text,
     appBarTheme: AppBarTheme(
