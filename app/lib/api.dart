@@ -244,6 +244,7 @@ class ListingModel {
   ListingModel.fromJson(Map<String, dynamic> j)
       : url = j['url'] as String,
         hqUrl = j['hq_url'] as String?,
+        firstUrl = j['first_url'] as String?,
         variant = j['variant'] as String?,
         tint = switch (j['tint']) {
           // Hue round the circle, saturation 0–1, lightness factor 0–2 (the viewer holds to the same).
@@ -261,6 +262,11 @@ class ListingModel {
         ];
   final String url;
   final String? hqUrl;
+
+  /// The 3D's own first picture, made as the stage opens it (square, cut out): it stands on the stage the moment the
+  /// page opens, while the 3D loads behind it, so the shoe shows at once and the 3D takes over without a jump. Only
+  /// the demo's data has it so far.
+  final String? firstUrl;
   final String? variant;
 
   /// A colour the model was not made in: hue (0–360), saturation and a lightness factor laid over [variant]'s

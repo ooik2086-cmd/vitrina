@@ -14,6 +14,7 @@ import '../theme.dart';
 import '../i18n.dart';
 import 'studio.dart';
 import 'card_turn.dart';
+import 'model_stage.dart';
 
 void showError(BuildContext context, Object error) {
   final text = error is ApiException ? error.message : tr('Байланыс жоқ. Қайта көріңіз.');
@@ -397,6 +398,8 @@ class ListingTile extends StatelessWidget {
     final theme = Theme.of(context);
     final cover = listing.coverUrl;
     return GestureDetector(
+      // The 3D's first picture comes down while the finger is still on the card.
+      onTapDown: listing.model == null ? null : (_) => ModelStage.prepare(context, listing.model!),
       onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => ListingScreen(listingId: listing.id))),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         AspectRatio(

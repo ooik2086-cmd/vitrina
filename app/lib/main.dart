@@ -32,6 +32,7 @@ Future<void> main() async {
   await restoreThemeMode();
   final Session session;
   if (demoMode) {
+    await restoreCarried();
     session = Session(Api(client: await DemoClient.load()))..api.token = demoToken;
     session.update(await session.api.me());
   } else {

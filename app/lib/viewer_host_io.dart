@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
+import 'demo.dart' show carriedAsset;
 import 'net_image_io.dart' show KeptImage;
 
 /// Serves the 3D stage's page and the shoes' models to the stage's WebView, on this phone only (127.0.0.1), under a
@@ -187,7 +188,9 @@ class ViewerHost {
         unawaited(file.setLastModified(DateTime.now()).catchError((_) {}));
         return file;
       }
-      final bytes = await fetch(uri);
+      // The demo's model is inside the app: no internet needed.
+      final asset = carriedAsset(url);
+      final bytes = asset == null ? await fetch(uri) : (await rootBundle.load(asset)).buffer.asUint8List();
       // glTF binary starts with "glTF": anything else (an error page) is not kept.
       if (bytes.length < 12 || String.fromCharCodes(bytes.sublist(0, 4)) != 'glTF') return null;
       final part = File('${file.path}.$pid.part');

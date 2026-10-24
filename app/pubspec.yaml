@@ -34,6 +34,9 @@ flutter:
   uses-material-design: true
   assets:
     - demo/api.json
+    # The demo's 3D model and first 3D pictures, carried so the 3D shows at once (demo.dart carriedAsset).
+    - demo/first/
+    - demo/media/models/shoe-1024.glb
     - assets/textures/grain.png
     - assets/viewer/
   fonts:

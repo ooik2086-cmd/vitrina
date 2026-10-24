@@ -16,6 +16,27 @@ const demoMode = bool.fromEnvironment('DEMO');
 
 const demoToken = 'demo';
 
+/// Where the demo's media lives on the internet (the repository's own files).
+const _demoFiles = 'https://raw.githubusercontent.com/ooik2086-cmd/vitrina/claude/initial-code/app/';
+
+/// The demo's files the app carries inside itself, by their address: the 3D model and each colour's first 3D picture,
+/// so a listing's shoe shows at once even on weak internet (Aza: "3d ашылғанда ортада кішкене күтіп загрузка бар").
+/// Empty outside the demo.
+final _carried = <String, String>{};
+
+/// The asset carried in place of [url]; null when it comes from the internet.
+String? carriedAsset(String url) => _carried[url];
+
+Future<void> restoreCarried() async {
+  if (!demoMode) return;
+  try {
+    final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
+    for (final key in manifest.listAssets()) {
+      if (key.startsWith('demo/first/') || key.startsWith('demo/media/models/')) _carried['$_demoFiles$key'] = key;
+    }
+  } catch (_) {} // then everything comes from the internet, as before
+}
+
 /// The demo person: a buyer who also has a shop, so the seller screens can be seen too.
 const _demoShopId = 1;
 
