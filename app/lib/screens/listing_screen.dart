@@ -32,8 +32,7 @@ import '../my_size.dart';
 import '../recent.dart';
 
 class ListingScreen extends StatefulWidget {
-  const ListingScreen(
-      {super.key, required this.listingId, this.cover, this.coverIsCutout = false, this.listing, this.pending});
+  const ListingScreen({super.key, required this.listingId, this.listing, this.pending});
   final int listingId;
 
   /// The listing, already fetched: the page shows it at once.
@@ -41,12 +40,6 @@ class ListingScreen extends StatefulWidget {
 
   /// The listing's request, already sent: the page waits for it instead of sending another.
   final Future<Listing>? pending;
-
-  /// The photo the catalog card showed: it flies in and stays while the listing loads.
-  final String? cover;
-
-  /// The cover is a cut-out: its shadow flies with it.
-  final bool coverIsCutout;
 
   @override
   State<ListingScreen> createState() => _ListingScreenState();
@@ -378,24 +371,8 @@ class _ListingScreenState extends State<ListingScreen> {
           if (snap.hasError && snap.connectionState == ConnectionState.done) {
             return SafeArea(child: ErrorRetry(error: snap.error, onRetry: _reload));
           }
-          if (!snap.hasData) {
-            final cover = widget.cover;
-            if (cover == null || MediaQuery.of(context).disableAnimations) {
-              return const Center(child: CircularProgressIndicator());
-            }
-            return Stack(children: [
-              Hero(
-                tag: 'listing-$_id',
-                // Only the shoe: the page may open on a dark stage or the photos as taken, so no backdrop flashes.
-                child: CoverPhoto(
-                    image: coverImage(cover),
-                    cutout: widget.coverIsCutout,
-                    fit: BoxFit.contain,
-                    errorBuilder: (_, __, ___) => const SizedBox.shrink()),
-              ),
-              const Center(child: CircularProgressIndicator()),
-            ]);
-          }
+          // Only the page's own 3D shows the shoe, no photo before it (Aza, 2026-10-24).
+          if (!snap.hasData) return const Center(child: CircularProgressIndicator());
           return _body(context, snap.data!);
         },
       ),
@@ -512,27 +489,24 @@ class _ListingScreenState extends State<ListingScreen> {
           key: ValueKey(l.id), dark: scan && _dark, cutout: scan, urls: [for (final p in l.photos) p.originalUrl]),
     );
     final first = l.photos.firstOrNull;
-    // The catalog's photo flies to the cover (the 3D itself never flies: a WebView cannot be moved mid-flight).
-    final cover = Hero(
-      tag: 'listing-${l.id}',
-      child: first == null
-          ? const SizedBox.shrink()
-          : CoverPhoto(
-              image: coverImage(first.processedUrl ?? first.originalUrl),
-              cutout: scan || (first.processedUrl ?? first.originalUrl) != first.originalUrl,
-              fit: BoxFit.contain,
-              errorBuilder: (_, __, ___) => const SizedBox.shrink()),
-    );
+    // The photos stand in for the 3D only when it cannot open on this phone.
+    final cover = first == null
+        ? const SizedBox.shrink()
+        : CoverPhoto(
+            image: coverImage(first.processedUrl ?? first.originalUrl),
+            cutout: scan || (first.processedUrl ?? first.originalUrl) != first.originalUrl,
+            fit: BoxFit.contain,
+            errorBuilder: (_, __, ___) => const SizedBox.shrink());
     return SizedBox(
       height: height,
       child: Material(
         type: MaterialType.transparency,
         child: Stack(fit: StackFit.expand, children: [
           if (model == null && videoPane == null)
-            Hero(tag: 'listing-${l.id}', child: photos)
+            photos
           else if (model == null)
             IndexedStack(index: shown == _Pane.video ? 1 : 0, sizing: StackFit.expand, children: [
-              Hero(tag: 'listing-${l.id}', child: photos),
+              photos,
               videoPane!,
             ])
           else

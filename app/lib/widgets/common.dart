@@ -13,6 +13,7 @@ import '../screens/login_screen.dart';
 import '../theme.dart';
 import '../i18n.dart';
 import 'studio.dart';
+import 'card_turn.dart';
 
 void showError(BuildContext context, Object error) {
   final text = error is ApiException ? error.message : tr('Байланыс жоқ. Қайта көріңіз.');
@@ -396,23 +397,21 @@ class ListingTile extends StatelessWidget {
     final theme = Theme.of(context);
     final cover = listing.coverUrl;
     return GestureDetector(
-      onTap: () => Navigator.of(context).push(MaterialPageRoute(
-          builder: (_) => ListingScreen(listingId: listing.id, cover: cover, coverIsCutout: listing.coverIsCutout))),
+      onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => ListingScreen(listingId: listing.id))),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         AspectRatio(
           aspectRatio: 1,
-          // The card stays put; only the shoe flies into the listing page and back.
           child: Container(
             clipBehavior: Clip.antiAlias,
             decoration: studioBackdrop(radius: BorderRadius.circular(Brand.radius)),
             child: Stack(fit: StackFit.expand, children: [
-              Hero(
-                tag: 'listing-${listing.id}',
-                child: switch (cover) {
-                  null => const Icon(Icons.image_outlined, color: Colors.black26),
-                  final cover => _cover(cover),
-                },
-              ),
+              switch (cover) {
+                null => const Icon(Icons.image_outlined, color: Colors.black26),
+                // A shoe with a 3D turns under a sideways finger here too, as on its page.
+                final cover when (listing.model?.turn.length ?? 0) >= CardTurn.minFrames =>
+                  CardTurn(frames: listing.model!.turn, cover: _cover(cover)),
+                final cover => _cover(cover),
+              },
               // The shoe turns in 3D on its page: the card only says so.
               if (listing.model != null) const Positioned(left: 10, top: 10, child: IgnorePointer(child: Badge360())),
               if (listing.wasPriceTiyn != null)

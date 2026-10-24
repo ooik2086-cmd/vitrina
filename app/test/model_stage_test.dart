@@ -155,15 +155,15 @@ void main() {
       await tester.pump();
     }
 
-    testWidgets('the cover stands in until the first 3D picture, then the shoe shows', (tester) async {
+    testWidgets('no photo before the 3D: a quiet line until its first picture, then the shoe fades in', (tester) async {
       await stage(tester, dark: true);
       expect(maker.scene, Brightness.dark);
-      expect(find.byKey(const Key('cover')), findsOneWidget);
+      expect(find.byKey(const Key('cover')), findsNothing); // Aza, 2026-10-24: "3д алдына фото қойма"
       expect(find.byKey(const Key('model-loading')), findsOneWidget);
       expect(
           tester
-              .widget<Opacity>(
-                  find.ancestor(of: find.byKey(const Key('fake-3d')), matching: find.byType(Opacity)).first)
+              .widget<AnimatedOpacity>(
+                  find.ancestor(of: find.byKey(const Key('fake-3d')), matching: find.byType(AnimatedOpacity)).first)
               .opacity,
           0);
       // The page loads, and is told which model, colour, scene and view to show.
@@ -182,11 +182,13 @@ void main() {
       expect(args['view'], [0, 0, 0, 1, 1.5]);
       maker.post({'type': 'ready'});
       await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
       expect(find.byKey(const Key('cover')), findsNothing);
+      expect(find.byKey(const Key('model-loading')), findsNothing);
       expect(
           tester
-              .widget<Opacity>(
-                  find.ancestor(of: find.byKey(const Key('fake-3d')), matching: find.byType(Opacity)).first)
+              .widget<AnimatedOpacity>(
+                  find.ancestor(of: find.byKey(const Key('fake-3d')), matching: find.byType(AnimatedOpacity)).first)
               .opacity,
           1);
       expect(find.bySemanticsLabel(RegExp('3D')), findsOneWidget);
@@ -345,14 +347,15 @@ void main() {
       await tester.pump();
       final args = jsonDecode(view.scripts.single.substring('vitrina.load('.length, view.scripts.single.length - 1));
       expect(args['load'], 2);
-      expect(find.byKey(const Key('cover')), findsOneWidget);
+      expect(find.byKey(const Key('model-loading')), findsOneWidget);
       maker.post({'type': 'ready', 'load': 1});
       maker.post({'type': 'error', 'message': 'old one failed', 'load': 1});
       await tester.pump();
-      expect(find.byKey(const Key('cover')), findsOneWidget); // still waiting for its own picture, not broken
+      expect(find.byKey(const Key('model-loading')), findsOneWidget); // still waiting for its own picture
+      expect(find.byKey(const Key('cover')), findsNothing); // not broken
       maker.post({'type': 'ready', 'load': 2});
       await tester.pump();
-      expect(find.byKey(const Key('cover')), findsNothing);
+      expect(find.byKey(const Key('model-loading')), findsNothing);
     });
 
     testWidgets('the turn and zoom are read back as the phone gives them', (tester) async {

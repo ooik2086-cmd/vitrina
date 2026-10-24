@@ -190,10 +190,12 @@ void main() {
     Future<void> show(Map<String, dynamic> json) => tester.pumpWidget(MaterialApp(
         home: Scaffold(body: SizedBox(width: 220, height: 400, child: ListingTile(listing: Listing.fromJson(json))))));
     await show(listing());
-    final card = tester.widget<Container>(find.ancestor(of: find.byType(Hero), matching: find.byType(Container)).first);
-    expect((card.decoration as BoxDecoration).gradient, studioGradient); // the card stays; only the shoe flies
+    final card =
+        tester.widget<Container>(find.ancestor(of: find.byType(CoverPhoto), matching: find.byType(Container)).first);
+    expect((card.decoration as BoxDecoration).gradient, studioGradient);
     final shadow = tester.widget<ContactShadow>(find.byType(ContactShadow));
-    final photo = tester.widget<Image>(find.descendant(of: find.byType(Hero), matching: find.byType(Image)));
+    final photo =
+        tester.widget<Image>(find.descendant(of: find.byType(CoverPhoto), matching: find.byType(Image)).first);
     expect(shadow.image, photo.image); // one decoded copy for both
     final layers = tester.widget<Stack>(find.descendant(of: find.byType(CoverPhoto), matching: find.byType(Stack)));
     expect([for (final w in layers.children) w.runtimeType], [ContactShadow, Image]); // under the photo

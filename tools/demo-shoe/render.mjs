@@ -1,5 +1,5 @@
-// Renders the approved demo's shoe in its 12 colours (6 photos and a turning video's frames each) for app/demo, with
-// the app viewer's own light, camera and tint. Run: build the page (see build.py), then
+// Renders the approved demo's shoe in its 12 colours (6 photos, the catalog card's 24-picture turn and a turning
+// video's frames each) for app/demo, with the app viewer's own light, camera and tint. Run: build the page (see build.py), then
 //   node render.mjs OUT_DIR
 import { chromium } from 'playwright';
 import http from 'http'; import fs from 'fs'; import path from 'path';
@@ -26,6 +26,10 @@ for (const [i, [name, v, t]] of COLOURS.entries()) {
   const t0 = Date.now();
   await pg.evaluate(([v, t]) => window.dress(v, t), [v, t]);
   for (const [k, [x, y, z]] of POSES.entries()) save(path.join(d, `p${k}.png`), await pg.evaluate(a => window.shot(...a), [x, y, z, 1600, 1600, null]));
+  // The catalog card's turn: 24 small cut-outs a full turn round, the first the same as the cover.
+  fs.mkdirSync(path.join(d, 't'), { recursive: true });
+  for (let f = 0; f < 24; f++) save(path.join(d, 't', `${String(f).padStart(2, '0')}.png`),
+    await pg.evaluate(a => window.shot(...a), [POSES[0][0], f / 24 * 2 * Math.PI, POSES[0][2], 400, 400, null]));
   save(path.join(d, 'thumb.jpg'), await pg.evaluate(() => window.shot(0.25, 0.25, 2.05 / 2.3, 168, 168, 0xF3F2EF, 'image/jpeg')));
   const n = +frames;
   for (let f = 0; f < n; f++) save(path.join(d, 'v', `${String(f).padStart(4, '0')}.jpg`),

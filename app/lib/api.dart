@@ -253,7 +253,12 @@ class ListingModel {
               k.clamp(0, 2).toDouble(),
             ],
           _ => null,
-        };
+        },
+        turn = [
+          if (j['turn'] case final List<dynamic> frames)
+            for (final f in frames)
+              if (f is String) f
+        ];
   final String url;
   final String? hqUrl;
   final String? variant;
@@ -262,6 +267,10 @@ class ListingModel {
   /// coloured parts, as on the approved demo. Null shows [variant] as made. Only the demo's data has it so far: the
   /// server sends none (a seller's pair is shown in the colour it was made in).
   final List<double>? tint;
+
+  /// Small cut-out pictures a full turn round, the first the catalog card's own cover, so a finger can turn the
+  /// shoe on the card too. Only the demo's data has them so far; empty otherwise.
+  final List<String> turn;
 }
 
 /// Brand, model and category read off look-alike listings already on VITRINA. Any field may be null.

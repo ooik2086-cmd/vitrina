@@ -32,9 +32,9 @@ abstract class ModelView {
 /// there is no 3D (the web, tests without a phone), and the listing then shows its photos.
 typedef ModelViewMaker = Future<ModelView?> Function(Brightness scene, void Function(String message) onMessage);
 
-/// The listing page's 3D stage: the shoe turns every way under the finger and zooms, on the light or dark scene. The
-/// [cover] photo stands in until the first 3D picture is drawn, and stays if the 3D cannot open ([onBroken] is told,
-/// so the page can show the photos instead): the stage is never empty.
+/// The listing page's 3D stage: the shoe turns every way under the finger and zooms, on the light or dark scene. Until
+/// the first 3D picture a quiet line says the 3D is opening, with no photo in front of it (Aza, 2026-10-24); the
+/// [cover] photo shows only if the 3D cannot open ([onBroken] is told, so the page can show the photos instead).
 class ModelStage extends StatefulWidget {
   const ModelStage(
       {super.key,
@@ -219,7 +219,7 @@ class ModelStageState extends State<ModelStage> {
   }
 
   /// Another model in place of this one (another colour made as its own model), at the turn and zoom shown now; the
-  /// cover stands in until it is drawn, as when the stage opened.
+  /// quiet line shows until it is drawn, as when the stage opened.
   Future<void> _swap() async {
     final kept = await view();
     if (!mounted) return;
@@ -250,22 +250,21 @@ class ModelStageState extends State<ModelStage> {
       label: tr('Аяқкиімнің 3D көрінісі'),
       child: ColoredBox(
         color: scene.ink,
+        // Only the 3D itself on the stage, no photo in front of it (Aza, 2026-10-24): the scene and a quiet line until
+        // its first picture, then the shoe fades in. The photos stand in only when the 3D cannot open.
         child: Stack(fit: StackFit.expand, children: [
           if (view != null && !_broken)
-            // Kept under the cover until its first picture, so the cover never blinks to an empty scene.
-            Opacity(opacity: _ready ? 1 : 0, child: ExcludeSemantics(child: view.widget)),
-          if (!_ready || _broken)
-            IgnorePointer(
-              child: Stack(fit: StackFit.expand, children: [
-                widget.cover,
-                if (!_broken)
-                  Align(
-                    alignment: const Alignment(0, 0.86),
-                    child: Text(tr('3D ашылуда…'),
-                        key: const Key('model-loading'),
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: scene.muted)),
-                  ),
-              ]),
+            AnimatedOpacity(
+              opacity: _ready ? 1 : 0,
+              duration: MediaQuery.disableAnimationsOf(context) ? Duration.zero : const Duration(milliseconds: 240),
+              child: ExcludeSemantics(child: view.widget),
+            ),
+          if (_broken) IgnorePointer(child: widget.cover),
+          if (!_ready && !_broken)
+            Center(
+              child: Text(tr('3D ашылуда…'),
+                  key: const Key('model-loading'),
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: scene.muted)),
             ),
         ]),
       ),

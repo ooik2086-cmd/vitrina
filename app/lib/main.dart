@@ -185,8 +185,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
         if (!didPop) setState(() => _tab = _lastTab = 0);
       },
       child: Scaffold(
-        // The hidden tabs stay alive but fly no photos: the catalog and favourites show the same shoe under one
-        // hero tag, and two such heroes on one route break the flight to the listing page.
+        // The hidden tabs stay alive but fly nothing: two heroes under one tag on one route would break a flight.
         body: IndexedStack(index: _tab, children: [
           for (final (i, tab) in const [
             CatalogScreen(),

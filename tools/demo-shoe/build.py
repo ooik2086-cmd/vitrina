@@ -40,7 +40,7 @@ COLOURS = [(3, 'көк', 'midnight', None), (1, 'қара', 'street', None), (4,
 ANGLES = ['outer', 'front', 'back', 'top', 'sole', 'detail']
 INSOLE = [('37', '24,0'), ('38', '24,5'), ('39', '25,0'), ('40', '25,7'), ('41', '26,3'), ('42', '27,0'), ('43', '27,7'), ('44', '28,3')]
 seller = {'id': 1, 'shop_name': 'Qadam Store', 'city': 'Алматы', 'away_until': None, 'rating': 4.8, 'reviews': 23}
-model = d['GET /listings/1']['model']
+model = {k: v for k, v in d['GET /listings/1']['model'].items() if k not in ('turn', 'tint')}
 new = {}
 for i, (lid, name, variant, tint) in enumerate(COLOURS):
     src = R / str(i)
@@ -57,6 +57,8 @@ for i, (lid, name, variant, tint) in enumerate(COLOURS):
     video = {'state': 'ready', 'url': put(mp4, 'mp4'), 'poster_url': put(poster, 'jpg'), 'seconds': 9}
     m = {**model, 'variant': variant}
     if tint: m['tint'] = tint
+    # The catalog card's turn: its cover's own small copy first, then the 23 pictures round from render.mjs.
+    m['turn'] = [media[0]['thumb_url']] + [put(webp(src / 't' / f'{f:02d}.png'), 'webp') for f in range(1, 24)]
     new[lid] = {
         'id': lid, 'status': 'published', 'title': 'Жеңіл жүгіру кроссовкасы', 'category': 'sneakers', 'brand': None,
         'model_name': 'Foam Run Light', 'color': name, 'price_tiyn': 2110000, 'was_price_tiyn': None,
