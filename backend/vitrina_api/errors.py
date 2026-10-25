@@ -98,6 +98,15 @@ MESSAGES: dict[str, tuple[str, str, str]] = {  # code: (Kazakh, Russian, English
     "unsupported_video": ("Видео ашылмады. Телефонмен түсірілген MP4 не MOV видеосын жіберіңіз (12 МБ-қа дейін).",
                           "Видео не открылось. Отправьте MP4 или MOV, снятое на телефон (до 12 МБ).",
                           "The video could not be read. Send an MP4 or MOV recorded on a phone (up to 12 MB)."),
+    "bad_model": ("3D файлы ашылмады: бір файлдағы glTF 2.0 (.glb) керек, басқа мекенжайдан ештеңе жүктемейтін, Draco/meshopt"
+                  " қысуынсыз.",
+                  "3D-файл не открылся: нужен один файл glTF 2.0 (.glb), без загрузок с других адресов и без сжатия"
+                  " Draco/meshopt.",
+                  "The 3D file could not be used: it must be one glTF 2.0 binary (.glb), loading nothing from elsewhere,"
+                  " without Draco/meshopt compression."),
+    "bad_first_picture": ("3D-ның алғашқы суреті шаршы, фонсыз және кемінде 400 px болуы керек.",
+                          "Первая картинка 3D должна быть квадратной, без фона и не меньше 400 px.",
+                          "The 3D's first picture must be square, cut out and at least 400 px."),
     "reason_required": ("Себебін жазыңыз.",
                         "Укажите причину.",
                         "Give a reason."),

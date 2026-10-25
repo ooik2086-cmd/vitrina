@@ -24,7 +24,7 @@
   .proofs { display:flex; gap:8px; flex-wrap:wrap; margin:8px 0; } .proofs img { width:120px; height:120px; }
   .muted { color:var(--muted); font-size:13px; }
   .pill { display:inline-block; padding:2px 10px; border-radius:99px; background:var(--canvas); border:1px solid var(--line); font-size:12px; }
-  input, textarea { font:inherit; color:inherit; background:var(--canvas); border:1px solid var(--line); border-radius:12px; padding:10px 12px; width:100%; }
+  input, textarea, select { font:inherit; color:inherit; background:var(--canvas); border:1px solid var(--line); border-radius:12px; padding:10px 12px; width:100%; }
   button.primary, button.ghost { font:inherit; font-weight:600; border-radius:12px; padding:10px 16px; cursor:pointer; }
   button.primary { background:var(--ink); color:var(--canvas); border:0; }
   button.ghost { background:none; border:1px solid var(--line); color:inherit; }
@@ -94,6 +94,147 @@ function loginView() {
     } catch (x) { err.textContent = x.message; }
   };
   render(n);
+}
+
+// ---- a listing's 3D: the file checked and stored by the server, its first picture drawn here by the app's own viewer
+// (viewer.js, the same script the listing page runs), so the picture is the stage exactly as it opens ----
+let viewerReady = null, viewerWaits = [], viewerLoad = 0, viewerTurn = Promise.resolve(), viewerLost = false;
+// Why a first picture could not be made: 'model' when the viewer itself could not open the file (it would not open
+// on a phone either), 'browser' when this browser could not draw it (no WebGL, the drawing lost, too slow).
+const failed = (kind, message) => Object.assign(new Error(message), { kind });
+function viewer() {
+  if (viewerLost) return Promise.reject(failed('browser', 'бұл браузерде WebGL жоғалды; бетті жаңартыңыз'));
+  if (viewerReady) return viewerReady;
+  viewerReady = new Promise((ok, fail) => {
+    document.body.append($(`<div id="stage" aria-hidden="true" style="position:fixed;left:-20000px;top:0">
+      <canvas id="c" style="position:absolute;inset:0;width:100%;height:100%;display:block"></canvas></div>`));
+    window.Vitrina = { postMessage: (m) => {
+      const msg = JSON.parse(m);
+      if (msg.type === 'lost') viewerLost = true;
+      viewerWaits = viewerWaits.filter(w => !w(msg));
+    } };
+    viewerWaits.push(m => { if (m.type === 'page') { ok(); return true; } if (m.type === 'lost') { fail(failed('browser', 'WebGL жоқ')); return true; } return false; });
+    const sc = document.createElement('script');
+    sc.src = 'viewer.js';
+    sc.onerror = () => fail(failed('browser', 'viewer.js ашылмады'));
+    document.body.append(sc);
+  });
+  viewerReady.catch(() => { viewerReady = null; });
+  return viewerReady;
+}
+// One model at a time: the viewer answers only its latest load.
+function firstPicture(file, variant) {
+  const run = viewerTurn.then(() => drawFirst(file, variant));
+  viewerTurn = run.catch(() => {});
+  return run;
+}
+async function drawFirst(file, variant) {
+  await viewer();
+  // Square, off the screen, as many pixels across as the demo's first pictures (the viewer draws at most 3 per px):
+  // the app shows the picture on the narrower side of its stage, which sees the same.
+  const stage = document.getElementById('stage'), side = 1080 / Math.min(window.devicePixelRatio || 1, 3);
+  stage.style.width = stage.style.height = side + 'px';
+  const n = ++viewerLoad, url = URL.createObjectURL(file);
+  try {
+    const done = new Promise((ok, fail) => viewerWaits.push(m => {
+      if (m.type === 'lost') fail(failed('browser', 'WebGL жоғалды'));
+      else if (m.load !== n) return false;
+      else if (m.type === 'ready') ok();
+      else if (m.type === 'error') fail(failed('model', m.message || '3D ашылмады'));
+      else return false;
+      return true;
+    }));
+    window.vitrina.load({ url, variant: variant || null, load: n });
+    await Promise.race([done, new Promise((_, fail) => setTimeout(() => fail(failed('browser', '3D 60 секундта ашылмады')), 60000))]);
+    const png = window.vitrina.picture();
+    if (!png) throw failed('browser', 'сурет салынбады');
+    // Not fetched: the console may only connect to its own server and to files picked here.
+    const bytes = Uint8Array.from(atob(png.split(',')[1]), ch => ch.charCodeAt(0));
+    return new Blob([bytes], { type: 'image/png' });
+  } finally { URL.revokeObjectURL(url); }
+}
+// The colour names inside a .glb (KHR_materials_variants), read from its JSON part, to pick from.
+async function variantsIn(file) {
+  try {
+    const head = new DataView(await file.slice(0, 20).arrayBuffer());
+    if (head.getUint32(0, true) !== 0x46546c67) return [];
+    const json = JSON.parse(await file.slice(20, 20 + head.getUint32(12, true)).text());
+    return (json.extensions?.KHR_materials_variants?.variants || []).map(v => String(v.name));
+  } catch (_) { return []; }
+}
+const problem = (data, status) => [data?.message_kk || 'Қате ' + status, data?.detail].filter(Boolean).join(' — ');
+function modelBox(l) {
+  const n = $(`<div>${l.model ? `<div class="row" style="align-items:center">
+      ${l.model.first_url ? `<img src="${esc(webUrl(l.model.first_url))}" alt="3D алғашқы суреті" style="background:#E8E6EE">` : ''}
+      <div class="muted">3D: ${esc(l.model.url)}${l.model.variant ? ' · түсі ' + esc(l.model.variant) : ''}${l.model.first_url ? '' : ' · алғашқы суреті жоқ'}</div></div>
+      <form class="inline" data-act="drop"><input name="reason" aria-label="3D-ны алу себебі" placeholder="3D-ны неге аламыз (міндетті)" required style="grid-column:1/3"><button class="ghost danger">3D алу</button></form>` : ''}
+    <form class="inline" data-act="give"><input name="model" type="file" accept=".glb,model/gltf-binary" aria-label="3D файлы (.glb, 8 МБ-қа дейін)" required>
+      <select name="variant" aria-label="Модельдегі түсі" hidden></select>
+      <input name="reason" aria-label="3D себебі" placeholder="${l.model ? '3D-ны неге ауыстырамыз' : 'Қайдан алынды, неге сай'} (міндетті)" required style="grid-column:1/3">
+      <button class="primary">${l.model ? '3D ауыстыру' : '3D қосу'}</button></form>
+    <div class="preview" hidden><div class="muted">Сатып алушы бетті ашқанда алдымен осыны көреді. Түсі сатушының аяқкиіміндей ме?</div>
+      <img alt="3D алғашқы суреті" style="width:240px;height:240px;background:#E8E6EE;border-radius:12px">
+      <div class="row"><button class="primary" data-act="send">Иә, жіберу</button><button class="ghost" data-act="cancel">Болдырмау</button></div></div>
+    <div class="muted" data-say aria-live="polite"></div><div class="err" role="alert"></div></div>`);
+  const say = n.querySelector('[data-say]'), err = n.querySelector('.err');
+  const drop = n.querySelector('[data-act=drop]');
+  if (drop) drop.onsubmit = async (e) => {
+    e.preventDefault(); err.textContent = '';
+    try { await call('DELETE', `/admin/listings/${l.id}/model`, { reason: drop.reason.value.trim() }); show(); } catch (x) { err.textContent = x.message; }
+  };
+  const give = n.querySelector('[data-act=give]'), button = give.querySelector('button');
+  const preview = n.querySelector('.preview'), shot = preview.querySelector('img');
+  let ready = null; // what was drawn and is waiting for a yes
+  const reset = () => { preview.hidden = true; if (shot.src) URL.revokeObjectURL(shot.src); shot.removeAttribute('src'); ready = null; button.disabled = false; };
+  give.model.onchange = async () => {
+    reset();
+    const names = give.model.files[0] ? await variantsIn(give.model.files[0]) : [];
+    give.variant.replaceChildren(...names.map(v => new Option(v, v)));
+    give.variant.hidden = !names.length;
+  };
+  const send = async () => {
+    const { file, first, variant, reason } = ready;
+    say.textContent = 'Жіберіліп жатыр…';
+    const form = new FormData();
+    form.append('model', file);
+    if (first) form.append('first', first, 'first.png');
+    if (variant) form.append('variant', variant);
+    form.append('reason', reason);
+    const r = await fetch(`${API}/admin/listings/${l.id}/model/upload`, { method: 'POST', body: form, headers: { Authorization: 'Bearer ' + token } });
+    const data = await r.json().catch(() => null);
+    if (!r.ok) throw new Error(problem(data, r.status));
+    show();
+  };
+  preview.querySelector('[data-act=cancel]').onclick = () => { reset(); say.textContent = ''; };
+  preview.querySelector('[data-act=send]').onclick = async () => {
+    err.textContent = '';
+    try { await send(); } catch (x) { err.textContent = x.message; say.textContent = ''; }
+  };
+  give.onsubmit = async (e) => {
+    e.preventDefault(); err.textContent = ''; reset();
+    const file = give.model.files[0];
+    if (!file) return;
+    if (file.size > 8 * 1024 * 1024) { err.textContent = '3D файлы 8 МБ-тан аспауы керек: телефон оны мобильді интернетпен ашады.'; return; }
+    const variant = give.variant.hidden ? '' : give.variant.value;
+    button.disabled = true;
+    try {
+      say.textContent = 'Алғашқы сурет жасалып жатыр…';
+      let first = null;
+      try { first = await firstPicture(file, variant); }
+      catch (x) {
+        // The app's own viewer could not open it: it would not open on a phone either.
+        if (x.kind !== 'browser') throw new Error('Бұл 3D файлы ашылмады, телефонда да ашылмайды: ' + x.message);
+        // This browser could not draw it: without a picture the page still shows the 3D, after its loading line.
+        if (!confirm(`Алғашқы сурет жасалмады (${x.message}). Онсыз жүктейміз бе? Бет 3D жүктелгенше күтеді.`)) { say.textContent = ''; button.disabled = false; return; }
+      }
+      ready = { file, first, variant, reason: give.reason.value.trim() };
+      if (!first) { await send(); return; }
+      shot.src = URL.createObjectURL(first);
+      preview.hidden = false;
+      say.textContent = '';
+    } catch (x) { err.textContent = x.message; say.textContent = ''; button.disabled = false; }
+  };
+  return n;
 }
 
 function shell(content) {
@@ -202,11 +343,13 @@ async function show() {
       r.items.forEach(l => {
         const cover = (l.media.find(m => m.angle !== 'frame') || l.media[0] || {}).original_url;
         const n = $(`<div class="card"><div class="row">${cover ? `<img src="${esc(cover)}" alt="">` : ''}<div style="flex:1">
-          <b>#${l.id} · ${esc(l.title)}</b><div class="muted">${tenge(l.price_tiyn)} · ${esc(l.seller.shop_name)} · ${l.media.filter(m => m.angle === 'frame').length} кадр 360°</div>
+          <b>#${l.id} · ${esc(l.title)}</b><div class="muted">${tenge(l.price_tiyn)} · ${esc(l.seller.shop_name)} · ${l.model ? '3D бар' : '3D жоқ: беті фотоларды көрсетеді'}</div>
           ${l.defects ? `<div class="muted">Ақау: ${esc(l.defects)}</div>` : ''}
-          <form class="inline"><input name="reason" placeholder="Жасыру себебі" required style="grid-column:1/3"><button class="ghost danger">Жасыру</button></form></div></div></div>`);
+          <form class="inline"><input name="reason" placeholder="Жасыру себебі" required style="grid-column:1/3"><button class="ghost danger">Жасыру</button></form>
+          <div class="model"></div></div></div></div>`);
         const f = n.querySelector('form');
         f.onsubmit = async (e) => { e.preventDefault(); await call('POST', `/admin/listings/${l.id}/hide`, { reason: f.reason.value.trim() }); show(); };
+        n.querySelector('.model').append(modelBox(l));
         box.append(n);
       });
       if (!r.items.length) box.append($(`<div class="card muted">Сатылымда тауар жоқ.</div>`));

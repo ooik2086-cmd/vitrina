@@ -101,6 +101,9 @@ class Listing(Base):
     model_url: Mapped[str | None] = mapped_column(String(500))
     model_hq_url: Mapped[str | None] = mapped_column(String(500))
     model_variant: Mapped[str | None] = mapped_column(String(40))
+    # The model's own first picture (square, cut out), made as the stage opens it: shown the moment the page opens,
+    # while the model loads behind it. Made in the staff console from the model itself, never a photo.
+    model_first_url: Mapped[str | None] = mapped_column(String(500))
     search_text: Mapped[str] = mapped_column(Text, default="")
     views: Mapped[int] = mapped_column(Integer, default=0, server_default="0")  # product page opens by others
     promo_state: Mapped[str | None] = mapped_column(String(12))  # rendering | ready | failed; None = never made

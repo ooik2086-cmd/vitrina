@@ -253,7 +253,8 @@ def model_out(listing: Listing) -> dict | None:
     """The 3D model the listing page shows, or None: the page then shows the photos."""
     if not listing.model_url:
         return None
-    return {"url": listing.model_url, "hq_url": listing.model_hq_url, "variant": listing.model_variant}
+    return {"url": listing.model_url, "hq_url": listing.model_hq_url, "variant": listing.model_variant,
+            "first_url": listing.model_first_url}
 
 
 def cover_frame(listing: Listing) -> str | None:

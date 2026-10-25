@@ -1266,7 +1266,7 @@ class ReportTests(ApiTestCase):
                          404)
         version = self.c.get(f"/api/v1/listings/{lid}").json()["photos_version"]
         r = self.c.put(url, json=body, headers=self.h(staff))
-        want = {"url": body["url"], "hq_url": body["hq_url"], "variant": "midnight"}
+        want = {"url": body["url"], "hq_url": body["hq_url"], "variant": "midnight", "first_url": None}
         self.assertEqual(r.json(), {"id": lid, "model": want})
         # An order from a page that showed no 3D (or another one) is placed on what the buyer saw, or refused.
         self.assertNotEqual(self.c.get(f"/api/v1/listings/{lid}").json()["photos_version"], version)
@@ -1277,8 +1277,8 @@ class ReportTests(ApiTestCase):
         self.c.put(url, json={**body, "variant": "beach"}, headers=self.h(staff))
         audit = self.c.get("/api/v1/admin/audit", headers=self.h(staff)).json()["items"]
         sets = [a["reason"] for a in audit if a["action"] == "set_listing_model"]
-        self.assertTrue(any("shoe-2048.glb beach (was https://cdn.example/shoe-1024.glb https://cdn.example/"
-                            "shoe-2048.glb midnight)" in r for r in sets), sets)
+        self.assertTrue(any("shoe-2048.glb beach None (was https://cdn.example/shoe-1024.glb https://cdn.example/"
+                            "shoe-2048.glb midnight None)" in r for r in sets), sets)
         self.assertTrue(any("(was none)" in r for r in sets), sets)
         gone = self.c.request("DELETE", url, json={"reason": "Түсі сәйкес емес"}, headers=self.h(staff))
         self.assertEqual(gone.json(), {"id": lid, "model": None})
@@ -1296,6 +1296,73 @@ class ReportTests(ApiTestCase):
         self.assertIsNone(self.c.get(f"/api/v1/listings/{lid}").json()["model"])
         self.assertEqual(self.c.request("DELETE", url, json={"reason": "x"}, headers=self.h(self.buyer)).status_code,
                          403)
+
+    def test_staff_upload_a_3d_file_with_its_first_picture(self):
+        lid = self.publish()["id"]
+        staff = self.make_staff()
+        url = f"/api/v1/admin/listings/{lid}/model/upload"
+
+        def send(model, first=None, token=staff, **form):
+            files = {"model": ("shoe.glb", model, "model/gltf-binary")}
+            if first is not None:
+                files["first"] = ("first.png", first, "image/png")
+            return self.c.post(url, files=files, data={"reason": "Сатушының аяқкиімі, түсі сай", **form},
+                               headers=self.h(token))
+
+        good, picture = glb(), cutout_png()
+        self.assertEqual(send(good, picture, token=self.seller).status_code, 403)
+        big = io.BytesIO()
+        Image.new("RGB", (4097, 64)).save(big, "PNG")
+        small = io.BytesIO()
+        Image.new("RGB", (2048, 2048)).save(small, "PNG")
+        for bad in (b"glTF" + b"\0" * 30, glb(images=[{"uri": "https://tracker.example/t.png"}]),
+                    glb(buffers=[{"uri": "../../etc/passwd", "byteLength": 4}]),
+                    glb(buffers=[{"uri": "data:application/octet-stream;base64,AAAA", "byteLength": 4}]),
+                    glb(extensionsRequired=["KHR_draco_mesh_compression"]),
+                    glb(extensionsUsed=["EXT_meshopt_compression"]), glb(extensionsRequired=["EXT_unknown"]),
+                    glb(meshes=[]), glb(scenes=[{"nodes": []}]), glb(nodes=[{"children": [0]}]),
+                    glb(asset=[1]), glb(images=5), glb(extensionsRequired=[{}]), glb(scene=7),
+                    glb(texture=big.getvalue()), glb(texture=b"not a picture"),
+                    glb()[:-4], b"x" * 100):
+            self.assertEqual(send(bad).json()["code"], "bad_model", bad[:200])
+        self.assertEqual(send(glb(texture=small.getvalue())).status_code, 200)
+        self.c.request("DELETE", f"/api/v1/admin/listings/{lid}/model", json={"reason": "сынақ"}, headers=self.h(staff))
+        self.assertIn("beach", send(good, variant="street").json()["detail"])
+        self.assertEqual(send(b"glTF" + b"\0" * (8 * 1024 * 1024)).status_code, 413)
+        self.assertEqual(send(good, cutout_png(side=500, height=400)).json()["code"], "bad_first_picture")
+        self.assertEqual(send(good, cutout_png(cut=False)).json()["code"], "bad_first_picture")
+        self.assertEqual(send(good, cutout_png(shoe=False)).json()["code"], "bad_first_picture")
+        self.assertEqual(send(good, jpeg((600, 600))).json()["code"], "unsupported_media")
+        self.assertEqual(send(good, reason=" ").json()["code"], "reason_required")
+        self.assertEqual(send(good, variant="a b").status_code, 422)
+        self.assertIsNone(self.c.get(f"/api/v1/listings/{lid}").json()["model"])
+        kept = {p.suffix for p in Path(self.cfg.media_dir).rglob("*") if p.is_file()}
+        self.assertEqual(kept & {".glb", ".webp"}, {".glb"}, "only the accepted small-texture model was stored")
+        r = send(good, picture, variant="midnight")
+        self.assertEqual(r.status_code, 200, r.text)
+        model = self.c.get(f"/api/v1/listings/{lid}").json()["model"]
+        self.assertEqual(model, r.json()["model"])
+        self.assertTrue(model["url"].endswith(".glb") and model["first_url"].endswith(".webp"), model)
+        self.assertEqual((model["hq_url"], model["variant"]), (None, "midnight"))
+        stored = lambda u: Path(self.cfg.media_dir) / u.removeprefix("http://test/media/")  # noqa: E731
+        self.assertEqual(stored(model["url"]).read_bytes(), good)
+        with Image.open(stored(model["first_url"])) as first:
+            self.assertEqual((first.format, first.size, first.mode), ("WEBP", (1080, 1080), "RGBA"))
+        # Without a picture (the console could not draw it): the 3D still shows, after its loading line.
+        model = send(good).json()["model"]
+        self.assertIsNone(model["first_url"])
+        # A model given by address has no first picture: only the console makes one, from the model.
+        send(good, picture)
+        body = {"url": "https://cdn.example/shoe.glb", "reason": "x"}
+        self.assertIsNone(self.c.put(f"/api/v1/admin/listings/{lid}/model", json=body, headers=self.h(staff))
+                          .json()["model"]["first_url"])
+        audit = self.c.get("/api/v1/admin/audit", headers=self.h(staff)).json()["items"]
+        self.assertTrue(any(a["action"] == "set_listing_model" and ".webp" in a["reason"] and "(was none)" in a["reason"]
+                            for a in audit), audit)
+        # Another colour drops the model and its picture together.
+        send(good, picture)
+        self.c.patch(f"/api/v1/listings/{lid}", json={"color": "Қызыл"}, headers=self.h(self.seller))
+        self.assertIsNone(self.c.get(f"/api/v1/listings/{lid}").json()["model"])
 
     def test_reports_queue_for_moderator_who_hides_and_everyone_is_told(self):
         lid = self.publish()["id"]
@@ -1903,6 +1970,33 @@ class OrderFlowTests(ApiTestCase):
         self.assertEqual(refund.json()["status"], "REFUNDED")
         with self.db() as db:
             self.assertEqual(balance(db, escrow(str(order["id"]))), 0)
+
+
+def glb(**gltf) -> bytes:
+    """A small glTF binary: one mesh, a BIN chunk; [gltf] keys replace or add top-level JSON keys."""
+    texture = gltf.pop("texture", None)
+    binary = b"\0" * 4 + (texture or b"")
+    binary += b"\0" * (-len(binary) % 4)
+    doc = {"asset": {"version": "2.0"}, "scene": 0, "scenes": [{"nodes": [0]}], "nodes": [{"mesh": 0}],
+           "meshes": [{"primitives": [{"attributes": {"POSITION": 0}}]}], "buffers": [{"byteLength": len(binary)}],
+           "extensions": {"KHR_materials_variants": {"variants": [{"name": "midnight"}, {"name": "beach"}]}}}
+    if texture:
+        doc |= {"bufferViews": [{"buffer": 0, "byteOffset": 4, "byteLength": len(texture)}],
+                "images": [{"bufferView": 0, "mimeType": "image/png"}]}
+    doc |= gltf
+    js = json.dumps(doc).encode()
+    js += b" " * (-len(js) % 4)
+    body = (len(js).to_bytes(4, "little") + b"JSON" + js + len(binary).to_bytes(4, "little") + b"BIN\0" + binary)
+    return b"glTF" + (2).to_bytes(4, "little") + (12 + len(body)).to_bytes(4, "little") + body
+
+
+def cutout_png(side=1600, height=None, cut=True, shoe=True) -> bytes:
+    img = Image.new("RGBA", (side, height or side), (0, 0, 0, 0) if cut else (232, 230, 238, 255))
+    if shoe:
+        img.paste((30, 80, 200, 255), (side // 4, side // 3, side * 3 // 4, side * 2 // 3))
+    out = io.BytesIO()
+    img.save(out, "PNG")
+    return out.getvalue()
 
 
 def jpeg(size=(800, 600), orientation=None, gps=False) -> bytes:
@@ -3609,6 +3703,12 @@ class AdminTests(ApiTestCase):
         r = self.c.get("/admin/")
         self.assertEqual(r.status_code, 200)
         self.assertIn("/api/v1", r.text)
+        # The console draws a model's first picture with the listing page's own viewer: the same file, byte for byte.
+        viewer = self.c.get("/admin/viewer.js")
+        self.assertEqual(viewer.status_code, 200)
+        app_copy = Path(__file__).resolve().parents[2] / "app/assets/viewer/viewer.js"
+        self.assertEqual(viewer.content, app_copy.read_bytes(), "run tools/viewer/build.sh")
+        self.assertIn("connect-src 'self' blob:", viewer.headers["Content-Security-Policy"])
 
     def test_admin_views_are_staff_only_and_show_dispute_reasons(self):
         _, order = self.delivered()

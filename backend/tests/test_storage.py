@@ -174,6 +174,20 @@ class LocalListingTests(unittest.TestCase):
                 disk.delete("../outside.jpg")
 
 
+class MediaCaddyTests(unittest.TestCase):
+    def test_the_media_caddy_serves_every_kind_of_file_the_storage_writes(self):
+        # A kind the storage writes that the media Caddy does not serve is a 404 on every phone (a 3D model, say).
+        import re
+        from pathlib import Path
+        from vitrina_api.storage import CONTENT_TYPES, KEY_BODY
+        caddy = (Path(__file__).resolve().parents[2] / "deploy/Caddyfile.media").read_text()
+        served = re.search(r"@photo path_regexp \^/\[0-9\]\+/\[0-9a-f\]\{32\}\\\.\(([a-z0-9|]+)\)\$", caddy)
+        self.assertIsNotNone(served, "the @photo matcher changed shape")
+        written = set(re.search(r"\(\?:([a-z0-9|]+)\)", KEY_BODY).group(1).split("|"))
+        self.assertEqual(set(served.group(1).split("|")), written)
+        self.assertEqual(set(CONTENT_TYPES), written)
+
+
 class ChoiceTests(unittest.TestCase):
     def test_bucket_setting_picks_s3_and_disk_is_the_default(self):
         import tempfile

@@ -782,7 +782,7 @@ CONDITION_ORDER = [c.value for c in Condition]  # best first
 def drop_model(listing: Listing) -> None:
     """The staff-given 3D no longer shows this listing (another colour, shoe or photos): its page shows the photos until
     staff match a model to it again."""
-    listing.model_url = listing.model_hq_url = listing.model_variant = None
+    listing.model_url = listing.model_hq_url = listing.model_variant = listing.model_first_url = None
 
 
 def picked_facts(facts: dict[str, str] | None, category: str) -> dict[str, str] | None:

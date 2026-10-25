@@ -130,6 +130,9 @@ const meshesOf = gltf => { const list = []; gltf.scene.traverse(o => { if (o.isM
 
 // Puts a loaded copy on the stage in place of the one shown, already in its colour (never a frame in the default one).
 function use(gltf, list) {
+  const box = new THREE.Box3().setFromObject(gltf.scene);
+  // A model with nothing to show is broken, not a shoe: said as an error, so the app shows the photos instead.
+  if (box.isEmpty() || !(box.getSize(new THREE.Vector3()).length() > 0)) throw new Error('no shoe in the model');
   if (model) {
     pivot.remove(model);
     model.traverse(o => {
@@ -142,7 +145,6 @@ function use(gltf, list) {
   parser = gltf.parser;
   meshes = list;
   model = gltf.scene;
-  const box = new THREE.Box3().setFromObject(model);
   model.position.sub(box.getCenter(new THREE.Vector3()));
   pivot.add(model);
   r = box.getSize(new THREE.Vector3()).length() / 2; // the radius of the sphere round the shoe
@@ -411,5 +413,13 @@ window.vitrina = {
   setPaused(p) { paused = !!p; if (!paused) { dirty = true; kick(); } },
   // The turn, zoom and the spot zoomed in on, to open another colour of this model showing the same.
   view: () => JSON.stringify([...pivot.quaternion.toArray(), zoomT, panTX / r, panTY / r]),
+  // The stage drawn now, without its scene (the app draws that), as a PNG: the staff console keeps it, taken as the
+  // model opens, as the model's first picture.
+  picture() {
+    if (!model) return null;
+    frame();
+    renderer.render(scene, camera);
+    return c.toDataURL('image/png');
+  },
 };
 post('page');

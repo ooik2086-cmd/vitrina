@@ -60,7 +60,8 @@ MAX_REQUEST_BYTES = MAX_UPLOAD_BYTES + 64 * 1024
 MAX_VIDEO_REQUEST_BYTES = VIDEO_UPLOAD_BYTES + 64 * 1024
 VIDEO_UPLOAD_PATH = re.compile(r"/api/v1/listings/\d+/video")
 # The console loads only its own files; share pages may also show photos from the media host.
-ADMIN_CSP = "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' https: data:; media-src 'self' https:; frame-ancestors 'none'"
+# blob: lets the console open a 3D file before it is sent (and the model's own pictures inside it).
+ADMIN_CSP = "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; connect-src 'self' blob:; media-src 'self' https:; frame-ancestors 'none'"
 SHARE_CSP = "default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'unsafe-inline'; img-src 'self' https: data:; media-src 'self' https:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
 
 

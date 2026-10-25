@@ -5,7 +5,7 @@ import hashlib
 import json
 from collections import defaultdict
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, Form, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -15,7 +15,7 @@ from vitrina_core.orders import Actor, OrderStatus as S
 
 from . import services
 from .config import Settings
-from .deps import get_db, get_private, get_settings, staff_user
+from .deps import get_db, get_private, get_settings, get_storage, staff_user
 from .errors import ApiError
 from .models import AuditLog, AuthProof, ListingReport, Listing, Order, OrderEvent, OrderEvidence, User, utcnow
 from .schemas import EvidenceRequestIn, ListingModelIn, ReasonIn, ReportCloseIn, ResolveIn
@@ -23,7 +23,8 @@ from .serializers import (LIGHT, listing_out, model_out, moderation_out, order_o
                           ordered_photos, preload_orders, preload_sellers, with_light_media)
 from .saved_search_routes import announce
 from .storage import Storage, private_link
-from .listing_routes import back_from_hold, settle_stock_status, split_codes
+from .listing_routes import back_from_hold, drop_model, settle_stock_status, split_codes
+from .model3d import FIRST_MAX_BYTES, MODEL_MAX_BYTES, check_glb, first_picture
 from .order_routes import dispute_evidence_until, order_evidence_list, order_for
 
 
@@ -116,6 +117,21 @@ def hide_listing(listing_id: int, body: ReasonIn, staff: User = Depends(staff_us
     return {"id": listing.id, "status": listing.status}
 
 
+def give_model(db: Session, staff: User, listing: Listing, url: str, hq_url: str | None, variant: str | None,
+               first_url: str | None, reason: str) -> dict:
+    if not reason.strip():
+        raise ApiError(422, "reason_required")
+    was = (f"{listing.model_url} {listing.model_hq_url} {listing.model_variant} {listing.model_first_url}"
+           if listing.model_url else "none")
+    listing.model_url, listing.model_hq_url, listing.model_variant = url, hq_url, variant
+    listing.model_first_url = first_url
+    # What it was and what it is now, both copies: a wrong 3D can be traced and put back.
+    services.audit(db, staff.id, "set_listing_model", f"listing:{listing.id}",
+                   f"{url} {hq_url} {variant} {first_url} (was {was}): {reason}"[:2000])
+    db.commit()
+    return {"id": listing.id, "model": model_out(listing)}
+
+
 @router.put("/admin/listings/{listing_id}/model")
 def set_listing_model(listing_id: int, body: ListingModelIn, staff: User = Depends(staff_user),
                       db: Session = Depends(get_db)):
@@ -123,15 +139,39 @@ def set_listing_model(listing_id: int, body: ListingModelIn, staff: User = Depen
     listing = db.get(Listing, listing_id)
     if listing is None:
         raise ApiError(404, "not_found")
-    if not body.reason.strip():
+    # No first picture by address: only the console's upload makes one, from the model itself.
+    return give_model(db, staff, listing, body.url, body.hq_url, body.variant, None, body.reason)
+
+
+@router.post("/admin/listings/{listing_id}/model/upload")
+def upload_listing_model(listing_id: int, model: UploadFile = File(...), first: UploadFile | None = File(None),
+                         variant: str | None = Form(None, max_length=40, pattern=r"^[A-Za-z0-9_-]+$"),
+                         reason: str = Form(..., max_length=2000), staff: User = Depends(staff_user),
+                         db: Session = Depends(get_db), storage: Storage = Depends(get_storage)):
+    """The console's way: the model file itself, checked and stored here, with its first picture the console made
+    from it (none when the console's browser could not draw it: the page then waits for the model)."""
+    listing = db.get(Listing, listing_id)
+    if listing is None:
+        raise ApiError(404, "not_found")
+    if not reason.strip():
         raise ApiError(422, "reason_required")
-    was = f"{listing.model_url} {listing.model_hq_url} {listing.model_variant}" if listing.model_url else "none"
-    listing.model_url, listing.model_hq_url, listing.model_variant = body.url, body.hq_url, body.variant
-    # What it was and what it is now, both copies: a wrong 3D can be traced and put back.
-    services.audit(db, staff.id, "set_listing_model", f"listing:{listing.id}",
-                   f"{body.url} {body.hq_url} {body.variant} (was {was}): {body.reason}"[:2000])
-    db.commit()
-    return {"id": listing.id, "model": model_out(listing)}
+    data = model.file.read(MODEL_MAX_BYTES + 1)
+    if len(data) > MODEL_MAX_BYTES:
+        raise ApiError(413, "file_too_large")
+    names = check_glb(data)
+    if variant and variant not in names:
+        # The viewer would quietly show the model's own colour, maybe not the seller's.
+        raise ApiError(422, "bad_model", f"no colour {variant} in it; it has: {', '.join(names) or 'none'}"[:300])
+    picture = None
+    if first is not None:
+        raw = first.file.read(FIRST_MAX_BYTES + 1)
+        if len(raw) > FIRST_MAX_BYTES:
+            raise ApiError(413, "file_too_large")
+        picture = first_picture(raw)
+    # Stored as the seller's, as the listing's photos are: it shows their shoe.
+    url = storage.put(data, owner_id=listing.seller_id, ext="glb")
+    first_url = storage.put(picture, owner_id=listing.seller_id, ext="webp") if picture else None
+    return give_model(db, staff, listing, url, None, variant or None, first_url, reason)
 
 
 @router.delete("/admin/listings/{listing_id}/model")
@@ -143,8 +183,8 @@ def remove_listing_model(listing_id: int, body: ReasonIn, staff: User = Depends(
         raise ApiError(404, "not_found")
     if not body.reason.strip():
         raise ApiError(422, "reason_required")
-    was = f"{listing.model_url} {listing.model_hq_url} {listing.model_variant}"
-    listing.model_url = listing.model_hq_url = listing.model_variant = None
+    was = f"{listing.model_url} {listing.model_hq_url} {listing.model_variant} {listing.model_first_url}"
+    drop_model(listing)
     services.audit(db, staff.id, "remove_listing_model", f"listing:{listing.id}", f"(was {was}): {body.reason}"[:2000])
     db.commit()
     return {"id": listing.id, "model": None}

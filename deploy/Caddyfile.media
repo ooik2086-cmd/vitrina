@@ -10,10 +10,13 @@
 	handle /health {
 		respond 200
 	}
-	@photo path_regexp ^/[0-9]+/[0-9a-f]{32}\.(jpg|webp|png|mp4)$
+	@photo path_regexp ^/[0-9]+/[0-9a-f]{32}\.(jpg|webp|png|mp4|glb)$
 	handle @photo {
 		root * /srv/media
 		header X-Content-Type-Options nosniff
+		# A shoe's 3D model (staff upload it); Caddy has no type of its own for it.
+		@model path *.glb
+		header @model Content-Type model/gltf-binary
 		# A name is random and never reused (an edit makes a new one): phones may keep a photo for a year. Only
 		# when it is there: a 404 (say, before restore.sh --files) must not be remembered.
 		@there file

@@ -147,7 +147,7 @@ def new_key(owner_id: int, ext: str) -> str:
 
 
 # The only shape new_key produces. Anything else (quotes, "</script>", "?", "#", "..") was not written by us.
-KEY_BODY = r"(\d+)/[0-9a-f]{32}\.(?:jpg|webp|png|mp4)"
+KEY_BODY = r"(\d+)/[0-9a-f]{32}\.(?:jpg|webp|png|mp4|glb)"
 KEY_RE = re.compile(KEY_BODY)
 
 
@@ -195,7 +195,8 @@ def link_signature(secret: bytes, key: str, expires: int) -> str:
     return hmac.new(secret, f"private-media:{key}:{expires}".encode(), hashlib.sha256).hexdigest()
 
 
-CONTENT_TYPES = {"jpg": "image/jpeg", "webp": "image/webp", "png": "image/png", "mp4": "video/mp4"}
+CONTENT_TYPES = {"jpg": "image/jpeg", "webp": "image/webp", "png": "image/png", "mp4": "video/mp4",
+                 "glb": "model/gltf-binary"}
 
 
 class LocalStorage:
