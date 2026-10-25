@@ -245,6 +245,7 @@ class ProfileScreen extends StatelessWidget {
       context: context,
       builder: (context) => AlertDialog(
         title: Text(tr('Сатушы режимі')),
+        scrollable: true, // large text and the keyboard up: it scrolls rather than overflows
         content: Column(mainAxisSize: MainAxisSize.min, children: [
           TextField(controller: shop, decoration: InputDecoration(labelText: tr('Дүкен атауы'))),
           TextField(controller: city, decoration: InputDecoration(labelText: tr('Қала'))),

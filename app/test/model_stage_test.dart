@@ -542,6 +542,55 @@ void main() {
       expect(find.byKey(const Key('stage-switch')), findsNothing);
     });
 
+    testWidgets('a 3D that ran out of time on a weak line opens again with one tap', (tester) async {
+      await open(tester, listing(3));
+      await tester.pump(ModelStage.patience + const Duration(seconds: 1));
+      await tester.pump();
+      expect(find.byType(ModelStage), findsNothing);
+      expect(find.byType(PhotoGallery), findsOneWidget);
+      final made = maker.views.length;
+      await tester.tap(find.byKey(const Key('model-again')));
+      await tester.pump();
+      expect(find.byType(ModelStage), findsOneWidget);
+      expect(maker.views.length, greaterThan(made), reason: 'asked anew, not the stage that gave up');
+      expect(find.byKey(const Key('model-again')), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('picked Фото while the 3D was coming: asking for it again shows the 360°, twice at most',
+        (tester) async {
+      await open(tester, listing(3, withVideo: true));
+      await tester.tap(find.text('Фото'));
+      await tester.pump();
+      for (var round = 0; round < 2; round++) {
+        await tester.pump(ModelStage.patience + const Duration(seconds: 1));
+        await tester.pump();
+        await tester.tap(find.text('Фото'));
+        await tester.pump();
+        await tester.tap(find.byKey(const Key('model-again')));
+        await tester.pump();
+        final stack = tester.widget<IndexedStack>(
+            find.ancestor(of: find.byType(ModelStage), matching: find.byType(IndexedStack)).first);
+        expect(stack.index, 0, reason: 'the 3D on top, not hidden under the photos');
+      }
+      await tester.pump(ModelStage.patience + const Duration(seconds: 1));
+      await tester.pump();
+      expect(find.byKey(const Key('model-again')), findsNothing, reason: 'a third time is not offered');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('on the Видео tab the button to open the 3D again is not over the player', (tester) async {
+      VideoPlayerPlatform.instance = FakeVideoPlatform();
+      await open(tester, listing(3, withVideo: true));
+      await tester.pump(ModelStage.patience + const Duration(seconds: 1));
+      await tester.pump();
+      expect(find.byKey(const Key('model-again')), findsOneWidget);
+      await tester.tap(find.text('Видео'));
+      await tester.pump();
+      expect(find.byKey(const Key('model-again')), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    });
+
     testWidgets('the seller\'s video is a third tab: its poster first, played on a tap, paused by another tab',
         (tester) async {
       final video = FakeVideoPlatform();

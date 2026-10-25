@@ -215,10 +215,11 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     final chats = _counts['unread_messages'] ?? 0;
     final orders = ordersWaiting(_counts);
     final labels = [tr('Каталог'), tr('Таңдаулы'), tr('Чат'), tr('Тапсырыс'), tr('Профиль')];
-    // Every label on one line: a long one (Russian «Избранное», large text) makes all of them a little smaller;
-    // when that is not enough, only the chosen tab is named, made as small as it needs to fit.
+    // Every label on one line: a long one (Russian «Избранное», large text) makes all of them a little smaller.
+    // With large text that still leaves them about the usual size, so every tab keeps its name: the people who
+    // chose large text are the ones who need the words. Only on a very narrow screen is the chosen tab alone named.
     final fit = navLabelFit(context, labels);
-    final roomy = fit >= 0.8;
+    final roomy = fit >= 0.8 || navTextScaler(context).scale(1) * fit >= 0.9;
     final scale = roomy ? fit : navLabelFit(context, [labels[_tab]], tabs: labels.length);
     // Back on another tab returns to the catalog first, rather than closing the app.
     return PopScope(
@@ -283,6 +284,9 @@ int ordersWaiting(Map<String, int> counts) => [
       'returns',
     ].fold(0, (sum, k) => sum + (counts[k] ?? 0));
 
+/// The text size the bottom bar draws its labels at: the phone's, up to the 1.3 the bar itself stops at.
+TextScaler navTextScaler(BuildContext context) => MediaQuery.textScalerOf(context).clamp(maxScaleFactor: 1.3);
+
 /// How much the bottom bar's labels must shrink so the widest fits on one line in its tab (1 = no shrinking).
 double navLabelFit(BuildContext context, List<String> labels, {int? tabs}) {
   final style = Theme.of(context).navigationBarTheme.labelTextStyle?.resolve({WidgetState.selected}) ??
@@ -293,7 +297,7 @@ double navLabelFit(BuildContext context, List<String> labels, {int? tabs}) {
     final painter = TextPainter(
         text: TextSpan(text: label, style: style),
         textDirection: TextDirection.ltr,
-        textScaler: MediaQuery.textScalerOf(context),
+        textScaler: navTextScaler(context),
         maxLines: 1)
       ..layout();
     widest = math.max(widest, painter.width);

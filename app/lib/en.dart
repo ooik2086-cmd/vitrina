@@ -1294,4 +1294,5 @@ const en = <String, String>{
   'Тиынсыз, бүтін теңгемен жазыңыз': 'Whole tenge, without tiyn',
   'Шығу керек пе?': 'Leave?',
   'Тапсырыс аяқталса, сізге түседі': 'You receive once the order completes',
+  '360° қайта ашу': 'Open 360° again',
 };

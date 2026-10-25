@@ -380,6 +380,7 @@ class _CounterDialogState extends State<_CounterDialog> {
     final o = widget.offer;
     return AlertDialog(
       title: Text(tr('Өз бағаңыз')),
+      scrollable: true, // large text and the keyboard up: it scrolls rather than overflows
       content: TextField(
         key: const Key('counter-amount'),
         controller: _controller,

@@ -62,6 +62,7 @@ class _SellerReviewsScreenState extends State<SellerReviewsScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: Text(tr('Пікірге жауап')),
+        scrollable: true, // large text and the keyboard up: it scrolls rather than overflows
         content: TextField(
           controller: text,
           autofocus: true,

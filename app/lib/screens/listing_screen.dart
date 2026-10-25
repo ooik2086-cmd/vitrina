@@ -69,6 +69,7 @@ class _ListingScreenState extends State<ListingScreen> {
 
   /// The 3D could not open: the stage shows the photos, with no switch to a 3D that is not there.
   bool _noModel = false;
+  int _modelTries = 0; // asked again after giving up, for this colour
   final _scroll = ScrollController();
   final _model = GlobalKey<ModelStageState>();
   final _sizesKey = GlobalKey();
@@ -109,9 +110,28 @@ class _ListingScreenState extends State<ListingScreen> {
     if (top != _stageTop) setState(() => _stageTop = top);
   }
 
+  bool _loaded = false;
+  String? _loadedFor; // the sign-in the page was loaded for
+  bool _loadFailed = false;
+
+  /// Loaded once, and again only when someone signs in or out, or after a load that failed (the session changing
+  /// as the line comes back tries again by itself). The keyboard, the text size or the theme changing what the page
+  /// depends on fetched it all again, on every frame of the keyboard opening.
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    final who = SessionScope.of(context).api.token;
+    if (_loaded && who == _loadedFor && !_loadFailed) return;
+    if (_loaded && who != _loadedFor) {
+      // Another person now: nothing of the one before stays on the page (their offer, alerts, order attempt).
+      _offer = null;
+      _offerError = null;
+      _unanswered = null;
+      _alerts = null;
+      _orderKey = newIdempotencyKey();
+    }
+    _loaded = true;
+    _loadedFor = who;
     _loadListing();
     _loadOffer();
     _loadPayments();
@@ -136,12 +156,15 @@ class _ListingScreenState extends State<ListingScreen> {
     _pending = null;
     _listing = shown(ready != null ? Future.value(ready) : pending ?? SessionScope.of(context).api.listing(_id));
     final hearts = _hearts;
+    _loadFailed = false;
     _listing.then((l) {
       if (l.status == 'published') rememberViewed(l);
       if (mounted && l.id == _id && hearts == _hearts && l.favorite != _favorite) {
         setState(() => _favorite = l.favorite);
       }
-    }, onError: (_) {});
+    }, onError: (_) {
+      _loadFailed = true;
+    });
   }
 
   /// After a failed load, «Try again» fetches every part of the page, not only the listing.
@@ -466,6 +489,7 @@ class _ListingScreenState extends State<ListingScreen> {
       _alerts = null;
       _favorite = next.favorite;
       _noModel = false;
+      _modelTries = 0;
       _videoOpened = false; // another colour, another video (or none)
       _orderKey = newIdempotencyKey();
     });
@@ -506,7 +530,7 @@ class _ListingScreenState extends State<ListingScreen> {
     if (sizes == null || !mounted) return;
     Scrollable.ensureVisible(sizes,
         alignment: 0.3,
-        duration: MediaQuery.of(context).disableAnimations ? Duration.zero : const Duration(milliseconds: 500));
+        duration: MediaQuery.disableAnimationsOf(context) ? Duration.zero : const Duration(milliseconds: 500));
   }
 
   /// What the stage shows now: the tab picked, while this colour has it; else the 3D, else the photos.
@@ -581,6 +605,35 @@ class _ListingScreenState extends State<ListingScreen> {
               photos,
               videoPane ?? (video == null ? _NoVideo(scene: scene) : const SizedBox.shrink()),
             ]),
+          // The 3D gave up (a weak line ran out of time): over the photos, one tap asks for it again, twice at most.
+          // Above the photos' page dots, clear of the scene button, as quiet as the stage's other buttons.
+          if (_noModel && l.model != null && ModelStage.mayRetry && _modelTries < 2 && shown == _Pane.photos)
+            Positioned(
+              left: 12,
+              right: 72,
+              bottom: 40,
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Material(
+                  color: _dark ? ShowcaseScene.dark.panel : Colors.white.withValues(alpha: 0.92),
+                  shape: StadiumBorder(side: _dark ? BorderSide(color: ShowcaseScene.dark.line) : BorderSide.none),
+                  child: TextButton.icon(
+                    key: const Key('model-again'),
+                    style: TextButton.styleFrom(
+                        minimumSize: const Size(48, 48),
+                        foregroundColor: _dark ? ShowcaseScene.dark.fg : Brand.ink,
+                        padding: const EdgeInsets.symmetric(horizontal: 14)),
+                    onPressed: () => setState(() {
+                      _noModel = false;
+                      _modelTries++;
+                      _pane = _Pane.turn; // the 360° asked for is the one shown
+                    }),
+                    icon: const Icon(Icons.threesixty),
+                    label: Text(tr('360° қайта ашу'), maxLines: 2),
+                  ),
+                ),
+              ),
+            ),
           if ((model != null || scan) && shown != _Pane.video)
             Positioned(
               right: 12,

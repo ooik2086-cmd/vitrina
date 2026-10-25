@@ -105,6 +105,10 @@ class ModelStage extends StatefulWidget {
   /// The stage draws with a phone's WebView, not a test's stand-in.
   static bool get _real => maker == _webView && !kIsWeb && WebViewPlatform.instance != null;
 
+  /// Whether a 3D that gave up may open if asked again: it ran out of time on a weak line, say. Not on a phone with
+  /// no WebGL or no web engine, where it would fail the same way.
+  static bool get mayRetry => !_noSpare && (maker != _webView || _real);
+
   static _WebModelView? _spare;
   static Future<_WebModelView?>? _making;
   static final _taken = <_WebModelView?>{};
