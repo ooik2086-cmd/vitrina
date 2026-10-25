@@ -15,6 +15,7 @@ from datetime import date, timedelta
 from fastapi import APIRouter, Depends, Header, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, or_, select, text as sql_text, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from vitrina_core.orders import OrderStatus as S
@@ -22,11 +23,11 @@ from vitrina_core.orders import OrderStatus as S
 from . import services
 from . import offers, payouts
 from .config import Settings
-from .deps import current_user, get_db, get_settings, now_utc, sha256
+from .deps import current_sign_in, current_user, get_db, get_settings, now_utc, sha256
 from .errors import ApiError
 from .social import find_contact
 from .models import (Block, Follow, Notification, Offer, SavedSearch, StockAlert, AuthToken, Favorite, Listing, Order,
-                     OtpCode, PayoutAccount, User)
+                     OtpCode, PayoutAccount, PushDevice, User)
 from .api_common import ALMATY, PHONE_RE
 from .schemas import OtpRequest, OtpVerify, ProfilePatch, SellerOn
 from .serializers import me_out
@@ -185,9 +186,55 @@ def logout(everywhere: bool = False, authorization: str | None = Header(default=
     """Ends this session on the server, not only on the phone; with everywhere, every session of the account."""
     which = (AuthToken.user_id == user.id if everywhere
              else AuthToken.token_hash == sha256((authorization or "")[7:].strip()))
+    # The phones signed in that way hear no more alerts of this account.
+    db.execute(delete(PushDevice).where(PushDevice.auth_token_id.in_(select(AuthToken.id).where(which))))
     db.execute(update(AuthToken).where(which).values(revoked=True))
     db.commit()
     return {"ok": True}
+
+
+class PushIn(BaseModel):
+    # A Firebase Cloud Messaging registration token, as the phone's Firebase gives it.
+    token: str = Field(min_length=20, max_length=400, pattern=r"^[A-Za-z0-9_:.\-]+$")
+    lang: str = Field(default="kk", pattern="^(kk|ru|en)$")
+
+
+@router.put("/me/push", status_code=204)
+def put_push(body: PushIn, sign_in: AuthToken = Depends(current_sign_in), db: Session = Depends(get_db),
+             cfg: Settings = Depends(get_settings)):
+    """This phone takes alerts while the app is closed, in the app's language, for as long as this sign-in lasts.
+    Sent at every start of the app, after sign-in, when Firebase gives the phone a new token and when the language
+    changes. A token already known moves to this sign-in: the phone now belongs to whoever signed in on it last."""
+    now = now_utc()
+    # A seller who waits for the phone to ring would hear nothing once the sign-in ends, and not know why: a phone
+    # that keeps opening the app (a tapped alert opens it) keeps its sign-in. Staff sign-ins stay short.
+    staff = db.get(User, sign_in.user_id).role in ("support", "admin")
+    for attempt in (1, 2):
+        if not staff and services.aware(sign_in.expires_at) < now + cfg.token_ttl / 2:
+            sign_in.expires_at = now + cfg.token_ttl
+        # One phone per sign-in: a new token of the same phone replaces its old one.
+        db.execute(delete(PushDevice).where(PushDevice.auth_token_id == sign_in.id, PushDevice.token != body.token))
+        device = db.scalar(select(PushDevice).where(PushDevice.token == body.token))
+        if device is None:
+            db.add(PushDevice(token=body.token, user_id=sign_in.user_id, auth_token_id=sign_in.id, lang=body.lang,
+                              created_at=now, updated_at=now))
+        else:
+            device.user_id, device.auth_token_id, device.lang, device.updated_at = (
+                sign_in.user_id, sign_in.id, body.lang, now)
+        try:
+            db.commit()
+            return
+        except IntegrityError:  # the same phone sent its token twice at once: the other one is there now
+            db.rollback()
+            if attempt == 2:
+                raise
+
+
+@router.delete("/me/push", status_code=204)
+def delete_push(sign_in: AuthToken = Depends(current_sign_in), db: Session = Depends(get_db)):
+    """This phone takes no more alerts (the person turned them off on the phone)."""
+    db.execute(delete(PushDevice).where(PushDevice.auth_token_id == sign_in.id))
+    db.commit()
 
 
 @router.get("/app-config")
@@ -258,7 +305,8 @@ def delete_account(db: Session, user: User) -> None:
     now = now_utc()
     for model, column in ((Favorite, Favorite.user_id), (SavedSearch, SavedSearch.user_id),
                           (Follow, Follow.user_id), (Follow, Follow.seller_id), (StockAlert, StockAlert.user_id),
-                          (Notification, Notification.user_id), (Block, Block.user_id), (Block, Block.blocked_id),
+                          (Notification, Notification.user_id), (PushDevice, PushDevice.user_id),
+                          (Block, Block.user_id), (Block, Block.blocked_id),
                           # Bank details: each payout already made keeps its own copy, as the ledger needs.
                           (PayoutAccount, PayoutAccount.seller_id)):
         db.execute(delete(model).where(column == user.id))

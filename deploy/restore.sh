@@ -56,7 +56,7 @@ $C exec -T db pg_dump -U vitrina -d vitrina -Fc > "$before"
 echo "the current database is saved in $before"
 
 trap 'if [ $? != 0 ]; then echo "RESTORE FAILED: the API is stopped. To go back to the database as it was: sh $PWD/restore.sh $before --yes" >&2; fi' EXIT
-$C stop api photos jobs
+$C stop api photos push jobs
 $C exec -T db dropdb -U vitrina --force vitrina
 $C exec -T db createdb -U vitrina -O vitrina vitrina
 $C exec -T db pg_restore -U vitrina -d vitrina --no-owner --exit-on-error < "$file"

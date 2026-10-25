@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'api.dart';
 import 'chat_drafts.dart';
+import 'push.dart';
 
 /// Signed-in state shared across screens. The token is kept on the device; the phone number never leaves the profile.
 class Session extends ChangeNotifier {
@@ -22,17 +23,24 @@ class Session extends ChangeNotifier {
   /// Changes to the seller's own listings not yet saved, by listing, kept the same way: a closed app loses nothing.
   static const listingEditsKey = 'vitrina_listing_edits';
 
+  /// A sign-out the server has not heard of yet (offline): ended at the next start, so the sign-in and its phone
+  /// alerts do not live on there.
+  static const _logoutKey = 'vitrina_logout_pending';
+
   bool get signedIn => api.token != null;
 
   Future<void> restore() async {
     unawaited(ChatDrafts.sweep()); // chat words past their time go, even if their chat is never opened again
     final prefs = await SharedPreferences.getInstance();
+    final pending = prefs.getString(_logoutKey);
+    if (pending != null) unawaited(_logout(pending));
     api.token = prefs.getString(_tokenKey);
     if (api.token == null) return;
     try {
       me = await api.me();
+      unawaited(Push.register());
     } on ApiException catch (e) {
-      if (e.status == 401) await signOut();
+      if (e.status == 401) await signOut(server: false);
     } catch (_) {
       // Offline: keep the token and try again later.
     }
@@ -44,6 +52,7 @@ class Session extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_tokenKey, api.token!);
     notifyListeners();
+    unawaited(Push.register());
   }
 
   void update(Me value) {
@@ -67,12 +76,37 @@ class Session extends ChangeNotifier {
     await ChatDrafts.forget(owner);
   }
 
-  Future<void> signOut() async {
+  /// Signs out on the phone at once, then on the server ([server]; not when the server already ended the sign-in),
+  /// which also stops this phone's alerts. Offline, Firebase still forgets the phone, so no alert of this account
+  /// reaches it, and the token kept here is gone either way.
+  Future<void> signOut({bool server = true}) async {
+    final bearer = api.token;
     api.token = null;
     me = null;
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_tokenKey);
     notifyListeners();
+    if (bearer == null) return;
+    unawaited(Push.forget());
+    if (!server) return;
+    await prefs.setString(_logoutKey, bearer);
+    unawaited(_logout(bearer));
+  }
+
+  /// Done once the server answers, even with "already ended" (401); offline or the server away, it waits for the next
+  /// start.
+  Future<void> _logout(String bearer) async {
+    try {
+      await api.logout(bearer);
+    } on ApiException catch (e) {
+      if (e.passing) return;
+    } catch (_) {
+      return;
+    }
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (prefs.getString(_logoutKey) == bearer) await prefs.remove(_logoutKey);
+    } catch (_) {}
   }
 }
 

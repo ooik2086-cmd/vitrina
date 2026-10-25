@@ -89,6 +89,12 @@ jobs:
       - name: Build, signed with the upload key
         env:
           API_BASE: ${{ inputs.api_base }}
+          # Phone alerts: the Firebase project's Android values (not secret: every installed app carries them).
+          # Unset, the app is built without push (deploy/README.md).
+          FCM_APP_ID: ${{ vars.VITRINA_FCM_APP_ID }}
+          FCM_API_KEY: ${{ vars.VITRINA_FCM_API_KEY }}
+          FCM_SENDER_ID: ${{ vars.VITRINA_FCM_SENDER_ID }}
+          FCM_PROJECT_ID: ${{ vars.VITRINA_FCM_PROJECT_ID }}
           KEYSTORE_BASE64: ${{ secrets.VITRINA_UPLOAD_KEYSTORE_BASE64 }}
           VITRINA_UPLOAD_STORE_PASSWORD: ${{ secrets.VITRINA_UPLOAD_STORE_PASSWORD }}
           VITRINA_UPLOAD_KEY_ALIAS: ${{ secrets.VITRINA_UPLOAD_KEY_ALIAS }}
@@ -107,6 +113,8 @@ jobs:
           printf %s "$KEYSTORE_BASE64" | base64 -d > "$VITRINA_UPLOAD_STORE_FILE"
           # Google Play takes each version number once: it grows with every run and every re-run of one.
           flutter build appbundle --release --dart-define=API_BASE="$API_BASE" \
+            --dart-define=FCM_APP_ID="$FCM_APP_ID" --dart-define=FCM_API_KEY="$FCM_API_KEY" \
+            --dart-define=FCM_SENDER_ID="$FCM_SENDER_ID" --dart-define=FCM_PROJECT_ID="$FCM_PROJECT_ID" \
             --build-number=$((GITHUB_RUN_NUMBER * 10 + GITHUB_RUN_ATTEMPT))
       - name: The key is gone from the machine
         if: always()

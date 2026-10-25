@@ -10,6 +10,7 @@ import '../chat_photos.dart';
 import '../net_image.dart';
 import '../api.dart';
 import '../labels.dart';
+import '../push.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
@@ -545,6 +546,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         if (!_messages.any((x) => x.id == m.id)) _messages.add(m);
       });
       _toBottom();
+      unawaited(Push.offer(context)); // the answer may come once the app is closed
     } catch (e) {
       if (!mounted) return;
       // On a lost connection the text stays in the field with a line above it; the same message goes again with a

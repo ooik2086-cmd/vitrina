@@ -7,6 +7,7 @@ import '../net_image.dart';
 import '../api.dart';
 import '../colors.dart';
 import '../labels.dart';
+import '../push.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
@@ -185,6 +186,7 @@ class _CatalogScreenState extends State<CatalogScreen> {
         content: Text(tr('Сақталды. Сай тауар шыққанда хабарлаймыз.')),
         action: SnackBarAction(label: tr('Барлығы'), onPressed: _openSaved),
       ));
+      unawaited(Push.offer(context)); // told of new matches: best on the phone too
     } catch (e) {
       if (mounted) showError(context, e);
     } finally {

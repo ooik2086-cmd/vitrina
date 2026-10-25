@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 
 from sqlalchemy import (JSON, BigInteger, Boolean, Date, DateTime, ForeignKey, Index, Integer, LargeBinary, String,
-                        Text, UniqueConstraint, create_engine, func, select)
+                        Text, UniqueConstraint, create_engine, func, select, text as sql)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 
 
@@ -550,6 +550,25 @@ class Notification(Base):
     listing_id: Mapped[int | None] = mapped_column(Integer)  # e.g. a price drop on a favourite
     read: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    # When the push worker took it (sent to the person's phones, or let go as too old); None: not yet looked at.
+    pushed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # The worker reads only the few not yet taken: an index of just those stays small however many are kept.
+    __table_args__ = (Index("ix_notifications_unpushed", "id", postgresql_where=sql("pushed_at IS NULL"),
+                            sqlite_where=sql("pushed_at IS NULL")),)
+
+
+class PushDevice(Base):
+    """A phone that hears of new notifications while the app is closed: its Firebase Cloud Messaging token, under
+    the sign-in that gave it. Ending that sign-in (signing out, or out everywhere, a deleted or blocked account)
+    ends the phone's alerts with it, even when the phone was offline and could not say so itself."""
+    __tablename__ = "push_devices"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    token: Mapped[str] = mapped_column(String(400), unique=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    auth_token_id: Mapped[int] = mapped_column(ForeignKey("auth_tokens.id", ondelete="CASCADE"), index=True)
+    lang: Mapped[str] = mapped_column(String(2), default="kk")  # the app's language: the alert is in it
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 # No request keeps a connection for ever, so a few stuck ones cannot take the whole pool: a query or a wait for a lock

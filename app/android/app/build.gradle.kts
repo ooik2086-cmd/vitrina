@@ -48,6 +48,18 @@ android {
         // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        // Alerts while the app is closed (Firebase Cloud Messaging): the Firebase project's four Android values, as
+        // the google-services plugin would write them, from --dart-define=FCM_APP_ID=... and the three below. With
+        // them Firebase starts with the app, also when an alert wakes a closed app; without them there is no push.
+        val firebase = listOf("FCM_APP_ID" to "google_app_id", "FCM_API_KEY" to "google_api_key",
+                              "FCM_SENDER_ID" to "gcm_defaultSenderId", "FCM_PROJECT_ID" to "project_id")
+        if (firebase.all { dartDefines[it.first].orEmpty().isNotEmpty() }) {
+            firebase.forEach { (define, name) -> resValue("string", name, dartDefines.getValue(define)) }
+        }
+    }
+
+    buildFeatures {
+        resValues = true
     }
 
     signingConfigs {
@@ -86,5 +98,10 @@ gradle.taskGraph.whenReady {
     val base = dartDefines["API_BASE"].orEmpty()
     if (release && uploadStoreFile != null && dartDefines["DEMO"] != "true" && !base.startsWith("https://")) {
         throw GradleException("A store build needs --dart-define=API_BASE=https://YOUR-DOMAIN/api/v1 (got \"$base\")")
+    }
+    val firebase = listOf("FCM_APP_ID", "FCM_API_KEY", "FCM_SENDER_ID", "FCM_PROJECT_ID")
+    val given = firebase.filter { dartDefines[it].orEmpty().isNotEmpty() }
+    if (given.isNotEmpty() && given.size < firebase.size) {
+        throw GradleException("Push needs all four Firebase values; missing: ${(firebase - given.toSet()).joinToString()}")
     }
 }

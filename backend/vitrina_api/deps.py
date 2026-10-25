@@ -44,7 +44,8 @@ def get_private(request: Request) -> Storage:
     return request.app.state.private
 
 
-def current_user(authorization: str | None = Header(default=None), db: Session = Depends(get_db)) -> User:
+def current_sign_in(authorization: str | None = Header(default=None), db: Session = Depends(get_db)) -> AuthToken:
+    """The sign-in this request comes with, live and of an account that is not blocked."""
     if not authorization or not authorization.startswith("Bearer "):
         raise ApiError(401, "unauthorized")
     token = db.scalar(select(AuthToken).where(AuthToken.token_hash == sha256(authorization[7:].strip())))
@@ -53,7 +54,11 @@ def current_user(authorization: str | None = Header(default=None), db: Session =
     user = db.get(User, token.user_id)
     if user.is_blocked:
         raise ApiError(403, "forbidden", "account blocked")
-    return user
+    return token
+
+
+def current_user(authorization: str | None = Header(default=None), db: Session = Depends(get_db)) -> User:
+    return db.get(User, current_sign_in(authorization, db).user_id)
 
 
 def optional_user(authorization: str | None = Header(default=None), db: Session = Depends(get_db)) -> User | None:

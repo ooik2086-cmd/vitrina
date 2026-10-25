@@ -7,6 +7,7 @@
 | `caddy` | Интернетке ашық жалғыз қызмет (80 және 443 порттары). Доменге HTTPS сертификатын Let's Encrypt-тен өзі алып, өзі жаңартады. http сұрауларын https-ке бұрады. |
 | `api` | Сервер, 2 процесс, бір ядроға бір процесс. Жаңа нұсқа іске қосылғанда дерекқорды өзі жаңартады (`alembic upgrade head`). |
 | `photos` | Фотолардың фонын алады, кіші көшірмелер мен іздеу векторын жасайды. Ең көбі 1,7 ГБ жад алады (өлшенген), шегі 2,5 ГБ. Процессорды API-ге бірінші береді. |
+| `push` | Әр жаңа хабарламаны бірнеше секундта адамның телефонына Firebase арқылы жібереді (қосымша жабық тұрса да). `deploy/secrets/firebase.json` жоқ болса, тек күтіп тұрады. |
 | `jobs` | Әр 5 минут сайын уақытқа байланысты жұмыстарды орындайды: төленбеген тапсырысты жабу, ақшаны қайтару, тапсырысты өзі аяқтау, еске салу. 15 минут бойы бірде-бір өту сәтті болмаса, `unhealthy` болады. |
 | `db` | PostgreSQL 16. Порты ашық емес, оған тек ішкі қызметтер жетеді. |
 
@@ -37,6 +38,10 @@
    - Жіберуші атауын (мысалы `VITRINA`) Mobizon-да тіркеп, бекітілгеннен кейін `.env`-тегі `VITRINA_MOBIZON_FROM` жолына жазуға болады. Бос болса, Mobizon-ның ортақ атауы қолданылады.
    - Кілтті чатқа не хатқа жібермеңіз: ол тек сервердегі `.env` файлында тұрады.
 6. **Сайтты кім жүргізеді**: ЖК не ЖШС атауы мен ЖСН/БСН (`VITRINA_OPERATOR`) және адамдар жеке деректер туралы жазатын email не телефон (`VITRINA_SUPPORT_CONTACT`). Екеуі `https://ДОМЕН/privacy` және `https://ДОМЕН/delete-account` беттерінде ашық көрсетіледі. Бұл беттердің мәтіні алдын ала нұсқа: оны заңгер тексеруі керек (`backend/vitrina_api/legal.py`).
+7. **Телефонға хабарлама (міндетті емес): Firebase жобасы** ([console.firebase.google.com](https://console.firebase.google.com), тегін). Онсыз да бәрі жұмыс істейді, тек хабарламалар қосымшаның ішінде ғана тұрады.
+   - Жоба ашып, оған Android қосымшасын `kz.vitrina.vitrina` атымен қосыңыз. Шыққан төрт мәнді GitHub-та репозиторийдің айнымалыларына жазыңыз (Settings → Secrets and variables → Actions → Variables): `VITRINA_FCM_APP_ID` (mobilesdk_app_id), `VITRINA_FCM_API_KEY` (current_key), `VITRINA_FCM_SENDER_ID` (project_number), `VITRINA_FCM_PROJECT_ID` (project_id). **Store release** оларды қосымшаға өзі қосады. Бұл төртеуі құпия емес, олар әр телефондағы қосымшаның ішінде тұрады.
+   - Project settings → Service accounts → «Generate new private key» басып, JSON файлын алыңыз. (Мүмкіндігінше Google Cloud-та тек «Firebase Cloud Messaging API Admin» рөлі бар бөлек сервистік аккаунт жасап, соның кілтін алған дұрыс: Firebase берген кілттің құқығы кең.) Оны серверге көшіріңіз: `/opt/vitrina/deploy/secrets/firebase.json`, содан кейін `chown 1000:1000 /opt/vitrina/deploy/secrets/firebase.json && chmod 600 /opt/vitrina/deploy/secrets/firebase.json`. Қайта іске қосу керек емес: `push` қызметі файлды әр минут сайын іздейді. Бір минуттан кейін `docker compose logs --since 2m push` журналында «push is on» жазуы шығады. Бұл файл құпия: чатқа не хатқа жібермеңіз, ол тек серверде тұрады.
+   - Google Play-дегі Деректер қауіпсіздігі (Data safety) бөлімін жаңартыңыз ([app/README.md](../app/README.md), 4-қадам).
 
 ## Орнату
 ```sh
@@ -87,7 +92,7 @@ sh /opt/vitrina/deploy/setup.sh
 ```sh
 C="docker compose -f /opt/vitrina/deploy/compose.yml"
 sh /opt/vitrina/deploy/backup.sh                       # 1. алдымен көшірме
-$C stop api photos jobs                                # 2. сайтты тоқтату
+$C stop api photos push jobs                              # 2. сайтты тоқтату
 $C run --rm --no-deps api python -m vitrina_api.move_media https://ЕСКІ-ДОМЕН/media          # 3. не істейтінін көру
 $C run --rm --no-deps api python -m vitrina_api.move_media https://ЕСКІ-ДОМЕН/media --yes    # 4. істеу
 sh /opt/vitrina/deploy/update.sh                       # 5. сайтты жаңа баптаулармен қосу
@@ -101,7 +106,7 @@ sh /opt/vitrina/deploy/update.sh                       # 5. сайтты жаң�
   - Ескі мекенжай қате жазылса (мысалы `/media` ұмытылса), ештеңе өзгертпей тоқтайды және фотолар шын мәнінде қай мекенжайда тұрғанын жазады. Команданы сол мекенжаймен қайталаңыз.
 - Команданы қайта іске қосуға болады: ол тек қалған жұмысты жасайды. Бәрі біткенде «nothing left to move» деп жазады.
 - Қате болса, ештеңе өзгермейді: `sh /opt/vitrina/deploy/update.sh` сайтты қайта қосады. `.env`-ті бұрынғы күйіне қайтарсаңыз, сайт бұрынғыдай жұмыс істейді.
-- **Құпия кілттер:** `.env` және `backup.env` файлдарының көшірмесін қауіпсіз жерде сақтаңыз, мысалы құпиясөз менеджерінде.
+- **Құпия кілттер:** `.env`, `backup.env` және (бар болса) `secrets/firebase.json` файлдарының көшірмесін қауіпсіз жерде сақтаңыз, мысалы құпиясөз менеджерінде.
 
 Production режимінде сервер қауіпсіз емес баптаумен іске қосылмайды. Мысалы, бакеттің бірі жоқ болса немесе мекенжай http болса, ол не түзету керегін журналға жазады: `docker compose logs api`.
 
@@ -125,7 +130,7 @@ docker compose exec db psql -U vitrina -d vitrina -c "UPDATE users SET role='adm
 | Не керек | Команда |
 |---|---|
 | Күйін көру | `docker compose ps` (бәрі `healthy` болуы керек) |
-| Журнал | `docker compose logs -f --tail 100 api` (не `photos`, `jobs`, `caddy`) |
+| Журнал | `docker compose logs -f --tail 100 api` (не `photos`, `push`, `jobs`, `caddy`) |
 | Жаңа нұсқаны орнату | `sh update.sh` |
 | Қайта іске қосу | `docker compose restart api` |
 | Тоқтату / іске қосу | `docker compose down` / `docker compose up -d --wait` |
@@ -191,10 +196,10 @@ sh restore.sh --files --yes      # disk: фотолар мен жабық фай
 Қалпына келтіру ортасында құласа, API тоқтап тұрады. Скрипт бұрынғы дерекқорға қайтаратын дайын команданы шығарады.
 
 ### Жаңа серверге көшу
-1. Жаңа серверде `git clone` жасаңыз. `setup.sh` іске қосылмай тұрып, ескі `.env` пен `backup.env` файлдарын `/opt/vitrina/deploy/` қалтасына көшіріңіз. Содан кейін `sh /opt/vitrina/deploy/setup.sh` командасын дәлелсіз (аргументсіз) іске қосыңыз. Бұл ретті сақтау керек: `setup.sh` бірінші болып іске қосылса, дерекқор жаңа құпиясөзбен жасалады.
+1. Жаңа серверде `git clone` жасаңыз. `setup.sh` іске қосылмай тұрып, ескі `.env` пен `backup.env` файлдарын `/opt/vitrina/deploy/` қалтасына, ал `secrets/firebase.json` бар болса, оны `/opt/vitrina/deploy/secrets/` қалтасына көшіріңіз. Содан кейін `sh /opt/vitrina/deploy/setup.sh` командасын дәлелсіз (аргументсіз) іске қосыңыз. Бұл ретті сақтау керек: `setup.sh` бірінші болып іске қосылса, дерекқор жаңа құпиясөзбен жасалады.
 2. Ескі серверде сайтты тоқтатып, соңғы көшірмені жасаңыз:
    ```sh
-   docker compose stop api photos jobs && systemctl disable --now vitrina-backup.timer && sh backup.sh
+   docker compose stop api photos push jobs && systemctl disable --now vitrina-backup.timer && sh backup.sh
    ```
 3. Жаңа серверде сол көшірмені қалпына келтіріңіз:
    - `disk` режимінде (бакет болса да, болмаса да) алдымен ескі сервердің көшірмелер қалтасын жаңа серверге көшіріңіз: `rsync -a root@ЕСКІ_IP:/var/backups/vitrina/ /var/backups/vitrina/`. Фотолар тек осы қалтада.

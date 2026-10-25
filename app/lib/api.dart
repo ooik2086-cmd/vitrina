@@ -1672,6 +1672,15 @@ class Api {
   }
 
   Future<void> readAllNotifications() => _send('POST', '/notifications/read-all');
+
+  /// This phone takes alerts while the app is closed (push.dart): its Firebase token, in the app's language.
+  Future<void> putPush(String token, String lang) => _send('PUT', '/me/push', body: {'token': token, 'lang': lang});
+
+  Future<void> deletePush() => _send('DELETE', '/me/push');
+
+  /// Ends the sign-in [bearer] on the server too (the phone has already let it go), so that token opens nothing
+  /// any more, and that phone's alerts stop.
+  Future<void> logout(String bearer) => _send('POST', '/auth/logout', headers: {'Authorization': 'Bearer $bearer'});
 }
 
 String newIdempotencyKey() {

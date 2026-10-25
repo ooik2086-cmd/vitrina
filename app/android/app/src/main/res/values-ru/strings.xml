@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="alerts_channel">Сообщения и заказы</string>
+    <string name="alerts_channel_about">Новые сообщения, заказы, вопросы и выплаты</string>
+    <string name="news_channel">Новости и советы</string>
+    <string name="news_channel_about">Скидки, новые товары, советы</string>
+</resources>

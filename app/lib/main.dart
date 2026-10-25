@@ -13,7 +13,9 @@ import 'screens/shop_screen.dart';
 import 'screens/onboarding_screen.dart';
 import 'screens/favorites_screen.dart';
 import 'screens/orders_screen.dart';
+import 'screens/notifications_screen.dart';
 import 'screens/profile_screen.dart';
+import 'push.dart';
 import 'session.dart';
 import 'theme.dart';
 import 'i18n.dart';
@@ -39,6 +41,7 @@ Future<void> main() async {
     session = Session(Api())..restore();
     // Asked now, so the first listing opened already knows whether to offer an order or a chat.
     unawaited(session.api.paymentsOn());
+    unawaited(Push.start(session)); // alerts while the app is closed, in a build that carries Firebase
   }
   runApp(VitrinaApp(session: session));
 }
@@ -115,6 +118,17 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    Push.opened.addListener(_openTapped);
+    Push.arrived.addListener(_refreshBadges);
+  }
+
+  /// An alert tapped on the phone opens what it tells of, over the tab the person was on.
+  void _openTapped() {
+    final tap = Push.opened.value;
+    if (tap == null || !mounted || !SessionScope.of(context).signedIn) return;
+    Push.opened.value = null;
+    openNotice(context, tap.kind,
+        orderId: tap.orderId, conversationId: tap.conversationId, listingId: tap.listingId, fromAlert: true);
   }
 
   @override
@@ -125,6 +139,8 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       _startPolling();
       _refreshBadges();
     }
+    // The sign-in was read back from the phone just now: a tap waiting for it opens once this frame is drawn.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _openTapped());
   }
 
   void _startPolling() {
@@ -132,12 +148,14 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     _poll = Timer.periodic(const Duration(minutes: 1), (_) => _refreshBadges());
   }
 
-  /// The badges stop counting while the app is in the background and catch up when it comes back.
+  /// The badges stop counting while the app is in the background and catch up when it comes back. Back too: the
+  /// phone's token, as alerts may have been allowed in the phone's settings meanwhile.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _refreshBadges();
       _startPolling();
+      unawaited(Push.register());
     } else if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
       _poll?.cancel();
       _poll = null;
@@ -147,6 +165,8 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    Push.opened.removeListener(_openTapped);
+    Push.arrived.removeListener(_refreshBadges);
     _poll?.cancel();
     super.dispose();
   }

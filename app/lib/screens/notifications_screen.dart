@@ -13,6 +13,43 @@ import '../widgets/common.dart';
 import '../widgets/questions.dart';
 import '../i18n.dart';
 
+/// Opens what a notification is about: from the list here, or from an alert tapped on the phone (push.dart). An
+/// alert about nothing to open ([fromAlert]) opens the list, where its words are.
+void openNotice(BuildContext context, String kind,
+    {int? orderId, int? conversationId, int? listingId, bool fromAlert = false}) {
+  if (const {'sold_out', 'listing_tip', 'photo_no_shoe'}.contains(kind) && listingId != null) {
+    _openOwnListing(context, kind, listingId);
+    return;
+  }
+  final route = kind == 'offer'
+      ? MaterialPageRoute(builder: (_) => const OffersScreen())
+      : kind == 'question' && listingId != null
+          ? MaterialPageRoute(builder: (_) => QuestionsScreen(listingId: listingId, seller: true))
+          : conversationId != null
+              ? MaterialPageRoute(builder: (_) => ChatScreen(conversationId: conversationId))
+              : orderId != null
+                  ? MaterialPageRoute(builder: (_) => OrderScreen(orderId: orderId))
+                  : listingId != null
+                      ? MaterialPageRoute(builder: (_) => ListingScreen(listingId: listingId))
+                      : fromAlert
+                          ? MaterialPageRoute(builder: (_) => const NotificationsScreen())
+                          : null;
+  if (route != null) Navigator.of(context).push(route);
+}
+
+/// A sold-out size is fixed where the stock is edited, so the seller lands on the listing's own page.
+Future<void> _openOwnListing(BuildContext context, String kind, int listingId) async {
+  try {
+    final listing = await SessionScope.of(context).api.listing(listingId);
+    if (!context.mounted) return;
+    // A photo the model found no shoe in is marked in the photos section, so that note opens there.
+    await Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => ManageListingScreen(listing: listing, showPhotos: kind == 'photo_no_shoe')));
+  } catch (e) {
+    if (context.mounted) showError(context, e);
+  }
+}
+
 String _ago(DateTime t) {
   final d = DateTime.now().difference(t);
   if (d.inMinutes < 1) return tr('жаңа ғана');
@@ -51,37 +88,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     });
   }
 
-  void _open(AppNotification n) {
-    if (const {'sold_out', 'listing_tip', 'photo_no_shoe'}.contains(n.kind) && n.listingId != null) {
-      _openOwnListing(n);
-      return;
-    }
-    final route = n.kind == 'offer'
-        ? MaterialPageRoute(builder: (_) => const OffersScreen())
-        : n.kind == 'question' && n.listingId != null
-            ? MaterialPageRoute(builder: (_) => QuestionsScreen(listingId: n.listingId!, seller: true))
-            : n.conversationId != null
-                ? MaterialPageRoute(builder: (_) => ChatScreen(conversationId: n.conversationId!))
-                : n.orderId != null
-                    ? MaterialPageRoute(builder: (_) => OrderScreen(orderId: n.orderId!))
-                    : n.listingId != null
-                        ? MaterialPageRoute(builder: (_) => ListingScreen(listingId: n.listingId!))
-                        : null;
-    if (route != null) Navigator.of(context).push(route);
-  }
-
-  /// A sold-out size is fixed where the stock is edited, so the seller lands on the listing's own page.
-  Future<void> _openOwnListing(AppNotification n) async {
-    try {
-      final listing = await SessionScope.of(context).api.listing(n.listingId!);
-      if (!mounted) return;
-      // A photo the model found no shoe in is marked in the photos section, so that note opens there.
-      await Navigator.of(context).push(MaterialPageRoute(
-          builder: (_) => ManageListingScreen(listing: listing, showPhotos: n.kind == 'photo_no_shoe')));
-    } catch (e) {
-      if (mounted) showError(context, e);
-    }
-  }
+  void _open(AppNotification n) =>
+      openNotice(context, n.kind, orderId: n.orderId, conversationId: n.conversationId, listingId: n.listingId);
 
   @override
   Widget build(BuildContext context) {

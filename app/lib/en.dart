@@ -1235,4 +1235,15 @@ const en = <String, String>{
   'Ішкі табан, мм': 'Insole, mm',
   'ішкі табан {0} мм': 'insole {0} mm',
   'Деректерді сатушы дайын нұсқалардан таңдаған.': 'The seller picked these details from ready options.',
+  // Alerts on the phone (push.dart)
+  'Телефонға хабарландыру келсін бе?': 'Get notifications on your phone?',
+  'Жаңа хат, тапсырыс не сұрақ келгенде, күткен өлшеміңіз шыққанда телефоныңыз бірден айтады, қосымша жабық тұрса да.':
+      'When a message, order or question comes, or the size you wait for is back, your phone tells you at once, even with the app closed.',
+  'Иә, қосу': 'Yes, turn on',
+  'Телефон хабарландыруға рұқсат бермеді. Оны телефонның баптауларында қосуға болады.':
+      'The phone did not allow notifications. You can turn them on in the phone’s settings.',
+  'Баптауды ашу': 'Open settings',
+  'Телефонға хабарландыру': 'Notifications on the phone',
+  'Қосымша жабық тұрса да, жаңа хат пен тапсырыс туралы телефон айтады':
+      'Your phone tells you of new messages and orders, even with the app closed',
 };

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../i18n.dart';
+import '../push.dart';
 import '../session.dart';
 import '../widgets/common.dart';
 
@@ -19,14 +20,67 @@ class NotificationSettingsScreen extends StatefulWidget {
   State<NotificationSettingsScreen> createState() => _NotificationSettingsScreenState();
 }
 
-class _NotificationSettingsScreenState extends State<NotificationSettingsScreen> {
+class _NotificationSettingsScreenState extends State<NotificationSettingsScreen> with WidgetsBindingObserver {
   Map<String, bool>? _on;
   Object? _error;
+
+  /// Whether alerts reach this phone while the app is closed; null in a build without push, or while asking.
+  bool? _phone;
+  bool _phoneBusy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _checkPhone();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  /// Back from the phone's settings: the switch shows what the phone allows now.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _checkPhone();
+  }
+
+  void _checkPhone() {
+    if (!Push.available) return;
+    Push.on().then((v) {
+      if (mounted && !_phoneBusy) setState(() => _phone = v);
+    });
+  }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     if (_on == null) _load();
+  }
+
+  Future<void> _setPhone(bool on) async {
+    if (_phoneBusy) return;
+    setState(() => _phoneBusy = true);
+    try {
+      final bool now;
+      if (on) {
+        now = await Push.turnOn();
+      } else {
+        await Push.turnOff();
+        now = false;
+      }
+      if (!mounted) return;
+      setState(() => _phone = now);
+      if (on && !now) {
+        Push.refused(context);
+      }
+    } catch (e) {
+      if (mounted) showError(context, e);
+    } finally {
+      if (mounted) setState(() => _phoneBusy = false);
+    }
   }
 
   void _load() {
@@ -87,6 +141,16 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
           : ListView(
               padding: contentPadding(context, EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom)),
               children: [
+                  if (_phone != null)
+                    SwitchListTile(
+                      key: const Key('alert-phone'),
+                      secondary: const Icon(Icons.phone_android_rounded),
+                      title: Text(tr('Телефонға хабарландыру')),
+                      subtitle: Text(tr('Қосымша жабық тұрса да, жаңа хат пен тапсырыс туралы телефон айтады')),
+                      value: _phone!,
+                      onChanged: _phoneBusy ? null : _setPhone,
+                    ),
+                  if (_phone != null) const Divider(),
                   for (final e in optionalAlerts.entries)
                     if (on.containsKey(e.key))
                       SwitchListTile(

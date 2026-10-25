@@ -1,4 +1,4 @@
-# A live server: PostgreSQL, the API (2 processes), the photo worker, the timed jobs and Caddy, which gets the
+# A live server: PostgreSQL, the API (2 processes), the photo worker, phone alerts, the timed jobs and Caddy, which gets the
 # HTTPS certificate for VITRINA_DOMAIN by itself and is the only thing open to the internet (ports 80 and 443).
 # Sized for 2 cores and 4 GB. Settings and secrets come from deploy/.env (setup.sh makes it); see deploy/README.md.
 #
@@ -72,6 +72,27 @@ services:
       test: ["CMD-SHELL", "find /tmp/photo_worker.alive -mmin -10 | grep -q ."]
       interval: 60s
       start_period: 120s
+    networks: [inner]
+
+  # Every new notification to the person's phones within seconds, through Firebase (vitrina_api/push.py). Without
+  # deploy/secrets/firebase.json it only waits for it.
+  push:
+    <<: *app
+    command: ["python", "-m", "vitrina_api.push"]
+    environment:
+      <<: *app-env
+      # The Firebase key, put there by hand (deploy/README.md), seen by this service only. Looked for every minute.
+      VITRINA_FCM_CREDENTIALS_FILE: /run/vitrina-secrets/firebase.json
+    volumes: [./secrets:/run/vitrina-secrets:ro]   # needs no photos
+    init: true
+    depends_on:
+      api: {condition: service_healthy}   # the API has run the migrations
+    mem_limit: 256m
+    healthcheck:   # it touches this file on every look, at least once a minute
+      test: ["CMD-SHELL", "find /tmp/push.alive -mmin -5 | grep -q ."]
+      interval: 60s
+      start_period: 60s
+      start_interval: 5s
     networks: [inner]
 
   # Unpaid orders let go, ignored ones refunded, unconfirmed ones completed, reminders: every 5 minutes.

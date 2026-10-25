@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 import 'dart:typed_data';
 
@@ -10,6 +11,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../net_image.dart';
 import '../api.dart';
 import '../labels.dart';
+import '../push.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
@@ -198,6 +200,8 @@ class _OrderScreenState extends State<OrderScreen> with WidgetsBindingObserver {
           _loadedAt = clock.now();
           _error = null;
         });
+        // Paid and on its way: when it is sent or arrives, the phone can say so.
+        if (const {'PAID', 'SELLER_ACCEPTED', 'SHIPPED'}.contains(o.status)) unawaited(Push.offer(context));
       }
     } catch (e) {
       if (!mounted) return;

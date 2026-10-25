@@ -178,7 +178,7 @@ class ProfileScreen extends StatelessWidget {
                   ListTile(
                     leading: const Icon(Icons.logout),
                     title: Text(tr('Шығу')),
-                    onTap: session.signOut,
+                    onTap: () => session.signOut(),
                   ),
                   ListTile(
                     key: const Key('delete-account'),
@@ -214,7 +214,7 @@ class ProfileScreen extends StatelessWidget {
       final owner = session.me?.id;
       await session.api.deleteAccount();
       if (owner != null) await session.forgetLocal(owner);
-      await session.signOut();
+      await session.signOut(server: false); // the deletion ended every sign-in
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr('Аккаунт жойылды.'))));
       }

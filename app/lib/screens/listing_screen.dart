@@ -8,6 +8,7 @@ import 'package:share_plus/share_plus.dart';
 import '../api.dart';
 import '../labels.dart';
 import '../net_image.dart';
+import '../push.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../widgets/color_choice.dart';
@@ -183,6 +184,7 @@ class _ListingScreenState extends State<ListingScreen> {
     setState(() => _offer = offer);
     ScaffoldMessenger.of(context)
         .showSnackBar(SnackBar(content: Text(tr('Ұсыныс жіберілді. Сатушы жауап бергенде хабарлаймыз.'))));
+    unawaited(Push.offer(context));
   }
 
   Future<void> _toggleStockAlert(Listing l, ShoeSize size) async {
@@ -197,6 +199,7 @@ class _ListingScreenState extends State<ListingScreen> {
           content: Text(on
               ? trf('{0} өлшемі қайта шыққанда хабарлаймыз.', [size.label])
               : trf('{0} өлшемі туралы хабарлама өшірілді.', [size.label]))));
+      if (on) unawaited(Push.offer(context));
     } catch (e) {
       if (mounted) showError(context, e);
     }

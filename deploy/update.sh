@@ -34,7 +34,7 @@ EOF
 fi' EXIT
 # Removed, not only stopped: a container that has just stopped can still read as "exited" to the --wait below,
 # which then fails the update although nothing is wrong (seen in CI). Named volumes are kept.
-$C rm --stop --force photos jobs
+$C rm --stop --force photos push jobs
 $C up -d --no-build --wait --wait-timeout 600
 trap - EXIT
 docker image prune -f > /dev/null

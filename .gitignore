@@ -17,6 +17,8 @@ media-private-dev/
 # Server settings and secrets (deploy/setup.sh writes it)
 deploy/.env
 deploy/backup.env
+# The Firebase service-account key for phone alerts (deploy/README.md)
+deploy/secrets/
 
 # The Play upload key and its base64 copy: never committed (app/README.md).
 *.jks

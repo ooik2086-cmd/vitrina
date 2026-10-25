@@ -368,11 +368,14 @@ def locked_order(db: Session, order_id: int) -> Order | None:
 
 def run_purge(db: Session, *, now: datetime) -> list[str]:
     """Scheduler job: drop rows that only ever mattered for a short while, so these tables do not grow forever.
-    Sign-in codes after two days (the daily failure cap reads one), dead tokens a week after expiry, webhook
-    ids after half a year (providers retry for days, not months)."""
-    from .models import AuthToken, OtpCode, WebhookEvent
+    Sign-in codes after two days (the daily failure cap reads one), a phone's push token once its sign-in ends,
+    dead tokens a week after expiry, webhook ids after half a year (providers retry for days, not months)."""
+    from .models import AuthToken, OtpCode, PushDevice, WebhookEvent
     done = []
-    for model, old in ((OtpCode, OtpCode.created_at < now - timedelta(days=2)),
+    # A phone whose sign-in ended takes no alerts: its token goes at once, ahead of the sign-in's own row.
+    dead = select(AuthToken.id).where(or_(AuthToken.revoked.is_(True), AuthToken.expires_at < now))
+    for model, old in ((PushDevice, PushDevice.auth_token_id.in_(dead)),
+                       (OtpCode, OtpCode.created_at < now - timedelta(days=2)),
                        (AuthToken, AuthToken.expires_at < now - timedelta(days=7)),
                        (WebhookEvent, WebhookEvent.received_at < now - timedelta(days=180))):
         n = db.execute(delete(model).where(old)).rowcount

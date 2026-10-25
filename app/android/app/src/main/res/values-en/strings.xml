@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="alerts_channel">Messages and orders</string>
+    <string name="alerts_channel_about">New messages, orders, questions and payouts</string>
+    <string name="news_channel">News and tips</string>
+    <string name="news_channel_about">Price drops, new pairs, tips</string>
+</resources>

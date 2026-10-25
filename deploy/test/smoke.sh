@@ -99,6 +99,7 @@ else
 	$C run --rm --no-deps -T api python -m vitrina_api.backup check
 fi
 [ "$(docker inspect -f '{{.State.Health.Status}}' vitrina-smoke-jobs-1)" = healthy ] || fail "the jobs have not run"
+[ "$(docker inspect -f '{{.State.Health.Status}}' vitrina-smoke-push-1)" = healthy ] || fail "the push service is not running"
 
 step "HTTPS, and plain http sent to it"
 [ "$(https https://vitrina.test/api/v1/health)" = '{"ok":true}' ] || fail "health over https"

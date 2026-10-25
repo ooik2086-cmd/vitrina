@@ -3,7 +3,7 @@
 write, from VITRINA_OPERATOR and VITRINA_SUPPORT_CONTACT; production does not start without them.
 
 The texts are a draft until a lawyer has read them, and say so. They describe what the code does now: when that
-changes (a payment partner, push notifications), the page changes with it.
+changes (a payment partner), the page changes with it.
 """
 from __future__ import annotations
 
@@ -41,6 +41,7 @@ PRIVACY = {
 <li>Түпнұсқалықтың дәлелі (чек, қорап фотосы) және дау дәлелдері. Оларды тек сіз, екінші тарап пен қолдау қызметі көреді.</li>
 <li>Сатушының ақша алатын деректері: шот иесінің аты, IBAN және ЖСН/БСН. Оларды тек қолдау қызметі көреді.</li>
 <li>Таңдаулылар, сақталған іздеулер, жазылымдар мен хабарламалар.</li>
+<li>Телефонға хабарландыру қосулы болса (Android 12 және ескі нұсқаларда әдепкіде қосулы, қосымшаның хабарлама баптауларынан өшіруге болады): телефонның хабарландыру белгісі. Хабарландыру Google Firebase қызметі арқылы жеткізіледі: оған хабарландыру мәтіні (мысалы, чат хатының басы) мен сол белгі беріледі. Аккаунттан шыққанда белгі өшіріледі.</li>
 </ul>
 <h2>Не үшін</h2>
 <p>Кіру, сауда жасау, тауарды жеткізу, дауды шешу және алаяқтықтан қорғау үшін ғана. Деректеріңіз сатылмайды және жарнама үшін берілмейді.</p>
@@ -60,6 +61,7 @@ PRIVACY = {
 <li>Подтверждение подлинности (чек, фото коробки) и доказательства в спорах. Их видят только вы, другая сторона и поддержка.</li>
 <li>Реквизиты продавца для выплат: имя владельца счёта, IBAN и ИИН/БИН. Их видит только поддержка.</li>
 <li>Избранное, сохранённые поиски, подписки и уведомления.</li>
+<li>Если уведомления на телефоне включены (на Android 12 и более ранних версиях включены по умолчанию, отключить можно в настройках уведомлений приложения): метка уведомлений телефона. Уведомления доставляются через сервис Google Firebase: ему передаются текст уведомления (например, начало сообщения из чата) и эта метка. При выходе из аккаунта метка удаляется.</li>
 </ul>
 <h2>Зачем</h2>
 <p>Только для входа, покупок и продаж, доставки, решения споров и защиты от мошенничества. Данные не продаются и не передаются для рекламы.</p>
@@ -79,6 +81,7 @@ PRIVACY = {
 <li>Proof of authenticity (receipt, box photo) and dispute evidence. Only you, the other side and support see them.</li>
 <li>A seller's payout details: the account holder's name, IBAN and IIN/BIN. Only support sees them.</li>
 <li>Favourites, saved searches, follows and notifications.</li>
+<li>If alerts on your phone are on (on by default on Android 12 and older; they can be turned off in the app's notification settings): the phone's notification token. Alerts are delivered through Google Firebase, which gets the alert's text (for example the start of a chat message) and that token. Signing out deletes the token.</li>
 </ul>
 <h2>Why</h2>
 <p>Only to sign in, buy and sell, deliver, settle disputes and protect against fraud. Your data is not sold or shared for advertising.</p>

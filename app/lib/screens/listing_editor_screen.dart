@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../net_image.dart';
 import '../api.dart';
 import '../labels.dart';
+import '../push.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
@@ -663,6 +664,9 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
                   'published' => tr('Сатылымға шықты'),
                   _ => tr('Бұл тауар бұрын сақталған. Өзгерістерді «Менің тауарларым» бетінде енгізіңіз.'),
                 })));
+      // On sale or on its way there: an order or a question may come while the app is closed.
+      if (!earlier && shown.status != 'draft') await Push.offer(context);
+      if (!mounted) return;
       Navigator.pop(context, true);
     } catch (e) {
       if (!mounted) return;

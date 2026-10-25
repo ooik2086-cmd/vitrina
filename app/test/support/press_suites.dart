@@ -15,6 +15,9 @@ const _hints = [
   '/delivery-estimate', // the arrival guess under the price; a city the buyer picks is said when it fails
   // Whether online payment is on: unknown counts as on and is asked again, and the server refuses an order itself.
   '/app-config',
+  // Signing out: the phone has already signed out; the server ends that sign-in when it is reached, and offline
+  // Firebase forgets the phone, so no alert of the account arrives (session.dart signOut).
+  '/auth/logout',
 ];
 
 /// Presses everything with the connection down: whatever it tries to send or fetch is said, and nothing keeps spinning.

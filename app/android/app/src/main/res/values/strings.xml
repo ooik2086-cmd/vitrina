@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The alerts' channels as the phone's settings name them (MainActivity makes them). -->
+    <string name="alerts_channel">Хат пен тапсырыс</string>
+    <string name="alerts_channel_about">Жаңа хат, тапсырыс, сұрақ және төлем</string>
+    <string name="news_channel">Жаңалықтар мен кеңестер</string>
+    <string name="news_channel_about">Арзандаған тауар, жаңа тауар, кеңес</string>
+</resources>

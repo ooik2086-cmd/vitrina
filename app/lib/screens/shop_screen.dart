@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../api.dart';
+import '../push.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
@@ -64,6 +67,7 @@ class _ShopScreenState extends State<ShopScreen> {
       if (result.$1) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text(tr('Жазылдыңыз. Дүкен жаңа тауар қойғанда хабарлаймыз.'))));
+        unawaited(Push.offer(context));
       }
     } catch (e) {
       if (mounted) showError(context, e);

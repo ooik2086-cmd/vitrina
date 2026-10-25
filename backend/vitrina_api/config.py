@@ -93,6 +93,12 @@ class Settings:
     # Search-by-photo model (backend/models/README.md). Empty = search by photo answers 503.
     search_model: str = field(default_factory=lambda: os.environ.get("VITRINA_SEARCH_MODEL", ""))
     cors_origins: list[str] = field(default_factory=lambda: [o for o in os.environ.get("VITRINA_CORS_ORIGINS", "").split(",") if o])
+    # Alerts on the phone while the app is closed (vitrina_api/push.py, `python -m vitrina_api.push`): the Firebase
+    # project's service-account key, a JSON file from the Firebase console. Missing or empty: no push, the
+    # notifications stay in the app as before.
+    fcm_credentials_file: str = field(default_factory=lambda: os.environ.get("VITRINA_FCM_CREDENTIALS_FILE", ""))
+    push_interval_s: float = field(default_factory=lambda: float(os.environ.get("VITRINA_PUSH_INTERVAL", "2")))
+    push_alive: str = field(default_factory=lambda: os.environ.get("VITRINA_PUSH_ALIVE", "/tmp/push.alive"))
 
 
 def production_problems(s: Settings) -> list[str]:
