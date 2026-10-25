@@ -255,7 +255,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
                       Text(i.listingTitle, maxLines: 3, overflow: TextOverflow.ellipsis), // the colour ends the title
                   subtitle: Text('№${i.orderId} · ${tr(_kinds[i.kind] ?? i.kind)} · '
                       '${i.at.toLocal().day.toString().padLeft(2, '0')}.${i.at.toLocal().month.toString().padLeft(2, '0')}'
-                      '${i.feeTiyn > 0 ? ' · комиссия ${formatTenge(i.feeTiyn)}' : ''}'),
+                      '${i.feeTiyn > 0 ? ' · ${trf('комиссия {0}', [formatTenge(i.feeTiyn)])}' : ''}'),
                   trailing: Text(formatTenge(i.netTiyn),
                       style:
                           const TextStyle(fontWeight: FontWeight.w700, fontVariations: [FontVariation('wght', 700)])),

@@ -887,8 +887,11 @@ void main() {
           sent.add('${req.method} ${req.url.path} ${req.body}');
           return jsonResponse({'changed': 2});
         }));
-    final onSale = Listing.fromJson({...listingJson(), 'id': 8, 'was_price_tiyn': 5000000});
-    final items = [Listing.fromJson(listingJson()), onSale];
+    final onSale =
+        Listing.fromJson({...listingJson(), 'id': 8, 'was_price_tiyn': 5000000, 'pre_sale_price_tiyn': 5000000});
+    // A price the seller cut by hand shows «was» too, but the shop sale did not make it and will not end it.
+    final cutByHand = Listing.fromJson({...listingJson(), 'id': 9, 'was_price_tiyn': 5000000});
+    final items = [Listing.fromJson(listingJson()), onSale, cutByHand];
     await tester.pumpWidget(SessionScope(
         session: Session(api),
         child: MaterialApp(
@@ -1629,8 +1632,8 @@ void main() {
     await tester.tap(find.text('42'));
     await tester.pump();
     expect(find.byKey(const Key('make-offer')), findsNothing);
-    final button =
-        tester.widget<FilledButton>(find.ancestor(of: find.text('25.10 бастап сатып алуға болады'), matching: find.byType(FilledButton)));
+    final button = tester.widget<FilledButton>(
+        find.ancestor(of: find.text('25.10 бастап сатып алуға болады'), matching: find.byType(FilledButton)));
     expect(button.onPressed, isNull);
   });
 

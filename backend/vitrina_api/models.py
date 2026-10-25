@@ -438,6 +438,7 @@ class SavedSearch(Base):
     size_cm: Mapped[str | None] = mapped_column(String(8))
     color: Mapped[str | None] = mapped_column(String(300))  # stored colour names, comma-separated
     audience: Mapped[str | None] = mapped_column(String(10))  # men|women|unisex|kids
+    city: Mapped[str | None] = mapped_column(String(60))  # the seller's city, as the catalog filter takes it
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 

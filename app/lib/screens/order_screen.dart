@@ -200,6 +200,19 @@ class _OrderScreenState extends State<OrderScreen> with WidgetsBindingObserver {
 
   /// Loads the order. With nothing on screen yet a failure shows in place of it with a retry; once the order is
   /// shown, a failed reload keeps it and says so in a snackbar.
+  /// Reads the order again without a second error on top of the one just said.
+  Future<void> _refreshQuietly() async {
+    try {
+      final o = await _api.order(widget.orderId);
+      if (mounted) {
+        setState(() {
+          _order = o;
+          _loadedAt = clock.now();
+        });
+      }
+    } catch (_) {}
+  }
+
   Future<void> _refresh() async {
     try {
       final o = await _api.order(widget.orderId);
@@ -316,6 +329,9 @@ class _OrderScreenState extends State<OrderScreen> with WidgetsBindingObserver {
       await _refresh(); // the action reply has no history or photo; reload the full view
     } catch (e) {
       if (mounted) showError(context, e);
+      // The server said no (the order moved on meanwhile, on the other side or another phone): the page is read
+      // again so its buttons are the ones that still apply. Offline, the error alone is said.
+      if (mounted && e is ApiException && e.status >= 400 && e.status < 500) unawaited(_refreshQuietly());
     } finally {
       if (mounted) {
         setState(() {

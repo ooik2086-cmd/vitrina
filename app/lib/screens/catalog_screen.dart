@@ -206,7 +206,9 @@ class _CatalogScreenState extends State<CatalogScreen> {
         minPriceTiyn: picked.minPriceTiyn,
         maxPriceTiyn: picked.maxPriceTiyn,
         colors: picked.colors,
-        audience: picked.audience);
+        audience: picked.audience,
+        city: picked.city);
+    _sale = false; // a saved search keeps no «sale» choice: its results are what its alerts are about
     _savedKey = jsonEncode(picked.asBody);
     _search();
   }

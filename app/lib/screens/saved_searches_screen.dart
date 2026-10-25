@@ -23,6 +23,7 @@ String savedSearchLabel(SavedSearch s) {
       trf('{0} бастап', [formatTenge(s.minPriceTiyn!)]),
     for (final c in (s.condition ?? '').split(',').where((c) => c.isNotEmpty)) tr(conditions[c] ?? c),
     if (s.colors.isNotEmpty) s.colors.map(colorName).join(', '),
+    if (s.city != null) tr(s.city!),
   ];
   return parts.join(' · ');
 }

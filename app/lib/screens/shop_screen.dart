@@ -11,6 +11,7 @@ import '../widgets/common.dart';
 import 'login_screen.dart';
 import 'seller_reviews_screen.dart';
 import '../i18n.dart';
+import '../labels.dart' show formatDay;
 
 const _months = ['қаң', 'ақп', 'нау', 'сәу', 'мам', 'мау', 'шіл', 'там', 'қыр', 'қаз', 'қар', 'жел'];
 
@@ -219,6 +220,26 @@ class _ShopScreenState extends State<ShopScreen> {
                             ),
                           ),
                         ]),
+                      ],
+                      // On holiday: said before the shoes, as the listing page and the chat say it.
+                      if (shop.awayUntil != null) ...[
+                        const SizedBox(height: 14),
+                        Container(
+                          key: const Key('shop-away'),
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(color: Brand.studio, borderRadius: BorderRadius.circular(14)),
+                          child: Row(children: [
+                            const Icon(Icons.beach_access_outlined, size: 18, color: Brand.ink),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                  trf('Сатушы {0} дейін демалыста. Тапсырысты ол оралғанда беруге болады.',
+                                      [formatDay(shop.awayUntil!)]),
+                                  style: theme.textTheme.bodyMedium?.copyWith(color: Brand.ink)),
+                            ),
+                          ]),
+                        ),
                       ],
                       if (shop.about != null) ...[
                         const SizedBox(height: 14),

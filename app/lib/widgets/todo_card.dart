@@ -66,6 +66,10 @@ final List<TodoLine> todoLines = [
   ),
 ];
 
+/// The latest counts the home read for the tab numbers (each poll, tab change and return to the app): the card
+/// follows them, so it does not keep an order that was answered elsewhere, nor miss a new one.
+final latestTodo = ValueNotifier<Map<String, int>?>(null);
+
 /// The top of the profile: everything that waits on this person, one tap from where it is done.
 /// Nothing is shown when nothing waits.
 class TodoCard extends StatefulWidget {
@@ -79,6 +83,28 @@ class _TodoCardState extends State<TodoCard> {
   Map<String, int>? _counts;
   Object? _error;
   bool _retrying = false;
+
+  @override
+  void initState() {
+    super.initState();
+    latestTodo.addListener(_follow);
+  }
+
+  @override
+  void dispose() {
+    latestTodo.removeListener(_follow);
+    super.dispose();
+  }
+
+  void _follow() {
+    final counts = latestTodo.value;
+    if (counts != null && mounted) {
+      setState(() {
+        _counts = counts;
+        _error = null;
+      });
+    }
+  }
 
   @override
   void didChangeDependencies() {

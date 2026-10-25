@@ -24,6 +24,7 @@ import 'my_size.dart';
 import 'quick_replies.dart';
 import 'recent.dart';
 import 'widgets/common.dart' show catalogWanted;
+import 'widgets/todo_card.dart' show latestTodo;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -141,9 +142,17 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    final token = SessionScope.of(context).api.token;
     if (!_started) {
       _started = true;
+      _badgesFor = token;
       _startPolling();
+      _refreshBadges();
+    } else if (token != _badgesFor) {
+      // Signed in, out or as someone else: the numbers are read for this person now, not at the next poll.
+      _badgesFor = token;
+      _counts = const {};
+      latestTodo.value = null; // never the last person's numbers, even for a moment
       _refreshBadges();
     }
     // The sign-in was read back from the phone just now: a tap waiting for it opens once this frame is drawn.
@@ -159,6 +168,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   }
 
   Session? _session;
+  String? _badgesFor; // the sign-in the tab numbers were read for
 
   /// The sign-in ended without the person signing out (the account blocked, the sign-in expired): said once, in words.
   void _sayNotice() {
@@ -207,12 +217,16 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     final session = SessionScope.of(context);
     if (!session.signedIn) {
       if (_counts.isNotEmpty) setState(() => _counts = const {});
+      latestTodo.value = null;
       return;
     }
+    final asked = session.api.token;
     if (session.me == null) unawaited(session.reloadMe()); // opened offline: the profile once the line is back
     try {
       final counts = await session.api.todo();
+      if (session.api.token != asked) return; // an answer for the person who was signed in before
       if (mounted) setState(() => _counts = counts);
+      latestTodo.value = counts; // the profile's to-do card shows the same, as fresh
     } catch (_) {
       // Badges are a hint; the tabs work without them.
     }

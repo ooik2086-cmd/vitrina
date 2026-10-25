@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from vitrina_core.catalog import audiences_for, categories_for, is_filler, normalize_query
 from vitrina_core.colors import PARTS, color_list, color_query, matching_colors
 
-from . import services
+from . import delivery_eta, services
 from . import promo
 from .deps import current_user, get_db, now_utc
 from .errors import ApiError
@@ -100,7 +100,7 @@ def query_words(q: str) -> list:
 
 MAX_SAVED_SEARCHES = 10
 SEARCH_FIELDS = ("q", "category", "brand", "condition", "min_price_tiyn", "max_price_tiyn", "size_cm", "color",
-                 "audience")
+                 "audience", "city")
 
 
 class SavedSearchIn(BaseModel):
@@ -113,6 +113,7 @@ class SavedSearchIn(BaseModel):
     size_cm: str | None = Field(default=None, max_length=8)
     color: str | None = Field(default=None, max_length=300)
     audience: Literal[AUDIENCES] | None = None  # type: ignore[valid-type]
+    city: str | None = Field(default=None, max_length=60)
 
     # In one spelling before the length is checked: a Kazakh name can be longer than the word typed for it.
     _color = field_validator("color", mode="before")(
@@ -124,6 +125,8 @@ def search_values(source) -> dict:
     values = {k: (v.strip() or None) if isinstance(v, str) else v for k, v in values.items()}
     if values["color"]:
         values["color"] = ",".join(color_list(values["color"])) or None  # one spelling, so equal searches compare equal
+    if values["city"]:
+        values["city"] = delivery_eta.known_city(values["city"]) or values["city"]  # «Almaty» is Алматы, as listed
     return values
 
 
@@ -165,7 +168,13 @@ def announce(db: Session, listing: Listing) -> None:
     for saved in db.scalars(candidates.order_by(SavedSearch.id)).all():
         if saved.user_id in told:
             continue
-        match = catalog_filter(select(Listing.id).where(Listing.id == listing.id), **search_values(saved))
+        values = search_values(saved)
+        # The city is the seller's, as in the catalog (search_routes.sellers_in): a city the list does not know
+        # matches no one there, so here too.
+        if (city := values.pop("city")) and (delivery_eta.known_city(city) is None
+                                             or delivery_eta.known_city(city) != delivery_eta.known_city(seller.city)):
+            continue
+        match = catalog_filter(select(Listing.id).where(Listing.id == listing.id), **values)
         if db.scalar(match) is not None:
             told.add(saved.user_id)
             services.notify(db, saved.user_id, "saved_search", f"Іздеуіңізге сай жаңа тауар: «{listing.title}», {price}",

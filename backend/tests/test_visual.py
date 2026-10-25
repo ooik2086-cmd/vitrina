@@ -110,6 +110,14 @@ class ImageSearchApiTests(ApiTestCase):
             scores = [i["similarity"] for i in items]
             self.assertEqual(scores, sorted(scores, reverse=True))
 
+    def test_photo_search_skips_other_shapes_and_sizes_that_do_not_fit(self):
+        self.app.state.embedder = colour_as_shape_embedder  # here a different colour means a different shape
+        red = self.listing_with_photo((200, 30, 30))
+        self.listing_with_photo((20, 20, 20))
+        self.assertEqual([i["id"] for i in self.search((210, 40, 30)).json()["items"]], [red])
+        self.assertEqual([i["id"] for i in self.search((210, 40, 30), size_cm="26").json()["items"]], [red])
+        self.assertEqual(self.search((210, 40, 30), size_cm="28").json()["items"], [])
+
     def test_photo_search_is_rate_limited_per_client(self):
         from vitrina_api.app import IMAGE_SEARCH_PER_MINUTE
         self.app.state.embedder = colour_only_embedder

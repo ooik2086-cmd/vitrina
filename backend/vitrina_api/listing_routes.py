@@ -33,7 +33,7 @@ from .storage import DETAIL_SIDE_PX, MAX_SIDE_PX, MAX_UPLOAD_BYTES, Storage, nor
 from .api_common import ALMATY, DEFECT_REQUIRED, MAX_LISTING_MEDIA, MAX_LISTING_SIZES, MIN_SPIN_FRAMES, log
 from .schemas import ListingIn, ListingPatch, PhotoIn, ReportIn
 from .serializers import (angle_frames, cm_to_mm, cover_frame, cover_photo, listing_out, mark_price_change, one_turn,
-                          photo_snapshot, showcase_parts, side_photo, was_price)
+                          photo_snapshot, showcase_parts, side_photo)
 from .saved_search_routes import announce
 
 
@@ -1015,11 +1015,12 @@ def start_shop_sale(body: ShopSaleIn, user: User = Depends(current_user), db: Se
 
 @router.delete("/me/shop-sale")
 def end_shop_sale(user: User = Depends(current_user), db: Session = Depends(get_db)):
-    """Puts back the price each listing had before the sale; listings from before that was stored fall back to the
-    crossed-out price."""
+    """Puts back the price each listing had before the sale. Only the sale's own cuts: a price the seller lowered by
+    hand on one pair keeps its crossed-out old price and stays as she set it."""
     changed = 0
-    for listing in db.scalars(select(Listing).where(Listing.seller_id == user.id)):
-        old = listing.pre_sale_price_tiyn or was_price(listing)
+    # Locked, as when the sale starts: a price edit saving at this moment is either seen whole or waits.
+    for listing in db.scalars(select(Listing).where(Listing.seller_id == user.id).with_for_update()):
+        old = listing.pre_sale_price_tiyn
         listing.pre_sale_price_tiyn = None
         if old is not None and old != listing.price_tiyn:
             set_price(db, listing, old)

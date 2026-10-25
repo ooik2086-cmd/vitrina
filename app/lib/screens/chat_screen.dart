@@ -14,6 +14,7 @@ import '../push.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import 'listing_screen.dart';
 import '../i18n.dart';
 import '../quick_replies.dart';
 
@@ -923,15 +924,36 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               ],
             ),
         ],
-        title: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(personName(conv?.otherName ?? ''), style: theme.textTheme.titleMedium),
+        title: () {
+          final name = Text(personName(conv?.otherName ?? ''), style: theme.textTheme.titleMedium);
+          if (conv == null) return name;
           // The shoe alone: today's listing price could differ from an agreed or paid one, so it is not shown here.
-          if (conv != null)
-            Text(conv.listingTitle,
-                style: theme.textTheme.labelMedium?.copyWith(color: scheme.onSurfaceVariant),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis),
-        ]),
+          // The whole title opens it, as tall as the bar, so the pair talked about is one easy tap away (› says so).
+          return InkWell(
+            key: const Key('chat-open-listing'),
+            onTap: () =>
+                Navigator.of(context).push(MaterialPageRoute(builder: (_) => ListingScreen(listingId: conv.listingId))),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(minHeight: kToolbarHeight),
+              child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    name,
+                    Row(mainAxisSize: MainAxisSize.min, children: [
+                      Flexible(
+                        child: Text(conv.listingTitle,
+                            style: theme.textTheme.labelMedium?.copyWith(color: scheme.onSurfaceVariant),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis),
+                      ),
+                      Icon(Icons.chevron_right_rounded, size: 18, color: scheme.onSurfaceVariant),
+                    ]),
+                  ]),
+            ),
+          );
+        }(),
       ),
       body: Column(children: [
         if (conv?.role == 'buyer' && conv?.sellerAwayUntil != null)

@@ -443,6 +443,15 @@ class LanguageSwitch extends StatelessWidget {
 /// A tile is at most 240 wide; three times that covers dense screens.
 ImageProvider coverImage(String url) => ResizeImage.resizeIfNeeded(720, null, netImage(url));
 
+/// Why a pair saved earlier cannot be bought now (sold, off sale, no size left); null when it can.
+String? notBuyableText(Listing l) => l.status == 'sold'
+    ? tr('Сатылған')
+    : l.status != 'published'
+        ? tr('Сатылымда жоқ') // short: one line in a 137 px tile at 320 px wide
+        : l.sizes.isNotEmpty && !l.sizes.any((s) => s.available)
+            ? tr('Таусылды')
+            : null;
+
 class ListingTile extends StatelessWidget {
   const ListingTile({super.key, required this.listing});
   final Listing listing;
@@ -488,10 +497,18 @@ class ListingTile extends StatelessWidget {
         Text(listing.title,
             maxLines: titleLines(context), overflow: TextOverflow.ellipsis, style: theme.textTheme.bodyMedium),
         const SizedBox(height: 2),
-        Text(label(conditions, listing.condition),
-            maxLines: conditionLines(context),
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.labelMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+        // A favourite no longer for sale says so in the condition's place, so it is not taken for one to buy.
+        if (notBuyableText(listing) case final gone?)
+          Text(gone,
+              key: Key('not-buyable-${listing.id}'),
+              maxLines: conditionLines(context),
+              overflow: TextOverflow.ellipsis,
+              style: weight(theme.textTheme.labelMedium!, 700).copyWith(color: theme.colorScheme.error))
+        else
+          Text(label(conditions, listing.condition),
+              maxLines: conditionLines(context),
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.labelMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
       ]),
     );
   }

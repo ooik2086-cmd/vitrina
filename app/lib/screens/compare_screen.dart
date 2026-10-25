@@ -17,8 +17,13 @@ const maxCompared = 3;
 /// What the buyer actually pays for each listing: the price plus its delivery.
 int totalTiyn(Listing l) => l.priceTiyn + l.deliveryPriceTiyn;
 
-/// Ids of the listings with the lowest total. Ties all win; nothing is marked when there is one listing.
-Set<int> cheapestIds(List<Listing> items) {
+/// Ids of the listings with the lowest total among those that can still be bought. Ties all win; nothing is marked
+/// when there is one such listing.
+Set<int> cheapestIds(List<Listing> all) {
+  final items = [
+    for (final l in all)
+      if (notBuyableText(l) == null) l
+  ];
   if (items.length < 2) return {};
   final low = items.map(totalTiyn).reduce((a, b) => a < b ? a : b);
   if (items.every((l) => totalTiyn(l) == low)) return {};
@@ -157,6 +162,13 @@ class _Table extends StatelessWidget {
           items: items,
           cell: (l) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(formatTenge(totalTiyn(l)), key: Key('compare-total-${l.id}'), style: strong),
+            if (notBuyableText(l) case final gone?)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(gone,
+                    key: Key('compare-gone-${l.id}'),
+                    style: weight(theme.textTheme.labelSmall!, 800).copyWith(color: theme.colorScheme.error)),
+              ),
             if (cheapest.contains(l.id))
               Padding(
                 padding: const EdgeInsets.only(top: 4),

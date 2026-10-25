@@ -29,17 +29,32 @@ class _BlockedScreenState extends State<BlockedScreen> {
     });
   }
 
+  /// Asked first, sent once, and said when done; already unblocked (a second tap, another phone) counts as done.
   Future<void> _unblock(BlockedUser b) async {
+    if (!await confirmAction(context,
+        title: trf('{0} бұғаттан шығарылсын ба?', [personName(b.name)]), action: tr('Бұғаттан шығару'))) {
+      return;
+    }
+    if (!mounted) return;
     final api = SessionScope.of(context).api;
-    try {
-      await api.unblock(b.userId);
+    await once((#unblock, b.userId), () async {
+      try {
+        await api.unblock(b.userId);
+      } on ApiException catch (e) {
+        if (e.status != 404) {
+          if (mounted) showError(context, e);
+          return;
+        }
+      } catch (e) {
+        if (mounted) showError(context, e);
+        return;
+      }
       if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr('Бұғаттан шығарылды'))));
       setState(() {
         _items = shown(api.blockedUsers());
       });
-    } catch (e) {
-      if (mounted) showError(context, e);
-    }
+    });
   }
 
   @override

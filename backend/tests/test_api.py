@@ -2975,6 +2975,19 @@ class SavedSearchTests(ApiTestCase):
         self.post(f"/listings/{listing['id']}/publish", self.seller)
         self.assertEqual(len(self.get("/notifications", self.buyer).json()["items"]), 3)  # not again
 
+    def test_a_saved_city_is_the_sellers_however_it_is_spelled(self):
+        r = self.post("/saved-searches", self.buyer, {"q": "кроссовка", "city": "Astana"})
+        self.assertEqual(r.json()["city"], "Астана")  # kept in the listed spelling
+        self.publish()  # the seller is in Алматы
+        self.assertEqual(self.get("/notifications", self.buyer).json()["items"], [])
+        self.post("/saved-searches", self.buyer, {"q": "кроссовка", "city": "Almaty"})
+        self.publish()
+        self.assertEqual([n["kind"] for n in self.get("/notifications", self.buyer).json()["items"]], ["saved_search"])
+        self.assertEqual({s["city"] for s in self.get("/saved-searches", self.buyer).json()["items"]},
+                         {"Астана", "Алматы"})
+        again = self.post("/saved-searches", self.buyer, {"q": "кроссовка", "city": "алматы"})
+        self.assertEqual(len(self.get("/saved-searches", self.buyer).json()["items"]), 2, again.text)  # the same one
+
     def test_listing_waiting_for_moderation_is_announced_only_when_approved(self):
         self.post("/saved-searches", self.buyer, {"q": "кроссовка"})
         r = self.post("/listings", self.seller, {**LISTING, "description": "WhatsApp 87011234567"})
@@ -3236,6 +3249,30 @@ class AwayTests(ApiTestCase):
         self.assertEqual(self.c.delete("/api/v1/me/shop-sale", headers=self.h(self.seller)).json(), {"changed": 2})
         back = self.c.get(f"/api/v1/listings/{a['id']}").json()
         self.assertEqual((back["price_tiyn"], back["was_price_tiyn"]), (4_500_000, None))
+
+    def test_ending_a_shop_sale_keeps_a_price_the_seller_cut_by_hand(self):
+        a = self.publish()
+        hand = self.publish(price_tiyn=2_000_000)
+        r = self.c.patch(f"/api/v1/listings/{hand['id']}", json={"price_tiyn": 1_500_000}, headers=self.h(self.seller))
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(self.post("/me/shop-sale", self.seller, {"percent": 10}).json(), {"changed": 2})
+        self.assertEqual(self.c.delete("/api/v1/me/shop-sale", headers=self.h(self.seller)).json(), {"changed": 2})
+        self.assertEqual(self.c.get(f"/api/v1/listings/{a['id']}").json()["price_tiyn"], 4_500_000)
+        kept = self.c.get(f"/api/v1/listings/{hand['id']}").json()
+        self.assertEqual((kept["price_tiyn"], kept["was_price_tiyn"]), (1_500_000, 2_000_000))
+
+    def test_ending_a_shop_sale_leaves_prices_it_did_not_cut(self):
+        off = self.publish(price_tiyn=2_000_000)  # cut by hand, then off sale while the shop sale runs
+        self.c.patch(f"/api/v1/listings/{off['id']}", json={"price_tiyn": 1_500_000}, headers=self.h(self.seller))
+        self.assertEqual(self.post(f"/listings/{off['id']}/pause", self.seller).status_code, 200)
+        later = self.publish()  # cut by the sale, then set by hand while it runs
+        self.assertEqual(self.post("/me/shop-sale", self.seller, {"percent": 10}).json(), {"changed": 1})
+        r = self.c.patch(f"/api/v1/listings/{later['id']}", json={"price_tiyn": 3_000_000}, headers=self.h(self.seller))
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(self.c.delete("/api/v1/me/shop-sale", headers=self.h(self.seller)).json(), {"changed": 0})
+        mine = {i["id"]: i for i in self.c.get("/api/v1/me/listings", headers=self.h(self.seller)).json()["items"]}
+        self.assertEqual(mine[off["id"]]["price_tiyn"], 1_500_000)
+        self.assertEqual(mine[later["id"]]["price_tiyn"], 3_000_000)
 
     def test_either_side_of_an_order_opens_the_same_chat(self):
         listing = self.publish()

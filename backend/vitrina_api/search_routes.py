@@ -147,6 +147,9 @@ class SlidingWindowLimiter:
 
 
 IMAGE_SEARCH_PER_MINUTE = 20
+# Shape-only cosine. Lower than SUGGEST_MIN_SHAPE: the buyer's photo is not cut out (floor, hand, bed around the
+# shoe) while listing vectors are, so true matches score lower. Not yet measured on real phone photos.
+IMAGE_MIN_SHAPE = 0.50
 
 
 @router.post("/search/image")
@@ -170,9 +173,17 @@ def search_by_image(request: Request, file: UploadFile = File(...), category: st
         stmt = stmt.where(Listing.category == category)
     if size_cm:
         stmt = stmt.where(fits_foot(size_cm))
+    # Shape decides whether it is the same kind of thing at all; a photo of a cup must not bring "similar" shoes.
+    shape_dims = query.size - visual.COLOR_BINS
+    query_shape = query[:shape_dims] / (np.linalg.norm(query[:shape_dims]) + 1e-8)
     # Brute force is fine at MVP scale; move to pgvector once the catalogue passes ~50k listings.
-    scored = sorted(((float(np.frombuffer(vec, np.float32) @ query), lid) for lid, vec in db.execute(stmt)),
-                    key=lambda t: -t[0])[:max(1, min(limit, 50))]
+    scored = []
+    for lid, vec in db.execute(stmt):
+        v = np.frombuffer(vec, np.float32)
+        shape = float(v[:shape_dims] @ query_shape) / (float(np.linalg.norm(v[:shape_dims])) + 1e-8)
+        if shape >= IMAGE_MIN_SHAPE:
+            scored.append((float(v @ query), lid))
+    scored = sorted(scored, key=lambda t: -t[0])[:max(1, min(limit, 50))]
     return {"items": [{**listing_out(db, listing), "similarity": round(score, 3)}
                       for score, listing in page_of(db, scored)]}
 

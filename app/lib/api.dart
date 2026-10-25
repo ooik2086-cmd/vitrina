@@ -138,7 +138,8 @@ class SavedSearch {
         maxPriceTiyn = j['max_price_tiyn'] as int?,
         sizeCm = j['size_cm'] as String?,
         color = j['color'] as String?,
-        audience = j['audience'] as String?;
+        audience = j['audience'] as String?,
+        city = j['city'] as String?;
   final int id;
   final String? q;
   final String? category;
@@ -153,6 +154,9 @@ class SavedSearch {
   /// Whom the pairs are for (men, women, unisex, kids); null for anyone.
   final String? audience;
 
+  /// The seller's city the buyer narrowed to; null for anywhere.
+  final String? city;
+
   /// The same filters as the catalog sends, for saving and comparing.
   static Map<String, Object> body(
           {String? q, String? category, String? sizeCm, CatalogFilter filter = const CatalogFilter()}) =>
@@ -165,6 +169,7 @@ class SavedSearch {
         if (filter.maxPriceTiyn != null) 'max_price_tiyn': filter.maxPriceTiyn!,
         if (filter.colors.isNotEmpty) 'color': (filter.colors.toList()..sort()).join(','),
         if (filter.audience != null) 'audience': filter.audience!,
+        if (filter.city != null) 'city': filter.city!,
       };
 
   /// The colours of [color] as a set, for the catalog filter.
@@ -179,7 +184,8 @@ class SavedSearch {
           minPriceTiyn: minPriceTiyn,
           maxPriceTiyn: maxPriceTiyn,
           colors: colors,
-          audience: audience));
+          audience: audience,
+          city: city));
 }
 
 /// A buyer's price offer on one size; `priceTiyn` is what they pay once it is accepted.
@@ -305,9 +311,13 @@ class Shop {
         following = j['following'] as bool? ?? false,
         replyBucket = (j['reply_time'] as Map?)?['bucket'] as String?,
         shipBucket = (j['ship_time'] as Map?)?['bucket'] as String?,
-        about = j['about'] as String?;
+        about = j['about'] as String?,
+        awayUntil = j['away_until'] == null ? null : DateTime.parse(j['away_until'] as String);
   final int id;
   final String? _shopName;
+
+  /// The last day of the seller's holiday; null when the shop is open.
+  final DateTime? awayUntil;
 
   /// Translated when shown, not when loaded, so a language picked later reaches it too.
   String get shopName => _shopName ?? tr('Сатушы');
@@ -1269,8 +1279,11 @@ class Api {
   }
 
   /// Listings that look like the photo, most similar first. The photo is not stored on the server.
-  Future<List<Listing>> searchByImage(List<int> bytes, String filename) async {
-    final req = http.MultipartRequest('POST', Uri.parse('$base/search/image'))
+  /// [sizeCm] is the buyer's foot length: only pairs that fit come back, as in the catalog.
+  Future<List<Listing>> searchByImage(List<int> bytes, String filename, {String? sizeCm}) async {
+    final fits = sizeCm != null && sizeCm.isNotEmpty;
+    final uri = Uri.parse('$base/search/image${fits ? '?size_cm=${Uri.encodeQueryComponent(sizeCm)}' : ''}');
+    final req = http.MultipartRequest('POST', uri)
       ..headers['Accept'] = 'application/json'
       ..files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
     final data = await _upload(req) as Map;

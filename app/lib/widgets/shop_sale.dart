@@ -58,7 +58,8 @@ class _ShopSaleSheetState extends State<ShopSaleSheet> {
     final api = SessionScope.of(context).api;
     final live = widget.listings.where((l) => l.status == 'published').toList();
     // A sale the server still keeps the old price of counts, even once its price is no longer shown crossed out.
-    final onSale = widget.listings.where((l) => l.wasPriceTiyn != null || l.preSalePriceTiyn != null).length;
+    // Only the sale's own cuts: a pair the seller lowered by hand is not put back by ending it.
+    final onSale = widget.listings.where((l) => l.preSalePriceTiyn != null).length;
     final sample = live.isEmpty ? null : live.first;
     // A sale that runs is replaced from the price before it (the server), so a smaller one makes prices go up.
     final base = sample == null ? 0 : sample.preSalePriceTiyn ?? sample.priceTiyn;

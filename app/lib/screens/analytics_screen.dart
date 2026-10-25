@@ -47,7 +47,11 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
           }
           if (!snap.hasData) return const Center(child: CircularProgressIndicator());
           final a = snap.data!;
+          // Another period on its way: a thin line says so, so the old numbers are not read as the new ones.
+          final loading = snap.connectionState == ConnectionState.waiting;
           return ListView(padding: contentPadding(context, const EdgeInsets.fromLTRB(20, 4, 20, 32)), children: [
+            // Always 4 px tall, so the buttons and numbers below stay put while it shows.
+            SizedBox(height: 4, child: loading ? const LinearProgressIndicator(key: Key('analytics-loading')) : null),
             SegmentedButton<int>(
               showSelectedIcon: false,
               segments: [

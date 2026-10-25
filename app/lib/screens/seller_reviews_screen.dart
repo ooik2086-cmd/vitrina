@@ -58,9 +58,14 @@ class _SellerReviewsScreenState extends State<SellerReviewsScreen> {
     });
   }
 
+  /// What the seller typed for each review: a reply that failed to go is there again on the next tap.
+  final _drafts = <int, String>{};
+
   /// The seller answers each review once, in public, under the buyer's words.
-  Future<void> _reply(Review r) async {
-    final text = TextEditingController();
+  Future<void> _reply(Review r) => once((#reviewReply, r.id), () => _replyNow(r));
+
+  Future<void> _replyNow(Review r) async {
+    final text = TextEditingController(text: _drafts[r.id]);
     final answer = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
@@ -79,9 +84,16 @@ class _SellerReviewsScreenState extends State<SellerReviewsScreen> {
         ],
       ),
     );
+    // Kept however the window closed, so a slip of the finger does not cost the words typed.
+    if (text.text.trim().isEmpty) {
+      _drafts.remove(r.id); // cleared on purpose: it does not come back
+    } else {
+      _drafts[r.id] = text.text;
+    }
     if (answer == null || answer.isEmpty || !mounted) return;
     try {
       await SessionScope.of(context).api.replyToReview(r.id, answer);
+      _drafts.remove(r.id);
       if (mounted) {
         setState(() {
           _items = shown(SessionScope.of(context).api.sellerReviews(widget.sellerId));

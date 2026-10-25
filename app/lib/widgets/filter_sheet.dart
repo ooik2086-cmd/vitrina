@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../api.dart';
 import '../colors.dart';
@@ -35,7 +36,8 @@ class _FilterSheetState extends State<FilterSheet> {
   static String _tenge(int? tiyn) => tiyn == null ? '' : '${tiyn ~/ 100}';
 
   static int? _tiyn(String text) {
-    final v = int.tryParse(text.replaceAll(RegExp(r'\s'), ''));
+    // «20.000», «20,000» and «20 000» are all twenty thousand.
+    final v = int.tryParse(text.replaceAll(RegExp(r'[^0-9]'), ''));
     return v == null || v <= 0 ? null : v * 100;
   }
 
@@ -104,6 +106,7 @@ class _FilterSheetState extends State<FilterSheet> {
                         key: const Key('min-price'),
                         controller: _min,
                         keyboardType: TextInputType.number,
+                        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                         decoration: InputDecoration(labelText: tr('бастап'))),
                   ),
                   const SizedBox(width: 12),
@@ -112,6 +115,7 @@ class _FilterSheetState extends State<FilterSheet> {
                         key: const Key('max-price'),
                         controller: _max,
                         keyboardType: TextInputType.number,
+                        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                         decoration: InputDecoration(labelText: tr('дейін'))),
                   ),
                 ]),

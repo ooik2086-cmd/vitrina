@@ -6,6 +6,7 @@ import '../api.dart';
 import '../session.dart';
 import '../widgets/common.dart';
 import '../i18n.dart';
+import '../my_size.dart';
 
 /// Camera or gallery, then the results page; [replace] puts it in place of the results already shown.
 Future<void> searchByPhoto(BuildContext context, {bool replace = false}) async {
@@ -41,11 +42,17 @@ class ImageSearchScreen extends StatefulWidget {
 
 class _ImageSearchScreenState extends State<ImageSearchScreen> {
   Future<List<Listing>>? _results;
+  // The buyer's size when the search started: results and the line above them keep to the same one. Dropped on
+  // this page only (for a pair bought for someone else), the saved size itself stays.
+  String? _size = mySize.value;
+
+  void _search() =>
+      _results = shown(SessionScope.of(context).api.searchByImage(widget.bytes, widget.filename, sizeCm: _size));
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _results ??= shown(SessionScope.of(context).api.searchByImage(widget.bytes, widget.filename));
+    if (_results == null) _search();
   }
 
   @override
@@ -64,7 +71,11 @@ class _ImageSearchScreenState extends State<ImageSearchScreen> {
               ),
               const SizedBox(width: 16),
               Expanded(
-                child: Text(tr('Пішіні мен түсі ұқсас тауарлар. Фотоңыз серверде сақталмайды.'),
+                child: Text(
+                    _size == null
+                        ? tr('Пішіні мен түсі ұқсас тауарлар. Фотоңыз серверде сақталмайды.')
+                        : trf('Пішіні мен түсі ұқсас, {0} см аяққа келетін тауарлар. Фотоңыз серверде сақталмайды.',
+                            [_size]),
                     style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
               ),
             ]),
@@ -81,9 +92,7 @@ class _ImageSearchScreenState extends State<ImageSearchScreen> {
                 hasScrollBody: false,
                 child: ErrorRetry(
                   error: snap.error,
-                  onRetry: () => setState(() {
-                    _results = shown(SessionScope.of(context).api.searchByImage(widget.bytes, widget.filename));
-                  }),
+                  onRetry: () => setState(_search),
                 ),
               );
             }
@@ -94,12 +103,22 @@ class _ImageSearchScreenState extends State<ImageSearchScreen> {
                   hasScrollBody: false,
                   child: EmptyState(
                       icon: Icons.image_search_outlined,
-                      text: tr('Ұқсас тауар табылмады.'),
-                      action: OutlinedButton(
-                          key: const Key('another-photo'),
-                          // The picker again, its results in place of these, as the words promise.
-                          onPressed: () => searchByPhoto(context, replace: true),
-                          child: Text(tr('Басқа фотомен іздеу')))));
+                      text: _size == null
+                          ? tr('Ұқсас тауар табылмады.')
+                          : trf('{0} см аяққа келетін ұқсас тауар табылмады.', [_size!]),
+                      action: _size != null
+                          ? OutlinedButton(
+                              key: const Key('all-sizes'),
+                              onPressed: () => setState(() {
+                                    _size = null;
+                                    _search();
+                                  }),
+                              child: Text(tr('Барлық өлшемнен іздеу')))
+                          : OutlinedButton(
+                              key: const Key('another-photo'),
+                              // The picker again, its results in place of these, as the words promise.
+                              onPressed: () => searchByPhoto(context, replace: true),
+                              child: Text(tr('Басқа фотомен іздеу')))));
             }
             return SliverPadding(
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),

@@ -277,35 +277,105 @@ class ProfileScreen extends StatelessWidget {
   }
 
   Future<void> _becomeSeller(BuildContext context) async {
-    final session = SessionScope.of(context);
-    final shop = TextEditingController();
-    final city = TextEditingController();
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(tr('Сатушы режимі')),
-        scrollable: true, // large text and the keyboard up: it scrolls rather than overflows
-        content: Column(mainAxisSize: MainAxisSize.min, children: [
-          TextField(controller: shop, decoration: InputDecoration(labelText: tr('Дүкен атауы'))),
-          TextField(controller: city, decoration: InputDecoration(labelText: tr('Қала'))),
-        ]),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Жабу'))),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(tr('Қосу'))),
-        ],
-      ),
-    );
-    if (ok != true) return;
-    try {
-      session.update(await session.api.becomeSeller(shop.text.trim(), city.text.trim()));
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(tr('Сатушы режимі қосылды. Енді «Менің тауарларым» бөлімінен тауар қоса аласыз.'))));
-      }
-    } catch (e) {
-      if (context.mounted) showError(context, e);
+    final ok = await showDialog<bool>(context: context, builder: (_) => const _BecomeSellerDialog());
+    if (ok == true && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(tr('Сатушы режимі қосылды. Енді «Менің тауарларым» бөлімінен тауар қоса аласыз.'))));
     }
   }
+}
+
+/// The shop's name and city. It stays open until the server says yes: a refusal is said under the fields, with
+/// what was typed still there.
+class _BecomeSellerDialog extends StatefulWidget {
+  const _BecomeSellerDialog();
+
+  @override
+  State<_BecomeSellerDialog> createState() => _BecomeSellerDialogState();
+}
+
+class _BecomeSellerDialogState extends State<_BecomeSellerDialog> {
+  final _shop = TextEditingController();
+  final _city = TextEditingController();
+  bool _busy = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _shop.dispose();
+    _city.dispose();
+    super.dispose();
+  }
+
+  // The server takes at least 2 letters in each.
+  bool get _filled => _shop.text.trim().length >= 2 && _city.text.trim().length >= 2;
+
+  Future<void> _send() async {
+    final session = SessionScope.of(context);
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      session.update(await session.api.becomeSeller(_shop.text.trim(), _city.text.trim()));
+      if (mounted) Navigator.pop(context, true);
+    } catch (e) {
+      if (mounted) setState(() => _error = errorText(e));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  // While the request is out it cannot be closed: a closed dialog would turn seller mode on without a word.
+  Widget build(BuildContext context) => PopScope(
+      canPop: !_busy,
+      child: AlertDialog(
+        title: Text(tr('Сатушы режимі')),
+        scrollable: true, // large text and the keyboard up: it scrolls rather than overflows
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          TextField(
+              key: const Key('seller-shop'),
+              controller: _shop,
+              autofocus: true,
+              maxLength: 80,
+              buildCounter: nearLimitCounter,
+              onChanged: (_) => setState(() => _error = null),
+              decoration: InputDecoration(labelText: tr('Дүкен атауы'))),
+          TextField(
+              key: const Key('seller-city'),
+              controller: _city,
+              maxLength: 60,
+              buildCounter: nearLimitCounter,
+              onChanged: (_) => setState(() => _error = null),
+              decoration: InputDecoration(labelText: tr('Қала'))),
+          if (!_filled)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(tr('Дүкен атауы мен қаланы жазыңыз (кемінде 2 әріп).'),
+                  style: Theme.of(context).textTheme.bodySmall),
+            ),
+          if (_error != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Semantics(
+                liveRegion: true,
+                child: Text(_error!,
+                    key: const Key('seller-error'), style: TextStyle(color: Theme.of(context).colorScheme.error)),
+              ),
+            ),
+        ]),
+        actions: [
+          TextButton(
+              key: const Key('seller-close'),
+              onPressed: _busy ? null : () => Navigator.pop(context, false),
+              child: Text(tr('Жабу'))),
+          FilledButton(
+              key: const Key('seller-on'),
+              onPressed: _busy || !_filled ? null : _send,
+              child: busyLabel(_busy, Text(tr('Қосу')))),
+        ],
+      ));
 }
 
 /// The seller's own lines on the shop page. Contacts are refused by the server, so the chat stays the one channel.

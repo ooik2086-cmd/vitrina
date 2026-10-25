@@ -22,14 +22,22 @@ import 'support/screens.dart' show loadFonts;
 /// when not empty, gives the next picks their own photos.
 var pickedBytes = utf8.encode('jpeg bytes');
 final pickQueue = <List<int>>[];
+Future<void>? pickHold; // a pick that has not come back yet: the camera is still open
+XFile? lostPhoto; // what image_picker hands over after Android closed the app during a pick
 
 /// Every pick hands back the same small photo, as if taken with the camera.
 class _FakePicker extends ImagePickerPlatform {
   @override
   Future<XFile?> getImageFromSource(
-          {required ImageSource source, ImagePickerOptions options = const ImagePickerOptions()}) async =>
-      XFile.fromData(Uint8List.fromList(pickQueue.isEmpty ? pickedBytes : pickQueue.removeAt(0)),
-          name: 'p.jpg', path: '/picked/p.jpg');
+      {required ImageSource source, ImagePickerOptions options = const ImagePickerOptions()}) async {
+    await pickHold;
+    return XFile.fromData(Uint8List.fromList(pickQueue.isEmpty ? pickedBytes : pickQueue.removeAt(0)),
+        name: 'p.jpg', path: '/picked/p.jpg');
+  }
+
+  @override
+  Future<LostDataResponse> getLostData() async =>
+      lostPhoto == null ? LostDataResponse.empty() : LostDataResponse(file: lostPhoto, files: [lostPhoto!]);
 
   @override
   Future<List<XFile>> getMultiImageWithOptions(
@@ -86,6 +94,8 @@ void main() {
     ImagePickerPlatform.instance = _FakePicker();
     pickedBytes = utf8.encode('jpeg bytes');
     pickQueue.clear();
+    pickHold = null;
+    lostPhoto = null;
     SharedPreferences.setMockInitialValues({});
   });
 
@@ -225,13 +235,14 @@ void main() {
     await tester.enterText(find.widgetWithText(TextFormField, 'Атауы'), 'AF');
     await next(tester);
     expect(find.text('Атауы кемінде 3 таңбадан тұрсын'), findsOneWidget);
+    expect(find.text('Жағдайын таңдаңыз'), findsOneWidget, reason: 'asked, not «new, with its box» by default');
     await tester.enterText(find.widgetWithText(TextFormField, 'Атауы'), 'Qadam етік');
     await choose(tester, find.byKey(const Key('audience')), 'Әйелдерге');
     await choose(tester, find.byKey(const ValueKey('category-null')), 'Етік, бәтеңке');
     await tester.tap(find.byKey(const Key('color-ақ')));
     await tester.pump();
     // A pair with a defect says what is wrong with it and shows it up close.
-    await choose(tester, find.text('Жаңа, қорабымен'), 'Ақауы бар');
+    await choose(tester, find.byKey(const Key('condition')), 'Ақауы бар');
     await next(tester);
     expect(find.text('Толтырыңыз'), findsOneWidget); // the defects field
     await tester.enterText(find.widgetWithText(TextFormField, 'Ақаулары'), 'Өкшесі сәл тозған');
@@ -385,7 +396,7 @@ void main() {
     await choose(tester, find.byKey(const ValueKey('category-null')), 'Етік, бәтеңке');
     await tester.tap(find.byKey(const Key('color-ақ')));
     await tester.pump();
-    await choose(tester, find.text('Жаңа, қорабымен'), condition);
+    await choose(tester, find.byKey(const Key('condition')), condition);
     await tester.enterText(find.widgetWithText(TextFormField, 'Ақаулары'), 'Өкшесі сәл тозған');
   }
 
@@ -519,6 +530,7 @@ void main() {
     await tester.enterText(find.widgetWithText(TextFormField, 'Атауы'), 'Qadam кроссовка');
     await choose(tester, find.byKey(const Key('audience')), 'Әйелдерге');
     await choose(tester, find.byKey(const ValueKey('category-null')), 'Кроссовкалар');
+    await choose(tester, find.byKey(const Key('condition')), 'Жаңа, қорабымен');
     await next(tester);
     expect(step(tester), 'Бағасы мен өлшемі');
     await tester.enterText(find.widgetWithText(TextFormField, 'Бағасы'), '30000');
@@ -613,6 +625,7 @@ void main() {
     // Filed as sneakers after all: a boot's height goes, what it is made of stays.
     await choose(tester, find.byKey(const ValueKey('category-boots')), 'Кроссовкалар');
     expect(find.byKey(const ValueKey('fact-shaft-knee')), findsNothing);
+    await choose(tester, find.byKey(const Key('condition')), 'Жаңа, қорабымен');
     await next(tester);
     await tester.enterText(find.widgetWithText(TextFormField, 'Бағасы'), '30000');
     await tester.enterText(find.widgetWithText(TextFormField, 'Өлшем'), '38');
@@ -1014,5 +1027,41 @@ void main() {
     expect(keys, hasLength(3));
     expect(keys.last, isNot(startsWith('a' * 32)));
     expect(keys.last.split('-').first, isNot(keys.first.split('-').first));
+  });
+
+  testWidgets('the side being taken is kept, even on a blank page, and only while the camera is open', (tester) async {
+    final camera = Completer<void>();
+    pickHold = camera.future;
+    await open(tester);
+    await tester.tap(find.text('${requiredAngles['front']} *'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Камерамен түсіру'));
+    await tester.pump();
+    expect((await kept())?['taking'], 'front');
+    camera.complete();
+    await tester.pumpAndSettle();
+    expect((await kept())?['taking'], isNull);
+  });
+
+  testWidgets('a photo lost when Android closed the app comes back on its side', (tester) async {
+    SharedPreferences.setMockInitialValues({
+      Session.editorDraftKey: jsonEncode({'v': 2, 'taking': 'front', 'kept_at': DateTime.now().millisecondsSinceEpoch})
+    });
+    lostPhoto = XFile.fromData(utf8.encode('lost jpeg'), name: 'lost.jpg', path: '/picked/lost.jpg');
+    final calls = await open(tester);
+    expect(calls.where((c) => c.endsWith('/media')), hasLength(1));
+    expect(find.byKey(const Key('restored-note')), findsNothing, reason: 'no work was kept, only the side');
+  });
+
+  testWidgets('a draft from before the condition had to be chosen does not keep the old default', (tester) async {
+    SharedPreferences.setMockInitialValues({
+      Session.editorDraftKey: jsonEncode(
+          {'title': 'Кроссовка', 'condition': 'new_with_box', 'kept_at': DateTime.now().millisecondsSinceEpoch})
+    });
+    await open(tester);
+    expect(find.byKey(const Key('restored-note')), findsOneWidget);
+    await tester.pump(const Duration(seconds: 2)); // kept again a moment after the change
+    final draft = await kept();
+    expect((draft?['title'], draft?['condition'], draft?['v']), ('Кроссовка', null, 2));
   });
 }

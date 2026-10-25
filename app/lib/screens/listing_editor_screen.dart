@@ -119,7 +119,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
   final _price = TextEditingController();
   final _delivery = TextEditingController(text: '0');
   String? _category; // chosen, or filled in from a photo: a default would file boots as sneakers
-  String _condition = 'new_with_box';
+  String? _condition; // asked, never assumed: a used pair must not go out as «new, with its box»
   String? _audience; // asked, never assumed: a men's default would hide a women's pair from women
   Map<String, String> _facts = {}; // picked, each optional
   String _style = 'clean';
@@ -144,6 +144,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
   String? _modelName;
   late final String _initial; // what the form held on opening
   Timer? _keepTimer;
+  String? _taking; // the side being taken right now, if the camera or gallery is open
   bool _restored = false; // work from before was put back: say so, with a way to start over
   bool _finished = false; // saved or thrown away: nothing more to keep
   Session? _session; // held, as the page is still kept while it is being closed
@@ -190,7 +191,8 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
   Future<void> _keep() async {
     _keepTimer?.cancel();
     if (_finished || !_keeps) return;
-    final draft = _dirty ? jsonEncode(_draft()) : null; // back to a blank page: nothing to offer next time
+    // Back to a blank page: nothing to offer next time, unless a side is being taken (its photo may come back).
+    final draft = _dirty || _taking != null ? jsonEncode(_draft()) : null;
     try {
       final prefs = await SharedPreferences.getInstance();
       await (draft == null ? prefs.remove(Session.editorDraftKey) : prefs.setString(Session.editorDraftKey, draft));
@@ -210,6 +212,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
 
   Map<String, Object?> _draft() => {
         'owner': _session?.me?.id,
+        'v': 2, // since v2 the condition is kept only when the seller chose it
         'save_key': _saveKey,
         'kept_at': DateTime.now().millisecondsSinceEpoch,
         'step': _step,
@@ -225,6 +228,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
         ],
         'photos': {for (final e in _photos.entries) e.key: _kept(e.value)},
         'defect_photos': [for (final d in _defectPhotos) _kept(d)],
+        if (_taking != null) 'taking': _taking,
       };
 
   List<(String, TextEditingController)> get _fields => [
@@ -265,12 +269,28 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
       }
       setState(() {
         _apply(d);
-        _restored = true;
+        _restored = _dirty; // a page kept only for the side being taken holds no work to speak of
       });
+      if (d['taking'] case final String angle
+          when requiredAngles.containsKey(angle) || optionalAngles.containsKey(angle)) {
+        unawaited(_takeLostPhoto(angle));
+      }
     } catch (_) {
       unawaited(_forget()); // kept by an older version and no longer readable
       _finished = false;
       setState(() => _apply({})); // not half of it: a clean page
+    }
+  }
+
+  /// The photo taken just as Android closed the app: image_picker hands it over only after the restart.
+  Future<void> _takeLostPhoto(String angle) async {
+    try {
+      final lost = await _picker.retrieveLostData();
+      final file = lost.file;
+      if (lost.isEmpty || file == null || !mounted) return; // a retake replaces the side's earlier photo
+      _usePhoto(angle, file);
+    } catch (_) {
+      // Not Android, or nothing to hand over: the side stays empty and the seller takes it again.
     }
   }
 
@@ -281,7 +301,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
       c.text = d[k] as String? ?? (k == 'delivery' ? '0' : '');
     }
     _category = d['category'] as String?;
-    _condition = d['condition'] as String? ?? 'new_with_box';
+    _condition = (d['v'] as int? ?? 1) >= 2 ? d['condition'] as String? : null; // v1 always held a default
     _audience = d['audience'] as String?;
     _facts = {
       for (final MapEntry(:key, :value) in ((d['facts'] as Map?) ?? const {}).entries)
@@ -579,9 +599,21 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
   }
 
   Future<void> _pickAngle(String angle) async {
+    _taking = angle; // kept with the work: Android may close the app while the camera is open
+    unawaited(_keep());
+    final XFile? file;
+    try {
+      file = await _pick(side: detailAngles.contains(angle) ? 3000 : 2000);
+    } finally {
+      _taking = null;
+      unawaited(_keep()); // the side is no longer being taken: a later lost photo is not this side's
+    }
+    if (file == null || !mounted) return;
+    _usePhoto(angle, file);
+  }
+
+  void _usePhoto(String angle, XFile file) {
     final detail = detailAngles.contains(angle);
-    final file = await _pick(side: detail ? 3000 : 2000);
-    if (file == null) return;
     final upload = _startUpload(file, detail: detail);
     _photos[angle]?.cancelled = true;
     setState(() => _photos[angle] = upload);
@@ -668,7 +700,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
         if (_brand.text.trim().isNotEmpty) 'brand': _brand.text.trim(),
         if (_modelName != null) 'model_name': _modelName,
         'color': _color.text.trim(),
-        'condition': _condition,
+        'condition': _condition!,
         if (_defectRequired.contains(_condition) && _defects.text.trim().isNotEmpty) 'defects': _defects.text.trim(),
         if (_description.text.trim().isNotEmpty) 'description': _description.text.trim(),
         'price_tiyn': _tiyn(_price.text),
@@ -848,7 +880,8 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
               ]),
             ),
           ),
-        Text(tr('Жарық жерде, біркелкі фонда түсіріңіз. Фото өзгертілмейді, тек метадеректер өшіріледі.'),
+        Text(
+            tr('Жарық жерде, біркелкі фонда түсіріңіз. Аяқкиімнің фоны кейін өзі алынады. Фото қай жерде түсірілгені туралы жасырын мәлімет өшіріледі.'),
             style: theme.textTheme.bodySmall),
         const SizedBox(height: 4),
         // What the star on four tiles means, before «Келесі» asks for them.
@@ -907,11 +940,13 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
           onAnswered: () => _colorAnswered = _colorGuess,
         ),
         DropdownButtonFormField<String>(
+          key: const Key('condition'),
           initialValue: _condition,
           isExpanded: true,
           decoration: InputDecoration(labelText: tr('Жағдайы')),
           items: [for (final e in conditions.entries) DropdownMenuItem(value: e.key, child: Text(tr(e.value)))],
-          onChanged: (v) => setState(() => _condition = v!),
+          validator: (v) => v == null ? tr('Жағдайын таңдаңыз') : null,
+          onChanged: (v) => setState(() => _condition = v),
         ),
         if (_defectRequired.contains(_condition)) ...[
           TextFormField(

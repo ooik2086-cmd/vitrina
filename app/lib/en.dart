@@ -105,8 +105,7 @@ const en = <String, String>{
   'Толтырыңыз': 'Fill in this field',
   'Жаңа тауар': 'New listing',
   'Фото': 'Photos',
-  'Жарық жерде, біркелкі фонда түсіріңіз. Фото өзгертілмейді, тек метадеректер өшіріледі.':
-      'Shoot in good light against a plain background. Photos aren\'t altered; only metadata is removed.',
+  'Жарық жерде, біркелкі фонда түсіріңіз. Аяқкиімнің фоны кейін өзі алынады. Фото қай жерде түсірілгені туралы жасырын мәлімет өшіріледі.': 'Shoot in good light on a plain background. The background around the shoe is removed later. Hidden data about where the photo was taken is deleted.',
   '360° көрініс': '360° view',
   'Міндетті емес, бірақ сатып алушы тауарды жан-жағынан көреді. Аяқкиімді аздап бұрып, {0} шақты кадр түсіріңіз.':
       'Optional, but buyers will see the item from every side. Turn the shoe slightly and take about {0} frames.',
@@ -1327,4 +1326,14 @@ const en = <String, String>{
   'Ақша сатып алушыға қайтарылып жатыр.': 'The money is going back to the buyer.',
   'Аккаунттан шығу керек пе?': 'Sign out?',
   'Көшіру': 'Copy',
+  'комиссия {0}': 'commission {0}',
+  '{0} бұғаттан шығарылсын ба?': 'Unblock {0}?',
+  'Бұғаттан шығарылды': 'Unblocked',
+  'Сатушы {0} дейін демалыста. Тапсырысты ол оралғанда беруге болады.': 'The seller is away until {0}. You can order when they are back.',
+  'Жағдайын таңдаңыз': 'Choose the condition',
+  'Дүкен атауы мен қаланы жазыңыз (кемінде 2 әріп).': 'Write the shop name and the city (at least 2 letters).',
+  'Пішіні мен түсі ұқсас, {0} см аяққа келетін тауарлар. Фотоңыз серверде сақталмайды.': 'Items similar in shape and colour that fit a {0} cm foot. Your photo is not stored on the server.',
+  'Сатылымда жоқ': 'Off sale',
+  '{0} см аяққа келетін ұқсас тауар табылмады.': 'No similar items fit a {0} cm foot.',
+  'Барлық өлшемнен іздеу': 'Search all sizes',
 };
