@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -85,6 +86,8 @@ class _ListingScreenState extends State<ListingScreen> {
   Offer? _offer; // the signed-in buyer's latest offer on this listing
   // One key per order attempt: a retried tap after a lost response returns the same order.
   String _orderKey = newIdempotencyKey();
+  String? _orderFor; // what [_orderKey] was last sent for
+  Checkout? _unanswered; // the last order sent whose answer never came
   Set<int>? _alerts; // sold-out sizes the buyer waits for, once they tap one
   // Off until a payment partner is signed: the buy button then opens the chat with the seller and offers are hidden.
   bool _payments = true;
@@ -249,12 +252,18 @@ class _ListingScreenState extends State<ListingScreen> {
       showDragHandle: true,
       // An agreed price is already the seller's discount, so a promo code is not offered on top of it.
       builder: (_) => DeliverySheet(
+          initial: _unanswered,
           listingId: offer == null ? listing.id : null,
           itemPriceTiyn: offer == null ? listing.priceTiyn : min(offer.priceTiyn, listing.priceTiyn),
           deliveryPriceTiyn: listing.deliveryPriceTiyn),
     );
     // Another colour opened meanwhile: its size is not this pair's, so nothing is ordered.
     if (checkout == null || !mounted || listing.id != _id) return;
+    // A retry of the same order keeps its key, so an answer lost on a weak line never makes two orders. Another size,
+    // address, price or code is another order: it gets its own key, or the server would hand back the first one.
+    final what = jsonEncode([listing.id, _sizeId, offer?.id, checkout.promoCode, checkout.delivery.toJson()]);
+    if (what != _orderFor) _orderKey = newIdempotencyKey();
+    _orderFor = what;
     setState(() => _ordering = true);
     try {
       final session = SessionScope.of(context);
@@ -266,10 +275,14 @@ class _ListingScreenState extends State<ListingScreen> {
       session.api.me().then(session.update, onError: (_) {}); // the address is remembered for next time
       if (offer != null) _offer = null;
       _orderKey = newIdempotencyKey();
+      _unanswered = null;
       if (!mounted) return;
       // The order screen opens on its "now pay" banner: paying is the one step left.
       await Navigator.of(context).push(MaterialPageRoute(builder: (_) => OrderScreen(orderId: order.id)));
     } catch (e) {
+      // No answer (a weak line): the order may be made. The next try fills in the same and keeps the key, so it is
+      // the same order. A plain refusal made nothing, and anything may be changed.
+      _unanswered = e is! ApiException || e.passing ? checkout : null;
       if (mounted) showError(context, e);
       // Online payment was switched off after this page asked: from now on the button writes to the seller.
       if (e is ApiException && e.code == 'payments_off' && mounted) {
@@ -414,6 +427,7 @@ class _ListingScreenState extends State<ListingScreen> {
       // What belonged to the other colour: its offer, its stock alerts, its order attempt.
       _offer = null;
       _offerError = null;
+      _unanswered = null;
       _alerts = null;
       _favorite = false;
       _noModel = false;

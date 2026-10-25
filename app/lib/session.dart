@@ -36,19 +36,58 @@ class Session extends ChangeNotifier {
     if (pending != null) unawaited(_logout(pending));
     api.token = prefs.getString(_tokenKey);
     if (api.token == null) return;
-    try {
-      me = await api.me();
-      unawaited(Push.register());
-    } on ApiException catch (e) {
-      if (e.status == 401) await signOut(server: false);
-    } catch (_) {
-      // Offline: keep the token and try again later.
+    await reloadMe();
+  }
+
+  /// Why the profile did not load (offline, the server away), while signed in without it; null otherwise.
+  Object? meError;
+  Future<void>? _reloading;
+
+  /// Why the sign-in ended without the person signing out (the account blocked), to be said once; null otherwise.
+  final notice = ValueNotifier<ApiException?>(null);
+
+  /// The profile, when signed in without it: at the start, and again when the line is back (the tabs' minute check,
+  /// the app coming back, "Қайта көру" with [shown]), so an app opened offline does not stay without it until
+  /// restarted. Every page that reads the session is rebuilt only when what it shows changes, not at each failed try.
+  Future<void> reloadMe({bool shown = false}) => _reloading ??= _reloadMe(shown).whenComplete(() => _reloading = null);
+
+  Future<void> _reloadMe(bool shown) async {
+    final bearer = api.token;
+    if (bearer == null || me != null) return;
+    if (shown && meError != null) {
+      meError = null; // the circle while it tries, the error again only if it fails
+      notifyListeners();
     }
-    notifyListeners();
+    Object? failed;
+    try {
+      final loaded = await api.me();
+      if (api.token != bearer) return; // signed out (or in again) meanwhile
+      me = loaded;
+      meError = null;
+      unawaited(Push.register());
+      notifyListeners();
+      return;
+    } on ApiException catch (e) {
+      if (api.token != bearer) return; // an answer for a sign-in already gone
+      // Ended, or the account blocked: signed out here too; a block is said in words (HomeShell).
+      if (e.status == 401 || e.code == 'account_blocked') {
+        if (e.code == 'account_blocked') notice.value = e;
+        await signOut(server: false);
+        return;
+      }
+      failed = e;
+    } catch (e) {
+      if (api.token != bearer) return;
+      failed = e; // offline: the sign-in is kept, and tried again later
+    }
+    final first = meError == null;
+    meError = failed;
+    if (first) notifyListeners();
   }
 
   Future<void> signIn(String phone, String code) async {
     me = await api.verifyOtp(phone, code);
+    meError = null;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_tokenKey, api.token!);
     notifyListeners();
@@ -83,6 +122,7 @@ class Session extends ChangeNotifier {
     final bearer = api.token;
     api.token = null;
     me = null;
+    meError = null;
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_tokenKey);
     notifyListeners();

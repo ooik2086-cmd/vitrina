@@ -437,11 +437,19 @@ class Payouts {
       : payableTiyn = j['payable_tiyn'] as int,
         minTiyn = j['min_tiyn'] as int,
         hasAccount = j['has_account'] as bool,
+        ibanMasked = j['iban_masked'] as String?,
+        readyAt = j['ready_at'] == null ? null : DateTime.parse(j['ready_at'] as String).toLocal(),
         open = j['open'] as bool,
         items = [for (final i in j['items'] as List) PayoutInfo.fromJson(i as Map<String, dynamic>)];
   final int payableTiyn;
   final int minTiyn;
   final bool hasAccount;
+
+  /// Where the money goes, as "KZ86 •••• 0100", so the seller sees it is her own account.
+  final String? ibanMasked;
+
+  /// New bank details are paid to only from this time on (a day after they were saved); null once they may be.
+  final DateTime? readyAt;
   final bool open;
   final List<PayoutInfo> items;
 }
@@ -558,6 +566,7 @@ class Listing {
         color = j['color'] as String,
         priceTiyn = j['price_tiyn'] as int,
         wasPriceTiyn = j['was_price_tiyn'] as int?,
+        preSalePriceTiyn = j['pre_sale_price_tiyn'] as int?,
         deliveryPriceTiyn = j['delivery_price_tiyn'] as int,
         segment = j['segment'] as String?,
         condition = j['condition'] as String,
@@ -627,6 +636,9 @@ class Listing {
 
   /// The price before the seller's recent cut, shown crossed out; null when there is no sale.
   final int? wasPriceTiyn;
+
+  /// The seller's own listings: the price before the shop sale that runs, which a new sale is cut from.
+  final int? preSalePriceTiyn;
   final int deliveryPriceTiyn;
   final String? segment;
   final String condition;
@@ -1162,14 +1174,24 @@ class Api {
   /// Whether the server takes orders and offers now. Until a payment partner is signed it does not, and buyers write
   /// to the seller instead. Asked once; a failed check counts as yes and is asked again next time, because the server
   /// still refuses an order itself, with words for people.
-  Future<bool> paymentsOn() =>
-      _payments ??= _send('GET', '/app-config').then((r) => (r as Map)['payments'] != false).catchError((Object _) {
+  Future<bool> paymentsOn() => _payments ??= _send('GET', '/app-config')
+          .then((r) => _paymentsKnown = (r as Map)['payments'] != false)
+          .catchError((Object _) {
         _payments = null;
         return true;
       });
 
+  bool? _paymentsKnown;
+
+  /// For words people read (the first pages, Help): what the server said of payments, null when unknown (offline, a
+  /// slow line). Unknown promises nothing either way: neither money held by VITRINA nor paying the seller in chat.
+  Future<bool?> paymentsPromised() => paymentsOn().then((_) => _paymentsKnown);
+
   /// The server refused an order with payments_off: the app knows it for the rest of the run.
-  void paymentsTurnedOff() => _payments = Future.value(false);
+  void paymentsTurnedOff() {
+    _payments = Future.value(false);
+    _paymentsKnown = false;
+  }
 
   Future<Me> setAway(DateTime? until) async => Me.fromJson(await _send('PUT', '/me/away', body: {
         'until': until == null

@@ -147,7 +147,10 @@ def verify_otp(body: OtpVerify, db: Session = Depends(get_db), cfg: Settings = D
         OtpCode.phone == body.phone, OtpCode.used.is_(False), OtpCode.attempts < cfg.otp_max_attempts,
         OtpCode.expires_at > now_utc()).order_by(OtpCode.id.desc())).all()
     if not live:
-        raise ApiError(400, "otp_expired")
+        locked = db.scalar(select(OtpCode.id).where(
+            OtpCode.phone == body.phone, OtpCode.used.is_(False), OtpCode.expires_at > now_utc()).limit(1))
+        # A code still in time but typed wrong too often is not "expired": the person was not slow, just unlucky.
+        raise ApiError(400, "otp_locked" if locked else "otp_expired")
     digest = hmac.new(cfg.otp_secret, f"{body.phone}:{body.code}".encode(), hashlib.sha256).hexdigest()
     otp = next((o for o in live if hmac.compare_digest(digest, o.code_hash)), None)
     if otp is None:
@@ -171,7 +174,7 @@ def verify_otp(body: OtpVerify, db: Session = Depends(get_db), cfg: Settings = D
         db.flush()
     if user.is_blocked:
         db.commit()
-        raise ApiError(403, "forbidden", "account blocked")
+        raise ApiError(403, "account_blocked", cfg.support_contact or None)  # where to write, when it is set
     raw = secrets.token_urlsafe(32)
     # Staff can move money and hide listings, so a leaked staff token is worth far less if it dies within a shift.
     ttl = STAFF_TOKEN_TTL if user.role in ("support", "admin") else cfg.token_ttl

@@ -53,7 +53,7 @@ def current_sign_in(authorization: str | None = Header(default=None), db: Sessio
         raise ApiError(401, "unauthorized")
     user = db.get(User, token.user_id)
     if user.is_blocked:
-        raise ApiError(403, "forbidden", "account blocked")
+        raise ApiError(403, "account_blocked")
     return token
 
 

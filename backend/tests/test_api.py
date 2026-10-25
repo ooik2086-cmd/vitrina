@@ -119,6 +119,14 @@ class ApiTestCase(unittest.TestCase):
     def db(self):
         return self.app.state.sessions()
 
+    def settle_accounts(self):
+        """Bank details saved a day and more ago: past the wait new ones get before money goes to them."""
+        from vitrina_api.models import PayoutAccount
+        with self.db() as db:
+            for a in db.scalars(select(PayoutAccount)):
+                a.updated_at = a.updated_at - timedelta(days=2)
+            db.commit()
+
     def fetch(self, url):
         """A file through the address a response gave, as the app would load it."""
         r = self.c.get(url.removeprefix("http://test"))
@@ -365,7 +373,7 @@ class AuthTests(ApiTestCase):
         for _ in range(self.cfg.otp_max_attempts):
             self.assertEqual(self.c.post("/api/v1/auth/verify", json={"phone": "+77010000003", "code": "000000"}).status_code, 400)
         r = self.c.post("/api/v1/auth/verify", json={"phone": "+77010000003", "code": "000000"})
-        self.assertEqual(r.json()["code"], "otp_expired")
+        self.assertEqual(r.json()["code"], "otp_locked")
 
     def test_otp_rate_limit(self):
         for _ in range(self.cfg.otp_per_phone_per_hour):
@@ -956,8 +964,17 @@ class PayoutTests(ApiTestCase):
     def test_payout_moves_money_out_once_and_support_pays_or_returns_it(self):
         self.assertEqual(self.post("/me/payouts", self.seller).json()["code"], "payout_account_required")
         self.account()
-        self.assertEqual(self.post("/me/payouts", self.seller).json()["code"], "payout_too_small")
         owed = self.completed()
+        # New bank details wait a day before money goes to them, and the seller hears of them at once.
+        self.assertEqual(self.post("/me/payouts", self.seller).json()["code"], "payout_account_new")
+        notices = self.c.get("/api/v1/notifications", headers=self.h(self.seller)).json()["items"]
+        self.assertIn("Банк шоты сақталды: KZ86 •••• 0100", next(n for n in notices if n["kind"] == "payout")["text"])
+        self.assertIsNotNone(self.c.get("/api/v1/me/payouts", headers=self.h(self.seller)).json()["ready_at"])
+        self.settle_accounts()
+        self.assertIsNone(self.c.get("/api/v1/me/payouts", headers=self.h(self.seller)).json()["ready_at"])
+        self.account(holder_name="ЖК Qadam Store")  # the same account saved again does not start the wait over
+        self.assertEqual(self.post("/me/payouts", self.seller, {"amount_tiyn": 99_900}).json()["code"],
+                         "payout_too_small")
         self.assertEqual(self.post("/me/payouts", self.seller, {"amount_tiyn": owed + 1}).json()["code"],
                          "payout_exceeds")
         r = self.post("/me/payouts", self.seller, {"amount_tiyn": owed - 100_000})
@@ -3103,6 +3120,32 @@ class AwayTests(ApiTestCase):
         items = self.c.get("/api/v1/notifications", headers=self.h(self.seller)).json()["items"]
         self.assertIn("is sold out", next(n for n in items if n["kind"] == "sold_out")["text_en"])
 
+    def test_a_blocked_account_is_told_so_in_plain_words(self):
+        from vitrina_api.models import User
+        with self.db() as db:
+            db.scalar(select(User).where(User.phone == "+77010000002")).is_blocked = True
+            db.commit()
+        r = self.c.get("/api/v1/me", headers=self.h(self.buyer))
+        self.assertEqual((r.status_code, r.json()["code"]), (403, "account_blocked"))
+        code = self.c.post("/api/v1/auth/otp", json={"phone": "+77010000002"}).json()["dev_code"]
+        r = self.c.post("/api/v1/auth/verify", json={"phone": "+77010000002", "code": code})
+        self.assertEqual((r.status_code, r.json()["code"]), (403, "account_blocked"))
+        self.assertIn("бұғатталған", r.json()["message_kk"])
+
+    def test_favorites_show_only_what_the_listing_page_shows(self):
+        draft = self.post("/listings", self.seller, LISTING).json()["id"]
+        self.assertEqual(self.post(f"/favorites/{draft}", self.buyer).status_code, 404)  # nobody else's draft
+        self.assertEqual(self.post(f"/favorites/{draft}", self.seller).status_code, 204)  # the seller's own
+        live = self.publish()["id"]
+        self.assertEqual(self.post(f"/favorites/{live}", self.buyer).status_code, 204)
+        saved = lambda t: [i["id"] for i in self.c.get("/api/v1/favorites", headers=self.h(t)).json()["items"]]
+        self.assertEqual(saved(self.buyer), [live])
+        self.post(f"/listings/{live}/pause", self.seller)
+        self.assertEqual(saved(self.buyer), [], "paused: its page does not open either")
+        self.assertEqual(sorted(saved(self.seller)), [draft])
+        self.post(f"/listings/{live}/publish", self.seller)
+        self.assertEqual(saved(self.buyer), [live], "kept, and back once on sale again")
+
     def test_shop_sale_cuts_every_listing_and_ending_it_puts_prices_back(self):
         a = self.publish()
         b = self.publish(price_tiyn=1_299_000)
@@ -3115,6 +3158,16 @@ class AwayTests(ApiTestCase):
         self.assertEqual(shown[b["id"]]["price_tiyn"], 1_104_200)  # 11 041,50 ₸ rounded to whole tenge
         kinds = [n["kind"] for n in self.c.get("/api/v1/notifications", headers=self.h(self.buyer)).json()["items"]]
         self.assertEqual(kinds, ["price_drop"])
+        # The answer lost on a weak line, tapped again: the cut price is not cut again, nobody hears it twice.
+        self.assertEqual(self.post("/me/shop-sale", self.seller, {"percent": 15}).json(), {"changed": 0})
+        self.assertEqual(self.c.get(f"/api/v1/listings/{a['id']}").json()["price_tiyn"], 3_825_000)
+        kinds = [n["kind"] for n in self.c.get("/api/v1/notifications", headers=self.h(self.buyer)).json()["items"]]
+        self.assertEqual(kinds, ["price_drop"])
+        # A new sale while one runs replaces it, from the price before the sale.
+        self.assertEqual(self.post("/me/shop-sale", self.seller, {"percent": 20}).json(), {"changed": 2})
+        mine = self.c.get(f"/api/v1/listings/{a['id']}", headers=self.h(self.seller)).json()
+        self.assertEqual((mine["price_tiyn"], mine["pre_sale_price_tiyn"]), (3_600_000, 4_500_000))
+        self.assertNotIn("pre_sale_price_tiyn", self.c.get(f"/api/v1/listings/{a['id']}").json())
         self.assertEqual(self.c.delete("/api/v1/me/shop-sale", headers=self.h(self.seller)).json(), {"changed": 2})
         back = self.c.get(f"/api/v1/listings/{a['id']}").json()
         self.assertEqual((back["price_tiyn"], back["was_price_tiyn"]), (4_500_000, None))

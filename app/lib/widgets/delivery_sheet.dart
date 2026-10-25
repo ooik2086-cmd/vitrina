@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../api.dart';
@@ -25,8 +27,11 @@ class Checkout {
 /// With [listingId], the buyer can also try the seller's promo code and see the new price.
 /// With [itemPriceTiyn], the sheet ends with what the order will cost in all, so nothing surprises on the next step.
 class DeliverySheet extends StatefulWidget {
-  const DeliverySheet({super.key, this.listingId, this.itemPriceTiyn, this.deliveryPriceTiyn = 0});
+  const DeliverySheet({super.key, this.listingId, this.itemPriceTiyn, this.deliveryPriceTiyn = 0, this.initial});
   final int? listingId;
+
+  /// What was sent the last time, when its answer never came: filled in as it was, so the same order is retried.
+  final Checkout? initial;
   final int? itemPriceTiyn;
   final int deliveryPriceTiyn;
 
@@ -46,12 +51,20 @@ class _DeliverySheetState extends State<DeliverySheet> {
   void initState() {
     super.initState();
     final me = context.getInheritedWidgetOfExactType<SessionScope>()?.notifier?.me;
-    final last = me?.lastDelivery;
+    final last = widget.initial?.delivery ?? me?.lastDelivery;
     _name = TextEditingController(text: last?.recipientName ?? me?.displayName ?? '');
     _phone = TextEditingController(text: last?.recipientPhone ?? me?.phone ?? '');
     _city = TextEditingController(text: last?.city ?? me?.city ?? '');
     _address = TextEditingController(text: last?.address ?? '');
     _note = TextEditingController(text: last?.note ?? '');
+    final code = widget.initial?.promoCode;
+    if (code != null && widget.listingId != null) {
+      _promoOpen = true;
+      _promo.text = code;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) unawaited(_checkPromo());
+      });
+    }
   }
 
   @override

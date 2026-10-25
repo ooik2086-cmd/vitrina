@@ -216,6 +216,7 @@ class RaceTests(ApiTestCase):
         self.c.put("/api/v1/me/payout-account", headers=self.h(self.seller), json={
             "holder_name": "ЖК Qadam Store", "iban": "kz86 125K ZT50 0410 0100",
             "tax_id": with_check_digit("90010130012")})
+        self.settle_accounts()
         payout = self.post("/me/payouts", self.seller).json()
         staff = self.make_staff()
         rs = self.race(*[lambda: self.post(f"/admin/payouts/{payout['id']}/paid", staff, {"bank_ref": "ПП-1"})] * 4,
@@ -241,6 +242,7 @@ class RaceTests(ApiTestCase):
         self.c.put("/api/v1/me/payout-account", headers=self.h(self.seller), json={
             "holder_name": "ЖК Qadam Store", "iban": "kz86 125K ZT50 0410 0100",
             "tax_id": with_check_digit("90010130012")})
+        self.settle_accounts()
         rs = self.same(lambda: self.post("/me/payouts", self.seller))
         self.assertEqual([r.status_code for r in rs].count(201), 1, self.codes(rs))
         self.assertEqual(self.count(Payout), 1)

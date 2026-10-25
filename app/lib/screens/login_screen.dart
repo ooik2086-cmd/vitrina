@@ -36,7 +36,22 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
-  String get _normalizedPhone => _phone.text.replaceAll(RegExp(r'[\s()-]'), '');
+  /// The number as the server takes it, +7XXXXXXXXXX, however it was typed: 8 701…, 7 701…, 701… or +7 701….
+  String get _normalizedPhone {
+    final typed = _phone.text.replaceAll(RegExp(r'[\s()-]'), '');
+    final digits = typed.replaceAll(RegExp(r'\D'), '');
+    // Typed after the "+7" already in the field: +7 8 701… or +7 7 701….
+    if (digits.length == 12 && digits.startsWith('7') && (digits[1] == '8' || digits[1] == '7')) {
+      return '+7${digits.substring(2)}';
+    }
+    if (digits.length == 11 && (digits.startsWith('8') || digits.startsWith('7'))) return '+7${digits.substring(1)}';
+    if (digits.length == 10 && digits.startsWith('7')) return '+7$digits';
+    return typed.startsWith('+') ? '+$digits' : typed;
+  }
+
+  /// The code as typed or pasted, without the spaces or dashes a message may carry.
+  String get _typedCode => _code.text.replaceAll(RegExp(r'\D'), '');
+  bool get _codeTyped => _typedCode.length == 6;
 
   void _countDown(int seconds) {
     _timer?.cancel();
@@ -73,7 +88,13 @@ class _LoginScreenState extends State<LoginScreen> {
       } else if (e.code == 'rate_limited' && int.tryParse(e.detail ?? '') != null && mounted) {
         _countDown(int.parse(e.detail!)); // the hourly or daily limit: the button waits it out instead of failing
       }
-      if (mounted) showError(context, e);
+      if (!mounted) return;
+      if (e.code == 'account_blocked') {
+        await showAccountBlocked(context, e);
+      } else {
+        if (e.code == 'otp_locked') _code.clear(); // that code is spent: a new one is asked for
+        showError(context, e);
+      }
     } catch (e) {
       if (mounted) showError(context, e);
     } finally {
@@ -97,9 +118,15 @@ class _LoginScreenState extends State<LoginScreen> {
       });
 
   void _verify() => _run((s) async {
-        await s.signIn(_normalizedPhone, _code.text.trim());
+        await s.signIn(_normalizedPhone, _typedCode);
         if (mounted) Navigator.of(context).pop();
       });
+
+  @override
+  void initState() {
+    super.initState();
+    _code.addListener(() => setState(() {})); // "Растау" waits for all six digits: a short code only uses up a try
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -131,7 +158,9 @@ class _LoginScreenState extends State<LoginScreen> {
         ],
         const SizedBox(height: 24),
         FilledButton(
-          onPressed: _busy || (!_codeSent && _wait > 0) ? null : (_codeSent ? _verify : _sendCode),
+          onPressed: _busy || (!_codeSent && _wait > 0) || (_codeSent && !_codeTyped)
+              ? null
+              : (_codeSent ? _verify : _sendCode),
           child: Text(_codeSent
               ? tr('Растау')
               : _wait > 0
@@ -164,3 +193,15 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 }
+
+/// The account is blocked: said in a box that stays until closed, with where to write (the server's support contact,
+/// when it gave one) to copy down.
+Future<void> showAccountBlocked(BuildContext context, ApiException e) => showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        key: const Key('account-blocked'),
+        title: Text(e.message),
+        content: (e.detail ?? '').isEmpty ? null : SelectableText(e.detail!),
+        actions: [FilledButton(onPressed: () => Navigator.pop(context), child: Text(tr('Жабу')))],
+      ),
+    );

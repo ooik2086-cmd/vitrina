@@ -773,6 +773,11 @@ const en = <String, String>{
   'Сатушы жауап берген ұсыныс': 'Offers the seller answered',
   'IBAN және ЖСН/БСН: ақшаны шығару үшін керек.': 'IBAN and IIN/BIN: needed to pay out.',
   '{0} шотыңызға шығарылсын ба?': 'Pay out {0} to your account?',
+  'Жаңа банк шотына ақшаны {0}, сағат {1} бастап шығаруға болады.':
+      'Money can be paid out to the new bank account from {0}, {1}.',
+  'Қазіргі жеңілдік бұдан үлкен: бағалар қымбаттайды.': 'The sale running now is bigger: prices will go up.',
+  'Бағалар бұрыннан осылай.': 'Prices are already like this.',
+  'Ақша осы шотқа аударылады: {0}': 'Money is paid out to this account: {0}',
   'Ақша осы шотқа аударылады.': 'Money is sent to this account.',
   'Банк шоты': 'Bank account',
   'Банк шотын қосу': 'Add a bank account',

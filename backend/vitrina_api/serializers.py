@@ -165,7 +165,8 @@ def listing_out(db: Session, listing: Listing, *, owner: bool = False) -> dict:
                    **per_request(db, "seller_rating", seller.id, lambda: seller_rating(db, seller.id))},
         **({"stats": listing_stats(db, listing), "ever_on_sale": listing.announced_at is not None,
             "promo": {"state": listing.promo_state, "url": listing.promo_url},
-            "moderation": moderation_out(listing), "photos_pending": photos_pending(listing)} if owner else {}),
+            "moderation": moderation_out(listing), "photos_pending": photos_pending(listing),
+            "pre_sale_price_tiyn": listing.pre_sale_price_tiyn} if owner else {}),
     }
 
 

@@ -197,10 +197,15 @@ def delete_saved_search(search_id: int, user: User = Depends(current_user), db: 
     db.commit()
 
 
+# What anyone may see of a listing, as GET /listings/{id} shows it; the seller sees their own whatever its state.
+SHOWN = ("published", "sold")
+
+
 @router.post("/favorites/{listing_id}", status_code=204)
 def add_favorite(listing_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    if db.get(Listing, listing_id) is None:
-        raise ApiError(404, "not_found")
+    listing = db.get(Listing, listing_id)
+    if listing is None or not (listing.status in SHOWN or listing.seller_id == user.id):
+        raise ApiError(404, "not_found")  # as GET /listings/{id}: a draft or a hidden pair is nobody else's to see
     db.add(Favorite(user_id=user.id, listing_id=listing_id))
     try:
         db.commit()
@@ -222,7 +227,8 @@ def list_favorites(before: int | None = Query(default=None, ge=1, le=2**31 - 1),
                    user: User = Depends(current_user), db: Session = Depends(get_db)):
     """The newest saved first, a page at a time: a long list of favourites with every 360° frame is never one response.
     next_before is the cursor for the next page (null after the last), by when it was saved, not by offset, so a heart
-    tapped meanwhile never repeats or skips one; a page may hold fewer items than it counted when a listing is gone."""
+    tapped meanwhile never repeats or skips one; a page may hold fewer items than it counted when a listing is gone, or
+    no longer on show (paused, hidden by a moderator), as its own page would not open either."""
     q = select(Favorite.id, Favorite.listing_id).where(Favorite.user_id == user.id)
     if before is not None:
         q = q.where(Favorite.id < before)
@@ -230,6 +236,7 @@ def list_favorites(before: int | None = Query(default=None, ge=1, le=2**31 - 1),
     saved, more = saved[:limit], len(saved) > limit
     ids = [s.listing_id for s in saved]
     found = {listing.id: listing for listing in with_light_media(db, db.scalars(
-        select(Listing).options(LIGHT).where(Listing.id.in_(ids))).all())}
+        select(Listing).options(LIGHT).where(Listing.id.in_(ids),
+                                             or_(Listing.status.in_(SHOWN), Listing.seller_id == user.id))).all())}
     return {"items": [listing_out(db, found[i]) for i in ids if i in found],
             "next_before": saved[-1].id if more else None}

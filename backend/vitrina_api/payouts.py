@@ -7,6 +7,7 @@ same money cannot be asked for twice; a request support sends back returns it.
 from __future__ import annotations
 
 import re
+from datetime import timedelta
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
@@ -23,6 +24,9 @@ from .models import Payout, PayoutAccount, User
 router = APIRouter(prefix="/api/v1")
 
 MIN_PAYOUT_TIYN = 100_000  # 1 000 ₸: below that a bank transfer costs more than it is worth
+# New bank details wait this long before money goes to them, and the seller is told at once: someone with the
+# seller's unlocked phone (or sign-in) cannot put in their own account and take the balance before she sees it.
+NEW_ACCOUNT_WAIT = timedelta(hours=24)
 IBAN = re.compile(r"^KZ\d{2}[0-9A-Z]{16}$")
 
 
@@ -117,7 +121,17 @@ def put_account(body: AccountIn, user: User = Depends(current_user), db: Session
     if a is None:
         a = PayoutAccount(seller_id=user.id)
         db.add(a)
-    a.holder_name, a.iban, a.tax_id, a.updated_at = name, iban, tax_id, now_utc()
+    if (a.iban, a.tax_id) != (iban, tax_id):  # the name alone (a typo put right) needs no wait
+        a.updated_at = now_utc()
+        services.notify(
+            db, user.id, "payout",
+            f"Банк шоты сақталды: {masked(iban)}. Ақшаны 24 сағаттан кейін шығаруға болады. Бұны сіз жасамаған "
+            "болсаңыз, қолдау қызметіне бірден жазыңыз.",
+            f"Банковский счёт сохранён: {masked(iban)}. Вывести деньги можно через 24 часа. Если это были не вы, "
+            "сразу напишите в поддержку.",
+            f"Bank account saved: {masked(iban)}. Money can be paid out to it after 24 hours. If this was not you, "
+            "write to support at once.")
+    a.holder_name, a.iban, a.tax_id = name, iban, tax_id
     services.audit(db, user.id, "payout_account", f"user:{user.id}", masked(iban))
     db.commit()
     return {"account": account_out(a)}
@@ -127,8 +141,12 @@ def put_account(body: AccountIn, user: User = Depends(current_user), db: Session
 def my_payouts(user: User = Depends(current_user), db: Session = Depends(get_db)):
     seller_only(user)
     rows = db.scalars(select(Payout).where(Payout.seller_id == user.id).order_by(Payout.id.desc()).limit(50)).all()
+    account = db.get(PayoutAccount, user.id)
     return {"payable_tiyn": services.balance(db, seller_payable(str(user.id))), "min_tiyn": MIN_PAYOUT_TIYN,
-            "has_account": db.get(PayoutAccount, user.id) is not None,
+            "has_account": account is not None, "iban_masked": masked(account.iban) if account else None,
+            # When new bank details may first be paid to; null once they may.
+            "ready_at": ready.isoformat() if account and (ready := services.aware(account.updated_at)
+                                                            + NEW_ACCOUNT_WAIT) > now_utc() else None,
             "open": any(p.status == "requested" for p in rows), "items": [payout_out(p) for p in rows]}
 
 
@@ -140,6 +158,8 @@ def request_payout(body: PayoutIn, user: User = Depends(current_user), db: Sessi
     account = db.scalar(select(PayoutAccount).where(PayoutAccount.seller_id == user.id).with_for_update())
     if account is None:
         raise ApiError(409, "payout_account_required")
+    if services.aware(account.updated_at) > now_utc() - NEW_ACCOUNT_WAIT:
+        raise ApiError(409, "payout_account_new")
     if open_payout(db, user.id) is not None:
         raise ApiError(409, "payout_open")
     owed = services.balance(db, seller_payable(str(user.id)))

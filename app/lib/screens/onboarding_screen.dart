@@ -60,18 +60,23 @@ class OnboardingScreen extends StatefulWidget {
 class _OnboardingScreenState extends State<OnboardingScreen> {
   final _pager = PageController();
   int _page = 0;
-  bool _payments = true;
+  bool? _payments; // what the server said; until then neither money page is shown
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     // Without a session (this page tested alone) the pages stay as they are.
-    SessionScope.maybeOf(context)?.api.paymentsOn().then((on) {
-      if (mounted && on != _payments) setState(() => _payments = on);
+    SessionScope.maybeOf(context)?.api.paymentsPromised().then((on) {
+      // Not under the person's eyes: once past the first page the pages stay as they are.
+      if (mounted && on != _payments && _page == 0) setState(() => _payments = on);
     });
   }
 
-  List<_Page> get _shown => _payments ? _pages : [_pages[0], _directPage, _pages[2]];
+  List<_Page> get _shown => switch (_payments) {
+        true => _pages,
+        false => [_pages[0], _directPage, _pages[2]],
+        null => [_pages[0], _pages[2]],
+      };
 
   @override
   void dispose() {

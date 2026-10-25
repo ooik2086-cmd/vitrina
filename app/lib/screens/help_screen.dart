@@ -94,13 +94,18 @@ class HelpScreen extends StatelessWidget {
   const HelpScreen({super.key});
 
   @override
-  Widget build(BuildContext context) => FutureBuilder<bool>(
-      future: SessionScope.maybeOf(context)?.api.paymentsOn(),
-      builder: (context, payments) => _build(context, payments.data ?? true));
+  Widget build(BuildContext context) => FutureBuilder<bool?>(
+      future: SessionScope.maybeOf(context)?.api.paymentsPromised(),
+      builder: (context, payments) => _build(context, payments.data));
 
-  Widget _build(BuildContext context, bool payments) {
+  /// [payments] unknown (offline): only what holds either way, no word on who keeps the money.
+  Widget _build(BuildContext context, bool? payments) {
     final theme = Theme.of(context);
-    final topics = payments ? _topics : [..._directTopics, ..._topics.where((t) => !t.paid)];
+    final topics = switch (payments) {
+      true => _topics,
+      false => [..._directTopics, ..._topics.where((t) => !t.paid)],
+      null => _topics.where((t) => !t.paid).toList(),
+    };
     return Scaffold(
       appBar: AppBar(title: Text(tr('Қалай жұмыс істейді'))),
       body: ListView(padding: contentPadding(context, const EdgeInsets.fromLTRB(16, 4, 16, 32)), children: [

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -36,7 +38,9 @@ class ProfileScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(title: Text(tr('Профиль'))),
       body: me == null
-          ? const Center(child: CircularProgressIndicator())
+          ? (session.meError != null
+              ? ErrorRetry(error: session.meError, onRetry: () => unawaited(session.reloadMe(shown: true)))
+              : const Center(child: CircularProgressIndicator()))
           : ListView(
               padding: contentPadding(context, EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom)),
               children: [

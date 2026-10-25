@@ -85,7 +85,11 @@ class _EarningsScreenState extends State<EarningsScreen> {
   }
 
   Future<void> _payout(Payouts p) async {
-    if (!p.hasAccount && !await _editAccount()) return;
+    if (!p.hasAccount) {
+      // New details wait a day before money goes to them: the card says from when, nothing is asked now.
+      await _editAccount();
+      return;
+    }
     if (!mounted) return;
     final ok = await showDialog<bool>(
       context: context,
@@ -152,15 +156,21 @@ class _EarningsScreenState extends State<EarningsScreen> {
                     Text(
                         p.open
                             ? tr('Шығару сұрауыңыз қаралуда.')
-                            : p.payableTiyn < p.minTiyn
-                                ? trf('Ең аз шығару сомасы — {0}.', [formatTenge(p.minTiyn)])
-                                : tr('Банк шотыңызға шығарып алуға болады.'),
+                            : p.readyAt != null
+                                ? trf('Жаңа банк шотына ақшаны {0}, сағат {1} бастап шығаруға болады.', [
+                                    formatDay(p.readyAt!),
+                                    '${p.readyAt!.hour.toString().padLeft(2, '0')}:'
+                                        '${p.readyAt!.minute.toString().padLeft(2, '0')}'
+                                  ])
+                                : p.payableTiyn < p.minTiyn
+                                    ? trf('Ең аз шығару сомасы — {0}.', [formatTenge(p.minTiyn)])
+                                    : tr('Банк шотыңызға шығарып алуға болады.'),
                         style: TextStyle(color: muted, fontSize: 13)),
                     const SizedBox(height: 12),
                     FilledButton.icon(
                       key: const Key('payout'),
                       style: FilledButton.styleFrom(backgroundColor: scheme.onPrimary, foregroundColor: scheme.primary),
-                      onPressed: p.open || p.payableTiyn < p.minTiyn ? null : () => _payout(p),
+                      onPressed: p.open || p.readyAt != null || p.payableTiyn < p.minTiyn ? null : () => _payout(p),
                       icon: const Icon(Icons.account_balance_outlined),
                       label: Text(tr('Шотқа шығару')),
                     ),
@@ -174,7 +184,9 @@ class _EarningsScreenState extends State<EarningsScreen> {
                   leading: const Icon(Icons.account_balance_outlined),
                   title: Text(p.hasAccount ? tr('Банк шоты') : tr('Банк шотын қосу')),
                   subtitle: Text(p.hasAccount
-                      ? tr('Ақша осы шотқа аударылады.')
+                      ? (p.ibanMasked != null
+                          ? trf('Ақша осы шотқа аударылады: {0}', [p.ibanMasked!])
+                          : tr('Ақша осы шотқа аударылады.'))
                       : tr('IBAN және ЖСН/БСН: ақшаны шығару үшін керек.')),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: _editAccount,

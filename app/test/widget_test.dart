@@ -842,11 +842,13 @@ void main() {
     await restoreOnboarded();
     expect(onboarded.value, isFalse);
     addTearDown(() => onboarded.value = true);
-    await tester.pumpWidget(MaterialApp(
-        home: ValueListenableBuilder<bool>(
-      valueListenable: onboarded,
-      builder: (_, done, __) => done ? const Text('home') : const OnboardingScreen(),
-    )));
+    await tester.pumpWidget(SessionScope(
+        session: _paying(),
+        child: MaterialApp(
+            home: ValueListenableBuilder<bool>(
+          valueListenable: onboarded,
+          builder: (_, done, __) => done ? const Text('home') : const OnboardingScreen(),
+        ))));
     expect(find.text('Аяқкиімді 360° айналдырып көріңіз'), findsOneWidget);
     await tester.tap(find.byKey(const Key('onboarding-next')));
     await tester.pumpAndSettle();
@@ -1069,7 +1071,8 @@ void main() {
   });
 
   testWidgets('help screen explains the clocks with the numbers the server uses', (tester) async {
-    await tester.pumpWidget(const MaterialApp(home: HelpScreen()));
+    await tester.pumpWidget(SessionScope(session: _paying(), child: const MaterialApp(home: HelpScreen())));
+    await tester.pump();
     expect(find.text('Ақшам қалай қорғалады?'), findsOneWidget);
     expect(find.textContaining('«Алдым, бәрі дұрыс»'), findsOneWidget); // first topic starts open
     await tester.tap(find.text('Тапсырыс қалай жүреді?'));
@@ -2513,6 +2516,7 @@ void main() {
     final calls = <String>[];
     var payouts = <Map<String, dynamic>>[];
     var hasAccount = false;
+    String? readyAt;
     final api = Api(
         base: 'http://x/api/v1',
         client: MockClient((req) async {
@@ -2528,6 +2532,7 @@ void main() {
               return jsonResponse({'code': 'invalid_iban', 'message_kk': 'IBAN қате.'}, 422);
             }
             hasAccount = true;
+            readyAt = '2026-10-21T09:30:00+05:00'; // new details wait a day (backend payouts.py)
             return jsonResponse({
               'account': {
                 'holder_name': b['holder_name'],
@@ -2555,6 +2560,7 @@ void main() {
             'payable_tiyn': payouts.isEmpty ? 2840500 : 0,
             'min_tiyn': 100000,
             'has_account': hasAccount,
+            'ready_at': readyAt,
             'open': payouts.isNotEmpty,
             'items': payouts,
           });
@@ -2577,7 +2583,15 @@ void main() {
     await tester.enterText(find.byKey(const Key('payout-iban')), 'KZ86125KZT5004100100');
     await tester.tap(find.byKey(const Key('payout-save')));
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('payout-confirm')), findsOneWidget);
+    // Nothing asked of a payout the server would refuse: the card says from when, the button waits.
+    expect(find.byKey(const Key('payout-confirm')), findsNothing);
+    expect(find.textContaining('бастап шығаруға болады'), findsOneWidget);
+    expect(tester.widget<FilledButton>(find.byKey(const Key('payout'))).onPressed, isNull);
+    readyAt = null; // a day later
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, 300));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('payout')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('payout-confirm')));
     await tester.pumpAndSettle();
     expect(calls.where((c) => c == 'POST /me/payouts'), hasLength(1));
@@ -3820,4 +3834,71 @@ void main() {
     expect(tester.widget<FilledButton>(find.byType(FilledButton)).onPressed, isNull);
     await tester.pumpWidget(const SizedBox()); // stops the timer
   });
+
+  testWidgets('the number typed the usual way is taken, and "Растау" waits for all six digits', (tester) async {
+    final sent = <String>[];
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async {
+          sent.add('${req.url.path} ${req.body}');
+          return jsonResponse({'sent': true, 'resend_after': 60, 'dev_code': null});
+        }));
+    await tester.pumpWidget(SessionScope(session: Session(api), child: const MaterialApp(home: LoginScreen())));
+    // Typed the usual way after the "+7" already in the field.
+    await tester.enterText(find.byType(TextField).first, '+78 (701) 000-00-01');
+    await tester.tap(find.text('Код алу'));
+    await tester.pump();
+    await tester.pump();
+    expect(sent.single, contains('"phone":"+77010000001"'));
+    Finder confirm() => find.widgetWithText(FilledButton, 'Растау');
+    expect(tester.widget<FilledButton>(confirm()).onPressed, isNull, reason: 'no code yet: a tap would use up a try');
+    await tester.enterText(find.byKey(const Key('otp-code')), '1234');
+    await tester.pump();
+    expect(tester.widget<FilledButton>(confirm()).onPressed, isNull);
+    await tester.enterText(find.byKey(const Key('otp-code')), '123456');
+    await tester.pump();
+    expect(tester.widget<FilledButton>(confirm()).onPressed, isNotNull);
+    await tester.pumpWidget(const SizedBox()); // stops the timer
+  });
+
+  testWidgets('opened offline, the profile loads once the line is back', (tester) async {
+    SharedPreferences.setMockInitialValues({'vitrina_token': 'tok'});
+    var online = false;
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) async {
+          if (!online) throw http.ClientException('offline');
+          if (req.url.path.endsWith('/me')) return jsonResponse({'id': 2, 'phone': '+77010000002', 'is_seller': false});
+          return jsonResponse(<String, dynamic>{});
+        }));
+    final session = Session(api);
+    await tester.runAsync(session.restore);
+    expect((session.signedIn, session.me), (true, null), reason: 'the sign-in is kept');
+    await tester.pumpWidget(SessionScope(session: session, child: const MaterialApp(home: ProfileScreen())));
+    await tester.pump();
+    expect(find.text('Қайта көру'), findsOneWidget, reason: 'not an endless circle');
+    online = true;
+    await tester.tap(find.text('Қайта көру'));
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+    await tester.pump();
+    expect(session.me?.id, 2);
+    expect(find.text('Қайта көру'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('that VITRINA holds the money is said only when the server says so', (tester) async {
+    for (final answer in [null, false, true]) {
+      final api = Api(
+          base: 'http://x/api/v1',
+          client: MockClient((req) async => answer == null
+              ? http.Response('', 503) // the server away: unknown
+              : jsonResponse({'payments': answer})));
+      expect(await tester.runAsync(api.paymentsPromised), answer, reason: 'unknown stays unknown: no promise');
+      expect(await tester.runAsync(api.paymentsOn), answer != false, reason: 'the order button still asks the server');
+    }
+  });
 }
+
+/// A server that holds the money: the pages that say so are shown.
+Session _paying() =>
+    Session(Api(base: 'http://x/api/v1', client: MockClient((_) async => jsonResponse({'payments': true}))));

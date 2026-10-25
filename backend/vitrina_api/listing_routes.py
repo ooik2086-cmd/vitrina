@@ -975,15 +975,20 @@ def set_price(db: Session, listing: Listing, new: int) -> None:
 
 @router.post("/me/shop-sale")
 def start_shop_sale(body: ShopSaleIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    """The same cut on every listing on sale, rounded to whole tenge. Each shows its old price crossed out."""
+    """The same cut on every listing on sale, rounded to whole tenge. Each shows its old price crossed out.
+
+    Always from the price before the sale: a new sale while one runs replaces it rather than cutting the cut price
+    again, so a repeat (an answer lost on a weak line, a second tap) changes nothing."""
     if not user.is_seller:
         raise ApiError(403, "seller_required")
     changed = 0
-    for listing in db.scalars(select(Listing).where(Listing.seller_id == user.id, Listing.status == "published")):
-        new = max(100, (listing.price_tiyn * (100 - body.percent) + 5000) // 10000 * 100)  # half up, as the app
-        if new < listing.price_tiyn:
-            if listing.pre_sale_price_tiyn is None:  # a second sale on top keeps the first original price
-                listing.pre_sale_price_tiyn = listing.price_tiyn
+    # Locked: a repeat sent while the first still runs waits for it, then finds the prices already cut.
+    for listing in db.scalars(select(Listing).where(Listing.seller_id == user.id, Listing.status == "published")
+                              .with_for_update()):
+        base = listing.pre_sale_price_tiyn or listing.price_tiyn
+        new = max(100, (base * (100 - body.percent) + 5000) // 10000 * 100)  # half up, as the app
+        if new < base and new != listing.price_tiyn:
+            listing.pre_sale_price_tiyn = base
             set_price(db, listing, new)
             changed += 1
     db.commit()

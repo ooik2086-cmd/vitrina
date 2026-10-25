@@ -76,6 +76,43 @@ void main() {
     expect(find.byType(OrderScreen), findsNothing);
   });
 
+  testWidgets('an order whose answer was lost: the next try is filled in the same and is the same order',
+      (tester) async {
+    final keys = <String?>[];
+    await _open(tester, const ListingScreen(listingId: 1), (req) {
+      if (req.method != 'POST' || !req.url.path.endsWith('/orders')) return null;
+      keys.add(req.headers['Idempotency-Key']);
+      throw http.ClientException('the line dropped'); // made on the server, perhaps, but no answer came
+    });
+    await scrollListingTo(tester, find.text('42'));
+    Scrollable.ensureVisible(tester.element(find.text('42').first), alignment: 0.4);
+    await tester.pump();
+    await tester.tap(find.text('42').first);
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('buy')));
+    await settle(tester);
+    await tester.enterText(find.byKey(const Key('delivery-name')), 'Аза Сапар');
+    await tester.enterText(find.byKey(const Key('delivery-phone')), '+7 701 000 00 00');
+    await tester.enterText(find.byKey(const Key('delivery-city')), 'Алматы');
+    await tester.enterText(find.byKey(const Key('delivery-address')), 'Абай даңғылы 10, кв. 5');
+    await tester.ensureVisible(find.byKey(const Key('delivery-continue')));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('delivery-continue')));
+    await settle(tester);
+    // The error line closed, as it does by itself after a moment.
+    ScaffoldMessenger.of(tester.element(find.byType(ListingScreen))).hideCurrentSnackBar();
+    await settle(tester);
+    await tester.tap(find.byKey(const Key('buy')));
+    await settle(tester);
+    expect(find.text('Абай даңғылы 10, кв. 5'), findsOneWidget, reason: 'filled in as it was sent');
+    await tester.ensureVisible(find.byKey(const Key('delivery-continue')));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('delivery-continue')));
+    await settle(tester);
+    expect(keys.length, 2);
+    expect(keys[1], keys[0], reason: 'the same order, not a second one');
+  });
+
   testWidgets('a review already kept: the form gives way to the thanks', (tester) async {
     await _open(tester, const OrderScreen(orderId: 2),
         (req) => req.method == 'POST' && req.url.path.endsWith('/review') ? _conflict('already_reviewed') : null);

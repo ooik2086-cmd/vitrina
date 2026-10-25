@@ -42,7 +42,8 @@ class _ShopSaleSheetState extends State<ShopSaleSheet> {
       final n = await call();
       if (!mounted) return;
       Navigator.pop(context, true);
-      messenger.showSnackBar(SnackBar(content: Text(trf(done, [n]))));
+      // Nothing changed: the same sale already runs (its answer was lost on a weak line), or there was none to end.
+      messenger.showSnackBar(SnackBar(content: Text(n == 0 ? tr('Бағалар бұрыннан осылай.') : trf(done, [n]))));
     } catch (e) {
       if (mounted) {
         setState(() => _busy = false);
@@ -56,8 +57,12 @@ class _ShopSaleSheetState extends State<ShopSaleSheet> {
     final theme = Theme.of(context);
     final api = SessionScope.of(context).api;
     final live = widget.listings.where((l) => l.status == 'published').toList();
-    final onSale = widget.listings.where((l) => l.wasPriceTiyn != null).length;
+    // A sale the server still keeps the old price of counts, even once its price is no longer shown crossed out.
+    final onSale = widget.listings.where((l) => l.wasPriceTiyn != null || l.preSalePriceTiyn != null).length;
     final sample = live.isEmpty ? null : live.first;
+    // A sale that runs is replaced from the price before it (the server), so a smaller one makes prices go up.
+    final base = sample == null ? 0 : sample.preSalePriceTiyn ?? sample.priceTiyn;
+    final dearer = sample != null && salePrice(base, _percent) > sample.priceTiyn;
     return SafeArea(
       // Scrolls when large text makes it taller than the sheet may be, so the buttons stay in reach.
       child: SingleChildScrollView(
@@ -83,11 +88,18 @@ class _ShopSaleSheetState extends State<ShopSaleSheet> {
           if (sample != null) ...[
             const SizedBox(height: 14),
             Text(
-              trf('Мысалы: {0} → {1}',
-                  [formatTenge(sample.priceTiyn), formatTenge(salePrice(sample.priceTiyn, _percent))]),
+              trf('Мысалы: {0} → {1}', [formatTenge(sample.priceTiyn), formatTenge(salePrice(base, _percent))]),
               key: const Key('sale-example'),
               style: weight(theme.textTheme.bodyMedium!, 600).copyWith(color: accentText(context)),
             ),
+            if (dearer) ...[
+              const SizedBox(height: 4),
+              Text(
+                tr('Қазіргі жеңілдік бұдан үлкен: бағалар қымбаттайды.'),
+                key: const Key('sale-dearer'),
+                style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.error),
+              ),
+            ],
           ],
           const SizedBox(height: 20),
           SizedBox(

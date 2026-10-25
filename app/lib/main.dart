@@ -16,6 +16,7 @@ import 'screens/orders_screen.dart';
 import 'screens/notifications_screen.dart';
 import 'screens/profile_screen.dart';
 import 'push.dart';
+import 'screens/login_screen.dart';
 import 'session.dart';
 import 'theme.dart';
 import 'i18n.dart';
@@ -140,7 +141,25 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       _refreshBadges();
     }
     // The sign-in was read back from the phone just now: a tap waiting for it opens once this frame is drawn.
-    WidgetsBinding.instance.addPostFrameCallback((_) => _openTapped());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _openTapped();
+      _sayNotice();
+    });
+    final session = SessionScope.of(context);
+    if (!identical(session, _session)) {
+      _session?.notice.removeListener(_sayNotice);
+      _session = session..notice.addListener(_sayNotice);
+    }
+  }
+
+  Session? _session;
+
+  /// The sign-in ended without the person signing out (the account blocked): said once, in words.
+  void _sayNotice() {
+    final e = _session?.notice.value;
+    if (e == null || !mounted) return;
+    _session!.notice.value = null;
+    unawaited(showAccountBlocked(context, e));
   }
 
   void _startPolling() {
@@ -165,6 +184,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _session?.notice.removeListener(_sayNotice);
     Push.opened.removeListener(_openTapped);
     Push.arrived.removeListener(_refreshBadges);
     _poll?.cancel();
@@ -178,6 +198,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       if (_counts.isNotEmpty) setState(() => _counts = const {});
       return;
     }
+    if (session.me == null) unawaited(session.reloadMe()); // opened offline: the profile once the line is back
     try {
       final counts = await session.api.todo();
       if (mounted) setState(() => _counts = counts);
