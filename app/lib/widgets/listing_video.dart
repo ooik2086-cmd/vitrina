@@ -34,6 +34,10 @@ class _ListingVideoSectionState extends State<ListingVideoSection> {
   bool _busy = false;
   Timer? _check;
   DateTime? _checkSince;
+  bool _asking = false; // one question at a time: on a weak line an answer can take longer than checkEvery
+  int _changes = 0; // the seller's own changes here; an answer asked before one of them is out of date
+  // The listing the page held when asking: an answer that comes after the page took another (an edit elsewhere on it,
+  // a change here) would put back what was there before; the next tick asks again.
 
   Listing get _l => widget.listing;
   ListingVideo? get _video => _l.video;
@@ -70,11 +74,18 @@ class _ListingVideoSectionState extends State<ListingVideoSection> {
         _check?.cancel();
         return;
       }
+      if (_asking || _busy || !mounted) return;
+      _asking = true;
+      final asked = _changes, held = _l;
       try {
         final l = await SessionScope.of(context).api.listing(_l.id);
-        if (mounted && l.video?.state != 'processing') widget.onChanged(l);
+        if (mounted && asked == _changes && identical(held, _l) && !_busy && l.video?.state != 'processing') {
+          widget.onChanged(l);
+        }
       } catch (_) {
         // offline for now: the next tick asks again
+      } finally {
+        _asking = false;
       }
     });
   }
@@ -113,6 +124,7 @@ class _ListingVideoSectionState extends State<ListingVideoSection> {
     setState(() {
       _busy = true;
       _sent = 0;
+      _changes++;
     });
     try {
       final l = await api.addListingVideo(_l.id, file.openRead(), await file.length(), file.name, onProgress: (p) {
@@ -138,7 +150,10 @@ class _ListingVideoSectionState extends State<ListingVideoSection> {
     final sure =
         await confirmAction(context, title: tr('Видеоны өшіру керек пе?'), action: tr('Өшіру'), destructive: true);
     if (!sure || !mounted) return;
-    setState(() => _busy = true);
+    setState(() {
+      _busy = true;
+      _changes++;
+    });
     try {
       final l = await SessionScope.of(context).api.removeListingVideo(_l.id);
       if (!mounted) return;

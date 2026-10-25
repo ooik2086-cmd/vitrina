@@ -3,6 +3,7 @@ from the request (video.py), shown to buyers once ready."""
 from __future__ import annotations
 
 import shutil
+import sys
 import tempfile
 import time
 from datetime import datetime
@@ -17,9 +18,9 @@ from .api_common import log
 from .deps import current_user, get_db, now_utc
 from .errors import ApiError
 from .listing_routes import own_listing
-from .models import Listing, User
+from .models import Listing, Order, User
 from .serializers import VIDEO_STUCK_AFTER, listing_out
-from .storage import VideoUnavailable
+from .storage import VideoUnavailable, key_of
 from .video import VIDEO_UPLOAD_BYTES, encode, probe_seconds, queue_places
 
 router = APIRouter(prefix="/api/v1")
@@ -65,6 +66,7 @@ def add_video(listing_id: int, request: Request, background: BackgroundTasks, fi
         listing = own_listing(db, listing_id, user, lock=True)
         started = now_utc()
         # Buyers see the old video, if any, no more: the seller replaced it, and the new one shows once made.
+        old = [listing.video_url, listing.video_poster_url]
         listing.video_state, listing.video_at, listing.video_seconds = "processing", started, round(seconds)
         listing.video_url = listing.video_poster_url = None
         services.audit(db, user.id, "add_video", f"listing:{listing.id}")
@@ -73,19 +75,46 @@ def add_video(listing_id: int, request: Request, background: BackgroundTasks, fi
         shutil.rmtree(work, ignore_errors=True)
         queue_places.release()
         raise
+    # The job first: it gives back the encoder's place, which nothing after it may hold up.
     background.add_task(make_video, request.app.state, listing.id, started, str(work), True)
+    background.add_task(free_files, request.app.state, listing.id, old)
     return listing_out(db, listing, owner=True)
 
 
 @router.delete("/listings/{listing_id}/video")
-def remove_video(listing_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+def remove_video(listing_id: int, request: Request, background: BackgroundTasks, user: User = Depends(current_user),
+                 db: Session = Depends(get_db)):
     listing = own_listing(db, listing_id, user, lock=True)
     if listing.status == "hidden":
         raise ApiError(409, "invalid_status")
+    background.add_task(free_files, request.app.state, listing.id, [listing.video_url, listing.video_poster_url])
     listing.video_state = listing.video_url = listing.video_poster_url = listing.video_seconds = None
     listing.video_at = None
     db.commit()
     return listing_out(db, listing, owner=True)
+
+
+def free_files(state, listing_id: int, urls: list[str | None]) -> None:
+    """Background, after the change is saved: a video's files once nothing shows them any more. The listing no
+    longer does (replaced, taken off, or a job's late result dropped); an order's copy of the listing keeps the video
+    its buyer watched, and then so does the storage. Only the listing's seller's own files. Never raises: a file that
+    fails to go costs a little storage and is left for the orphans sweep, and nothing after this may be skipped."""
+    try:
+        storage = state.storage
+        with state.sessions() as db:
+            listing = db.get(Listing, listing_id)
+            if listing is None:
+                return
+            shown, seller = {listing.video_url, listing.video_poster_url}, listing.seller_id
+            keys = [key_of(storage.public_base, u, seller) for u in urls if u and u not in shown]
+            ordered = {k for k in keys if k and db.scalar(
+                select(Order.id).where(Order.listing_id == listing_id, Order.listing_details.contains(k)).limit(1))}
+            db.rollback()
+        for key in keys:
+            if key and key not in ordered:
+                storage.delete(key)
+    except Exception:  # noqa: BLE001 - see above
+        log.warning("listing %s old video files not deleted", listing_id, exc_info=True)
 
 
 def make_video(state, listing_id: int, started: datetime, work: str, queued: bool = False) -> bool:
@@ -93,6 +122,7 @@ def make_video(state, listing_id: int, started: datetime, work: str, queued: boo
     off meanwhile (then this one is dropped). The upload is deleted either way. A job that waited past the time the
     seller is told it failed (VIDEO_STUCK_AFTER) stays failed, never ready later."""
     folder = Path(work)
+    stored: list[str] = []  # what this job wrote, freed unless the listing ends up showing it
     try:
         with state.sessions() as db:
             seller = db.scalar(select(Listing.seller_id).where(Listing.id == listing_id))
@@ -101,8 +131,9 @@ def make_video(state, listing_id: int, started: datetime, work: str, queued: boo
         if seller is not None and now_utc() - started <= VIDEO_STUCK_AFTER:
             try:
                 mp4, poster = encode(folder / "in", folder)
-                values = {"video_state": "ready", "video_url": state.storage.put(mp4, owner_id=seller, ext="mp4"),
-                          "video_poster_url": state.storage.put(poster, owner_id=seller, ext="jpg")}
+                stored.append(state.storage.put(mp4, owner_id=seller, ext="mp4"))
+                stored.append(state.storage.put(poster, owner_id=seller, ext="jpg"))
+                values = {"video_state": "ready", "video_url": stored[0], "video_poster_url": stored[1]}
             except Exception:  # unreadable, or the server could not run ffmpeg: the seller is told to send it again
                 log.exception("listing %s video not made", listing_id)
         if now_utc() - started > VIDEO_STUCK_AFTER:
@@ -111,8 +142,14 @@ def make_video(state, listing_id: int, started: datetime, work: str, queued: boo
             done = db.execute(update(Listing).where(Listing.id == listing_id, Listing.video_at == started,
                                                     Listing.video_state == "processing").values(**values))
             db.commit()
-        return done.rowcount == 1 and values["video_state"] == "ready"
+        shown = done.rowcount == 1 and values["video_state"] == "ready"
+        if not shown:
+            stored, dropped = [], stored  # sent again or taken off meanwhile, too late, or half stored: shown nowhere
+            free_files(state, listing_id, dropped)
+        return shown
     finally:
+        if stored and sys.exc_info()[0] is not None:  # the job broke after storing: those files are shown nowhere
+            free_files(state, listing_id, stored)
         shutil.rmtree(folder, ignore_errors=True)
         if queued:
             queue_places.release()

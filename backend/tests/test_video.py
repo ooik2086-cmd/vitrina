@@ -4,6 +4,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 from datetime import timedelta
 from pathlib import Path
 
@@ -122,6 +123,77 @@ class ListingVideoTests(ApiTestCase):
         Path(work, "in").write_bytes(clip(2.5, "320x240"))
         self.assertTrue(video_routes.make_video(self.app.state, lid, started, work))
         self.assertEqual(self.page(lid)["video"]["state"], "ready")
+
+    def test_a_replaced_or_removed_video_leaves_the_storage_unless_an_order_keeps_it(self):
+        lid = self.publish()["id"]
+        files = lambda video: [video["url"], video["poster_url"]]  # noqa: E731
+        there = lambda url: Path(self.cfg.media_dir, url.removeprefix("http://test/media/")).exists()  # noqa: E731
+        self.send(lid, clip(2.5, "320x240"))
+        first = self.page(lid)["video"]
+        self.send(lid, clip(2.5, "320x240"))
+        second = self.page(lid)["video"]
+        self.assertEqual([there(u) for u in files(first)], [False, False], "replaced: shown nowhere")
+        self.assertEqual([there(u) for u in files(second)], [True, True])
+        # Ordered: the order keeps the video its buyer watched (the poster it never kept goes).
+        page = self.page(lid)
+        body = {"listing_id": lid, "size_id": page["sizes"][0]["id"], "photos_version": page["photos_version"]}
+        self.assertEqual(self.post("/orders", self.buyer, body, **{"Idempotency-Key": "keep"}).status_code, 201)
+        self.c.delete(f"/api/v1/listings/{lid}/video", headers=self.h(self.seller))
+        self.assertEqual([there(u) for u in files(second)], [True, False])
+        # A job whose result came after the seller sent another: its files are shown nowhere and go.
+        started = now_utc()
+        with self.db() as db:
+            db.get(Listing, lid).video_state, db.get(Listing, lid).video_at = "processing", started
+            db.commit()
+        before = {p for p in Path(self.cfg.media_dir).rglob("*") if p.is_file()}
+        work = tempfile.mkdtemp()
+        Path(work, "in").write_bytes(clip(2.5, "320x240"))
+        self.assertFalse(video_routes.make_video(self.app.state, lid, started - timedelta(seconds=1), work))
+        self.assertEqual({p for p in Path(self.cfg.media_dir).rglob("*") if p.is_file()}, before)
+
+    def test_a_job_finished_too_late_or_half_stored_leaves_nothing_behind(self):
+        lid = self.publish()["id"]
+        files = lambda: {p for p in Path(self.cfg.media_dir).rglob("*") if p.is_file()}  # noqa: E731
+        before = files()
+        started = now_utc()
+        with self.db() as db:
+            db.get(Listing, lid).video_state, db.get(Listing, lid).video_at = "processing", started
+            db.commit()
+        # The encode ends just past the time the seller is told it failed: stored, then shown nowhere.
+        times = iter([started, started + video_routes.VIDEO_STUCK_AFTER + timedelta(seconds=1)])
+        work = tempfile.mkdtemp()
+        Path(work, "in").write_bytes(clip(2.5, "320x240"))
+        with mock.patch.object(video_routes, "now_utc", lambda: next(times)):
+            self.assertFalse(video_routes.make_video(self.app.state, lid, started, work))
+        self.assertEqual(self.page(lid, self.seller)["video"]["state"], "failed")
+        self.assertEqual(files(), before)
+        # The mp4 stored, the poster not: the mp4 goes too.
+        with self.db() as db:
+            db.get(Listing, lid).video_state = "processing"
+            db.commit()
+        put, calls = self.app.state.storage.put, []
+
+        def second_fails(data, **kw):
+            calls.append(kw["ext"])
+            if len(calls) == 2:
+                raise OSError("bucket down")
+            return put(data, **kw)
+        work = tempfile.mkdtemp()
+        Path(work, "in").write_bytes(clip(2.5, "320x240"))
+        with mock.patch.object(self.app.state.storage, "put", second_fails):
+            self.assertFalse(video_routes.make_video(self.app.state, lid, started, work))
+        self.assertEqual(files(), before)
+
+    def test_freeing_old_files_never_holds_up_the_next_video(self):
+        lid = self.publish()["id"]
+        self.send(lid, clip(2.5, "320x240"))
+        places = video_routes.queue_places._value
+        # Freeing the replaced files breaks (say, the database is gone a moment): the new video is made all the same.
+        with mock.patch.object(video_routes, "key_of", side_effect=RuntimeError("db down")):
+            r = self.send(lid, clip(2.5, "320x240"))
+        self.assertEqual(r.status_code, 202, r.text)
+        self.assertEqual(self.page(lid)["video"]["state"], "ready")
+        self.assertEqual(video_routes.queue_places._value, places)
 
     def test_a_video_lost_with_a_restart_shows_failed_to_its_seller_and_nothing_to_buyers(self):
         lid = self.publish()["id"]

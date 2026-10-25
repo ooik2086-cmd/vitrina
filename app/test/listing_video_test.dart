@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -55,7 +56,7 @@ const ready = {'state': 'ready', 'url': 'https://cdn/v.mp4', 'poster_url': 'http
 
 /// Holds the listing as the manage page does: what the section reports becomes the listing it shows.
 class _Page extends StatefulWidget {
-  const _Page(this.first);
+  const _Page(this.first, {super.key});
   final Listing first;
   @override
   State<_Page> createState() => _PageState();
@@ -63,6 +64,7 @@ class _Page extends StatefulWidget {
 
 class _PageState extends State<_Page> {
   late Listing l = widget.first;
+  void take(Listing next) => setState(() => l = next);
   @override
   Widget build(BuildContext context) => Scaffold(
       body: Padding(
@@ -158,6 +160,64 @@ void main() {
     await open(tester, listing(video: {...processing, 'state': 'failed'}));
     expect(find.text('Видео дайындалмады. Қайта жіберіп көріңіз.'), findsOneWidget);
     expect(find.byKey(const Key('add-video')), findsOneWidget);
+  });
+
+  testWidgets('on a weak line the page asks again only once the last answer came', (tester) async {
+    final answers = <Completer<http.Response>>[];
+    picker = _FakePicker();
+    ImagePickerPlatform.instance = picker;
+    sent = [];
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) {
+          sent.add(req);
+          answers.add(Completer());
+          return answers.last.future;
+        }));
+    await tester.pumpWidget(SessionScope(
+        session: Session(api)..api.token = 't',
+        child: MaterialApp(home: _Page(Listing.fromJson(listing(video: processing))))));
+    await tester.pump(const Duration(seconds: 8));
+    await tester.pump(const Duration(seconds: 8));
+    await tester.pump(const Duration(seconds: 8));
+    expect(sent, hasLength(1), reason: 'the first answer is still on its way');
+    answers.single.complete(jsonResponse(listing(video: processing)));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 8));
+    expect(sent, hasLength(2));
+    answers.last.complete(jsonResponse(listing(video: ready)));
+    await tester.pump();
+    expect(find.byKey(const Key('video-ready')), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('an answer asked before the page changed elsewhere does not put the old listing back', (tester) async {
+    final answers = <Completer<http.Response>>[];
+    final api = Api(
+        base: 'http://x/api/v1',
+        client: MockClient((req) {
+          answers.add(Completer());
+          return answers.last.future;
+        }));
+    final page = GlobalKey<_PageState>();
+    await tester.pumpWidget(SessionScope(
+        session: Session(api)..api.token = 't',
+        child: MaterialApp(home: _Page(Listing.fromJson(listing(video: processing)), key: page))));
+    await tester.pump(const Duration(seconds: 8));
+    expect(answers, hasLength(1));
+    // Meanwhile the seller saves another part of the page: it holds a new listing.
+    page.currentState!.take(Listing.fromJson({...listing(video: processing), 'title': 'Жаңа'}));
+    await tester.pump();
+    answers.single.complete(jsonResponse(listing(video: ready)));
+    await tester.pump();
+    expect(page.currentState!.l.title, 'Жаңа');
+    expect(find.byKey(const Key('video-processing')), findsOneWidget);
+    await tester.pump(const Duration(seconds: 8));
+    expect(answers, hasLength(2), reason: 'asked again');
+    answers.last.complete(jsonResponse({...listing(video: ready), 'title': 'Жаңа'}));
+    await tester.pump();
+    expect(find.byKey(const Key('video-ready')), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
   });
 
   testWidgets('leaving the page stops asking about a video still being made', (tester) async {
