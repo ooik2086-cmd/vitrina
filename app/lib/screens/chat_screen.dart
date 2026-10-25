@@ -17,7 +17,15 @@ import '../widgets/common.dart';
 import '../i18n.dart';
 import '../quick_replies.dart';
 
-String _time(DateTime t) => '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+String _clock(DateTime t) => '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+
+/// The clock alone for today; an older message also says its day, so «10:15» is never yesterday's read as today's.
+/// The chat list, short on room, gives an older chat its day alone.
+String _time(DateTime t, {bool dayOnly = false}) {
+  final n = DateTime.now();
+  if (t.year == n.year && t.month == n.month && t.day == n.day) return _clock(t);
+  return dayOnly ? formatDay(t) : '${formatDay(t)} ${_clock(t)}';
+}
 
 /// Bumped when a chat closes, so every chat list shown (the Chat tab stays alive behind the others) reads the
 /// answers and unread counts again, not only the list the chat was opened from.
@@ -98,6 +106,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
                     Icon(Icons.chat_bubble_outline_rounded, size: 40, color: theme.colorScheme.onSurfaceVariant),
                     const SizedBox(height: 12),
                     Center(child: Text(tr('Әзірге хат жоқ. Тауар бетінен сатушыға жазыңыз.'))),
+                    const BrowseShoesButton(),
                   ])
                 : ListView.separated(
                     padding: contentPadding(context, EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom)),
@@ -152,7 +161,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
                             crossAxisAlignment: roomy ? CrossAxisAlignment.end : CrossAxisAlignment.center,
                             children: [
                               if (c.lastMessage != null)
-                                Text(_time(c.lastMessage!.createdAt), style: theme.textTheme.labelSmall),
+                                Text(_time(c.lastMessage!.createdAt, dayOnly: true), style: theme.textTheme.labelSmall),
                               const SizedBox(height: 4, width: 6),
                               if (c.unread > 0) Badge(label: Text('${c.unread}')),
                             ]),
@@ -873,7 +882,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         messenger
           ..clearSnackBars()
           ..showSnackBar(SnackBar(
-              content: Text(e is ApiException ? e.message : tr('Байланыс жоқ. Қайта көріңіз.')),
+              content: Text(e is ApiException ? e.message : unexpectedText),
               duration: const Duration(seconds: 12),
               persist: reader));
       }
@@ -916,8 +925,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         ],
         title: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(personName(conv?.otherName ?? ''), style: theme.textTheme.titleMedium),
+          // The shoe alone: today's listing price could differ from an agreed or paid one, so it is not shown here.
           if (conv != null)
-            Text('${conv.listingTitle} · ${formatTenge(conv.priceTiyn)}',
+            Text(conv.listingTitle,
                 style: theme.textTheme.labelMedium?.copyWith(color: scheme.onSurfaceVariant),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis),

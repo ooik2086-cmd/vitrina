@@ -192,7 +192,12 @@ class ProfileScreen extends StatelessWidget {
                   ListTile(
                     leading: const Icon(Icons.logout),
                     title: Text(tr('Шығу')),
-                    onTap: () => session.signOut(),
+                    // Next to the theme and the language: a tap meant for them does not sign out unasked.
+                    onTap: () async {
+                      if (await confirmAction(context, title: tr('Аккаунттан шығу керек пе?'), action: tr('Шығу'))) {
+                        await session.signOut();
+                      }
+                    },
                   ),
                   ListTile(
                     key: const Key('delete-account'),
@@ -223,18 +228,52 @@ class ProfileScreen extends StatelessWidget {
         ],
       ),
     );
-    if (ok != true) return;
-    try {
-      final owner = session.me?.id;
-      await session.api.deleteAccount();
-      if (owner != null) await session.forgetLocal(owner);
-      await session.signOut(server: false); // the deletion ended every sign-in
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr('Аккаунт жойылды.'))));
+    if (ok != true || !context.mounted) return;
+    await once((ProfileScreen, #delete), () async {
+      // On a slow line the wait is shown, and nothing else can be tapped meanwhile. It is closed by its own route,
+      // whatever opened above it, and also when the answer came before it was first drawn.
+      BuildContext? shown;
+      var finished = false;
+      void close() {
+        finished = true;
+        final route = shown != null && shown!.mounted ? ModalRoute.of(shown!) : null;
+        if (route != null && route.isActive) Navigator.of(shown!).removeRoute(route);
       }
-    } catch (e) {
-      if (context.mounted) showError(context, e);
-    }
+
+      unawaited(showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        useRootNavigator: true,
+        builder: (context) {
+          shown = context;
+          if (finished) WidgetsBinding.instance.addPostFrameCallback((_) => close());
+          return PopScope(
+            canPop: false,
+            child: AlertDialog(
+              key: const Key('deleting-account'),
+              content: Row(children: [
+                const SizedBox.square(dimension: 24, child: CircularProgressIndicator(strokeWidth: 2.5)),
+                const SizedBox(width: 16),
+                Expanded(child: Text(tr('Аккаунт жойылуда…'))),
+              ]),
+            ),
+          );
+        },
+      ));
+      try {
+        final owner = session.me?.id;
+        await session.api.deleteAccount();
+        close();
+        if (owner != null) await session.forgetLocal(owner);
+        await session.signOut(server: false); // the deletion ended every sign-in
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr('Аккаунт жойылды.'))));
+        }
+      } catch (e) {
+        close();
+        if (context.mounted) showError(context, e);
+      }
+    });
   }
 
   Future<void> _becomeSeller(BuildContext context) async {

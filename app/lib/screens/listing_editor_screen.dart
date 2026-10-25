@@ -816,7 +816,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
               else ...[
                 FilledButton(
                   onPressed: _saving ? null : () => _save(publish: true),
-                  child: Text(_saving ? tr('Сақталуда…') : tr('Жариялау')),
+                  child: Text(_saving ? tr('Сақталуда…') : tr('Сатылымға шығару')), // the manage page's word for it
                 ),
                 TextButton(
                   onPressed: _saving ? null : () => _save(publish: false),
@@ -850,6 +850,10 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
           ),
         Text(tr('Жарық жерде, біркелкі фонда түсіріңіз. Фото өзгертілмейді, тек метадеректер өшіріледі.'),
             style: theme.textTheme.bodySmall),
+        const SizedBox(height: 4),
+        // What the star on four tiles means, before «Келесі» asks for them.
+        Text(trf('* белгісі бар {0} фото міндетті', [requiredAngles.length]),
+            key: const Key('required-photos-note'), style: theme.textTheme.bodySmall),
         const SizedBox(height: 8),
         Wrap(spacing: 8, runSpacing: 8, children: [
           for (final e in {...requiredAngles, ...optionalAngles}.entries)

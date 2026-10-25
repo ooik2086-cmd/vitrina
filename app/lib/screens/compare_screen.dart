@@ -217,7 +217,7 @@ class _Table extends StatelessWidget {
             Text(
               [
                 if (l.sellerRating != null) '★ ${ratingText(l.sellerRating!)}',
-                if (l.sellerCity != null) l.sellerCity!,
+                if (l.sellerCity != null) tr(l.sellerCity!),
               ].join(' · '),
               style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
             ),

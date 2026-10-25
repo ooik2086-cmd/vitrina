@@ -59,7 +59,23 @@ class _SavedSearchesScreenState extends State<SavedSearchesScreen> {
       setState(() {
         _items = shown(SessionScope.of(context).api.savedSearches());
       });
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr('Іздеу өшірілді'))));
+      // A bin tapped by mistake is undone from the same line.
+      final api = SessionScope.of(context).api;
+      final messenger = ScaffoldMessenger.of(context); // the undo can be tapped after the page is left
+      messenger.showSnackBar(SnackBar(
+        content: Text(tr('Іздеу өшірілді')),
+        action: SnackBarAction(
+          label: tr('Қалпына келтіру'),
+          onPressed: () async {
+            try {
+              await api.saveSearch(s.asBody);
+              if (mounted) setState(() => _items = shown(api.savedSearches()));
+            } catch (e) {
+              messenger.showSnackBar(SnackBar(content: Text(errorText(e))));
+            }
+          },
+        ),
+      ));
     } catch (e) {
       if (mounted) showError(context, e);
     }

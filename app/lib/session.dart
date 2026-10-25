@@ -43,7 +43,8 @@ class Session extends ChangeNotifier {
   Object? meError;
   Future<void>? _reloading;
 
-  /// Why the sign-in ended without the person signing out (the account blocked), to be said once; null otherwise.
+  /// Why the sign-in ended without the person signing out (the account blocked, or the sign-in expired), to be said
+  /// once; null otherwise.
   final notice = ValueNotifier<ApiException?>(null);
 
   /// The profile, when signed in without it: at the start, and again when the line is back (the tabs' minute check,
@@ -71,7 +72,10 @@ class Session extends ChangeNotifier {
       if (api.token != bearer) return; // an answer for a sign-in already gone
       // Ended, or the account blocked: signed out here too; a block is said in words (HomeShell).
       if (e.status == 401 || e.code == 'account_blocked') {
-        if (e.code == 'account_blocked') notice.value = e;
+        // Either way it is said, not left for the person to find signed out.
+        notice.value = e.code == 'account_blocked'
+            ? e
+            : ApiException.local(401, 'session_ended', 'Кіру мерзімі бітті. Қайта кіріңіз.');
         await signOut(server: false);
         return;
       }

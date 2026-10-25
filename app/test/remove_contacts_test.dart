@@ -53,7 +53,7 @@ void main() {
     final split = refusal('WhatsApp: +7 701 555 12 34');
     expect(refusalText(split, 'WhatsApp:\n+7 701 555 12 34'), 'Мынаны алып тастаңыз: «WhatsApp: +7 701 555 12 34»',
         reason: 'a piece written over two lines is named whole');
-    expect(refusalText(Exception('offline'), 'Иә'), 'Серверге қосылу мүмкін болмады.');
+    expect(refusalText(Exception('offline'), 'Иә'), 'Бір нәрсе дұрыс болмады. Қайта көріңіз.');
   });
 
   test('in English the pieces are quoted the English way', () {

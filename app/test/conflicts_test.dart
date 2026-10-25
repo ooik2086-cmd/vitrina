@@ -139,6 +139,8 @@ void main() {
     final before = asked.where((r) => r == 'GET /offers').length;
     await tester.tap(find.text('Бас тарту').first);
     await settle(tester);
+    await tester.tap(find.byKey(const Key('confirm-action'))); // declining is asked first
+    await settle(tester);
     expect(find.text('Қақтығыс: invalid_status'), findsOneWidget);
     expect(asked.where((r) => r == 'GET /offers').length, before + 1);
   });

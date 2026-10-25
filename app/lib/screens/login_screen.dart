@@ -137,6 +137,11 @@ class _LoginScreenState extends State<LoginScreen> {
           controller: _phone,
           enabled: !_codeSent,
           keyboardType: TextInputType.phone,
+          // The keyboard's own key asks for the code, as the button below does.
+          textInputAction: TextInputAction.done,
+          onSubmitted: (_) {
+            if (!_busy && _wait == 0 && !_codeSent) _sendCode();
+          },
           decoration: InputDecoration(labelText: tr('Телефон нөмірі'), hintText: '+7 701 000 00 00'),
         ),
         if (_codeSent) ...[
@@ -150,7 +155,12 @@ class _LoginScreenState extends State<LoginScreen> {
             maxLength: 6,
             autofocus: true,
             autofillHints: const [AutofillHints.oneTimeCode],
-            decoration: InputDecoration(labelText: tr('SMS коды')),
+            textInputAction: TextInputAction.done,
+            onSubmitted: (_) {
+              if (!_busy && _codeTyped) _verify();
+            },
+            // Six digits, said by the label: no «0/6» counter under it.
+            decoration: InputDecoration(labelText: tr('SMS коды'), counterText: ''),
           ),
           if (_devCode != null)
             Text(trf('Сынақ режимі: SMS жіберілмейді, код {0}', [_devCode]),
@@ -173,8 +183,16 @@ class _LoginScreenState extends State<LoginScreen> {
               textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodySmall),
           TextButton(
             key: const Key('privacy'),
-            onPressed: () => launchUrl(Uri.parse(privacyUrl(appLanguage.value)), mode: LaunchMode.externalApplication)
-                .catchError((_) => false),
+            onPressed: () async {
+              final url = privacyUrl(appLanguage.value);
+              final opened =
+                  await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication).catchError((_) => false);
+              // No browser to open it with: the address, to type in elsewhere.
+              if (!opened && context.mounted) {
+                ScaffoldMessenger.of(context)
+                    .showSnackBar(SnackBar(content: Text(trf('Сілтеме ашылмады: {0}', [url]))));
+              }
+            },
             child: Text(tr('Құпиялылық саясаты')),
           ),
         ],

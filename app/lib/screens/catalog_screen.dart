@@ -222,14 +222,7 @@ class _CatalogScreenState extends State<CatalogScreen> {
     _search();
   }
 
-  Future<void> _searchByPhoto() async {
-    final file = await pickPhoto(context,
-        title: tr('Фотомен іздеу'), subtitle: tr('Ұнаған аяқкиімнің суретін түсіріңіз немесе таңдаңыз'));
-    if (file == null || !mounted) return;
-    final bytes = await file.readAsBytes();
-    if (!mounted) return;
-    Navigator.of(context).push(MaterialPageRoute(builder: (_) => ImageSearchScreen(bytes: bytes, filename: file.name)));
-  }
+  Future<void> _searchByPhoto() => searchByPhoto(context);
 
   Future<void> _pickFilter() async {
     final picked = await showSheet<CatalogFilter>(

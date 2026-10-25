@@ -427,6 +427,7 @@ const en = <String, String>{
   'Мерзімі өтті': 'Expired',
   '{0} дейін': 'until {0}',
   '{0} бастап': 'from {0}',
+  '{0} бастап сатып алуға болады': 'You can buy from {0}',
   'Іздеу өшірілді': 'Search deleted',
   'Сақталған іздеулер': 'Saved searches',
   'Каталогта іздеп, «Жаңасы шыққанда хабарлау» басыңыз. Сай тауар шыққанда бірден хабарлаймыз.':
@@ -679,8 +680,8 @@ const en = <String, String>{
   'Өлшеміңіз: {0} см': 'Your size: {0} cm',
   'Өткізу': 'Skip',
   'Аяқкиімді 360° айналдырып көріңіз': 'Spin the shoes 360°',
-  'Аяқкиімді саусақпен кез келген жаққа бұрап, екі саусақпен жақындатыңыз. Тігісі мен табанына дейін көресіз.':
-      'Turn the shoe any way with your finger and zoom in with two fingers. You see everything, down to the seams and sole.',
+  '360° белгісі бар аяқкиімді саусақпен кез келген жаққа бұрап, екі саусақпен жақындатыңыз. Тігісі мен табанына дейін көресіз.':
+      'Turn a shoe with the 360° badge any way with a finger and zoom in with two. You see every seam, down to the sole.',
   'Ақшаңыз қорғалған': 'Your money is protected',
   'Төлем VITRINA-да сақталады. Сатушы оны тауарды алғаныңызды растағаннан кейін ғана алады.':
       'Payment is held by VITRINA. The seller gets it only after you confirm you received the item.',
@@ -1005,7 +1006,7 @@ const en = <String, String>{
   'Тапсырыс берген кездегі сипаттама': 'Description when ordered',
   'Фотоны ашу': 'Open the photo',
   'Әзірге дәлел жоқ.': 'No evidence yet.',
-  'MP4 не MOV, 12 МБ-қа дейін (шамамен 10 секунд)': 'MP4 or MOV, up to 12 MB (about 10 seconds)',
+  'Қысқа видео, шамамен 10 секундқа дейін': 'A short video, up to about 10 seconds',
   '{0} секундқа дейін': 'up to {0} seconds',
   'Бұл тапсырыс сипаттама сақтала бастағанға дейін берілген. Мұнда тауар бетінің кейінгі нұсқасы тұр.':
       'This order was placed before descriptions were kept. This shows a later version of the listing.',
@@ -1295,4 +1296,35 @@ const en = <String, String>{
   'Шығу керек пе?': 'Leave?',
   'Тапсырыс аяқталса, сізге түседі': 'You receive once the order completes',
   '360° қайта ашу': 'Open 360° again',
+  'Сілтеме ашылмады: {0}': 'The link did not open: {0}',
+  'Бір нәрсе дұрыс болмады. Қайта көріңіз.': 'Something went wrong. Please try again.',
+  'Кіру мерзімі бітті. Қайта кіріңіз.': 'Your sign-in has expired. Please sign in again.',
+  'Қалпына келтіру': 'Undo',
+  'Басқа фотомен іздеу': 'Search with another photo',
+  'Ұсыныстан бас тарту керек пе?': 'Decline the offer?',
+  'Сатушының бағасынан бас тарту керек пе?': 'Turn down the seller\'s price?',
+  'Бағаңызды жазыңыз.': 'Write your price.',
+  'Ұсынысты қайтару керек пе?': 'Take the offer back?',
+  'Алдымен жұлдыз санын таңдаңыз.': 'First choose the number of stars.',
+  'Ақша төлеген картаңызға қайтарылады. Түскенде мұнда «Ақша қайтарылды» деп жазылады. Ұзаққа созылса, қолдау қызметіне жазыңыз.':
+      'The money goes back to the card you paid with. Once it arrives, this page says «Refunded». If it takes long, write to support.',
+  'Жеткізілді, сатып алушы тексеріп жатыр': 'Delivered, the buyer is checking it',
+  'Аяқкиім қарау': 'Browse shoes',
+  'Сұрақты жасыру керек пе?': 'Hide the question?',
+  'Сұрағыңызды қайтарып алу керек пе?': 'Take back your question?',
+  'Қайтарып алу': 'Take back',
+  'Жасыру': 'Hide',
+  'Кемінде {0} әріп жазыңыз': 'Write at least {0} characters',
+  'Видеоны ашу мүмкін болмады. Қайта көріңіз.': 'The video did not open. Try again.',
+  'Видеоларға рұқсат берілмеді. Телефон баптауларынан рұқсат беріңіз.':
+      'No access to videos. Allow it in the phone settings.',
+  '* белгісі бар {0} фото міндетті': 'Photos marked * are required ({0})',
+  'Сұрау жіберілді. Аударылғанда хабарлама келеді.':
+      'Request sent. You will be notified when the money is transferred.',
+  'Балансқа оралды': 'Back on your balance',
+  'Конверсия: қаралымның неше пайызы тапсырысқа айналды.': 'Conversion: the share of views that became orders.',
+  'Аккаунт жойылуда…': 'Deleting the account…',
+  'Ақша сатып алушыға қайтарылып жатыр.': 'The money is going back to the buyer.',
+  'Аккаунттан шығу керек пе?': 'Sign out?',
+  'Көшіру': 'Copy',
 };

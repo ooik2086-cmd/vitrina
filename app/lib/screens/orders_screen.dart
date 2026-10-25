@@ -105,7 +105,11 @@ class _OrderListState extends State<_OrderList> {
         return RefreshIndicator(
           onRefresh: _reload,
           child: all.isEmpty
-              ? ListView(children: [SizedBox(height: 120), Center(child: Text(tr('Әзірге тапсырыс жоқ.')))])
+              ? ListView(children: [
+                  const SizedBox(height: 120),
+                  Center(child: Text(tr('Әзірге тапсырыс жоқ.'))),
+                  if (widget.role == 'buyer') const BrowseShoesButton(),
+                ])
               : ListView.separated(
                   itemCount: items.length + 1,
                   // Rows are capped one by one, so the filter chips above can still scroll the full width.
@@ -165,7 +169,11 @@ class _OrderListState extends State<_OrderList> {
                       title: Text(o.listingTitle ?? trf('Тапсырыс №{0}', [o.id]),
                           maxLines: 3, overflow: TextOverflow.ellipsis),
                       subtitle: Text.rich(TextSpan(children: [
-                        TextSpan(text: label(orderStatuses, o.status)),
+                        // «awaits your confirmation» is the buyer's step; the seller is told who it waits on.
+                        TextSpan(
+                            text: widget.role == 'seller' && o.status == 'DELIVERED_PENDING_CONFIRMATION'
+                                ? tr('Жеткізілді, сатып алушы тексеріп жатыр')
+                                : label(orderStatuses, o.status)),
                         if (waits)
                           TextSpan(
                               text: ' · ${tr('Сізді күтеді')}',

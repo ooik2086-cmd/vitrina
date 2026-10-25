@@ -21,6 +21,7 @@ class AnalyticsScreen extends StatefulWidget {
 class _AnalyticsScreenState extends State<AnalyticsScreen> {
   Future<Analytics>? _data;
   int _days = 14;
+  int? _opening; // the top listing being fetched before its page opens
 
   @override
   void didChangeDependencies() {
@@ -81,6 +82,12 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                 ],
               ),
             ),
+            // The one word on the page that is not everyday speech, said plainly once.
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(tr('Конверсия: қаралымның неше пайызы тапсырысқа айналды.'),
+                  style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+            ),
             const SizedBox(height: 24),
             Text(tr('Күн сайынғы қаралым'), style: theme.textTheme.titleMedium),
             const SizedBox(height: 4),
@@ -103,15 +110,21 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                 title: Text(t.title, maxLines: 3, overflow: TextOverflow.ellipsis), // the colour ends the title
                 subtitle: Text(trf('{0} қаралым · {1} тапсырыс · {2}',
                     [t.views, t.orders, tr(listingStatuses[t.status] ?? t.status)])),
-                trailing: const Icon(Icons.chevron_right),
+                // The row being opened turns, so a slow line does not look like a tap that missed.
+                trailing: _opening == t.id
+                    ? const SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.chevron_right),
                 onTap: () => once((this, #open), () async {
                   final api = SessionScope.of(context).api;
+                  setState(() => _opening = t.id);
                   final Listing l;
                   try {
                     l = await api.listing(t.id);
                   } catch (e) {
                     if (context.mounted) showError(context, e);
                     return;
+                  } finally {
+                    if (mounted) setState(() => _opening = null);
                   }
                   if (!context.mounted) return;
                   await Navigator.of(context).push(MaterialPageRoute(builder: (_) => ManageListingScreen(listing: l)));

@@ -84,7 +84,7 @@ class _FollowingScreenState extends State<FollowingScreen> {
                 ),
                 title: Text(s.shopName),
                 subtitle: Text([
-                  if (s.city != null) s.city!,
+                  if (s.city != null) tr(s.city!),
                   trf('{0} тауар', [s.listings]),
                   if (s.rating != null) '★ ${ratingText(s.rating!)}',
                   if (s.awayUntil != null) trf('{0} дейін демалыста', [formatDay(s.awayUntil!)]),

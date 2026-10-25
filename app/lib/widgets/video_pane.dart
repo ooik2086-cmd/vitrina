@@ -175,7 +175,7 @@ class _VideoPaneState extends State<VideoPane> {
                 child: VideoProgressIndicator(
                   video,
                   allowScrubbing: true,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  padding: const EdgeInsets.symmetric(vertical: 22), // the 4 px line in a 48 px strip a finger finds
                   colors: const VideoProgressColors(
                       playedColor: Colors.white, bufferedColor: Colors.white38, backgroundColor: Colors.white24),
                 ),

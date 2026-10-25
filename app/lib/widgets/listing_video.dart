@@ -34,6 +34,7 @@ class _ListingVideoSectionState extends State<ListingVideoSection> {
   bool _busy = false;
   Timer? _check;
   DateTime? _checkSince;
+  bool _gaveUp = false; // checked for checkFor without an answer
   bool _asking = false; // one question at a time: on a weak line an answer can take longer than checkEvery
   int _changes = 0; // the seller's own changes here; an answer asked before one of them is out of date
   // The listing the page held when asking: an answer that comes after the page took another (an edit elsewhere on it,
@@ -66,12 +67,14 @@ class _ListingVideoSectionState extends State<ListingVideoSection> {
       _check?.cancel();
       _check = null;
       _checkSince = null;
+      _gaveUp = false; // the next video is followed afresh
       return;
     }
     _checkSince ??= DateTime.now();
     _check ??= Timer.periodic(checkEvery, (_) async {
       if (DateTime.now().difference(_checkSince!) > checkFor) {
         _check?.cancel();
+        if (mounted) setState(() => _gaveUp = true); // the spinner gives way to «Қайта көру»
         return;
       }
       if (_asking || _busy || !mounted) return;
@@ -112,13 +115,9 @@ class _ListingVideoSectionState extends State<ListingVideoSection> {
       ),
     );
     if (source == null || !mounted) return;
-    final XFile? file;
-    try {
-      file = await _picker.pickVideo(source: source, maxDuration: maxLength);
-    } catch (e) {
-      if (mounted) showError(context, e);
-      return;
-    }
+    // A refused permission or a file that did not open is said as such, not as a lost connection.
+    final file = await takePhoto(context, () => _picker.pickVideo(source: source, maxDuration: maxLength),
+        camera: source == ImageSource.camera, video: true);
     if (file == null || !mounted) return;
     final api = SessionScope.of(context).api;
     setState(() {
@@ -202,9 +201,21 @@ class _ListingVideoSectionState extends State<ListingVideoSection> {
         LinearProgressIndicator(value: _sent),
       ] else if (video?.state == 'processing')
         Row(key: const Key('video-processing'), children: [
-          const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
-          const SizedBox(width: 12),
+          if (!_gaveUp) const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
+          if (!_gaveUp) const SizedBox(width: 12),
           Expanded(child: Text(tr('Видео дайындалып жатыр. Бірнеше минут кетуі мүмкін.'), style: small)),
+          if (_gaveUp)
+            TextButton(
+              key: const Key('video-ask-again'),
+              onPressed: () {
+                setState(() => _gaveUp = false);
+                _check?.cancel();
+                _check = null;
+                _checkSince = null;
+                _follow();
+              },
+              child: Text(tr('Қайта көру')),
+            ),
         ])
       else if (video != null && video.ready)
         Row(key: const Key('video-ready'), children: [

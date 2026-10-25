@@ -251,15 +251,15 @@ void main() {
     await next(tester);
 
     // Price and sizes, checked on the spot.
-    await tester.tap(find.text('Жариялау'));
+    await tester.tap(find.text('Сатылымға шығару'));
     await tester.pumpAndSettle();
     expect(find.text('Бағаны енгізіңіз'), findsOneWidget);
     await tester.enterText(find.widgetWithText(TextFormField, 'Ішкі табан, см'), '5');
-    await tester.tap(find.text('Жариялау'));
+    await tester.tap(find.text('Сатылымға шығару'));
     await tester.pumpAndSettle();
     expect(find.text('8–35 см аралығында болуы керек'), findsOneWidget);
     await tester.enterText(find.widgetWithText(TextFormField, 'Ішкі табан, см'), 'жиырма');
-    await tester.tap(find.text('Жариялау'));
+    await tester.tap(find.text('Сатылымға шығару'));
     await tester.pumpAndSettle();
     expect(find.text('Санмен жазыңыз, мысалы 27,5'), findsOneWidget);
     expect(calls.where((c) => c == 'POST /api/v1/listings'), isEmpty); // nothing was sent while anything was wrong
@@ -267,7 +267,7 @@ void main() {
     await tester.enterText(find.widgetWithText(TextFormField, 'Бағасы'), '34900');
     await tester.enterText(find.widgetWithText(TextFormField, 'Өлшем'), '38');
     await tester.enterText(find.widgetWithText(TextFormField, 'Ішкі табан, см'), '24,5');
-    await tester.tap(find.text('Жариялау'));
+    await tester.tap(find.text('Сатылымға шығару'));
     await tester.pumpAndSettle();
     expect(sent.single, containsPair('title', 'Qadam етік'));
     expect(sent.single, containsPair('category', 'boots'));
@@ -458,7 +458,7 @@ void main() {
     await tester.enterText(find.widgetWithText(TextFormField, 'Бағасы'), '20000');
     await tester.enterText(find.widgetWithText(TextFormField, 'Өлшем'), '38');
     await tester.enterText(find.widgetWithText(TextFormField, 'Ішкі табан, см'), '24,5');
-    await tester.tap(find.text('Жариялау'));
+    await tester.tap(find.text('Сатылымға шығару'));
     await tester.pumpAndSettle();
     expect(step(tester), 'Фото');
     expect(sent, isEmpty);
@@ -524,7 +524,7 @@ void main() {
     await tester.enterText(find.widgetWithText(TextFormField, 'Бағасы'), '30000');
     await tester.enterText(find.widgetWithText(TextFormField, 'Өлшем'), '38');
     await tester.enterText(find.widgetWithText(TextFormField, 'Ішкі табан, см'), '24');
-    await tester.tap(find.text('Жариялау'));
+    await tester.tap(find.text('Сатылымға шығару'));
     await tester.pumpAndSettle();
     expect(sent.single['color'], 'көк');
   });
@@ -617,7 +617,7 @@ void main() {
     await tester.enterText(find.widgetWithText(TextFormField, 'Бағасы'), '30000');
     await tester.enterText(find.widgetWithText(TextFormField, 'Өлшем'), '38');
     await tester.enterText(find.widgetWithText(TextFormField, 'Ішкі табан, см'), '24');
-    await tester.tap(find.text('Жариялау'));
+    await tester.tap(find.text('Сатылымға шығару'));
     await tester.pumpAndSettle();
     expect(sent.single['facts'], {'upper': 'suede'});
   });
@@ -634,7 +634,7 @@ void main() {
     await next(tester);
     expect(find.byKey(const ValueKey('fact-upper-leather')), findsOneWidget);
     await next(tester);
-    await tester.tap(find.text('Жариялау'));
+    await tester.tap(find.text('Сатылымға шығару'));
     await tester.pumpAndSettle();
     expect(sent.single['facts'], {'upper': 'leather', 'season': 'demi'});
   });
@@ -838,7 +838,7 @@ void main() {
     expect(find.text('24,5'), findsOneWidget);
     await tester.pump(const Duration(seconds: 2));
     expect((await kept())!..remove('kept_at'), before!..remove('kept_at')); // the same work, nothing lost
-    await tester.tap(find.text('Жариялау'));
+    await tester.tap(find.text('Сатылымға шығару'));
     await tester.pumpAndSettle();
     expect(calls.where((c) => c.endsWith('/media')), isEmpty);
     final body = sent.single;
@@ -931,11 +931,11 @@ void main() {
     final keys = <String>[];
     final calls = await open(tester, keys: keys, createLost: (n) => n == 1);
     await fillAll(tester);
-    await tester.tap(find.text('Жариялау'));
+    await tester.tap(find.text('Сатылымға шығару'));
     await tester.pumpAndSettle();
     expect(find.text('Байланыс жоқ. Интернетті тексеріп, қайталап көріңіз.'), findsOneWidget);
-    expect(find.text('Жариялау'), findsOneWidget); // still on the page, nothing lost
-    await tester.tap(find.text('Жариялау'));
+    expect(find.text('Сатылымға шығару'), findsOneWidget); // still on the page, nothing lost
+    await tester.tap(find.text('Сатылымға шығару'));
     await tester.pumpAndSettle();
     expect(keys, hasLength(2));
     expect(keys.first, matches(RegExp(r'^[0-9a-f]{32}$')));
@@ -948,11 +948,11 @@ void main() {
     final keys = <String>[];
     final calls = await open(tester, keys: keys, createLost: (n) => n == 1);
     await fillAll(tester);
-    await tester.tap(find.text('Жариялау'));
+    await tester.tap(find.text('Сатылымға шығару'));
     await tester.pumpAndSettle();
     await tester.enterText(find.widgetWithText(TextFormField, 'Бағасы'), '18000');
     tester.state<ScaffoldMessengerState>(find.byType(ScaffoldMessenger)).clearSnackBars(); // read and gone
-    await tester.tap(find.text('Жариялау'));
+    await tester.tap(find.text('Сатылымға шығару'));
     await tester.pumpAndSettle();
     expect(keys, hasLength(2));
     expect(keys.last, keys.first); // the same pair: the server answers with the listing it made the first time
@@ -968,7 +968,7 @@ void main() {
     await tester.tap(find.text('Жоба ретінде сақтау'));
     await tester.pumpAndSettle();
     expect(find.byType(ListingEditorScreen), findsOneWidget);
-    await tester.tap(find.text('Жариялау'));
+    await tester.tap(find.text('Сатылымға шығару'));
     await tester.pumpAndSettle();
     expect(keys, hasLength(2));
     expect(keys.last, keys.first);
@@ -978,7 +978,7 @@ void main() {
   testWidgets('a lost answer to a listing already sent for checking is not published twice', (tester) async {
     final calls = await open(tester, madeStatus: 'moderation');
     await fillAll(tester);
-    await tester.tap(find.text('Жариялау'));
+    await tester.tap(find.text('Сатылымға шығару'));
     await tester.pumpAndSettle();
     expect(calls.where((c) => c.endsWith('/publish')), isEmpty);
     expect(find.text('Тексеруге жіберілді'), findsOneWidget);
@@ -988,13 +988,13 @@ void main() {
     final keys = <String>[];
     await open(tester, keys: keys, createLost: (n) => n == 1);
     await fillAll(tester);
-    await tester.tap(find.text('Жариялау'));
+    await tester.tap(find.text('Сатылымға шығару'));
     await tester.pumpAndSettle();
     await tester.pump(const Duration(seconds: 2));
     await tester.pumpWidget(const SizedBox()); // the app closed with the answer lost
 
     await open(tester, keys: keys);
-    await tester.tap(find.text('Жариялау'));
+    await tester.tap(find.text('Сатылымға шығару'));
     await tester.pumpAndSettle();
     expect(keys, hasLength(2));
     expect(keys.last, keys.first);
@@ -1009,7 +1009,7 @@ void main() {
     await tester.tap(find.byKey(const Key('start-over-sure')));
     await tester.pumpAndSettle();
     await fillAll(tester);
-    await tester.tap(find.text('Жариялау'));
+    await tester.tap(find.text('Сатылымға шығару'));
     await tester.pumpAndSettle();
     expect(keys, hasLength(3));
     expect(keys.last, isNot(startsWith('a' * 32)));

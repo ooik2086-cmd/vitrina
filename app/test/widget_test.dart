@@ -1630,7 +1630,7 @@ void main() {
     await tester.pump();
     expect(find.byKey(const Key('make-offer')), findsNothing);
     final button =
-        tester.widget<FilledButton>(find.ancestor(of: find.text('25.10 бастап'), matching: find.byType(FilledButton)));
+        tester.widget<FilledButton>(find.ancestor(of: find.text('25.10 бастап сатып алуға болады'), matching: find.byType(FilledButton)));
     expect(button.onPressed, isNull);
   });
 

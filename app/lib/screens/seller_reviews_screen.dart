@@ -28,10 +28,13 @@ class Stars extends StatelessWidget {
 
 class SellerReviewsScreen extends StatefulWidget {
   const SellerReviewsScreen(
-      {super.key, required this.sellerId, required this.shopName, this.rating, this.inSheet = false});
+      {super.key, required this.sellerId, required this.shopName, this.rating, this.count, this.inSheet = false});
   final int sellerId;
   final String shopName;
   final double? rating;
+
+  /// How many reviews the shop has, as its page says: the list below shows the latest of them.
+  final int? count;
 
   /// Shown in a sheet over the listing page: closed by its round × as the page's other sheets, not a back arrow.
   final bool inSheet;
@@ -125,7 +128,7 @@ class _SellerReviewsScreenState extends State<SellerReviewsScreen> {
               const SizedBox(width: 12),
               Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Stars(value: rating ?? 0, size: 20),
-                Text(trf('{0} пікір', [items.length]), style: theme.textTheme.bodyMedium),
+                Text(trf('{0} пікір', [widget.count ?? items.length]), style: theme.textTheme.bodyMedium),
               ]),
             ]),
             const SizedBox(height: 8),

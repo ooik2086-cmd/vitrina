@@ -25,7 +25,10 @@ class EarningsScreen extends StatefulWidget {
 }
 
 class _EarningsScreenState extends State<EarningsScreen> {
+  bool _exporting = false, _paying = false; // one at a time, and the button shows it is working
+
   Future<void> _export() async {
+    if (_exporting) return;
     final days = await showDialog<int>(
       context: context,
       builder: (context) => SimpleDialog(
@@ -41,6 +44,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
       ),
     );
     if (days == null || !mounted) return;
+    setState(() => _exporting = true);
     try {
       final bytes = await SessionScope.of(context).api.salesCsv(days: days);
       final name = 'vitrina-sales-${DateTime.now().toIso8601String().substring(0, 10)}.csv';
@@ -52,6 +56,8 @@ class _EarningsScreenState extends State<EarningsScreen> {
       ));
     } catch (e) {
       if (mounted) showError(context, e);
+    } finally {
+      if (mounted) setState(() => _exporting = false);
     }
   }
 
@@ -85,7 +91,8 @@ class _EarningsScreenState extends State<EarningsScreen> {
   Future<bool> _editAccount() async {
     final saved =
         await showSheet<bool>(context: context, isScrollControlled: true, builder: (_) => const PayoutAccountSheet());
-    if (saved == true) await _reload();
+    // Read again however the sheet closed: one swiped away while its save went through still saved.
+    if (mounted) await _reload();
     return saved == true;
   }
 
@@ -110,12 +117,19 @@ class _EarningsScreenState extends State<EarningsScreen> {
         ],
       ),
     );
-    if (ok != true || !mounted) return;
+    if (ok != true || !mounted || _paying) return;
+    setState(() => _paying = true);
     try {
       await SessionScope.of(context).api.requestPayout();
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(tr('Сұрау жіберілді. Аударылғанда хабарлама келеді.'))));
+      }
       await _reload();
     } catch (e) {
       if (mounted) showError(context, e);
+    } finally {
+      if (mounted) setState(() => _paying = false);
     }
   }
 
@@ -127,8 +141,10 @@ class _EarningsScreenState extends State<EarningsScreen> {
         IconButton(
           key: const Key('export-sales'),
           tooltip: tr('Сатылымды Excel-ге жүктеу'),
-          icon: const Icon(Icons.file_download_outlined),
-          onPressed: _export,
+          icon: _exporting
+              ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+              : const Icon(Icons.file_download_outlined),
+          onPressed: _exporting ? null : _export,
         ),
       ]),
       body: FutureBuilder<(Earnings, Payouts?, Object?)>(
@@ -177,10 +193,16 @@ class _EarningsScreenState extends State<EarningsScreen> {
                     const SizedBox(height: 12),
                     FilledButton.icon(
                       key: const Key('payout'),
-                      style: FilledButton.styleFrom(backgroundColor: scheme.onPrimary, foregroundColor: scheme.primary),
-                      onPressed: p.open || p.readyAt != null || p.payableTiyn < p.minTiyn ? null : () => _payout(p),
+                      // Sending, the button keeps the card's colours, dimmed, so its circle can be seen.
+                      style: FilledButton.styleFrom(
+                          backgroundColor: scheme.onPrimary,
+                          foregroundColor: scheme.primary,
+                          disabledBackgroundColor: _paying ? scheme.onPrimary.withValues(alpha: 0.6) : null,
+                          disabledForegroundColor: _paying ? scheme.primary : null),
+                      onPressed:
+                          _paying || p.open || p.readyAt != null || p.payableTiyn < p.minTiyn ? null : () => _payout(p),
                       icon: const Icon(Icons.account_balance_outlined),
-                      label: Text(tr('Шотқа шығару')),
+                      label: busyLabel(_paying, Text(tr('Шотқа шығару'))),
                     ),
                   ],
                 ]),
@@ -270,7 +292,7 @@ class _Stat extends StatelessWidget {
   }
 }
 
-const _payoutStatuses = {'requested': 'Қаралуда', 'paid': 'Аударылды', 'rejected': 'Қайтарылды'};
+const _payoutStatuses = {'requested': 'Қаралуда', 'paid': 'Аударылды', 'rejected': 'Балансқа оралды'};
 
 class _PayoutTile extends StatelessWidget {
   const _PayoutTile({required this.payout});
@@ -374,7 +396,7 @@ class _PayoutAccountSheetState extends State<PayoutAccountSheet> {
           .setPayoutAccount(holderName: _holder.text.trim(), iban: _iban.text, taxId: _tax.text);
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
-      setState(() => _error = errorText(e));
+      if (mounted) setState(() => _error = errorText(e));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -383,42 +405,46 @@ class _PayoutAccountSheetState extends State<PayoutAccountSheet> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Padding(
-      padding: EdgeInsets.fromLTRB(20, 20, 20, 20 + MediaQuery.viewInsetsOf(context).bottom),
-      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Text(tr('Банк шоты'), style: theme.textTheme.titleLarge),
-        const SizedBox(height: 4),
-        Text(tr('Шот сіздің не ЖК-ңыздың атында болуы керек. Деректемені тек қолдау қызметі көреді.'),
-            style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
-        if (_loadError != null) ...[
-          const SizedBox(height: 12),
-          Card(child: RetryLine(what: tr('Сақталған деректеме'), error: _loadError, busy: _loading, onRetry: _load)),
-        ],
-        const SizedBox(height: 16),
-        TextField(
-            key: const Key('payout-holder'),
-            controller: _holder,
-            textCapitalization: TextCapitalization.words,
-            decoration: InputDecoration(labelText: tr('Шот иесі (аты-жөні не ЖК атауы)'))),
-        const SizedBox(height: 12),
-        TextField(
-            key: const Key('payout-iban'),
-            controller: _iban,
-            textCapitalization: TextCapitalization.characters,
-            decoration: const InputDecoration(labelText: 'IBAN', hintText: 'KZ00 0000 0000 0000 0000')),
-        const SizedBox(height: 12),
-        TextField(
-            key: const Key('payout-tax'),
-            controller: _tax,
-            keyboardType: TextInputType.number,
-            decoration: InputDecoration(labelText: tr('ЖСН не БСН (12 цифр)'))),
-        if (_error != null) ...[
-          const SizedBox(height: 8),
-          Text(_error!, key: const Key('payout-error'), style: TextStyle(color: theme.colorScheme.error)),
-        ],
-        const SizedBox(height: 16),
-        FilledButton(key: const Key('payout-save'), onPressed: _busy ? null : _save, child: Text(tr('Сақтау'))),
-      ]),
-    );
+    // While the details are being saved, back does not close the sheet and lose them half-way.
+    return PopScope(
+        canPop: !_busy,
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(20, 20, 20, 20 + MediaQuery.viewInsetsOf(context).bottom),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Text(tr('Банк шоты'), style: theme.textTheme.titleLarge),
+            const SizedBox(height: 4),
+            Text(tr('Шот сіздің не ЖК-ңыздың атында болуы керек. Деректемені тек қолдау қызметі көреді.'),
+                style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+            if (_loadError != null) ...[
+              const SizedBox(height: 12),
+              Card(
+                  child: RetryLine(what: tr('Сақталған деректеме'), error: _loadError, busy: _loading, onRetry: _load)),
+            ],
+            const SizedBox(height: 16),
+            TextField(
+                key: const Key('payout-holder'),
+                controller: _holder,
+                textCapitalization: TextCapitalization.words,
+                decoration: InputDecoration(labelText: tr('Шот иесі (аты-жөні не ЖК атауы)'))),
+            const SizedBox(height: 12),
+            TextField(
+                key: const Key('payout-iban'),
+                controller: _iban,
+                textCapitalization: TextCapitalization.characters,
+                decoration: const InputDecoration(labelText: 'IBAN', hintText: 'KZ00 0000 0000 0000 0000')),
+            const SizedBox(height: 12),
+            TextField(
+                key: const Key('payout-tax'),
+                controller: _tax,
+                keyboardType: TextInputType.number,
+                decoration: InputDecoration(labelText: tr('ЖСН не БСН (12 цифр)'))),
+            if (_error != null) ...[
+              const SizedBox(height: 8),
+              Text(_error!, key: const Key('payout-error'), style: TextStyle(color: theme.colorScheme.error)),
+            ],
+            const SizedBox(height: 16),
+            FilledButton(key: const Key('payout-save'), onPressed: _busy ? null : _save, child: Text(tr('Сақтау'))),
+          ]),
+        ));
   }
 }

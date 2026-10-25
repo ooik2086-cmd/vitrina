@@ -690,7 +690,7 @@ class _ManageListingScreenState extends State<ManageListingScreen> with WidgetsB
       say(e is ApiException
           // «This size is out of stock» says nothing to a seller with no pair left on the listing.
           ? (e.code == 'out_of_stock' ? tr('Сату үшін алдымен жұп қосыңыз.') : e.message)
-          : tr('Байланыс жоқ. Қайта көріңіз.'));
+          : unexpectedText);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -707,24 +707,7 @@ class _ManageListingScreenState extends State<ManageListingScreen> with WidgetsB
         if (!didPop) _leave();
       },
       child: Scaffold(
-        appBar: AppBar(title: Text(tr('Тауарды басқару')), actions: [
-          IconButton(
-            key: const Key('duplicate'),
-            tooltip: tr('Ұқсас тауар қосу'),
-            icon: const Icon(Icons.content_copy_rounded),
-            onPressed: () async {
-              final created = await Navigator.of(context)
-                  .push<bool>(MaterialPageRoute(builder: (_) => ListingEditorScreen(template: _l)));
-              if (created == true) _changed = true; // the seller's list reloads on the way back
-            },
-          ),
-          IconButton(
-            tooltip: tr('Сатып алушы көретіндей ашу'),
-            icon: const Icon(Icons.visibility_outlined),
-            onPressed: () =>
-                Navigator.of(context).push(MaterialPageRoute(builder: (_) => ListingScreen(listingId: _l.id))),
-          ),
-        ]),
+        appBar: AppBar(title: Text(tr('Тауарды басқару'))),
         body: Form(
           key: _form,
           child: ListView(
@@ -936,6 +919,27 @@ class _ManageListingScreenState extends State<ManageListingScreen> with WidgetsB
                     }),
                   ),
                 ],
+                // In words, not as two bare icons in the bar; at the end, as what the seller comes back for stays on top.
+                const SizedBox(height: 16),
+                Wrap(spacing: 4, runSpacing: 4, children: [
+                  TextButton.icon(
+                    key: const Key('preview'),
+                    icon: const Icon(Icons.visibility_outlined, size: 20),
+                    label: Text(tr('Сатып алушы көретіндей ашу')),
+                    onPressed: () =>
+                        Navigator.of(context).push(MaterialPageRoute(builder: (_) => ListingScreen(listingId: _l.id))),
+                  ),
+                  TextButton.icon(
+                    key: const Key('duplicate'),
+                    icon: const Icon(Icons.content_copy_rounded, size: 20),
+                    label: Text(tr('Ұқсас тауар қосу')),
+                    onPressed: () async {
+                      final created = await Navigator.of(context)
+                          .push<bool>(MaterialPageRoute(builder: (_) => ListingEditorScreen(template: _l)));
+                      if (created == true) _changed = true; // the seller's list reloads on the way back
+                    },
+                  ),
+                ]),
                 // Only a draft no buyer ever saw: anything once on sale keeps its history and is paused instead.
                 if (_l.status == 'draft' && !_l.everOnSale) ...[
                   const SizedBox(height: 16),
@@ -1357,6 +1361,8 @@ class PromoCard extends StatefulWidget {
 class _PromoCardState extends State<PromoCard> {
   Timer? _poll;
   bool _starting = false;
+  int _asked = 0; // checks since the video began; each waits a little longer, and after 40 the card stops asking
+  bool get _gaveUp => _asked >= 40;
 
   String? get _state => widget.listing.promo?.state;
 
@@ -1372,9 +1378,15 @@ class _PromoCardState extends State<PromoCard> {
     super.dispose();
   }
 
+  // On a weak line the asking slows down (up to 8 waits apart) and stops, leaving «Қайта көру», not a bar for ever.
   void _schedule() {
     _poll?.cancel();
-    _poll = Timer(widget.pollEvery, () async {
+    if (_gaveUp) {
+      if (mounted) setState(() {});
+      return;
+    }
+    _poll = Timer(widget.pollEvery * min(1 + _asked ~/ 5, 8), () async {
+      _asked++;
       try {
         final l = await SessionScope.of(context).api.listing(widget.listing.id);
         if (!mounted) return;
@@ -1386,8 +1398,16 @@ class _PromoCardState extends State<PromoCard> {
     });
   }
 
+  void _askAgain() {
+    setState(() => _asked = 0);
+    _schedule();
+  }
+
   Future<void> _make() async {
-    setState(() => _starting = true);
+    setState(() {
+      _starting = true;
+      _asked = 0; // a new video is checked from the start
+    });
     try {
       final l = await SessionScope.of(context).api.makePromo(widget.listing.id, appLanguage.value);
       if (!mounted) return;
@@ -1431,7 +1451,15 @@ class _PromoCardState extends State<PromoCard> {
           style: theme.textTheme.bodyMedium?.copyWith(color: Colors.white70),
         ),
         const SizedBox(height: 12),
-        if (rendering)
+        if (rendering && _gaveUp && !_starting)
+          OutlinedButton(
+            key: const Key('promo-ask-again'),
+            style:
+                OutlinedButton.styleFrom(foregroundColor: Colors.white, side: const BorderSide(color: Colors.white54)),
+            onPressed: _askAgain,
+            child: Text(tr('Қайта көру')),
+          )
+        else if (rendering)
           const LinearProgressIndicator(color: Brand.accent, backgroundColor: Colors.white24)
         else if (_state == 'ready' && url != null)
           Wrap(spacing: 8, runSpacing: 8, children: [

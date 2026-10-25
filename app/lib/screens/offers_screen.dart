@@ -66,7 +66,11 @@ class _OfferSheetState extends State<OfferSheet> {
 
   Future<void> _send() async {
     final v = _tiyn;
-    if (v == null || v >= _price) {
+    if (v == null) {
+      setState(() => _error = tr('Бағаңызды жазыңыз.'));
+      return;
+    }
+    if (v >= _price) {
       setState(() => _error = tr('Ұсыныс бағадан төмен болуы керек.'));
       return;
     }
@@ -137,23 +141,42 @@ class _OfferSheetState extends State<OfferSheet> {
 }
 
 /// The buyer's latest offer on a listing, with the step that is theirs to take.
-class OfferStatusCard extends StatelessWidget {
+class OfferStatusCard extends StatefulWidget {
   const OfferStatusCard({super.key, required this.offer, required this.onChanged});
   final Offer offer;
   final ValueChanged<Offer> onChanged;
 
-  Future<void> _act(BuildContext context, String action) => once(('offer', offer.id), () async {
+  @override
+  State<OfferStatusCard> createState() => _OfferStatusCardState();
+}
+
+class _OfferStatusCardState extends State<OfferStatusCard> {
+  String? _doing; // the answer on its way: its button turns, the other waits
+
+  /// Saying no to the seller's price, or taking an offer back, is asked first: one stray tap ends it for good.
+  Future<void> _act(String action) => once(('offer', widget.offer.id), () async {
+        // The button in the question names the step, as the card's own button does: not a bare «Yes».
+        final ask = switch (action) {
+          'decline' => (tr('Сатушының бағасынан бас тарту керек пе?'), tr('Бас тарту')),
+          'withdraw' => (tr('Ұсынысты қайтару керек пе?'), tr('Ұсынысты қайтару')),
+          _ => null,
+        };
+        if (ask != null && !await confirmAction(context, title: ask.$1, action: ask.$2, destructive: true)) return;
+        if (!mounted) return;
+        setState(() => _doing = action);
         try {
-          onChanged(await SessionScope.of(context).api.answerOffer(offer.id, action));
+          widget.onChanged(await SessionScope.of(context).api.answerOffer(widget.offer.id, action));
         } catch (e) {
-          if (context.mounted) showError(context, e);
+          if (mounted) showError(context, e);
+        } finally {
+          if (mounted) setState(() => _doing = null);
         }
       });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final o = offer;
+    final o = widget.offer;
     final (icon, title, line) = switch (o.status) {
       'pending' => (
           Icons.schedule_rounded,
@@ -203,18 +226,26 @@ class OfferStatusCard extends StatelessWidget {
             Expanded(
               child: OutlinedButton(
                 style:
-                    OutlinedButton.styleFrom(foregroundColor: fg, side: BorderSide(color: fg.withValues(alpha: 0.38))),
-                onPressed: () => _act(context, 'decline'),
-                child: Text(tr('Бас тарту')),
+                    // While an answer is on its way the card's own colours stay, dimmed, so the circle shows on it.
+                    OutlinedButton.styleFrom(
+                        foregroundColor: fg,
+                        disabledForegroundColor: fg.withValues(alpha: 0.6),
+                        side: BorderSide(color: fg.withValues(alpha: 0.38))),
+                onPressed: _doing == null ? () => _act('decline') : null,
+                child: busyLabel(_doing == 'decline', Text(tr('Бас тарту'))),
               ),
             ),
             const SizedBox(width: 12),
             Expanded(
               child: FilledButton(
                 key: const Key('offer-accept'),
-                style: FilledButton.styleFrom(backgroundColor: Brand.accentStrong, foregroundColor: Colors.white),
-                onPressed: () => _act(context, 'accept'),
-                child: Text(tr('Келісемін')),
+                style: FilledButton.styleFrom(
+                    backgroundColor: Brand.accentStrong,
+                    foregroundColor: Colors.white,
+                    disabledBackgroundColor: Brand.accentStrong.withValues(alpha: 0.6),
+                    disabledForegroundColor: Colors.white),
+                onPressed: _doing == null ? () => _act('accept') : null,
+                child: busyLabel(_doing == 'accept', Text(tr('Келісемін'))),
               ),
             ),
           ]),
@@ -223,9 +254,9 @@ class OfferStatusCard extends StatelessWidget {
           Align(
             alignment: Alignment.centerLeft,
             child: TextButton(
-              style: TextButton.styleFrom(padding: EdgeInsets.zero),
-              onPressed: () => _act(context, 'withdraw'),
-              child: Text(tr('Ұсынысты қайтару')),
+              style: TextButton.styleFrom(padding: EdgeInsets.zero, disabledForegroundColor: fg.withValues(alpha: 0.6)),
+              onPressed: _doing == null ? () => _act('withdraw') : null,
+              child: busyLabel(_doing == 'withdraw', Text(tr('Ұсынысты қайтару'))),
             ),
           ),
       ]),
@@ -258,8 +289,30 @@ class _OffersScreenState extends State<OffersScreen> {
 
   /// One answer at a time to each offer, the same key its card on the listing page uses: a second tap on the same
   /// offer is let go, an answer to another offer is not.
-  Future<void> _run(int offerId, Future<Offer> Function(Api api) action, String done) =>
-      once(('offer', offerId), () => _runNow(action, done));
+  /// The offer being answered and how, while its request is on the way: its button turns, the others wait.
+  final _doing = <int, String>{}; // by offer: one finishing leaves another's spinner turning
+
+  Future<void> _run(int offerId, Future<Offer> Function(Api api) action, String done, {String how = ''}) =>
+      once(('offer', offerId), () async {
+        setState(() => _doing[offerId] = how);
+        try {
+          await _runNow(action, done);
+        } finally {
+          if (mounted) setState(() => _doing.remove(offerId));
+        }
+      });
+
+  /// Saying no is asked first: one stray tap would end the bargaining for good.
+  Future<void> _decline(Offer o) async {
+    if (!await confirmAction(context,
+        title: _seller ? tr('Ұсыныстан бас тарту керек пе?') : tr('Сатушының бағасынан бас тарту керек пе?'),
+        action: tr('Бас тарту'),
+        destructive: true)) {
+      return;
+    }
+    if (!mounted) return;
+    await _run(o.id, (api) => api.answerOffer(o.id, 'decline'), tr('Ұсыныс қабылданбады'), how: 'decline');
+  }
 
   Future<void> _runNow(Future<Offer> Function(Api api) action, String done) async {
     try {
@@ -277,7 +330,7 @@ class _OffersScreenState extends State<OffersScreen> {
   Future<void> _counter(Offer o) async {
     final tenge = await showDialog<int>(context: context, builder: (_) => _CounterDialog(offer: o));
     if (tenge == null) return;
-    await _run(o.id, (api) => api.counterOffer(o.id, tenge * 100), tr('Бағаңыз жіберілді'));
+    await _run(o.id, (api) => api.counterOffer(o.id, tenge * 100), tr('Бағаңыз жіберілді'), how: 'counter');
   }
 
   @override
@@ -319,13 +372,16 @@ class _OffersScreenState extends State<OffersScreen> {
                 return Center(
                   child: Padding(
                     padding: const EdgeInsets.all(32),
-                    child: Text(
-                      _seller
-                          ? tr('Әзірге ұсыныс жоқ. Сатып алушылар тауар бетінде баға ұсына алады.')
-                          : tr('Сіз әлі баға ұсынбадыңыз.'),
-                      textAlign: TextAlign.center,
-                      style: theme.textTheme.bodyLarge,
-                    ),
+                    child: Column(mainAxisSize: MainAxisSize.min, children: [
+                      Text(
+                        _seller
+                            ? tr('Әзірге ұсыныс жоқ. Сатып алушылар тауар бетінде баға ұсына алады.')
+                            : tr('Сіз әлі баға ұсынбадыңыз.'),
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.bodyLarge,
+                      ),
+                      if (!_seller) const BrowseShoesButton(),
+                    ]),
                   ),
                 );
               }
@@ -341,10 +397,11 @@ class _OffersScreenState extends State<OffersScreen> {
                   itemBuilder: (context, i) => _OfferTile(
                     offer: items[i],
                     seller: _seller,
-                    onAccept: () =>
-                        _run(items[i].id, (api) => api.answerOffer(items[i].id, 'accept'), tr('Ұсыныс қабылданды')),
-                    onDecline: () =>
-                        _run(items[i].id, (api) => api.answerOffer(items[i].id, 'decline'), tr('Ұсыныс қабылданбады')),
+                    doing: _doing[items[i].id],
+                    onAccept: () => _run(
+                        items[i].id, (api) => api.answerOffer(items[i].id, 'accept'), tr('Ұсыныс қабылданды'),
+                        how: 'accept'),
+                    onDecline: () => _decline(items[i]),
                     onCounter: () => _counter(items[i]),
                   ),
                 ),
@@ -419,9 +476,13 @@ class _OfferTile extends StatelessWidget {
     required this.onAccept,
     required this.onDecline,
     required this.onCounter,
+    this.doing,
   });
   final Offer offer;
   final bool seller;
+
+  /// What is on its way for this offer ('accept', 'decline', 'counter'), or null.
+  final String? doing;
   final VoidCallback onAccept;
   final VoidCallback onDecline;
   final VoidCallback onCounter;
@@ -517,39 +578,46 @@ class _OfferTile extends StatelessWidget {
                 width: double.infinity,
                 child: FilledButton(
                   key: Key('accept-${o.id}'),
-                  onPressed: onAccept,
-                  child: Text(trf('Келісемін · {0}', [formatTenge(o.priceTiyn)]),
-                      maxLines: 2, textAlign: TextAlign.center),
+                  onPressed: doing == null ? onAccept : null,
+                  child: busyLabel(
+                      doing == 'accept',
+                      Text(trf('Келісемін · {0}', [formatTenge(o.priceTiyn)]),
+                          maxLines: 2, textAlign: TextAlign.center)),
                 ),
               ),
               const SizedBox(height: 8),
               SizedBox(
                 width: double.infinity,
-                child: OutlinedButton(onPressed: onDecline, child: Text(tr('Бас тарту'))),
+                child: OutlinedButton(
+                    onPressed: doing == null ? onDecline : null,
+                    child: busyLabel(doing == 'decline', Text(tr('Бас тарту')))),
               ),
             ],
             if (myTurn && seller) ...[
               const SizedBox(height: 12),
               Row(children: [
                 Expanded(
-                  child:
-                      OutlinedButton(style: _compact, onPressed: onDecline, child: Text(tr('Бас тарту'), maxLines: 1)),
+                  child: OutlinedButton(
+                      style: _compact,
+                      onPressed: doing == null ? onDecline : null,
+                      child: busyLabel(doing == 'decline', Text(tr('Бас тарту'), maxLines: 1))),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: OutlinedButton(
                       key: Key('counter-${o.id}'),
                       style: _compact,
-                      onPressed: onCounter,
-                      child: Text(tr('Өз бағам'), maxLines: 1)),
+                      onPressed: doing == null ? onCounter : null,
+                      child: busyLabel(doing == 'counter', Text(tr('Өз бағам'), maxLines: 1))),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: FilledButton(
                       key: Key('accept-${o.id}'),
                       style: _compact,
-                      onPressed: onAccept,
-                      child: Text(tr('Қабылдау'), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                      onPressed: doing == null ? onAccept : null,
+                      child: busyLabel(
+                          doing == 'accept', Text(tr('Қабылдау'), maxLines: 1, overflow: TextOverflow.ellipsis))),
                 ),
               ]),
             ],

@@ -7,6 +7,7 @@ import '../i18n.dart';
 import '../labels.dart';
 import '../session.dart';
 import '../theme.dart';
+import 'common.dart' show unexpectedText;
 
 /// Phone as the server stores it (+7XXXXXXXXXX), or null when it cannot be one.
 String? normalizeKzPhone(String raw) {
@@ -91,7 +92,7 @@ class _DeliverySheetState extends State<DeliverySheet> {
     } on ApiException catch (e) {
       if (mounted) setState(() => _promoError = e.message);
     } catch (_) {
-      if (mounted) setState(() => _promoError = tr('Байланыс жоқ. Қайта көріңіз.'));
+      if (mounted) setState(() => _promoError = unexpectedText);
     } finally {
       if (mounted) setState(() => _checking = false);
     }

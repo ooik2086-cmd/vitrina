@@ -7,6 +7,28 @@ import '../session.dart';
 import '../widgets/common.dart';
 import '../i18n.dart';
 
+/// Camera or gallery, then the results page; [replace] puts it in place of the results already shown.
+Future<void> searchByPhoto(BuildContext context, {bool replace = false}) async {
+  final file = await pickPhoto(context,
+      title: tr('Фотомен іздеу'), subtitle: tr('Ұнаған аяқкиімнің суретін түсіріңіз немесе таңдаңыз'));
+  if (file == null || !context.mounted) return;
+  final Uint8List bytes;
+  try {
+    bytes = await file.readAsBytes();
+  } catch (_) {
+    // A file the phone would not hand over: said, rather than nothing happening.
+    if (context.mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(tr('Фотоны ашу мүмкін болмады. Қайта көріңіз.'))));
+    }
+    return;
+  }
+  if (!context.mounted) return;
+  final page = MaterialPageRoute<void>(builder: (_) => ImageSearchScreen(bytes: bytes, filename: file.name));
+  final nav = Navigator.of(context);
+  replace ? nav.pushReplacement(page) : nav.push(page);
+}
+
 /// Results of a search by photo: the buyer's picture on top, look-alike listings below.
 class ImageSearchScreen extends StatefulWidget {
   const ImageSearchScreen({super.key, required this.bytes, required this.filename});
@@ -67,8 +89,17 @@ class _ImageSearchScreenState extends State<ImageSearchScreen> {
             }
             final items = snap.data!;
             if (items.isEmpty) {
+              // Not a dead end: back to the catalog, to try another photo or search in words.
               return SliverFillRemaining(
-                  hasScrollBody: false, child: Center(child: Text(tr('Ұқсас тауар табылмады.'))));
+                  hasScrollBody: false,
+                  child: EmptyState(
+                      icon: Icons.image_search_outlined,
+                      text: tr('Ұқсас тауар табылмады.'),
+                      action: OutlinedButton(
+                          key: const Key('another-photo'),
+                          // The picker again, its results in place of these, as the words promise.
+                          onPressed: () => searchByPhoto(context, replace: true),
+                          child: Text(tr('Басқа фотомен іздеу')))));
             }
             return SliverPadding(
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),

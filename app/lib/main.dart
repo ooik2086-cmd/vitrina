@@ -23,6 +23,7 @@ import 'i18n.dart';
 import 'my_size.dart';
 import 'quick_replies.dart';
 import 'recent.dart';
+import 'widgets/common.dart' show catalogWanted;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -121,6 +122,11 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     Push.opened.addListener(_openTapped);
     Push.arrived.addListener(_refreshBadges);
+    catalogWanted.addListener(_toCatalog);
+  }
+
+  void _toCatalog() {
+    if (mounted) setState(() => _tab = _lastTab = 0);
   }
 
   /// An alert tapped on the phone opens what it tells of, over the tab the person was on.
@@ -154,12 +160,16 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
 
   Session? _session;
 
-  /// The sign-in ended without the person signing out (the account blocked): said once, in words.
+  /// The sign-in ended without the person signing out (the account blocked, the sign-in expired): said once, in words.
   void _sayNotice() {
     final e = _session?.notice.value;
     if (e == null || !mounted) return;
     _session!.notice.value = null;
-    unawaited(showAccountBlocked(context, e));
+    if (e.code == 'account_blocked') {
+      unawaited(showAccountBlocked(context, e));
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    }
   }
 
   void _startPolling() {
@@ -187,6 +197,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     _session?.notice.removeListener(_sayNotice);
     Push.opened.removeListener(_openTapped);
     Push.arrived.removeListener(_refreshBadges);
+    catalogWanted.removeListener(_toCatalog);
     _poll?.cancel();
     super.dispose();
   }

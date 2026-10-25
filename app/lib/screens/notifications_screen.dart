@@ -94,6 +94,17 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     });
   }
 
+  /// Pulled down: reads the list again in place, so a new notice shows without leaving the page.
+  Future<void> _refresh() async {
+    // A failed pull keeps the notices already shown and says why, instead of the whole page turning to an error.
+    try {
+      final items = await _load();
+      if (mounted) setState(() => _items = Future.value(items));
+    } catch (e) {
+      if (mounted) showError(context, e);
+    }
+  }
+
   void _open(AppNotification n) =>
       openNotice(context, n.kind, orderId: n.orderId, conversationId: n.conversationId, listingId: n.listingId);
 
@@ -118,44 +129,54 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           }
           if (!snap.hasData) return const Center(child: CircularProgressIndicator());
           final items = snap.data!;
-          if (items.isEmpty) return Center(child: Text(tr('Хабарландыру жоқ.')));
-          return ListView.separated(
-            padding: contentPadding(context, EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom)),
-            itemCount: items.length,
-            separatorBuilder: (_, __) => const Divider(indent: 72),
-            itemBuilder: (context, i) {
-              final n = items[i];
-              final icon = switch (n.kind) {
-                'message' => Icons.chat_bubble_outline_rounded,
-                'review' || 'review_reply' || 'review_reminder' => Icons.star_outline_rounded,
-                'price_drop' => Icons.trending_down_rounded,
-                'offer' || 'offer_reply' => Icons.local_offer_outlined,
-                'saved_search' => Icons.notifications_active_outlined,
-                'followed_shop' => Icons.storefront_outlined,
-                'back_in_stock' => Icons.inventory_outlined,
-                'sold_out' => Icons.production_quantity_limits_rounded,
-                'question' || 'question_answered' => Icons.help_outline_rounded,
-                'moderation' => Icons.fact_check_outlined,
-                'listing_hidden' || 'report_closed' => Icons.flag_outlined,
-                'listing_tip' => Icons.tips_and_updates_outlined,
-                'photo_no_shoe' => Icons.hide_image_outlined,
-                'payout' => Icons.account_balance_wallet_outlined,
-                'authenticity' => Icons.verified_outlined,
-                _ => Icons.local_shipping_outlined,
-              };
-              return ListTile(
-                contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
-                leading: CircleAvatar(
-                  backgroundColor: theme.colorScheme.surfaceContainerHighest,
-                  child: Icon(icon, color: theme.colorScheme.onSurface),
-                ),
-                title: Text(n.shown, style: n.read ? null : weight(theme.textTheme.bodyLarge!, 650)),
-                subtitle: Text(_ago(n.createdAt)),
-                trailing: n.read ? null : const CircleAvatar(radius: 4, backgroundColor: Brand.accent),
-                onTap: () => _open(n),
-              );
-            },
-          );
+          if (items.isEmpty) {
+            return RefreshIndicator(
+              onRefresh: _refresh,
+              child: ListView(children: [
+                const SizedBox(height: 160),
+                Center(child: Text(tr('Хабарландыру жоқ.'))),
+              ]),
+            );
+          }
+          return RefreshIndicator(
+              onRefresh: _refresh,
+              child: ListView.separated(
+                padding: contentPadding(context, EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom)),
+                itemCount: items.length,
+                separatorBuilder: (_, __) => const Divider(indent: 72),
+                itemBuilder: (context, i) {
+                  final n = items[i];
+                  final icon = switch (n.kind) {
+                    'message' => Icons.chat_bubble_outline_rounded,
+                    'review' || 'review_reply' || 'review_reminder' => Icons.star_outline_rounded,
+                    'price_drop' => Icons.trending_down_rounded,
+                    'offer' || 'offer_reply' => Icons.local_offer_outlined,
+                    'saved_search' => Icons.notifications_active_outlined,
+                    'followed_shop' => Icons.storefront_outlined,
+                    'back_in_stock' => Icons.inventory_outlined,
+                    'sold_out' => Icons.production_quantity_limits_rounded,
+                    'question' || 'question_answered' => Icons.help_outline_rounded,
+                    'moderation' => Icons.fact_check_outlined,
+                    'listing_hidden' || 'report_closed' => Icons.flag_outlined,
+                    'listing_tip' => Icons.tips_and_updates_outlined,
+                    'photo_no_shoe' => Icons.hide_image_outlined,
+                    'payout' => Icons.account_balance_wallet_outlined,
+                    'authenticity' => Icons.verified_outlined,
+                    _ => Icons.local_shipping_outlined,
+                  };
+                  return ListTile(
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+                    leading: CircleAvatar(
+                      backgroundColor: theme.colorScheme.surfaceContainerHighest,
+                      child: Icon(icon, color: theme.colorScheme.onSurface),
+                    ),
+                    title: Text(n.shown, style: n.read ? null : weight(theme.textTheme.bodyLarge!, 650)),
+                    subtitle: Text(_ago(n.createdAt)),
+                    trailing: n.read ? null : const CircleAvatar(radius: 4, backgroundColor: Brand.accent),
+                    onTap: () => _open(n),
+                  );
+                },
+              ));
         },
       ),
     );

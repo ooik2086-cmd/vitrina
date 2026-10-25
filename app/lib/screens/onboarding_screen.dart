@@ -24,6 +24,7 @@ Future<void> restoreOnboarded() async {
 
 Future<void> finishOnboarding() async {
   onboarded.value = true;
+  forgetOnboardingPage(); // a later intro (storage lost) starts at the beginning
   try {
     await (await SharedPreferences.getInstance()).setBool(_prefsKey, true);
   } catch (_) {}
@@ -38,7 +39,7 @@ class _Page {
 
 const _pages = [
   _Page(Icons.threesixty_rounded, 'Аяқкиімді 360° айналдырып көріңіз',
-      'Аяқкиімді саусақпен кез келген жаққа бұрап, екі саусақпен жақындатыңыз. Тігісі мен табанына дейін көресіз.'),
+      '360° белгісі бар аяқкиімді саусақпен кез келген жаққа бұрап, екі саусақпен жақындатыңыз. Тігісі мен табанына дейін көресіз.'),
   _Page(Icons.verified_user_outlined, 'Ақшаңыз қорғалған',
       'Төлем VITRINA-да сақталады. Сатушы оны тауарды алғаныңызды растағаннан кейін ғана алады.'),
   _Page(Icons.straighten_rounded, 'Өлшеміңізді бір рет көрсетіңіз',
@@ -57,10 +58,20 @@ class OnboardingScreen extends StatefulWidget {
   State<OnboardingScreen> createState() => _OnboardingScreenState();
 }
 
+/// Where the person was, kept across a language change (it builds the app anew): not back to page 1.
+int _keptPage = 0;
+bool? _keptPayments;
+
+@visibleForTesting
+void forgetOnboardingPage() {
+  _keptPage = 0;
+  _keptPayments = null;
+}
+
 class _OnboardingScreenState extends State<OnboardingScreen> {
-  final _pager = PageController();
-  int _page = 0;
-  bool? _payments; // what the server said; until then neither money page is shown
+  late final _pager = PageController(initialPage: _keptPage);
+  int _page = _keptPage;
+  bool? _payments = _keptPayments; // what the server said; until then neither money page is shown
 
   @override
   void didChangeDependencies() {
@@ -68,7 +79,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     // Without a session (this page tested alone) the pages stay as they are.
     SessionScope.maybeOf(context)?.api.paymentsPromised().then((on) {
       // Not under the person's eyes: once past the first page the pages stay as they are.
-      if (mounted && on != _payments && _page == 0) setState(() => _payments = on);
+      if (mounted && on != _payments && _page == 0) setState(() => _payments = _keptPayments = on);
     });
   }
 
@@ -96,52 +107,58 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final last = _page == _shown.length - 1;
-    return Scaffold(
-      body: SafeArea(
-        child: Column(children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 8, 0),
-            child: Row(children: [
-              const Expanded(child: Align(alignment: Alignment.centerLeft, child: LanguageSwitch())),
-              TextButton(key: const Key('onboarding-skip'), onPressed: finishOnboarding, child: Text(tr('Өткізу'))),
-            ]),
-          ),
-          Expanded(
-            child: PageView.builder(
-              controller: _pager,
-              itemCount: _shown.length,
-              onPageChanged: (i) => setState(() => _page = i),
-              itemBuilder: (context, i) => _PageBody(page: _shown[i], showSize: i == _shown.length - 1),
-            ),
-          ),
-          Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-            for (var i = 0; i < _shown.length; i++)
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                margin: const EdgeInsets.symmetric(horizontal: 4),
-                width: i == _page ? 22 : 8,
-                height: 8,
-                decoration: BoxDecoration(
-                  color: i == _page ? Brand.accent : theme.colorScheme.outlineVariant,
-                  borderRadius: BorderRadius.circular(99),
+    // Back on a later page goes to the page before, as a finger swiping back would; on the first it leaves.
+    return PopScope(
+        canPop: _page == 0,
+        onPopInvokedWithResult: (didPop, _) {
+          if (!didPop) _pager.previousPage(duration: const Duration(milliseconds: 280), curve: Curves.easeOutCubic);
+        },
+        child: Scaffold(
+          body: SafeArea(
+            child: Column(children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 8, 0),
+                child: Row(children: [
+                  const Expanded(child: Align(alignment: Alignment.centerLeft, child: LanguageSwitch())),
+                  TextButton(key: const Key('onboarding-skip'), onPressed: finishOnboarding, child: Text(tr('Өткізу'))),
+                ]),
+              ),
+              Expanded(
+                child: PageView.builder(
+                  controller: _pager,
+                  itemCount: _shown.length,
+                  onPageChanged: (i) => setState(() => _page = _keptPage = i),
+                  itemBuilder: (context, i) => _PageBody(page: _shown[i], showSize: i == _shown.length - 1),
                 ),
               ),
-          ]),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(24, 20, 24, 20),
-            child: SizedBox(
-              width: double.infinity,
-              height: 54,
-              child: FilledButton(
-                key: const Key('onboarding-next'),
-                onPressed: _next,
-                child: Text(last ? tr('Бастау') : tr('Келесі')),
+              Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                for (var i = 0; i < _shown.length; i++)
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    margin: const EdgeInsets.symmetric(horizontal: 4),
+                    width: i == _page ? 22 : 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      color: i == _page ? Brand.accent : theme.colorScheme.outlineVariant,
+                      borderRadius: BorderRadius.circular(99),
+                    ),
+                  ),
+              ]),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 20, 24, 20),
+                child: SizedBox(
+                  width: double.infinity,
+                  height: 54,
+                  child: FilledButton(
+                    key: const Key('onboarding-next'),
+                    onPressed: _next,
+                    child: Text(last ? tr('Бастау') : tr('Келесі')),
+                  ),
+                ),
               ),
-            ),
+            ]),
           ),
-        ]),
-      ),
-    );
+        ));
   }
 }
 

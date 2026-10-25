@@ -83,6 +83,7 @@ List<_Action> _actionsFor(OrderInfo o, {required bool isBuyer}) {
               done: tr('Рақмет! Тапсырыс аяқталды.')),
           _Action(tr('Қайтару'), 'return',
               needs: 'reason',
+              destructive: true, // beside «Алдым, бәрі дұрыс», not as strong: the usual way is to confirm
               explain: tr(
                   'Сатушы қайтаруды мақұлдаса, ақша сізге қайтарылады. Аяқкиімді қалай қайтаратыныңызды сатушымен чатта келісіңіз. Келіспесе, қолдау қызметі шешеді.'),
               done: tr('Қайтару сұрауы сатушыға жіберілді. «Дәлелдер» бөлімінде ақаудың фотосын қосыңыз.')),
@@ -138,6 +139,8 @@ const linkFreshFor = Duration(minutes: 50);
 class _OrderScreenState extends State<OrderScreen> with WidgetsBindingObserver {
   /// A6 page with the recipient, address, pair and size, to print and put on the box.
   Future<void> _slip() async {
+    if (_slipping) return; // a second tap would open a second share sheet
+    setState(() => _slipping = true);
     try {
       final bytes = await _api.packingSlip(widget.orderId);
       final name = 'vitrina-${widget.orderId}.pdf';
@@ -148,13 +151,17 @@ class _OrderScreenState extends State<OrderScreen> with WidgetsBindingObserver {
       ));
     } catch (e) {
       if (mounted) showError(context, e);
+    } finally {
+      if (mounted) setState(() => _slipping = false);
     }
   }
 
+  bool _slipping = false;
   OrderInfo? _order;
   DateTime? _loadedAt;
   Object? _error;
   bool _busy = false;
+  String? _doing; // the move on its way: its button turns
   bool _paymentStarted = false;
   bool _reviewed = false;
 
@@ -290,7 +297,10 @@ class _OrderScreenState extends State<OrderScreen> with WidgetsBindingObserver {
       if (!await _confirm(a)) return;
     }
     if (!mounted) return;
-    setState(() => _busy = true);
+    setState(() {
+      _busy = true;
+      _doing = a.endpoint;
+    });
     try {
       if (a.endpoint == 'pay') {
         await _api.startPayment(widget.orderId);
@@ -307,7 +317,12 @@ class _OrderScreenState extends State<OrderScreen> with WidgetsBindingObserver {
     } catch (e) {
       if (mounted) showError(context, e);
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _doing = null;
+        });
+      }
     }
   }
 
@@ -376,7 +391,7 @@ class _OrderScreenState extends State<OrderScreen> with WidgetsBindingObserver {
                   _OrderedDetails(details: o.listingDetails!),
                   const SizedBox(height: 16),
                 ],
-                _Timeline(order: o),
+                _Timeline(order: o, buyer: me?.id == o.buyerId),
                 const SizedBox(height: 16),
                 const _ProtectionNote(),
                 if (_paymentStarted && o.status == 'PAYMENT_PENDING')
@@ -405,9 +420,9 @@ class _OrderScreenState extends State<OrderScreen> with WidgetsBindingObserver {
                     padding: const EdgeInsets.only(bottom: 8),
                     child: OutlinedButton.icon(
                       key: const Key('slip'),
-                      onPressed: _slip,
+                      onPressed: _slipping ? null : _slip,
                       icon: const Icon(Icons.print_outlined),
-                      label: Text(tr('Жіберу парағын жүктеу')),
+                      label: busyLabel(_slipping, Text(tr('Жіберу парағын жүктеу'))),
                     ),
                   ),
                 // Next to the buttons that open a return or dispute, so it is where the next step is.
@@ -426,8 +441,12 @@ class _OrderScreenState extends State<OrderScreen> with WidgetsBindingObserver {
                     Padding(
                       padding: const EdgeInsets.only(bottom: 8),
                       child: a.destructive
-                          ? OutlinedButton(onPressed: _busy ? null : () => _do(a), child: Text(a.label))
-                          : FilledButton(onPressed: _busy ? null : () => _do(a), child: Text(a.label)),
+                          ? OutlinedButton(
+                              onPressed: _busy ? null : () => _do(a),
+                              child: busyLabel(_doing == a.endpoint, Text(a.label)))
+                          : FilledButton(
+                              onPressed: _busy ? null : () => _do(a),
+                              child: busyLabel(_doing == a.endpoint, Text(a.label))),
                     ),
               ]),
             ),
@@ -559,7 +578,7 @@ class _EvidenceCardState extends State<_EvidenceCard> {
               key: const Key('evidence-video'),
               leading: const Icon(Icons.video_library_outlined),
               title: Text(tr('Галереядан видео')),
-              subtitle: Text(tr('MP4 не MOV, 12 МБ-қа дейін (шамамен 10 секунд)')),
+              subtitle: Text(tr('Қысқа видео, шамамен 10 секундқа дейін')),
               onTap: () => Navigator.pop(context, 'video'),
             ),
           ]),
@@ -580,7 +599,8 @@ class _EvidenceCardState extends State<_EvidenceCard> {
               'video' => picker.pickVideo(source: ImageSource.gallery),
               _ => Future.value(null),
             },
-        camera: choice == 'camera' || choice == 'record');
+        camera: choice == 'camera' || choice == 'record',
+        video: choice == 'record' || choice == 'video');
   }
 
   /// Shows what is about to go out and that it is final. Null when cancelled, '' when sent without a note. The
@@ -671,6 +691,7 @@ class _EvidenceCardState extends State<_EvidenceCard> {
 
   /// One try; after a dropped connection the same [key] is offered again, so a copy that did arrive is not doubled.
   Future<void> _send(Uint8List bytes, String name, String note, String key) async {
+    if (!mounted) return; // «Қайталау» tapped after the order page closed
     setState(() => _uploading = true);
     try {
       await SessionScope.of(context).api.addEvidence(widget.order.id, bytes, name, note: note, key: key);
@@ -1031,8 +1052,9 @@ class _DeliveryCard extends StatelessWidget {
 
 /// The happy path as five steps; disputes, returns and cancellations show as a banner instead.
 class _Timeline extends StatelessWidget {
-  const _Timeline({required this.order});
+  const _Timeline({required this.order, required this.buyer});
   final OrderInfo order;
+  final bool buyer; // the refund line speaks of «your card»
 
   // Built on each call, not cached: a cached list would keep the language the app started in.
   static List<(String, String, IconData)> get _steps => [
@@ -1063,8 +1085,21 @@ class _Timeline extends StatelessWidget {
               margin: const EdgeInsets.only(bottom: 12),
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(color: scheme.errorContainer, borderRadius: BorderRadius.circular(14)),
-              child: Text(label(orderStatuses, o.status),
-                  style: weight(theme.textTheme.bodyMedium!, 650).copyWith(color: scheme.onErrorContainer)),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(label(orderStatuses, o.status),
+                    style: weight(theme.textTheme.bodyMedium!, 650).copyWith(color: scheme.onErrorContainer)),
+                // A refund on its way says where the money goes and how the page will tell it arrived.
+                if (o.status == 'REFUND_PENDING')
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                        buyer
+                            ? tr(
+                                'Ақша төлеген картаңызға қайтарылады. Түскенде мұнда «Ақша қайтарылды» деп жазылады. Ұзаққа созылса, қолдау қызметіне жазыңыз.')
+                            : tr('Ақша сатып алушыға қайтарылып жатыр.'),
+                        style: theme.textTheme.bodySmall?.copyWith(color: scheme.onErrorContainer)),
+                  ),
+              ]),
             )
           else if (!reached.containsKey('PAID'))
             Padding(
@@ -1275,11 +1310,19 @@ class _ReviewFormState extends State<_ReviewForm> {
           Text(tr('Келген жұпты суретке түсіріңіз: басқа сатып алушыларға көп көмектеседі.'),
               style: theme.textTheme.bodySmall),
           const SizedBox(height: 12),
+          // The button waits for the stars: it says so, rather than being grey for no reason.
+          if (_rating == 0)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(tr('Алдымен жұлдыз санын таңдаңыз.'),
+                  key: const Key('review-stars-first'),
+                  style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+            ),
           SizedBox(
             width: double.infinity,
             child: FilledButton(
               onPressed: _rating == 0 || _busy || _uploading ? null : _submit,
-              child: Text(tr('Пікір қалдыру')),
+              child: busyLabel(_busy, Text(tr('Пікір қалдыру'))),
             ),
           ),
         ]),

@@ -17,8 +17,12 @@ import 'studio.dart';
 import 'card_turn.dart';
 import 'model_stage.dart';
 
+/// A failure that is not the server's nor the connection's (the API turns both into an [ApiException]): said as
+/// such, not as «no connection», which would send the person to check a line that works.
+String get unexpectedText => tr('Бір нәрсе дұрыс болмады. Қайта көріңіз.');
+
 void showError(BuildContext context, Object error) {
-  final text = error is ApiException ? error.message : tr('Байланыс жоқ. Қайта көріңіз.');
+  final text = error is ApiException ? error.message : unexpectedText;
   ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
 }
 
@@ -177,7 +181,7 @@ ApiException moreContacts() =>
     ApiException.local(422, 'contacts_left', 'Мәтінде тағы байланыс бар. Оны да алып тастаңыз.');
 
 /// A failed load in people's words: the server's own message when it sent one, never a raw exception.
-String errorText(Object? error) => error is ApiException ? error.message : tr('Серверге қосылу мүмкін болмады.');
+String errorText(Object? error) => error is ApiException ? error.message : unexpectedText;
 
 /// Widest a screen's text column grows on a tablet or the web; phones are narrower than this anyway.
 const maxContentWidth = 640.0;
@@ -224,6 +228,29 @@ class ContentWidth extends StatelessWidget {
 }
 
 /// An icon, one friendly line and an optional action: for empty lists and failed loads.
+/// Bumped to bring the home back to its catalog tab: the next step from an empty list.
+final catalogWanted = ValueNotifier<int>(0);
+
+/// Under an empty list: the one way on, to the shoes.
+class BrowseShoesButton extends StatelessWidget {
+  const BrowseShoesButton({super.key});
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.only(top: 16),
+        child: Center(
+          child: OutlinedButton(
+            key: const Key('browse-shoes'),
+            onPressed: () {
+              Navigator.of(context).popUntil((r) => r.isFirst);
+              catalogWanted.value++;
+            },
+            child: Text(tr('Аяқкиім қарау')),
+          ),
+        ),
+      );
+}
+
 class EmptyState extends StatelessWidget {
   const EmptyState({super.key, required this.icon, required this.text, this.action});
   final IconData icon;
@@ -365,7 +392,8 @@ Future<XFile?> pickPhoto(BuildContext context, {String? title, String? subtitle}
 
 /// The phone's camera or gallery. Refused (no permission, the picker failed): said in words, never a tap that does
 /// nothing.
-Future<XFile?> takePhoto(BuildContext context, Future<XFile?> Function() pick, {required bool camera}) async {
+Future<XFile?> takePhoto(BuildContext context, Future<XFile?> Function() pick,
+    {required bool camera, bool video = false}) async {
   try {
     return await pick();
   } catch (e) {
@@ -376,10 +404,14 @@ Future<XFile?> takePhoto(BuildContext context, Future<XFile?> Function() pick, {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         duration: const Duration(seconds: 8),
         content: Text(!refused
-            ? tr('Фотоны ашу мүмкін болмады. Қайта көріңіз.')
+            ? (video
+                ? tr('Видеоны ашу мүмкін болмады. Қайта көріңіз.')
+                : tr('Фотоны ашу мүмкін болмады. Қайта көріңіз.'))
             : camera
                 ? tr('Камераға рұқсат берілмеді. Телефон баптауларынан рұқсат беріңіз.')
-                : tr('Фотоларға рұқсат берілмеді. Телефон баптауларынан рұқсат беріңіз.')),
+                : video
+                    ? tr('Видеоларға рұқсат берілмеді. Телефон баптауларынан рұқсат беріңіз.')
+                    : tr('Фотоларға рұқсат берілмеді. Телефон баптауларынан рұқсат беріңіз.')),
       ));
     }
     return null;
@@ -612,6 +644,26 @@ class ListingGrid extends StatelessWidget {
     );
   }
 }
+
+/// A button's words, or a small turning circle in their place while its request is on the way, so a slow line
+/// does not look like a tap that did nothing. The words stay, unseen: the button keeps its width and a screen
+/// reader still hears its name.
+Widget busyLabel(bool busy, Widget label) => busy
+    ? Stack(alignment: Alignment.center, children: [
+        Visibility(
+            visible: false,
+            maintainSize: true,
+            maintainAnimation: true,
+            maintainState: true,
+            maintainSemantics: true,
+            child: label),
+        SizedBox.square(
+            dimension: 18,
+            child: Builder(
+                builder: (context) =>
+                    CircularProgressIndicator(strokeWidth: 2, color: DefaultTextStyle.of(context).style.color))),
+      ])
+    : label;
 
 /// Asks before an action that cannot be taken back; true only when the person pressed [action].
 Future<bool> confirmAction(BuildContext context,

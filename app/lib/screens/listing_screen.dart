@@ -254,11 +254,17 @@ class _ListingScreenState extends State<ListingScreen> {
     return session.signedIn;
   }
 
+  /// The listing's link goes even when its page did not load: only its title and price are left out then.
   Future<void> _share() async {
-    final l = await _listing;
+    Listing? l;
+    try {
+      l = await _listing;
+    } catch (_) {}
     await SharePlus.instance.share(ShareParams(
-      text: trf('{0} · {1}\n{2}', [l.title, formatTenge(l.priceTiyn), listingShareUrl(l.id)]),
-      subject: l.title,
+      text: l == null
+          ? listingShareUrl(_id)
+          : trf('{0} · {1}\n{2}', [l.title, formatTenge(l.priceTiyn), listingShareUrl(l.id)]),
+      subject: l?.title,
     ));
   }
 
@@ -521,7 +527,11 @@ class _ListingScreenState extends State<ListingScreen> {
         builder: (_) => FractionallySizedBox(
           heightFactor: 0.86,
           child: SellerReviewsScreen(
-              sellerId: l.sellerId, shopName: l.shopName ?? tr('Сатушы'), rating: l.sellerRating, inSheet: true),
+              sellerId: l.sellerId,
+              shopName: l.shopName ?? tr('Сатушы'),
+              rating: l.sellerRating,
+              count: l.sellerReviews,
+              inSheet: true),
         ),
       );
 
@@ -939,7 +949,7 @@ class _ListingScreenState extends State<ListingScreen> {
                           : l.status != 'published'
                               ? tr('Қазір сатылымда жоқ')
                               : away != null
-                                  ? trf('{0} бастап', [formatDay(away.add(const Duration(days: 1)))])
+                                  ? trf('{0} бастап сатып алуға болады', [formatDay(away.add(const Duration(days: 1)))])
                                   : !_payments
                                       ? tr('Сатушыға жазу')
                                       : selected == null
@@ -1352,7 +1362,7 @@ class _SellerRow extends StatelessWidget {
                         ],
                         TextSpan(
                             text: [
-                          if (l.sellerCity != null) l.sellerCity!,
+                          if (l.sellerCity != null) tr(l.sellerCity!),
                           trf('{0} пікір', [l.sellerReviews])
                         ].join(' · ')),
                       ]),

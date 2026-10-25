@@ -142,6 +142,22 @@ class _PromoCard extends StatelessWidget {
               Text(rules.join(' · '), style: theme.textTheme.bodySmall),
               if (!p.active)
                 Text(tr('Мерзімі өтті'), style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.error)),
+              // The code is there to be passed on: one tap copies it, to paste in a chat or a post. Under the words,
+              // so the row keeps its room at large text on a narrow phone.
+              if (p.active)
+                TextButton.icon(
+                  key: Key('copy-${p.code}'),
+                  style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: const Size(48, 48)),
+                  icon: const Icon(Icons.copy_rounded, size: 18),
+                  label: Text(tr('Көшіру')),
+                  onPressed: () async {
+                    await Clipboard.setData(ClipboardData(text: p.code));
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context)
+                          .showSnackBar(SnackBar(content: Text(trf('Көшірілді: {0}', [p.code]))));
+                    }
+                  },
+                ),
             ]),
           ),
           IconButton(

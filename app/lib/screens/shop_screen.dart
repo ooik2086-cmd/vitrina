@@ -113,7 +113,14 @@ class _ShopScreenState extends State<ShopScreen> {
     }
   }
 
-  Future<void> _share() async => shareShop(widget.sellerId, (await _data)?.$1.shopName);
+  /// The shop's link goes even when its page did not load: only its name is left out then.
+  Future<void> _share() async {
+    String? name;
+    try {
+      name = (await _data)?.$1.shopName;
+    } catch (_) {}
+    await shareShop(widget.sellerId, name);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -166,7 +173,7 @@ class _ShopScreenState extends State<ShopScreen> {
                             const SizedBox(height: 2),
                             Text(
                               [
-                                if (shop.city != null) shop.city!,
+                                if (shop.city != null) tr(shop.city!),
                                 trf('VITRINA-да {0} {1} бастап', [tr(_months[shop.since.month - 1]), shop.since.year]),
                               ].join(' · '),
                               style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
@@ -267,7 +274,10 @@ class _ShopScreenState extends State<ShopScreen> {
                           icon: Icons.star_rounded,
                           onTap: () => Navigator.of(context).push(MaterialPageRoute(
                               builder: (_) => SellerReviewsScreen(
-                                  sellerId: shop.id, shopName: shop.shopName, rating: shop.rating))),
+                                  sellerId: shop.id,
+                                  shopName: shop.shopName,
+                                  rating: shop.rating,
+                                  count: shop.reviews))),
                         ),
                         const SizedBox(width: 10),
                         _Fact(value: '${shop.completedSales}', label: tr('сатылым'), icon: Icons.verified_outlined),

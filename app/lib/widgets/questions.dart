@@ -116,7 +116,19 @@ class _QuestionsSectionState extends State<QuestionsSection> {
             Text(tr('Әзірге сұрақ жоқ.'),
                 key: const Key('no-questions'),
                 style: theme.textTheme.bodyLarge?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
-          for (final q in visible) QuestionTile(question: q, card: widget.inSheet),
+          for (final q in visible)
+            QuestionTile(
+                question: q,
+                card: widget.inSheet,
+                // The buyer's own question, while unanswered, can be taken back where it is read.
+                trailing: widget.inSheet && q.mine && q.answer == null
+                    ? TextButton(
+                        key: Key('take-back-${q.id}'),
+                        style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+                        onPressed: () => takeBackQuestion(context, q, seller: false, done: _reload),
+                        child: Text(tr('Қайтарып алу')),
+                      )
+                    : null),
           if (!seller && widget.inSheet)
             Padding(
               padding: const EdgeInsets.only(top: 14),
@@ -232,6 +244,24 @@ Future<bool> askQuestion(BuildContext context, int listingId) async {
   return sent == true;
 }
 
+/// The seller hides a question, or a buyer takes back her own: asked first, sent once.
+Future<void> takeBackQuestion(BuildContext context, Question q,
+    {required bool seller, required VoidCallback done}) async {
+  final ok = await confirmAction(context,
+      title: seller ? tr('Сұрақты жасыру керек пе?') : tr('Сұрағыңызды қайтарып алу керек пе?'),
+      action: seller ? tr('Жасыру') : tr('Қайтарып алу'),
+      destructive: true);
+  if (!ok || !context.mounted) return;
+  await once((#takeBackQuestion, q.id), () async {
+    try {
+      await SessionScope.of(context).api.hideQuestion(q.id);
+      if (context.mounted) done();
+    } catch (e) {
+      if (context.mounted) showError(context, e);
+    }
+  });
+}
+
 class QuestionTile extends StatelessWidget {
   const QuestionTile({super.key, required this.question, this.trailing, this.card = false});
   final Question question;
@@ -261,6 +291,7 @@ class QuestionTile extends StatelessWidget {
           const SizedBox(height: 6),
           Text(q.answer != null ? '${tr('Сатушы')}: ${q.answer}' : trf('{0} · жауап күтуде', [formatDay(q.askedAt)]),
               style: muted),
+          if (trailing != null) Align(alignment: Alignment.centerLeft, child: trailing!),
         ]),
       );
     }
@@ -341,14 +372,7 @@ class _QuestionsScreenState extends State<QuestionsScreen> {
     if (done == true && mounted) _reload();
   }
 
-  Future<void> _hide(Question q) async {
-    try {
-      await SessionScope.of(context).api.hideQuestion(q.id);
-      _reload();
-    } catch (e) {
-      if (mounted) showError(context, e);
-    }
-  }
+  Future<void> _hide(Question q) => takeBackQuestion(context, q, seller: widget.seller, done: _reload);
 
   @override
   Widget build(BuildContext context) {
@@ -502,6 +526,10 @@ class _TextSheetState extends State<_TextSheet> {
                   decoration: InputDecoration(
                       // errorMaxLines: a refusal reads in full, at any text size; the sheet scrolls.
                       hintText: widget.hint,
+                      // Begun but too short: says why «send» waits, rather than leaving it grey without a word.
+                      helperText: _text.text.trim().isNotEmpty && _text.text.trim().length < widget.minLength
+                          ? trf('Кемінде {0} әріп жазыңыз', [widget.minLength])
+                          : null,
                       errorText: _error == null ? null : refusalText(_error, _text.text),
                       errorMaxLines: 30),
                   onChanged: (_) => setState(() => _error = null),
