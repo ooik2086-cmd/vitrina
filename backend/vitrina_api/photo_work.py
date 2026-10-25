@@ -82,7 +82,8 @@ def due_work(state, chunk: int = 500, known: dict | None = None) -> dict[int, Du
         wanted |= Listing.id.not_in(current)
     due: dict[int, Due] = {}
     with state.sessions() as db:
-        ids = db.scalars(select(Listing.id).where(wanted).order_by(Listing.id)).all()
+        # A deleted draft (archived) is never shown again: its photos are not worked on.
+        ids = db.scalars(select(Listing.id).where(wanted, Listing.status != "archived").order_by(Listing.id)).all()
         if known is not None:
             # What a listing's work depends on, cheaply: its photo rows and what the jobs write.
             marks = {row[0]: tuple(row[1:]) for row in db.execute(

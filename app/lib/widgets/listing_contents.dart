@@ -464,7 +464,7 @@ class _NewSizeDialogState extends State<_NewSizeDialog> {
             key: const Key('size-cm'),
             controller: _cm,
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: InputDecoration(labelText: tr('Ұлтарақ, см')),
+            decoration: InputDecoration(labelText: tr('Ішкі табан, см')),
             validator: insoleCheck,
           ),
           TextFormField(

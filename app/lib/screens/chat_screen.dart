@@ -498,7 +498,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       builder: (context) => AlertDialog(
         title: Text(trf('{0}: бұғаттау керек пе?', [personName(conv.otherName)])),
         content: Text(tr(
-            'Екеуіңіз бір-біріңізге жаза алмайсыз, баға ұсынысы, сұрақ пен тапсырыс та жабылады. Профильдегі «Бұғатталғандар» бөлімінен қайтаруға болады.')),
+            'Екеуіңіз бір-біріңізге жаза алмайсыз, жаңа баға ұсынысы, сұрақ пен тапсырыс жасалмайды. Басталған тапсырыс жалғасады, ол туралы сұрағыңызды қолдау қызметіне жазыңыз. Профильдегі «Бұғатталғандар» бөлімінен қайтаруға болады.')),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Жабу'))),
           FilledButton(
@@ -943,28 +943,31 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         Expanded(
           child: conv == null && _loadError != null
               ? ErrorRetry(error: _loadError, onRetry: _retry)
-              : _messages.isEmpty
-                  ? Center(
-                      child: Padding(
-                        padding: const EdgeInsets.all(32),
-                        child: Text(
-                          conv?.role == 'buyer'
-                              ? tr('Өлшемі, жағдайы немесе жеткізу туралы сұраңыз.')
-                              : tr('Хабарлама әлі жоқ.'),
-                          textAlign: TextAlign.center,
-                          style: theme.textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
+              // Still loading on a weak line: a circle, not «no messages», or the buyer writes everything again.
+              : conv == null && _messages.isEmpty
+                  ? const Center(child: CircularProgressIndicator())
+                  : _messages.isEmpty
+                      ? Center(
+                          child: Padding(
+                            padding: const EdgeInsets.all(32),
+                            child: Text(
+                              conv?.role == 'buyer'
+                                  ? tr('Өлшемі, жағдайы немесе жеткізу туралы сұраңыз.')
+                                  : tr('Хабарлама әлі жоқ.'),
+                              textAlign: TextAlign.center,
+                              style: theme.textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
+                            ),
+                          ),
+                        )
+                      : ListView.builder(
+                          controller: _scroll,
+                          padding: contentPadding(context, const EdgeInsets.fromLTRB(16, 12, 16, 12)),
+                          itemCount: _messages.length,
+                          itemBuilder: (context, i) {
+                            final m = _messages[i];
+                            return _Bubble(message: m, mine: m.senderId == me, payments: _payments);
+                          },
                         ),
-                      ),
-                    )
-                  : ListView.builder(
-                      controller: _scroll,
-                      padding: contentPadding(context, const EdgeInsets.fromLTRB(16, 12, 16, 12)),
-                      itemCount: _messages.length,
-                      itemBuilder: (context, i) {
-                        final m = _messages[i];
-                        return _Bubble(message: m, mine: m.senderId == me, payments: _payments);
-                      },
-                    ),
         ),
         if (conv?.role == 'seller')
           _QuickReplies(

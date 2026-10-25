@@ -837,6 +837,8 @@ class OrderInfo {
         trackingNumber = j['tracking_number'] as String?,
         promoCode = j['promo_code'] as String?,
         promoDiscountTiyn = (j['promo_discount_tiyn'] as int?) ?? 0,
+        sellerFeeTiyn = j['seller_fee_tiyn'] as int?,
+        sellerNetTiyn = j['seller_net_tiyn'] as int?,
         listingTitle = j['listing_title'] as String?,
         reviewed = (j['reviewed'] as bool?) ?? false,
         listingCover = j['listing_cover'] as String?,
@@ -868,6 +870,9 @@ class OrderInfo {
   final String? trackingNumber;
   final String? promoCode;
   final int promoDiscountTiyn;
+
+  /// The seller's own view of an order not refunded: the commission, and what reaches them when it completes.
+  final int? sellerFeeTiyn, sellerNetTiyn;
   final String? listingTitle;
   final bool reviewed;
   final String? listingCover;
@@ -1178,14 +1183,22 @@ class Api {
   /// Whether the server takes orders and offers now. Until a payment partner is signed it does not, and buyers write
   /// to the seller instead. Asked once; a failed check counts as yes and is asked again next time, because the server
   /// still refuses an order itself, with words for people.
-  Future<bool> paymentsOn() => _payments ??= _send('GET', '/app-config')
-          .then((r) => _paymentsKnown = (r as Map)['payments'] != false)
-          .catchError((Object _) {
+  Future<bool> paymentsOn() => _payments ??= _send('GET', '/app-config').then((r) {
+        _support = (r as Map)['support'] as String?;
+        return _paymentsKnown = r['payments'] != false;
+      }).catchError((Object _) {
         _payments = null;
         return true;
       });
 
   bool? _paymentsKnown;
+  String? _support;
+
+  /// Where people write to support (an address, a phone or a link), as the server is set up; null when unknown.
+  Future<String?> supportContact() => paymentsOn().then((_) => _support);
+
+  /// The contact once known, so a page opened later shows it in its first frame.
+  String? get supportKnown => _support;
 
   /// For words people read (the first pages, Help): what the server said of payments, null when unknown (offline, a
   /// slow line). Unknown promises nothing either way: neither money held by VITRINA nor paying the seller in chat.
@@ -1356,6 +1369,9 @@ class Api {
 
   Future<Listing> removeListingVideo(int id) async =>
       Listing.fromJson(await _send('DELETE', '/listings/$id/video') as Map<String, dynamic>);
+
+  /// A draft never on sale goes for good; the server refuses anything else (only_drafts_deleted).
+  Future<void> deleteDraft(int id) => _send('DELETE', '/listings/$id');
 
   Future<Listing> pauseListing(int id) async =>
       Listing.fromJson(await _send('POST', '/listings/$id/pause') as Map<String, dynamic>);

@@ -83,7 +83,8 @@ List<_Action> _actionsFor(OrderInfo o, {required bool isBuyer}) {
               done: tr('Рақмет! Тапсырыс аяқталды.')),
           _Action(tr('Қайтару'), 'return',
               needs: 'reason',
-              explain: tr('Сатушы қайтаруды мақұлдаса, ақша сізге қайтарылады. Келіспесе, қолдау қызметі шешеді.'),
+              explain: tr(
+                  'Сатушы қайтаруды мақұлдаса, ақша сізге қайтарылады. Аяқкиімді қалай қайтаратыныңызды сатушымен чатта келісіңіз. Келіспесе, қолдау қызметі шешеді.'),
               done: tr('Қайтару сұрауы сатушыға жіберілді. «Дәлелдер» бөлімінде ақаудың фотосын қосыңыз.')),
           dispute,
         ],
@@ -105,7 +106,8 @@ List<_Action> _actionsFor(OrderInfo o, {required bool isBuyer}) {
     'RETURN_REQUESTED' => [
         _Action(tr('Қайтаруды мақұлдау'), 'approve-return',
             ask: tr('Қайтаруды мақұлдау керек пе?'),
-            explain: tr('Ақша сатып алушыға қайтарылады.'),
+            explain: tr(
+                'Ақша сатып алушыға қайтарылады. Аяқкиімді қалай қайтаратынын сатып алушымен чатта алдын ала келісіңіз.'),
             done: tr('Қайтару мақұлданды.')),
         _Action(tr('Қайтаруға келіспеу'), 'dispute',
             needs: 'reason',
@@ -380,7 +382,8 @@ class _OrderScreenState extends State<OrderScreen> with WidgetsBindingObserver {
                 if (_paymentStarted && o.status == 'PAYMENT_PENDING')
                   Padding(
                     padding: EdgeInsets.only(top: 12),
-                    child: Text(tr('Төлем провайдері әлі қосылмаған: сынақ режимінде төлем расталмайды.')),
+                    child: Text(tr(
+                        'Төлемнің расталуын күтудеміз. Расталғанда тапсырыс күйі осында өзгереді: жаңарту үшін бетті төмен тартыңыз.')),
                   ),
                 const SizedBox(height: 16),
                 if (me?.id == o.buyerId && o.status == 'COMPLETED' && !o.reviewed && !_reviewed)
@@ -933,6 +936,15 @@ class _PriceCard extends StatelessWidget {
           const Divider(),
           row(tr('Жиыны'), formatTenge(o.totalTiyn),
               style: weight(theme.textTheme.titleMedium!, 750), key: const Key('order-total')),
+          // The seller sees the sum the honest way: what the commission takes and what comes to them.
+          // Until the order completes the sum is not certain yet (a return may end in a refund): the label says so.
+          if (o.sellerFeeTiyn != null && o.sellerNetTiyn != null) ...[
+            const Divider(),
+            row(tr('VITRINA комиссиясы'), '−${formatTenge(o.sellerFeeTiyn!)}'),
+            row(o.status == 'COMPLETED' ? tr('Сізге түседі') : tr('Тапсырыс аяқталса, сізге түседі'),
+                formatTenge(o.sellerNetTiyn!),
+                style: weight(theme.textTheme.titleMedium!, 750), key: const Key('seller-net')),
+          ],
         ]),
       ),
     );
@@ -1302,8 +1314,9 @@ String? orderDeadlineText(OrderInfo o, int? meId) {
     'SHIPPED' || 'IN_TRANSIT' => trf(
         '{0} дейін жеткізілмесе, тапсырысты қолдау қызметі дау ретінде қарайды. Ақша оған дейін ұсталып тұрады.',
         [_clock(at)]),
-    'RETURN_REQUESTED' when buyer =>
-      trf('Сатушы {0} дейін жауап бермесе, қайтаруды қолдау қызметі шешеді.', [_clock(at)]),
+    'RETURN_REQUESTED' when buyer => trf(
+        'Сатушы {0} дейін жауап бермесе, қайтаруды қолдау қызметі шешеді. Аяқкиімді қайтару жолын сатушымен чатта келісіңіз.',
+        [_clock(at)]),
     'RETURN_REQUESTED' => trf(
         '{0} дейін қайтаруды мақұлдаңыз не келіспеу себебін жазыңыз. Әйтпесе қайтаруды қолдау қызметі шешеді.',
         [_clock(at)]),

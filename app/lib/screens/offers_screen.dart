@@ -429,14 +429,17 @@ class _OfferTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final o = offer;
-    final off = ((1 - o.amountTiyn / o.listPriceTiyn) * 100).round();
+    // The big number is the price on the table now: after a counter it is the seller's, which «accept» agrees to.
+    final off = ((1 - o.priceTiyn / o.listPriceTiyn) * 100).round();
     final myTurn = seller ? o.status == 'pending' : o.status == 'countered';
+    final orderNow = !seller && o.status == 'accepted';
+    void openListing() =>
+        Navigator.of(context).push(MaterialPageRoute(builder: (_) => ListingScreen(listingId: o.listingId)));
     return Card(
       margin: EdgeInsets.zero,
       child: InkWell(
         borderRadius: BorderRadius.circular(Brand.radius),
-        onTap: () =>
-            Navigator.of(context).push(MaterialPageRoute(builder: (_) => ListingScreen(listingId: o.listingId))),
+        onTap: openListing,
         child: Padding(
           padding: const EdgeInsets.all(14),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -470,7 +473,8 @@ class _OfferTile extends StatelessWidget {
             Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
               Expanded(
                 child: Wrap(crossAxisAlignment: WrapCrossAlignment.end, spacing: 8, children: [
-                  Text(formatTenge(o.amountTiyn), style: weight(theme.textTheme.titleLarge!, 800)),
+                  Text(formatTenge(o.priceTiyn),
+                      key: Key('offer-price-${o.id}'), style: weight(theme.textTheme.titleLarge!, 800)),
                   Padding(
                     padding: const EdgeInsets.only(bottom: 3),
                     child: Text('−$off%', style: theme.textTheme.labelLarge?.copyWith(color: accentText(context))),
@@ -478,7 +482,11 @@ class _OfferTile extends StatelessWidget {
                   if (o.counterTiyn != null)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 3),
-                      child: Text(trf('→ {0}', [formatTenge(o.counterTiyn!)]), style: theme.textTheme.labelLarge),
+                      child: Text(
+                          seller
+                              ? trf('Сатып алушы {0} ұсынған', [formatTenge(o.amountTiyn)])
+                              : trf('Сіз {0} ұсындыңыз', [formatTenge(o.amountTiyn)]),
+                          style: theme.textTheme.labelLarge?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
                     ),
                 ]),
               ),
@@ -489,31 +497,58 @@ class _OfferTile extends StatelessWidget {
                     style: theme.textTheme.labelMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
               ),
             ]),
-            if (myTurn) ...[
+            // An agreed price lasts a day: the buyer is told until when, and the way to the order is one tap.
+            if (orderNow) ...[
+              const SizedBox(height: 8),
+              Text(trf('Өлшем {0}. Тапсырысты {1} дейін рәсімдеңіз.', [o.sizeLabel, _until(o.expiresAt)]),
+                  style: theme.textTheme.bodyMedium),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                    key: Key('offer-order-${o.id}'), onPressed: openListing, child: Text(tr('Тапсырыс беру'))),
+              ),
+            ],
+            if (myTurn && !seller) ...[
+              // The buyer agrees to the seller's price: the button names it, whole, on a line of its own.
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  key: Key('accept-${o.id}'),
+                  onPressed: onAccept,
+                  child: Text(trf('Келісемін · {0}', [formatTenge(o.priceTiyn)]),
+                      maxLines: 2, textAlign: TextAlign.center),
+                ),
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton(onPressed: onDecline, child: Text(tr('Бас тарту'))),
+              ),
+            ],
+            if (myTurn && seller) ...[
               const SizedBox(height: 12),
               Row(children: [
                 Expanded(
                   child:
                       OutlinedButton(style: _compact, onPressed: onDecline, child: Text(tr('Бас тарту'), maxLines: 1)),
                 ),
-                if (seller) ...[
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: OutlinedButton(
-                        key: Key('counter-${o.id}'),
-                        style: _compact,
-                        onPressed: onCounter,
-                        child: Text(tr('Өз бағам'), maxLines: 1)),
-                  ),
-                ],
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton(
+                      key: Key('counter-${o.id}'),
+                      style: _compact,
+                      onPressed: onCounter,
+                      child: Text(tr('Өз бағам'), maxLines: 1)),
+                ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: FilledButton(
-                    key: Key('accept-${o.id}'),
-                    style: _compact,
-                    onPressed: onAccept,
-                    child: Text(tr('Қабылдау'), maxLines: 1),
-                  ),
+                      key: Key('accept-${o.id}'),
+                      style: _compact,
+                      onPressed: onAccept,
+                      child: Text(tr('Қабылдау'), maxLines: 1, overflow: TextOverflow.ellipsis)),
                 ),
               ]),
             ],

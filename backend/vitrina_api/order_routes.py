@@ -159,7 +159,22 @@ def get_order(order_id: int, user: User = Depends(current_user), db: Session = D
             "deadline": act_by.isoformat() if act_by else None, "listing_photos": ordered_photos(order),
             "listing_details": ordered_details(order), "evidence": order_evidence_list(db, order, files),
             "evidence_until": evidence_until_out(db, order),
-            "history": [{"status": e.to_status, "at": services.aware(e.at).isoformat()} for e in events]}
+            "history": [{"status": e.to_status, "at": services.aware(e.at).isoformat()} for e in events],
+            **seller_take(order, user, cfg)}
+
+
+# Not paid yet, or the money went back: no sum the seller could count on.
+NO_TAKE = (S.CREATED.value, S.PAYMENT_PENDING.value, S.CANCELLED.value, S.REFUND_PENDING.value, S.REFUNDED.value)
+
+
+def seller_take(order: Order, user: User, cfg: Settings) -> dict:
+    """For the seller only: the commission and what reaches them when the order completes in full, by the rule
+    the order was made under (settle takes it from the item price, never the delivery). Nothing before payment,
+    after a refund, or for an order made under an older rule this server no longer knows."""
+    if user.id != order.seller_id or order.status in NO_TAKE or order.commission_version != cfg.commission.version:
+        return {}
+    fee = cfg.commission.fee_for(order.item_price_tiyn)
+    return {"seller_fee_tiyn": fee, "seller_net_tiyn": services.total_tiyn(order) - fee}
 
 
 @router.post("/orders/{order_id}/pay")

@@ -3205,6 +3205,31 @@ void main() {
     return posts;
   }
 
+  testWidgets('the seller sees the commission and what comes to them; the buyer does not', (tester) async {
+    for (final meId in [1, 2]) {
+      final api = Api(
+          base: 'http://x/api/v1',
+          client: MockClient((req) async => jsonResponse({
+                ...orderJson('PAID'),
+                if (meId == 1) ...{'seller_fee_tiyn': 225000, 'seller_net_tiyn': 4425000},
+              })))
+        ..token = 't';
+      final session = Session(api)
+        ..update(Me.fromJson({'id': meId, 'phone': '+7701000000$meId', 'is_seller': meId == 1}));
+      tester.view.physicalSize = const Size(500, 2000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(SessionScope(session: session, child: const MaterialApp(home: OrderScreen(orderId: 5))));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('seller-net')), meId == 1 ? findsOneWidget : findsNothing);
+      if (meId == 1) {
+        expect(tester.widget<Text>(find.byKey(const Key('seller-net'))).data, formatTenge(4425000));
+        expect(find.text('−${formatTenge(225000)}'), findsOneWidget);
+      }
+      await tester.pumpWidget(const SizedBox());
+    }
+  });
+
   testWidgets('a reason or a tracking number is asked for before «Жіберу» can be pressed', (tester) async {
     final posts = await pumpOrder(tester, 'RETURN_REQUESTED', meId: 1);
     await tester.tap(find.text('Қайтаруға келіспеу'));

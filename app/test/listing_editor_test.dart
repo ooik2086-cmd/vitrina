@@ -254,11 +254,11 @@ void main() {
     await tester.tap(find.text('Жариялау'));
     await tester.pumpAndSettle();
     expect(find.text('Бағаны енгізіңіз'), findsOneWidget);
-    await tester.enterText(find.widgetWithText(TextFormField, 'Ұлтарақ, см'), '5');
+    await tester.enterText(find.widgetWithText(TextFormField, 'Ішкі табан, см'), '5');
     await tester.tap(find.text('Жариялау'));
     await tester.pumpAndSettle();
     expect(find.text('8–35 см аралығында болуы керек'), findsOneWidget);
-    await tester.enterText(find.widgetWithText(TextFormField, 'Ұлтарақ, см'), 'жиырма');
+    await tester.enterText(find.widgetWithText(TextFormField, 'Ішкі табан, см'), 'жиырма');
     await tester.tap(find.text('Жариялау'));
     await tester.pumpAndSettle();
     expect(find.text('Санмен жазыңыз, мысалы 27,5'), findsOneWidget);
@@ -266,7 +266,7 @@ void main() {
 
     await tester.enterText(find.widgetWithText(TextFormField, 'Бағасы'), '34900');
     await tester.enterText(find.widgetWithText(TextFormField, 'Өлшем'), '38');
-    await tester.enterText(find.widgetWithText(TextFormField, 'Ұлтарақ, см'), '24,5');
+    await tester.enterText(find.widgetWithText(TextFormField, 'Ішкі табан, см'), '24,5');
     await tester.tap(find.text('Жариялау'));
     await tester.pumpAndSettle();
     expect(sent.single, containsPair('title', 'Qadam етік'));
@@ -297,7 +297,8 @@ void main() {
     await pick(tester, find.text('Алдынан *'));
     await tester.pageBack();
     await tester.pumpAndSettle();
-    expect(find.text('Сақтамай шығу керек пе?'), findsOneWidget);
+    // A new pair is kept on this phone: leaving loses nothing, so the question does not say «without saving».
+    expect(find.text('Шығу керек пе?'), findsOneWidget);
     await tester.tap(find.text('Қалу'));
     await tester.pumpAndSettle();
     expect(find.byType(ListingEditorScreen), findsOneWidget);
@@ -307,6 +308,20 @@ void main() {
     await tester.tap(find.byKey(const Key('discard')));
     await tester.pumpAndSettle();
     expect(find.byType(ListingEditorScreen), findsNothing);
+  });
+
+  testWidgets('«continue later» keeps the work at once, and the next «add» offers it back', (tester) async {
+    await open(tester);
+    await pick(tester, find.text('Алдынан *'));
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('later')));
+    await tester.pumpAndSettle();
+    expect(find.byType(ListingEditorScreen), findsNothing);
+    expect(await kept(), isNotNull, reason: 'kept as the page goes, not a second later');
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('restored-note')), findsOneWidget);
   });
 
   testWidgets('a photo that did not upload is caught on the photo step and sent again with a tap, not retaken',
@@ -385,7 +400,7 @@ void main() {
     expect(step(tester), 'Бағасы мен өлшемі'); // same rule as the server: the text is enough for a worn pair
     await tester.enterText(find.widgetWithText(TextFormField, 'Бағасы'), '20000');
     await tester.enterText(find.widgetWithText(TextFormField, 'Өлшем'), '38');
-    await tester.enterText(find.widgetWithText(TextFormField, 'Ұлтарақ, см'), '24,5');
+    await tester.enterText(find.widgetWithText(TextFormField, 'Ішкі табан, см'), '24,5');
     await tester.tap(find.text('Жоба ретінде сақтау'));
     await tester.pumpAndSettle();
     expect(sent.single, containsPair('condition', 'used_good'));
@@ -442,7 +457,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.enterText(find.widgetWithText(TextFormField, 'Бағасы'), '20000');
     await tester.enterText(find.widgetWithText(TextFormField, 'Өлшем'), '38');
-    await tester.enterText(find.widgetWithText(TextFormField, 'Ұлтарақ, см'), '24,5');
+    await tester.enterText(find.widgetWithText(TextFormField, 'Ішкі табан, см'), '24,5');
     await tester.tap(find.text('Жариялау'));
     await tester.pumpAndSettle();
     expect(step(tester), 'Фото');
@@ -508,7 +523,7 @@ void main() {
     expect(step(tester), 'Бағасы мен өлшемі');
     await tester.enterText(find.widgetWithText(TextFormField, 'Бағасы'), '30000');
     await tester.enterText(find.widgetWithText(TextFormField, 'Өлшем'), '38');
-    await tester.enterText(find.widgetWithText(TextFormField, 'Ұлтарақ, см'), '24');
+    await tester.enterText(find.widgetWithText(TextFormField, 'Ішкі табан, см'), '24');
     await tester.tap(find.text('Жариялау'));
     await tester.pumpAndSettle();
     expect(sent.single['color'], 'көк');
@@ -601,7 +616,7 @@ void main() {
     await next(tester);
     await tester.enterText(find.widgetWithText(TextFormField, 'Бағасы'), '30000');
     await tester.enterText(find.widgetWithText(TextFormField, 'Өлшем'), '38');
-    await tester.enterText(find.widgetWithText(TextFormField, 'Ұлтарақ, см'), '24');
+    await tester.enterText(find.widgetWithText(TextFormField, 'Ішкі табан, см'), '24');
     await tester.tap(find.text('Жариялау'));
     await tester.pumpAndSettle();
     expect(sent.single['facts'], {'upper': 'suede'});
@@ -686,7 +701,7 @@ void main() {
     await next(tester);
     await tester.enterText(find.widgetWithText(TextFormField, 'Бағасы'), '20000');
     await tester.enterText(find.widgetWithText(TextFormField, 'Өлшем'), '38');
-    await tester.enterText(find.widgetWithText(TextFormField, 'Ұлтарақ, см'), '24,5');
+    await tester.enterText(find.widgetWithText(TextFormField, 'Ішкі табан, см'), '24,5');
     await tester.pump(const Duration(seconds: 2));
     expect(await kept(), isNotNull);
     await tester.tap(find.text('Жоба ретінде сақтау'));
@@ -811,7 +826,7 @@ void main() {
     await next(tester);
     await tester.enterText(find.widgetWithText(TextFormField, 'Бағасы'), '20000');
     await tester.enterText(find.widgetWithText(TextFormField, 'Өлшем'), '38');
-    await tester.enterText(find.widgetWithText(TextFormField, 'Ұлтарақ, см'), '24,5');
+    await tester.enterText(find.widgetWithText(TextFormField, 'Ішкі табан, см'), '24,5');
     await tester.pump(const Duration(seconds: 2));
     final before = await kept();
     await tester.pumpWidget(const SizedBox());
@@ -908,7 +923,7 @@ void main() {
     await next(tester);
     await tester.enterText(find.widgetWithText(TextFormField, 'Бағасы'), '20000');
     await tester.enterText(find.widgetWithText(TextFormField, 'Өлшем'), '38');
-    await tester.enterText(find.widgetWithText(TextFormField, 'Ұлтарақ, см'), '24,5');
+    await tester.enterText(find.widgetWithText(TextFormField, 'Ішкі табан, см'), '24,5');
   }
 
   testWidgets('weak mobile data: Publish pressed again after a lost answer sends the same key, so one listing',

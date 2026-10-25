@@ -21,6 +21,7 @@ import '../widgets/listing_contents.dart';
 import '../widgets/questions.dart';
 import 'listing_editor_screen.dart';
 import 'listing_screen.dart';
+import 'help_screen.dart';
 import '../i18n.dart';
 import '../listing_quality.dart';
 import '../quick_replies.dart';
@@ -78,6 +79,7 @@ class _ManageListingScreenState extends State<ManageListingScreen> with WidgetsB
   ScaffoldFeatureController<SnackBar, SnackBarClosedReason>? _offlineBar;
 
   Timer? _keepTimer;
+  bool _deleted = false; // the draft is gone: its edits are never kept again
   bool _restored = false; // changes from before were put back: say so, with a way to drop them
   int _skipped = 0; // kept changes not put back, as their value changed meanwhile
   String? _lastKept; // what was last written, so the same is not written again
@@ -193,7 +195,7 @@ class _ManageListingScreenState extends State<ManageListingScreen> with WidgetsB
   /// listing that cannot be changed). Kept only for the person signed in, so no one else is ever shown them.
   Future<void> _keep({bool drop = false}) async {
     _keepTimer?.cancel();
-    final edits = !drop && !_locked(_l) && _session?.me != null && _dirty ? _edits() : null;
+    final edits = !drop && !_deleted && !_locked(_l) && _session?.me != null && _dirty ? _edits() : null;
     final mine = edits == null ? null : jsonEncode({...edits, 'kept_at': 0});
     if (mine != null && mine == _lastKept) return; // nothing new since it was last kept
     _lastKept = mine;
@@ -594,6 +596,32 @@ class _ManageListingScreenState extends State<ManageListingScreen> with WidgetsB
     }
   }
 
+  /// A draft made by mistake is deleted after asking; the list it came from loses it on the way back.
+  Future<void> _deleteDraft() async {
+    final sure = await confirmAction(context,
+        title: tr('Жобаны өшіру керек пе? Оны қайтару мүмкін болмайды.'), action: tr('Өшіру'), destructive: true);
+    if (!sure || !mounted) return;
+    setState(() => _busy = true);
+    try {
+      try {
+        await SessionScope.of(context).api.deleteDraft(_l.id);
+      } on ApiException catch (e) {
+        // Tapped again after an answer lost on the way: the first tap already deleted it.
+        if (e.status != 404) rethrow;
+      }
+      if (!mounted) return;
+      _deleted = true;
+      _offlineBar?.close();
+      unawaited(_keep(drop: true)); // nothing left to come back to
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr('Жоба өшірілді'))));
+      Navigator.pop(context, true);
+    } catch (e) {
+      if (mounted) showError(context, e);
+    } finally {
+      if (mounted && !_deleted) setState(() => _busy = false);
+    }
+  }
+
   /// Asks whether a sold-out listing that got pairs again goes back on sale now; it stays paused otherwise. Only on
   /// this page while it is in front: a leave question or another page opened meanwhile is not covered by it, and the
   /// button to put it on sale stays on the page.
@@ -672,6 +700,7 @@ class _ManageListingScreenState extends State<ManageListingScreen> with WidgetsB
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final locked = _locked(_l);
+    final publishable = const {'draft', 'paused', 'rejected'}.contains(_l.status);
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
@@ -739,6 +768,8 @@ class _ManageListingScreenState extends State<ManageListingScreen> with WidgetsB
                       child: Text(tr('Тауарды модератор жасырды. Өзгерту үшін қолдау қызметіне жазыңыз.')),
                     ),
                   ),
+                  const SizedBox(height: 8),
+                  const SupportTile(), // the way there, not only the words
                 ],
                 if (_l.status == 'moderation' || _l.status == 'rejected') ...[
                   const SizedBox(height: 16),
@@ -775,15 +806,16 @@ class _ManageListingScreenState extends State<ManageListingScreen> with WidgetsB
                 const SizedBox(height: 24),
                 Text(tr('Баға'), style: theme.textTheme.titleMedium),
                 const SizedBox(height: 8),
-                Row(children: [
+                Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Expanded(
                     child: TextFormField(
                       key: const Key('price'),
                       controller: _price,
                       enabled: !locked,
                       keyboardType: TextInputType.number,
-                      decoration: InputDecoration(labelText: tr('Бағасы'), suffixText: '₸'),
-                      validator: (v) => (_tiyn(v ?? '') ?? 0) <= 0 ? tr('Бағаны енгізіңіз') : null,
+                      inputFormatters: tengeInput,
+                      decoration: InputDecoration(labelText: tr('Бағасы'), suffixText: '₸', errorMaxLines: 3),
+                      validator: tengeCheck,
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -792,7 +824,15 @@ class _ManageListingScreenState extends State<ManageListingScreen> with WidgetsB
                       controller: _delivery,
                       enabled: !locked,
                       keyboardType: TextInputType.number,
-                      decoration: InputDecoration(labelText: tr('Жеткізу'), suffixText: '₸'),
+                      inputFormatters: tengeInput,
+                      // Emptied, it asks again rather than turning into free delivery unseen.
+                      decoration: InputDecoration(
+                          labelText: tr('Жеткізу'),
+                          suffixText: '₸',
+                          helperText: tr('Тегін болса, 0'),
+                          helperMaxLines: 3,
+                          errorMaxLines: 3),
+                      validator: (v) => tengeCheck(v, free: true),
                     ),
                   ),
                 ]),
@@ -896,6 +936,19 @@ class _ManageListingScreenState extends State<ManageListingScreen> with WidgetsB
                     }),
                   ),
                 ],
+                // Only a draft no buyer ever saw: anything once on sale keeps its history and is paused instead.
+                if (_l.status == 'draft' && !_l.everOnSale) ...[
+                  const SizedBox(height: 16),
+                  Center(
+                    child: TextButton.icon(
+                      key: const Key('delete-draft'),
+                      style: TextButton.styleFrom(foregroundColor: Theme.of(context).colorScheme.error),
+                      onPressed: _busy ? null : _deleteDraft,
+                      icon: const Icon(Icons.delete_outline_rounded),
+                      label: Text(tr('Жобаны өшіру')),
+                    ),
+                  ),
+                ],
               ]),
         ),
         bottomNavigationBar: locked
@@ -919,9 +972,11 @@ class _ManageListingScreenState extends State<ManageListingScreen> with WidgetsB
                           child: Text(tr('Тоқтату')),
                         ),
                       ),
-                    if (_l.status == 'draft' || _l.status == 'paused' || _l.status == 'rejected')
+                    // Not yet on sale: putting it on sale is the main step (it saves the edits first), so it is the
+                    // filled button and «Save» the quiet one; on sale, saving is.
+                    if (publishable)
                       Expanded(
-                        child: OutlinedButton(
+                        child: FilledButton(
                           key: const Key('publish'),
                           onPressed: _busy ? null : _publish,
                           child: Text(_l.status == 'rejected' ? tr('Қайта жіберу') : tr('Сатылымға шығару')),
@@ -929,11 +984,11 @@ class _ManageListingScreenState extends State<ManageListingScreen> with WidgetsB
                       ),
                     const SizedBox(width: 12),
                     Expanded(
-                      child: FilledButton(
-                        key: const Key('save'),
-                        onPressed: _busy ? null : _save,
-                        child: Text(tr('Сақтау')),
-                      ),
+                      child: publishable
+                          ? OutlinedButton(
+                              key: const Key('save'), onPressed: _busy ? null : _save, child: Text(tr('Сақтау')))
+                          : FilledButton(
+                              key: const Key('save'), onPressed: _busy ? null : _save, child: Text(tr('Сақтау'))),
                     ),
                   ]),
                 ),

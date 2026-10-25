@@ -17,7 +17,7 @@ const maxQuickReplyLength = 300;
 
 const _defaults = [
   'Сәлеметсіз бе! Иә, бар.',
-  'Өлшемі сай келеді. Табанының ұзындығын тауар бетінен қараңыз.',
+  'Өлшемі сай келеді. Ішкі табанының ұзындығын тауар бетінен қараңыз.',
 ];
 // Only while online payment works: they speak of money paid in the app and held by VITRINA.
 const _paidDefaults = [

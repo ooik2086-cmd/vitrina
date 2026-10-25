@@ -1125,7 +1125,11 @@ class _ReportSheetState extends State<ReportSheet> {
               maxLines: 3,
               maxLength: 1000,
               onChanged: (_) => setState(() {}),
-              decoration: InputDecoration(labelText: tr('Толығырақ (міндетті емес)')),
+              // «Other» says nothing by itself: then the words are needed, and the field says so.
+              decoration: InputDecoration(
+                  labelText: _reason == 'other' ? tr('Себебін жазыңыз') : tr('Толығырақ (міндетті емес)'),
+                  helperText: needsText ? tr('«Басқа себеп» үшін не болғанын қысқаша жазыңыз.') : null,
+                  helperMaxLines: 2),
             ),
             const SizedBox(height: 8),
             SizedBox(

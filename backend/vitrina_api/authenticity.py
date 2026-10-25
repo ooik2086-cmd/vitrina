@@ -36,8 +36,8 @@ def proofs_out(db: Session, listing: Listing, files: Storage, rows: list[AuthPro
 
 def seller_listing(db: Session, listing_id: int, user: User) -> Listing:
     listing = db.get(Listing, listing_id)
-    if listing is None or listing.seller_id != user.id:
-        raise ApiError(404, "not_found")
+    if listing is None or listing.seller_id != user.id or listing.status == "archived":
+        raise ApiError(404, "not_found")  # a deleted draft is gone for its seller too
     if listing.status == "hidden":
         raise ApiError(409, "invalid_status")
     return listing

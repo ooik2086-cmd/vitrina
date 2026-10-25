@@ -503,6 +503,8 @@ void main() {
     expect(find.text('Ақауы бар'), findsOneWidget);
     await tester.scrollUntilVisible(find.byKey(const Key('drop-edits')), -300,
         scrollable: find.byType(Scrollable).first);
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, 200)); // out from under the top bar
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('drop-edits')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('drop-edits-sure')));

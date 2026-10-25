@@ -114,14 +114,21 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  Future<void> open(WidgetTester tester) async {
+  /// [settle] false: a few frames only, as a chat still loading shows a turning circle that never settles.
+  Future<void> open(WidgetTester tester, {bool settle = true}) async {
     await tester.tap(find.text('open'));
-    await tester.pumpAndSettle();
+    if (settle) {
+      await tester.pumpAndSettle();
+    } else {
+      for (var i = 0; i < 5; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+    }
   }
 
   /// Shows a page with a button that opens the chat, signed in as [me] (null: signed in, the profile not loaded
   /// yet, as on a weak connection), as the app does.
-  Future<Session> start(WidgetTester tester, _Server server, {int? me = 3, String? draft}) async {
+  Future<Session> start(WidgetTester tester, _Server server, {int? me = 3, String? draft, bool settle = true}) async {
     final session = Session(server.api)
       ..api.token = 't'
       ..me = me == null ? null : Me.fromJson({'id': me, 'phone': '+7701000000$me', 'is_seller': true});
@@ -135,7 +142,7 @@ void main() {
                             builder: (_) =>
                                 ChatScreen(conversationId: 9, pollEvery: const Duration(hours: 1), draft: draft))),
                         child: const Text('open')))))));
-    await open(tester);
+    await open(tester, settle: settle);
     return session;
   }
 
@@ -433,7 +440,7 @@ void main() {
       '3:9': {'text': 'Жетпеген', 'not_sent': true, 'key': 'k-12345678', 'after': 0}
     });
     final server = _Server()..readHold = Completer<void>();
-    await start(tester, server);
+    await start(tester, server, settle: false);
     expect(field(tester), 'Жетпеген');
     expect(find.byKey(const Key('chat-not-sent')), findsNothing); // not yet known whether it arrived meanwhile
     server.readHold!.complete();

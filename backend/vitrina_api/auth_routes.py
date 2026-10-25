@@ -243,8 +243,8 @@ def delete_push(sign_in: AuthToken = Depends(current_sign_in), db: Session = Dep
 @router.get("/app-config")
 def app_config(cfg: Settings = Depends(get_settings)):
     """What the app shows depending on the server: without online payment, a chat with the seller replaces
-    ordering and price offers."""
-    return {"payments": cfg.payments != "off"}
+    ordering and price offers. Where to write to support, for Help and a listing a moderator hid (null if unset)."""
+    return {"payments": cfg.payments != "off", "support": cfg.support_contact or None}
 
 
 @router.get("/health")
@@ -316,7 +316,7 @@ def delete_account(db: Session, user: User) -> None:
     db.execute(update(AuthToken).where(AuthToken.user_id == user.id).values(revoked=True))
     db.execute(update(Offer).where(or_(Offer.buyer_id == user.id, Offer.seller_id == user.id),
                                    Offer.status.in_(offers.OPEN)).values(status="withdrawn"))
-    db.execute(update(Listing).where(Listing.seller_id == user.id, Listing.status.not_in(("sold", "hidden")))
+    db.execute(update(Listing).where(Listing.seller_id == user.id, Listing.status.not_in(("sold", "hidden", "archived")))
                .values(status="paused"))
     services.audit(db, user.id, "delete_account", f"user:{user.id}")
     user.phone = f"deleted:{user.id}"  # frees the number: signing in with it again starts a new account

@@ -312,13 +312,15 @@ class RetryLine extends StatelessWidget {
 
 /// Shown on tabs that need an account.
 class SignInPrompt extends StatelessWidget {
-  const SignInPrompt({super.key, required this.text});
+  const SignInPrompt({super.key, required this.text, this.below});
   final String text;
+  final Widget? below;
 
   @override
   Widget build(BuildContext context) {
+    // Scrolls when large text and a short phone leave too little room for all three.
     return Center(
-      child: Padding(
+      child: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           Text(text, textAlign: TextAlign.center),
@@ -327,6 +329,7 @@ class SignInPrompt extends StatelessWidget {
             onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LoginScreen())),
             child: Text(tr('Кіру')),
           ),
+          if (below != null) ...[const SizedBox(height: 8), below!],
         ]),
       ),
     );

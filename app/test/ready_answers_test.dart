@@ -146,7 +146,7 @@ void main() {
     await tester.tap(second);
     await tester.pump();
     expect(tester.widget<TextField>(field).controller!.text,
-        'Өлшемі сай келеді. Табанының ұзындығын тауар бетінен қараңыз.');
+        'Өлшемі сай келеді. Ішкі табанының ұзындығын тауар бетінен қараңыз.');
   });
 
   Finder chips() => find.descendant(of: ready, matching: find.byType(ActionChip));
@@ -243,7 +243,8 @@ void main() {
       final paragraph =
           tester.renderObject<RenderParagraph>(find.descendant(of: error, matching: find.byType(RichText)));
       expect(paragraph.didExceedMaxLines, isFalse, reason: 'no line of the refusal is cut off');
-      expect(find.textContaining(RegExp(r'^\d+/\d+$')), findsNothing, reason: 'no counter narrows it, far from the limit');
+      expect(find.textContaining(RegExp(r'^\d+/\d+$')), findsNothing,
+          reason: 'no counter narrows it, far from the limit');
       expect(tester.takeException(), isNull);
     });
   }

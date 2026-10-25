@@ -28,7 +28,7 @@ from .deps import current_user, get_db, get_settings, get_storage, now_utc, opti
 from .errors import ApiError
 from .social import size_fit
 from .models import (PriceChange, StockAlert, ListingDailyViews, ListingEmbedding, ListingReport, Favorite, Listing,
-                     IdempotencyRecord, ListingSize, Media, Order, User)
+                     IdempotencyRecord, ListingSize, Media, Offer, Order, User)
 from .storage import DETAIL_SIDE_PX, MAX_SIDE_PX, MAX_UPLOAD_BYTES, Storage, normalize_image
 from .api_common import ALMATY, DEFECT_REQUIRED, MAX_LISTING_MEDIA, MAX_LISTING_SIZES, MIN_SPIN_FRAMES, log
 from .schemas import ListingIn, ListingPatch, PhotoIn, ReportIn
@@ -432,15 +432,16 @@ def prepare_listing_media(state, listing_id: int) -> None:
 
 
 def listing_made_by(db: Session, user: User, key: str) -> Listing | None:
-    """The listing an earlier request with [key] made. One gone since (staff removed it) frees the key: saving
-    again makes the listing anew rather than failing for ever."""
+    """The listing an earlier request with [key] made. One gone since (staff removed it, or its seller deleted the
+    draft) frees the key: saving again makes the listing anew rather than failing for ever or bringing it back."""
     seen = IdempotencyRecord.made(db, user.id, "create_listing", key)
     if seen is None:
         return None
     listing = db.get(Listing, seen.result_id)
-    if listing is None:
+    if listing is None or listing.status == "archived":
         db.delete(seen)
         db.flush()
+        return None
     return listing
 
 
@@ -498,15 +499,32 @@ def own_listing(db: Session, listing_id: int, user: User, lock: bool = False) ->
     """The seller's listing; lock holds its row (on Postgres) until the commit, which a change of its photos does
     first, so it never waits on a media job that waits on it (see lock_fresh)."""
     listing = db.get(Listing, listing_id, with_for_update=lock, populate_existing=lock)
-    if listing is None or listing.seller_id != user.id:
-        raise ApiError(404, "not_found")
+    if listing is None or listing.seller_id != user.id or listing.status == "archived":
+        raise ApiError(404, "not_found")  # a deleted draft is gone for its seller too
     return listing
+
+
+@router.delete("/listings/{listing_id}", status_code=204)
+def delete_draft(listing_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """A draft made by mistake goes. Only one never on sale: anything a buyer saw, asked about or ordered keeps its
+    record. It is archived, not erased, as listings never are; nobody sees it again, its seller included."""
+    listing = own_listing(db, listing_id, user, lock=True)
+    # announced_at marks a listing once on sale; one from before it was kept, or hidden and given back as a draft,
+    # still has its orders or offers to tell.
+    traces = db.scalar(select(func.count()).select_from(Order).where(Order.listing_id == listing.id)) or db.scalar(
+        select(func.count()).select_from(Offer).where(Offer.listing_id == listing.id))
+    if listing.status != "draft" or listing.announced_at is not None or traces:
+        raise ApiError(409, "only_drafts_deleted")
+    listing.status = "archived"
+    db.execute(delete(Favorite).where(Favorite.listing_id == listing.id))
+    services.audit(db, user.id, "delete_draft", f"listing:{listing.id}")
+    db.commit()
 
 
 @router.post("/listings/{listing_id}/publish")
 def publish_listing(listing_id: int, user: User = Depends(current_user), db: Session = Depends(get_db),
                     cfg: Settings = Depends(get_settings), storage: Storage = Depends(get_storage)):
-    listing = own_listing(db, listing_id, user)
+    listing = own_listing(db, listing_id, user, lock=True)  # a delete at the same moment is not undone
     # "hidden" is a moderation decision; only staff can lift it. A "rejected" listing is fixed and sent again.
     if listing.status not in ("draft", "paused", "rejected"):
         raise ApiError(409, "invalid_status")
@@ -1083,7 +1101,8 @@ def cancel_stock_alert(listing_id: int, size_id: int, user: User = Depends(curre
 @router.get("/listings/{listing_id}")
 def get_listing(listing_id: int, user: User | None = Depends(optional_user), db: Session = Depends(get_db)):
     listing = db.get(Listing, listing_id)
-    visible = listing is not None and (listing.status in ("published", "sold") or (user and listing.seller_id == user.id))
+    visible = listing is not None and (listing.status in ("published", "sold")
+                                       or (user and listing.seller_id == user.id and listing.status != "archived"))
     if not visible:
         raise ApiError(404, "not_found")
     owner = bool(user and listing.seller_id == user.id)

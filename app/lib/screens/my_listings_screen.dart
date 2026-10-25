@@ -162,6 +162,9 @@ class _MyListingsScreenState extends State<MyListingsScreen> {
             ('paused', tr('Тоқтатылған')),
             ('sold', tr('Сатылды')),
             ('rejected', tr('Қайтарылды')),
+            // A draft to finish and a listing a moderator hid are the ones that most need the seller.
+            ('draft', tr('Жоба')),
+            ('hidden', tr('Модератор жасырды')),
           ]
               .where((f) => f.$1 == 'all' || (f.$1 == status || count(f.$1) > 0) && (f.$1 != 'questions' || known))
               .toList();

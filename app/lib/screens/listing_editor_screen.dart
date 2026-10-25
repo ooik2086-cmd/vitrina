@@ -438,25 +438,42 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
 
   bool get _dirty => _snapshot() != _initial;
 
-  /// Back with unsaved work asks first; uploads already made are simply left unused.
+  /// Back with unsaved work asks first. A new pair is kept on this phone, so leaving can keep it for next time (the
+  /// page offers it again) or throw it away; a copy of another listing is not kept, so leaving loses it.
   Future<void> _confirmLeave() async {
-    final leave = await showDialog<bool>(
+    final choice = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(tr('Сақтамай шығу керек пе?')),
-        content: Text(tr('Толтырған мәліметтер мен фотолар жоғалады. Кейін жалғастыру үшін жоба ретінде сақтаңыз.')),
+        // Kept on the phone, nothing is lost by leaving: the title does not say «without saving».
+        title: Text(_keeps ? tr('Шығу керек пе?') : tr('Сақтамай шығу керек пе?')),
+        content: Text(_keeps
+            ? tr('Толтырғаныңыз осы телефонда сақталады: келесі жолы «Тауар қосу» басқанда жалғастыра аласыз.')
+            : tr('Толтырған мәліметтер мен фотолар жоғалады.')),
         actions: [
-          // Staying keeps the work, so it is the button the eye goes to.
+          // Throwing the work away is told apart by colour from keeping it.
           TextButton(
-              key: const Key('discard'), onPressed: () => Navigator.pop(context, true), child: Text(tr('Шығып кету'))),
-          FilledButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Қалу'))),
+              key: const Key('discard'),
+              style: TextButton.styleFrom(foregroundColor: Theme.of(context).colorScheme.error),
+              onPressed: () => Navigator.pop(context, 'discard'),
+              child: Text(_keeps ? tr('Өшіріп шығу') : tr('Шығып кету'))),
+          if (_keeps)
+            TextButton(
+                key: const Key('later'),
+                onPressed: () => Navigator.pop(context, 'later'),
+                child: Text(tr('Кейін жалғастыру'))),
+          // Staying keeps the work, so it is the button the eye goes to.
+          FilledButton(onPressed: () => Navigator.pop(context, 'stay'), child: Text(tr('Қалу'))),
         ],
       ),
     );
-    if (leave == true && mounted) {
+    if (!mounted || choice == null || choice == 'stay') return;
+    if (choice == 'discard') {
       unawaited(_forget()); // thrown away on purpose: not offered again next time
-      Navigator.pop(context);
+    } else {
+      await _keep(); // kept now, not a second later: the page is going
+      _finished = true;
     }
+    if (mounted) Navigator.pop(context);
   }
 
   _Upload _startUpload(XFile file, {bool detail = false}) {
@@ -922,13 +939,14 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
       ];
 
   List<Widget> _priceStep(ThemeData theme) => [
-        Row(children: [
+        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Expanded(
             child: TextFormField(
               controller: _price,
               keyboardType: TextInputType.number,
-              decoration: InputDecoration(labelText: tr('Бағасы'), suffixText: '₸'),
-              validator: (v) => (_tiyn(v ?? '') ?? 0) <= 0 ? tr('Бағаны енгізіңіз') : null,
+              inputFormatters: tengeInput,
+              decoration: InputDecoration(labelText: tr('Бағасы'), suffixText: '₸', errorMaxLines: 3),
+              validator: tengeCheck,
             ),
           ),
           const SizedBox(width: 12),
@@ -936,7 +954,15 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
             child: TextFormField(
               controller: _delivery,
               keyboardType: TextInputType.number,
-              decoration: InputDecoration(labelText: tr('Жеткізу'), suffixText: '₸'),
+              inputFormatters: tengeInput,
+              // It starts at 0 in sight; emptied, it asks again rather than turning into free delivery unseen.
+              decoration: InputDecoration(
+                  labelText: tr('Жеткізу'),
+                  suffixText: '₸',
+                  helperText: tr('Тегін болса, 0'),
+                  helperMaxLines: 3,
+                  errorMaxLines: 3),
+              validator: (v) => tengeCheck(v, free: true),
             ),
           ),
         ]),
@@ -945,16 +971,20 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
         // Each size on two lines: in one row of four, «Ұлтарақ, см» and «Саны» were cut off on a usual phone.
         for (final (i, s) in _sizes.indexed) ...[
           const SizedBox(height: 8),
-          Row(children: [
+          // «Өлшем» is short and «Ішкі табан, см» is not: the room is shared out so neither is cut at large text.
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Expanded(
                 child: TextFormField(
-                    controller: s.label, decoration: InputDecoration(labelText: tr('Өлшем')), validator: _required)),
+                    controller: s.label,
+                    decoration: InputDecoration(labelText: tr('Өлшем'), errorMaxLines: 2),
+                    validator: _required)),
             const SizedBox(width: 8),
             Expanded(
+              flex: 2,
               child: TextFormField(
                 controller: s.cm,
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: InputDecoration(labelText: tr('Ұлтарақ, см')),
+                decoration: InputDecoration(labelText: tr('Ішкі табан, см'), errorMaxLines: 2),
                 validator: insoleCheck,
               ),
             ),
@@ -1042,6 +1072,23 @@ String? insoleCheck(String? v) {
   final cm = double.tryParse(t.replaceAll(',', '.'));
   if (cm == null) return tr('Санмен жазыңыз, мысалы 27,5');
   return cm < 8 || cm > 35 ? tr('8–35 см аралығында болуы керек') : null;
+}
+
+/// What a price or delivery field takes: digits and spaces («1 500»), and a comma or point only so that
+/// [tengeCheck] can say kopecks are not taken. Dropping them as typed turned «1500,00» into 150 000 ₸.
+final List<TextInputFormatter> tengeInput = [
+  FilteringTextInputFormatter.allow(RegExp(r'[0-9 ,.]')),
+  LengthLimitingTextInputFormatter(11),
+];
+
+/// A whole number of tenge; [free] lets 0 through (delivery). An empty field never becomes a price by itself.
+String? tengeCheck(String? v, {bool free = false}) {
+  final t = (v ?? '').trim();
+  if (t.isEmpty) return free ? tr('Сомасын жазыңыз, тегін болса 0') : tr('Бағаны енгізіңіз');
+  if (t.contains(RegExp('[,.]'))) return tr('Тиынсыз, бүтін теңгемен жазыңыз');
+  final n = int.tryParse(t.replaceAll(' ', ''));
+  if (n == null || n < 0 || (n == 0 && !free)) return tr('Бағаны енгізіңіз');
+  return null;
 }
 
 class _PhotoSlot extends StatelessWidget {

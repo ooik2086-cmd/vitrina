@@ -171,9 +171,10 @@ class PaymentsOffTests(ApiTestCase):
 
     def test_no_orders_or_offers_and_the_app_is_told(self):
         listing = self.publish()
-        self.assertEqual(self.c.get("/api/v1/app-config").json(), {"payments": True})
+        self.assertEqual(self.c.get("/api/v1/app-config").json(), {"payments": True, "support": None})
         self.app.state.settings.payments = "off"
-        self.assertEqual(self.c.get("/api/v1/app-config").json(), {"payments": False})
+        self.app.state.settings.support_contact = "help@vitrina.kz"  # where the Help page tells people to write
+        self.assertEqual(self.c.get("/api/v1/app-config").json(), {"payments": False, "support": "help@vitrina.kz"})
         r = self.post("/orders", self.buyer, {"listing_id": listing["id"], "size_id": listing["sizes"][0]["id"]},
                       **{"Idempotency-Key": "off"})
         self.assertEqual((r.status_code, r.json()["code"]), (503, "payments_off"))
@@ -912,14 +913,36 @@ class WeightTests(ApiTestCase):
 
 
 class EarningsTests(ApiTestCase):
+    def test_the_seller_is_told_no_sum_before_payment_after_a_cancel_or_under_an_old_rule(self):
+        _, order = self.ordered()
+        page = lambda: self.c.get(f"/api/v1/orders/{order['id']}", headers=self.h(self.seller)).json()
+        self.assertNotIn("seller_net_tiyn", page(), "not paid yet: nothing to count on")
+        self.post(f"/orders/{order['id']}/pay", self.buyer)
+        self.pay(order)
+        self.assertIn("seller_net_tiyn", page())
+        from vitrina_api.models import Order
+        with self.db() as db:
+            db.get(Order, order["id"]).commission_version = "older"
+            db.commit()
+        self.assertNotIn("seller_net_tiyn", page(), "a rule this server no longer knows is not guessed")
+        _, other = self.ordered(key="k2")
+        self.post(f"/orders/{other['id']}/cancel", self.buyer)
+        self.assertNotIn("seller_net_tiyn", self.c.get(f"/api/v1/orders/{other['id']}", headers=self.h(self.seller)).json())
+
     def test_seller_sees_held_then_payable_minus_commission(self):
         self.assertEqual(self.c.get("/api/v1/me/earnings", headers=self.h(self.buyer)).status_code, 403)
         _, order = self.delivered()
         e = self.c.get("/api/v1/me/earnings", headers=self.h(self.seller)).json()
         self.assertEqual(e["held_tiyn"], order["total_tiyn"])
         self.assertEqual((e["payable_tiyn"], e["items"]), (0, []))
+        # The order page tells the seller, and only the seller, the commission and what comes to them.
+        page = lambda t: self.c.get(f"/api/v1/orders/{order['id']}", headers=self.h(t)).json()
+        told = page(self.seller)
+        self.assertNotIn("seller_fee_tiyn", page(self.buyer))
         self.post(f"/orders/{order['id']}/confirm", self.buyer)
         e = self.c.get("/api/v1/me/earnings", headers=self.h(self.seller)).json()
+        self.assertEqual((told["seller_fee_tiyn"], told["seller_net_tiyn"]), (e["fees_tiyn"], e["payable_tiyn"]),
+                         "what the page said is what the ledger did")
         self.assertEqual(e["held_tiyn"], 0)
         self.assertGreater(e["fees_tiyn"], 0)
         self.assertEqual(e["payable_tiyn"] + e["fees_tiyn"], order["total_tiyn"])
@@ -3138,6 +3161,39 @@ class AwayTests(ApiTestCase):
         r = self.c.post("/api/v1/auth/verify", json={"phone": "+77010000002", "code": code})
         self.assertEqual((r.status_code, r.json()["code"]), (403, "account_blocked"))
         self.assertIn("бұғатталған", r.json()["message_kk"])
+
+    def test_a_draft_made_by_mistake_can_be_deleted_and_nothing_once_on_sale_can(self):
+        draft = self.post("/listings", self.seller, LISTING).json()["id"]
+        gone = lambda lid, t: self.c.delete(f"/api/v1/listings/{lid}", headers=self.h(t))
+        self.assertEqual(gone(draft, self.buyer).status_code, 404)  # nobody else's to delete
+        self.assertEqual(self.post(f"/favorites/{draft}", self.seller).status_code, 204)
+        self.assertEqual(gone(draft, self.seller).status_code, 204)
+        self.assertEqual(self.c.get(f"/api/v1/listings/{draft}", headers=self.h(self.seller)).status_code, 404)
+        mine = self.c.get("/api/v1/me/listings", headers=self.h(self.seller)).json()["items"]
+        self.assertNotIn(draft, [i["id"] for i in mine])
+        self.assertEqual(self.c.get("/api/v1/favorites", headers=self.h(self.seller)).json()["items"], [])
+        self.assertEqual(gone(draft, self.seller).status_code, 404, "once is enough")
+        self.assertEqual(self.post(f"/listings/{draft}/publish", self.seller).status_code, 404)
+        live = self.publish()["id"]
+        r = gone(live, self.seller)
+        self.assertEqual((r.status_code, r.json()["code"]), (409, "only_drafts_deleted"))
+        self.post(f"/listings/{live}/pause", self.seller)
+        self.assertEqual(gone(live, self.seller).status_code, 409, "paused after a sale: kept, it has a history")
+        staff = self.make_staff()
+        self.post(f"/admin/listings/{live}/hide", staff, {"reason": "fake brand"})
+        self.post(f"/admin/listings/{live}/unhide", staff, {"reason": "checked"})
+        self.assertEqual(self.c.get(f"/api/v1/listings/{live}", headers=self.h(self.seller)).json()["status"], "draft")
+        self.assertEqual(gone(live, self.seller).status_code, 409, "given back as a draft, it was on sale once")
+        self.assertEqual(self.post(f"/admin/listings/{draft}/hide", staff, {"reason": "x"}).status_code, 409,
+                         "hiding then unhiding a deleted draft would bring it back")
+
+    def test_saving_again_after_deleting_the_draft_makes_a_new_one(self):
+        first = self.post("/listings", self.seller, LISTING, **{"Idempotency-Key": "tap-0009"}).json()["id"]
+        self.assertEqual(self.c.delete(f"/api/v1/listings/{first}", headers=self.h(self.seller)).status_code, 204)
+        again = self.post("/listings", self.seller, LISTING, **{"Idempotency-Key": "tap-0009"})
+        self.assertEqual(again.status_code, 201)
+        self.assertNotEqual(again.json()["id"], first)
+        self.assertEqual(again.json()["status"], "draft")
 
     def test_favorites_show_only_what_the_listing_page_shows(self):
         draft = self.post("/listings", self.seller, LISTING).json()["id"]

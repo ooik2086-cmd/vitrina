@@ -21,7 +21,7 @@ jobs:
 
   backend-postgres:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20  # a request stuck on a lock fails here, not after six hours
+    timeout-minutes: 45  # a slow package mirror (13 min on 2026-10-25) must not use up the tests' time
     services:
       postgres:
         image: postgres:16
@@ -45,6 +45,7 @@ jobs:
       - run: sudo apt-get update -q && sudo apt-get install -yq --no-install-recommends ffmpeg  # promo videos
       - run: python -m pip install -r requirements.txt
       - run: python -m unittest tests.test_api tests.test_cutout tests.test_races tests.test_video tests.test_push tests.test_migrations.PostgresMigrationTests -v
+        timeout-minutes: 20  # a request stuck on a lock fails here, not after six hours
 
   # The shared listing page's 360° turn in a real browser: its script under the page's own Content-Security-Policy.
   share-page-browser:

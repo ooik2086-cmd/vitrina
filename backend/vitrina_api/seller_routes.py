@@ -35,7 +35,7 @@ def my_listings(before: int | None = Query(default=None, ge=1, le=2**31 - 1),
     shop with more than one page of listings sees all of them (the app reads every page; its filters and search work
     on the whole shop). Paging by id, not by offset, so a listing published or removed meanwhile never shows twice
     or pushes another off a page."""
-    q = select(Listing).options(LIGHT).where(Listing.seller_id == user.id)
+    q = select(Listing).options(LIGHT).where(Listing.seller_id == user.id, Listing.status != "archived")
     if before is not None:
         q = q.where(Listing.id < before)
     rows = db.scalars(q.order_by(Listing.id.desc()).limit(limit + 1)).all()

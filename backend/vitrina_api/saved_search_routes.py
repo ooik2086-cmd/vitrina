@@ -5,7 +5,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import or_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -214,7 +214,8 @@ SHOWN = ("published", "sold")
 @router.post("/favorites/{listing_id}", status_code=204)
 def add_favorite(listing_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
     listing = db.get(Listing, listing_id)
-    if listing is None or not (listing.status in SHOWN or listing.seller_id == user.id):
+    own = listing is not None and listing.seller_id == user.id and listing.status != "archived"
+    if listing is None or not (listing.status in SHOWN or own):
         raise ApiError(404, "not_found")  # as GET /listings/{id}: a draft or a hidden pair is nobody else's to see
     db.add(Favorite(user_id=user.id, listing_id=listing_id))
     try:
@@ -247,6 +248,7 @@ def list_favorites(before: int | None = Query(default=None, ge=1, le=2**31 - 1),
     ids = [s.listing_id for s in saved]
     found = {listing.id: listing for listing in with_light_media(db, db.scalars(
         select(Listing).options(LIGHT).where(Listing.id.in_(ids),
-                                             or_(Listing.status.in_(SHOWN), Listing.seller_id == user.id))).all())}
+                                             or_(Listing.status.in_(SHOWN), and_(Listing.seller_id == user.id,
+                                                                     Listing.status != "archived")))).all())}
     return {"items": [listing_out(db, found[i]) for i in ids if i in found],
             "next_before": saved[-1].id if more else None}

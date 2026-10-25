@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../i18n.dart';
 import '../session.dart';
@@ -69,7 +71,7 @@ final _topics = [
       Icons.report_gmailerrorred_rounded,
       'Тауар сипаттамаға сай болмаса?',
       () => tr(
-          'Тапсырыс бетінде «Дау ашу» басып, себебін жазыңыз, фотосын сатушымен чатқа жіберіңіз. Дау шешілгенше ақша ешкімге өтпейді. Қолдау қызметі екі жақтың да түсіндірмесін және чатты қарап, шешім шығарады.'),
+          'Тапсырыс бетінде «Дау ашу» басып, себебін жазыңыз, «Дәлелдер» бөліміне фото не видео қосыңыз. Дау шешілгенше ақша ешкімге өтпейді. Қолдау қызметі екі жақтың да түсіндірмесін, дәлелдерді және чатты қарап, шешім шығарады.'),
       paid: true),
   _Topic(
       Icons.verified_outlined,
@@ -124,6 +126,8 @@ class HelpScreen extends StatelessWidget {
               children: [Text(t.body(), style: theme.textTheme.bodyMedium?.copyWith(height: 1.45))],
             ),
           ),
+        // The texts above say support decides: here is where to write.
+        const SupportTile(),
         const SizedBox(height: 8),
         Text(
           tr('Бұл ережелер алдын ала нұсқа: төлем серіктесі қосылып, заңгер тексергеннен кейін нақтыланады.'),
@@ -132,4 +136,49 @@ class HelpScreen extends StatelessWidget {
       ]),
     );
   }
+}
+
+/// The way to support the server names: a tap opens it (mail, phone, a link) or, when it cannot, copies it. Nothing
+/// shows while the server has not said, so no made-up address is ever offered.
+class SupportTile extends StatelessWidget {
+  const SupportTile({super.key});
+
+  static Uri? _uri(String c) {
+    if (c.startsWith('http://') || c.startsWith('https://')) return Uri.tryParse(c);
+    if (RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(c)) return Uri(scheme: 'mailto', path: c);
+    final digits = c.replaceAll(RegExp(r'[\s()-]'), '');
+    if (RegExp(r'^\+?\d{6,15}$').hasMatch(digits)) return Uri(scheme: 'tel', path: digits);
+    return null;
+  }
+
+  Future<void> _open(BuildContext context, String contact) async {
+    final uri = _uri(contact);
+    final opened = uri != null && await launchUrl(uri, mode: LaunchMode.externalApplication).catchError((_) => false);
+    if (opened) return;
+    await Clipboard.setData(ClipboardData(text: contact));
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(trf('Көшірілді: {0}', [contact]))));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => FutureBuilder<String?>(
+        future: SessionScope.maybeOf(context)?.api.supportContact(),
+        initialData: SessionScope.maybeOf(context)?.api.supportKnown,
+        builder: (context, snap) {
+          final contact = snap.data?.trim();
+          if (contact == null || contact.isEmpty) return const SizedBox.shrink();
+          return Card(
+            key: const Key('support'),
+            margin: const EdgeInsets.only(bottom: 10),
+            child: ListTile(
+              leading: const Icon(Icons.support_agent_rounded, color: Brand.accent),
+              title: Text(tr('Қолдау қызметіне жазу')),
+              subtitle: Text(contact),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => _open(context, contact),
+            ),
+          );
+        },
+      );
 }

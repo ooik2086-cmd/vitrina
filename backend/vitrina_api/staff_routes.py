@@ -109,6 +109,8 @@ def hide_listing(listing_id: int, body: ReasonIn, staff: User = Depends(staff_us
     listing = db.get(Listing, listing_id)
     if listing is None:
         raise ApiError(404, "not_found")
+    if listing.status == "archived":
+        raise ApiError(409, "invalid_status")  # a draft its seller deleted: hiding then unhiding would bring it back
     if not body.reason.strip():
         raise ApiError(422, "reason_required")
     listing.status = "hidden"

@@ -30,9 +30,19 @@ class ProfileScreen extends StatelessWidget {
     final me = session.me;
     if (!session.signedIn) {
       return Scaffold(
-        body: SignInPrompt(text: tr('Профиль мен сатушы режимі үшін кіріңіз.')),
-        bottomNavigationBar:
-            const SafeArea(child: Padding(padding: EdgeInsets.all(16), child: Center(child: LanguageSwitch()))),
+        // How buying and paying work is for someone deciding whether to sign in, too.
+        body: SignInPrompt(
+          text: tr('Профиль мен сатушы режимі үшін кіріңіз.'),
+          below: TextButton.icon(
+            key: const Key('help-signed-out'),
+            onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const HelpScreen())),
+            icon: const Icon(Icons.help_outline_rounded),
+            label: Text(tr('Қалай жұмыс істейді')),
+          ),
+        ),
+        // heightFactor 1: a plain Center would grow to the whole screen and lie over «Кіру», taking its taps.
+        bottomNavigationBar: const SafeArea(
+            child: Padding(padding: EdgeInsets.all(16), child: Center(heightFactor: 1, child: LanguageSwitch()))),
       );
     }
     return Scaffold(

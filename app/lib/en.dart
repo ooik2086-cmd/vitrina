@@ -136,7 +136,7 @@ const en = <String, String>{
   'Бағаны енгізіңіз': 'Enter a price',
   'Жеткізу': 'Delivery',
   'Өлшемдер': 'Sizes',
-  'Ұлтарақ, см': 'Insole, cm',
+  'Ішкі табан, см': 'Insole, cm',
   'Тауар туралы': 'About the pair',
   'Бағасы мен өлшемі': 'Price and sizes',
   '{0}-қадам, барлығы {1}': 'Step {0} of {1}',
@@ -256,8 +256,8 @@ const en = <String, String>{
   'Трек-нөмір': 'Tracking number',
   'Мысалы, KZ123456789': 'For example, KZ123456789',
   'Тапсырыс №{0}': 'Order No. {0}',
-  'Төлем провайдері әлі қосылмаған: сынақ режимінде төлем расталмайды.':
-      'The payment provider isn\'t connected yet: in test mode, payment isn\'t confirmed.',
+  'Төлемнің расталуын күтудеміз. Расталғанда тапсырыс күйі осында өзгереді: жаңарту үшін бетті төмен тартыңыз.':
+      'We are waiting for the payment to be confirmed. Once it is, the order status changes here: pull the page down to refresh.',
   'Пікіріңіз үшін рақмет!': 'Thanks for your review!',
   'Өлшем {0} · {1} см': 'Size {0} · {1} cm',
   'Төленді': 'Paid',
@@ -591,7 +591,7 @@ const en = <String, String>{
   'Жылдам жауаптар': 'Quick replies',
   'Үлгілер': 'Templates',
   'Сәлеметсіз бе! Иә, бар.': 'Hello! Yes, it\'s in stock.',
-  'Өлшемі сай келеді. Табанының ұзындығын тауар бетінен қараңыз.':
+  'Өлшемі сай келеді. Ішкі табанының ұзындығын тауар бетінен қараңыз.':
       'True to size. See the insole length on the listing page.',
   'Төлем түскен күні жіберемін.': 'I\'ll ship on the day of payment.',
   'Ақшаңыз VITRINA-да сақталады: сіз тауарды алғаныңызды растағанда не тексеру мерзімі өткенде ғана маған өтеді.':
@@ -606,13 +606,13 @@ const en = <String, String>{
   'Бұғаттау': 'Block',
   'Ешкім бұғатталмаған. Чаттағы мәзірден бұғаттауға болады.':
       'No one is blocked. You can block someone from the chat menu.',
-  'Екеуіңіз бір-біріңізге жаза алмайсыз, баға ұсынысы, сұрақ пен тапсырыс та жабылады. Профильдегі «Бұғатталғандар» бөлімінен қайтаруға болады.':
-      'You won\'t be able to message each other, and offers, questions, and orders will close too. You can undo this in your profile under «Blocked».',
+  'Екеуіңіз бір-біріңізге жаза алмайсыз, жаңа баға ұсынысы, сұрақ пен тапсырыс жасалмайды. Басталған тапсырыс жалғасады, ол туралы сұрағыңызды қолдау қызметіне жазыңыз. Профильдегі «Бұғатталғандар» бөлімінен қайтаруға болады.':
+      'You will not be able to message each other, and new offers, questions and orders are blocked. An order already under way goes on; write to support about it. You can undo this in Profile under «Blocked».',
   'EU, US, UK кестесі': 'EU, US, UK chart',
   'US ер': 'US men',
   'US әйел': 'US women',
-  'Брендтер арасында жарты өлшемге дейін айырма болады. Күмәндансаңыз, тауар бетіндегі ұлтарақ ұзындығына (см) және сатып алушылардың «өлшемі қалай келді» деген бағасына сүйеніңіз.':
-      'Sizes can differ by up to half a size between brands. If unsure, go by the insole length (cm) on the listing page and buyers\' "how it fits" ratings.',
+  'Брендтер арасында жарты өлшемге дейін айырма болады. Күмәндансаңыз, тауар бетіндегі ішкі табан ұзындығына және сатып алушылардың «өлшемі қалай келді» деген бағасына сүйеніңіз.':
+      'Sizes can differ by up to half a size between brands. If unsure, go by the insole length on the listing page and buyers\' "how it fits" ratings.',
   'Екі белгінің арасын сызғышпен өлшеңіз. Екі аяқты да өлшеп, үлкенін алыңыз.':
       'Measure the distance between the marks with a ruler. Measure both feet and use the larger one.',
   'Төмендегі кестеден сол сантиметрді басыңыз: каталог пен тауар беті сізге сай өлшемді көрсетеді.':
@@ -744,8 +744,8 @@ const en = <String, String>{
       'Within {0} days of delivery, tap “Return” on the order page and write the reason. If the seller approves, the money comes back. If the seller disagrees or does not answer, support decides. To get it right next time, add your foot length in centimetres to your profile.',
   'Аяқкиімнің 3D үлгісі. Оны саусақпен кез келген жаққа бұрап, екі саусақпен жақындатып, тігісі мен табанына дейін көресіз. Қасында сатушының өз фотолары да бар.':
       'A 3D model of the shoe. Turn it any way with your finger and zoom in with two fingers, down to the seams and sole. The seller\'s own photos are right beside it.',
-  'Тапсырыс бетінде «Дау ашу» басып, себебін жазыңыз, фотосын сатушымен чатқа жіберіңіз. Дау шешілгенше ақша ешкімге өтпейді. Қолдау қызметі екі жақтың да түсіндірмесін және чатты қарап, шешім шығарады.':
-      'Tap “Open dispute” on the order page and write the reason; send photos to the seller in the chat. Until the dispute is settled the money goes to no one. Support reads both sides and the chat, then decides.',
+  'Тапсырыс бетінде «Дау ашу» басып, себебін жазыңыз, «Дәлелдер» бөліміне фото не видео қосыңыз. Дау шешілгенше ақша ешкімге өтпейді. Қолдау қызметі екі жақтың да түсіндірмесін, дәлелдерді және чатты қарап, шешім шығарады.':
+      'On the order page tap «Open dispute», write the reason and add photos or a video in the «Evidence» section. Until the dispute is settled the money goes to nobody. Support reads both sides, the evidence and the chat, and decides.',
   'Тапсырыс жасаған соң {0} минут ішінде төлейсіз, әйтпесе ол жойылып, өлшем басқаларға ашылады. Сатушы {1} сағат ішінде қабылдап, {3} күн ішінде жіберуі керек, әйтпесе ақша өзі қайтарылады. Сәлемдеме қолыңызға тигенде «Тауарды алдым» басыңыз. Тексеруге {2} күн бар: растамасаңыз да, қайтару не дау ашпасаңыз, тапсырыс өзі аяқталып, ақша сатушыға өтеді.':
       'After ordering, pay within {0} minutes, or the order is cancelled and the size goes back on sale. The seller has {1} hours to accept and {3} days to ship; otherwise the money comes back automatically. When the parcel is in your hands, tap “I have received it”. You then have {2} days to check: if you neither confirm, ask for a return nor open a dispute, the order completes on its own and the money goes to the seller.',
   'Толығырақ': 'Learn more',
@@ -848,7 +848,8 @@ const en = <String, String>{
   '{0} төлеу': 'Pay {0}',
   'Ақша сатып алушыға толық қайтарылады, өлшем қайта сатылымға шығады.':
       'The buyer gets a full refund and the size goes back on sale.',
-  'Ақша сатып алушыға қайтарылады.': 'The money goes back to the buyer.',
+  'Ақша сатып алушыға қайтарылады. Аяқкиімді қалай қайтаратынын сатып алушымен чатта алдын ала келісіңіз.':
+      'The money goes back to the buyer. Agree with the buyer in the chat beforehand how the shoes come back to you.',
   'Ақша сізге толық қайтарылады, тапсырыс жабылады.': 'You get a full refund and the order is closed.',
   'Белгіленді. Аяқкиімді тексеріп көріңіз.': 'Noted. Now check the shoes.',
   'Бәрі дұрыс па?': 'Is everything all right?',
@@ -858,12 +859,12 @@ const en = <String, String>{
   'Растасаңыз, ақша комиссия шегеріліп сатушыға өтеді. Осыдан кейін қайтару не дау ашу мүмкін болмайды.':
       'Once you confirm, the money goes to the seller minus commission. After that you can no longer ask for a return or open a dispute.',
   'Рақмет! Тапсырыс аяқталды.': 'Thank you! The order is complete.',
-  'Сатушы {0} дейін жауап бермесе, қайтаруды қолдау қызметі шешеді.':
-      'If the seller does not answer by {0}, support decides the return.',
+  'Сатушы {0} дейін жауап бермесе, қайтаруды қолдау қызметі шешеді. Аяқкиімді қайтару жолын сатушымен чатта келісіңіз.':
+      'If the seller does not answer by {0}, support decides the return. Agree with the seller in the chat how to send the shoes back.',
   'Сатушы {0} дейін жібермесе, тапсырыс жойылып, ақша сізге толық қайтарылады.':
       'If the seller does not ship by {0}, the order is cancelled and you get a full refund.',
-  'Сатушы қайтаруды мақұлдаса, ақша сізге қайтарылады. Келіспесе, қолдау қызметі шешеді.':
-      'If the seller approves the return, you get your money back. If not, support decides.',
+  'Сатушы қайтаруды мақұлдаса, ақша сізге қайтарылады. Аяқкиімді қалай қайтаратыныңызды сатушымен чатта келісіңіз. Келіспесе, қолдау қызметі шешеді.':
+      'If the seller approves the return, your money comes back to you. Agree with the seller in the chat how to send the shoes back. If they do not agree, support decides.',
   'Сатып алушы {0} дейін қайтару не дау ашпаса, тапсырыс аяқталып, ақша комиссия шегеріліп сізге өтеді.':
       'If the buyer neither asks for a return nor opens a dispute by {0}, the order completes and the money, minus commission, goes to you.',
   'Сәлемдеме қолыңызға тиді ме?': 'Is the parcel in your hands?',
@@ -1271,4 +1272,26 @@ const en = <String, String>{
       'You already made an offer on this item. It is shown on the page.',
   'Сізде {0} өлшеміне ұсыныс бар, сондықтан сол өлшем таңдалды. Тексеріп, қайта басыңыз.':
       'You have an offer for size {0}, so that size is now selected. Check it and tap again.',
+  'VITRINA комиссиясы': 'VITRINA commission',
+  '«Басқа себеп» үшін не болғанын қысқаша жазыңыз.': 'For «Other reason», say briefly what happened.',
+  'Жоба өшірілді': 'Draft deleted',
+  'Жобаны өшіру': 'Delete draft',
+  'Жобаны өшіру керек пе? Оны қайтару мүмкін болмайды.': 'Delete the draft? It cannot be brought back.',
+  'Кейін жалғастыру': 'Continue later',
+  'Келісемін · {0}': 'Agree · {0}',
+  'Көшірілді: {0}': 'Copied: {0}',
+  'Сатып алушы {0} ұсынған': 'The buyer offered {0}',
+  'Сомасын жазыңыз, тегін болса 0': 'Enter the amount, 0 if free',
+  'Сіз {0} ұсындыңыз': 'You offered {0}',
+  'Сізге түседі': 'You receive',
+  'Тапсырыс беру': 'Place order',
+  'Тегін болса, 0': '0 if free',
+  'Толтырған мәліметтер мен фотолар жоғалады.': 'What you filled in and the photos will be lost.',
+  'Толтырғаныңыз осы телефонда сақталады: келесі жолы «Тауар қосу» басқанда жалғастыра аласыз.':
+      'What you filled in stays on this phone: carry on next time you tap «Add listing».',
+  'Қолдау қызметіне жазу': 'Write to support',
+  'Өшіріп шығу': 'Delete and leave',
+  'Тиынсыз, бүтін теңгемен жазыңыз': 'Whole tenge, without tiyn',
+  'Шығу керек пе?': 'Leave?',
+  'Тапсырыс аяқталса, сізге түседі': 'You receive once the order completes',
 };
