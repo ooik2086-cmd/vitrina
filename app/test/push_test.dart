@@ -175,7 +175,7 @@ void main() {
   });
 
   testWidgets('a tapped alert opens what it tells of from the home screen', (tester) async {
-    phone.atStart = PushTap.fromData({'kind': 'payout', 'notification_id': '5'});
+    phone.atStart = PushTap.fromData({'kind': 'report_closed', 'notification_id': '5'});
     await Push.use(phone, session);
     await tester.pumpWidget(SessionScope(session: session, child: const MaterialApp(home: HomeShell())));
     // Not pumpAndSettle: the tabs underneath keep a loading circle turning.

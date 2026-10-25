@@ -218,27 +218,43 @@ class _OrderScreenState extends State<OrderScreen> with WidgetsBindingObserver {
     _refresh();
   }
 
-  Future<String?> _ask(String title, String hint, {String? explain}) {
+  /// One line of text before a move; «Жіберу» waits for it, so an empty press never looks like it did nothing.
+  Future<String?> _ask(String title, String hint, {String? explain, int maxLength = 2000}) async {
     final ctrl = TextEditingController();
-    return showDialog<String>(
+    final text = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
         title: Text(title),
+        scrollable: true,
         content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
           if (explain != null) ...[Text(explain), const SizedBox(height: 12)],
           TextField(
               key: const Key('action-reason'),
               controller: ctrl,
               autofocus: true,
-              maxLines: 3,
-              decoration: InputDecoration(hintText: hint)),
+              maxLines: maxLength > 100 ? 3 : 1,
+              maxLength: maxLength,
+              // A track number is one line of capitals; the keyboard's own key sends it.
+              textCapitalization: maxLength > 100 ? TextCapitalization.sentences : TextCapitalization.characters,
+              textInputAction: maxLength > 100 ? TextInputAction.newline : TextInputAction.done,
+              onSubmitted: (t) {
+                if (t.trim().isNotEmpty) Navigator.pop(context, t.trim());
+              },
+              decoration: InputDecoration(hintText: hint, counterText: '')),
         ]),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: Text(tr('Жабу'))),
-          FilledButton(onPressed: () => Navigator.pop(context, ctrl.text.trim()), child: Text(tr('Жіберу'))),
+          ValueListenableBuilder<TextEditingValue>(
+            valueListenable: ctrl,
+            builder: (context, v, _) => FilledButton(
+                key: const Key('action-send'),
+                onPressed: v.text.trim().isEmpty ? null : () => Navigator.pop(context, ctrl.text.trim()),
+                child: Text(tr('Жіберу'))),
+          ),
         ],
       ),
     );
+    return text;
   }
 
   /// Yes or no before a move that touches the money; the dialog says what happens to it.
@@ -264,7 +280,9 @@ class _OrderScreenState extends State<OrderScreen> with WidgetsBindingObserver {
       reason = await _ask(a.label, a.hint ?? tr('Себебін жазыңыз'), explain: a.explain);
       if (reason == null || reason.isEmpty) return;
     } else if (a.needs == 'tracking') {
-      tracking = await _ask(tr('Трек-нөмір'), tr('Мысалы, KZ123456789'));
+      tracking = await _ask(tr('Трек-нөмір'), tr('Мысалы, KZ123456789'),
+          explain: tr('Пошта не курьер берген нөмір. Сатып алушы сәлемдеменің қайда екенін осы нөмір арқылы көреді.'),
+          maxLength: 60);
       if (tracking == null || tracking.isEmpty) return;
     } else if (a.ask != null) {
       if (!await _confirm(a)) return;
@@ -546,14 +564,20 @@ class _EvidenceCardState extends State<_EvidenceCard> {
       ),
     );
     final picker = ImagePicker();
-    return switch (choice) {
-      'camera' => picker.pickImage(source: ImageSource.camera, maxWidth: 1600, imageQuality: 90),
-      'gallery' => picker.pickImage(source: ImageSource.gallery, maxWidth: 1600, imageQuality: 90),
-      // maxDuration only stops a recording; a gallery clip is checked by size below.
-      'record' => picker.pickVideo(source: ImageSource.camera, maxDuration: const Duration(seconds: _videoSeconds)),
-      'video' => picker.pickVideo(source: ImageSource.gallery),
-      _ => Future.value(null),
-    };
+    if (choice == null || !mounted) return null;
+    // A refused camera or gallery says so instead of doing nothing.
+    return takePhoto(
+        context,
+        () => switch (choice) {
+              'camera' => picker.pickImage(source: ImageSource.camera, maxWidth: 1600, imageQuality: 90),
+              'gallery' => picker.pickImage(source: ImageSource.gallery, maxWidth: 1600, imageQuality: 90),
+              // maxDuration only stops a recording; a gallery clip is checked by size below.
+              'record' =>
+                picker.pickVideo(source: ImageSource.camera, maxDuration: const Duration(seconds: _videoSeconds)),
+              'video' => picker.pickVideo(source: ImageSource.gallery),
+              _ => Future.value(null),
+            },
+        camera: choice == 'camera' || choice == 'record');
   }
 
   /// Shows what is about to go out and that it is final. Null when cancelled, '' when sent without a note. The

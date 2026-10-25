@@ -135,7 +135,8 @@ class ListingSizeChart extends StatelessWidget {
           child: Row(children: [Expanded(child: a), Expanded(child: b), if (end != null) end]),
         );
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      Text(tr('Табаныңызды өкшеден ең ұзын саусаққа дейін өлшеңіз. Ішкі табан ұзындығын сатушы өлшеген.'),
+      Text(
+          tr('Табаныңызды өкшеден ең ұзын саусаққа дейін өлшеңіз. Ішкі табан одан 0,5–1 см ұзын болсын. Ішкі табан ұзындығын сатушы өлшеген.'),
           style: theme.textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant)),
       const SizedBox(height: 8),
       row(Text(tr('Өлшемі'), style: head), Text(tr('Ішкі табан, мм'), style: head)),

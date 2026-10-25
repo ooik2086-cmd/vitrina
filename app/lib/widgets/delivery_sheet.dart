@@ -46,6 +46,7 @@ class _DeliverySheetState extends State<DeliverySheet> {
   bool _promoOpen = false, _checking = false;
   PromoPreview? _applied;
   String? _promoError;
+  Future<void>? _check; // the check running now, which «order» waits for
 
   @override
   void initState() {
@@ -75,7 +76,9 @@ class _DeliverySheetState extends State<DeliverySheet> {
     super.dispose();
   }
 
-  Future<void> _checkPromo() async {
+  Future<void> _checkPromo() => _check ??= _checkOnce().whenComplete(() => _check = null);
+
+  Future<void> _checkOnce() async {
     final code = _promo.text.trim();
     if (code.isEmpty) return;
     setState(() {
@@ -94,8 +97,20 @@ class _DeliverySheetState extends State<DeliverySheet> {
     }
   }
 
-  void _submit() {
+  Future<void> _submit() async {
     if (!_form.currentState!.validate()) return;
+    // A code typed but not yet tried is tried now: it is never dropped without a word.
+    // A check already running (the retry sheet re-checks the remembered code) is waited for, not skipped.
+    if (_check != null) await _check;
+    if (!mounted) return;
+    final typed = _promo.text.trim();
+    if (_promoOpen && typed.isNotEmpty && _applied?.code.toUpperCase() != typed.toUpperCase()) {
+      _applied = null;
+      await _checkPromo();
+      if (!mounted || _applied == null) return; // its error is under the field, with a cross that clears it
+      if (!_form.currentState!.validate()) return; // the fields may have been edited while the code was checked
+    }
+    if (!mounted) return;
     Navigator.pop(
       context,
       Checkout(
@@ -135,7 +150,10 @@ class _DeliverySheetState extends State<DeliverySheet> {
           IconButton(
             tooltip: tr('Промокодты алып тастау'),
             icon: const Icon(Icons.close_rounded),
-            onPressed: () => setState(() => _applied = null),
+            onPressed: () => setState(() {
+              _applied = null;
+              _promo.clear(); // taken off: not tried again on "order"
+            }),
           ),
         ]),
       );
@@ -154,7 +172,23 @@ class _DeliverySheetState extends State<DeliverySheet> {
           key: const Key('promo-code'),
           controller: _promo,
           textCapitalization: TextCapitalization.characters,
-          decoration: InputDecoration(labelText: tr('Промокод'), errorText: _promoError, errorMaxLines: 2),
+          decoration: InputDecoration(
+            labelText: tr('Промокод'),
+            errorText: _promoError,
+            errorMaxLines: 2,
+            // A code that does not work is taken out in one tap, and the order goes on without it.
+            suffixIcon: _promoError == null
+                ? null
+                : IconButton(
+                    key: const Key('promo-clear'),
+                    tooltip: tr('Промокодты алып тастау'),
+                    icon: const Icon(Icons.close_rounded),
+                    onPressed: () => setState(() {
+                      _promo.clear();
+                      _promoError = null;
+                    }),
+                  ),
+          ),
           onSubmitted: (_) => _checkPromo(),
         ),
       ),

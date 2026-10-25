@@ -381,7 +381,7 @@ def close_reports(listing_id: int, body: ReportCloseIn, staff: User = Depends(st
         services.notify(db, listing.seller_id, "listing_hidden",
                         f"«{listing.title}» модератор шешімімен жасырылды: {body.reason}",
                         f"«{listing.title}» скрыт по решению модератора: {body.reason}",
-                        f"“{listing.title}” was hidden by a moderator: {body.reason}")
+                        f"“{listing.title}” was hidden by a moderator: {body.reason}", listing_id=listing.id)
     for reporter in {r.reporter_id for r in reports}:
         services.notify(db, reporter, "report_closed",
                         f"«{listing.title}» туралы шағымыңыз қаралды: "

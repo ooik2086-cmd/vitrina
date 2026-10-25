@@ -601,6 +601,7 @@ class Listing {
         moderation = j['moderation'] == null ? null : Moderation.fromJson(j['moderation'] as Map<String, dynamic>),
         sizeFit = j['size_fit'] == null ? null : SizeFit.fromJson(j['size_fit'] as Map<String, dynamic>),
         stockAlerts = {for (final id in (j['stock_alerts'] as List?) ?? const []) id as int},
+        favorite = j['favorite'] as bool? ?? false,
         soldRecently = ((j['popularity'] as Map?)?['sold_30d'] as int?) ?? 0,
         savedBy = ((j['popularity'] as Map?)?['favorites'] as int?) ?? 0,
         colors = [for (final c in (j['colors'] as List?) ?? const []) Colorway.fromJson(c as Map<String, dynamic>)],
@@ -673,6 +674,9 @@ class Listing {
 
   /// Sold-out sizes the signed-in buyer asked to hear about when they are back.
   final Set<int> stockAlerts;
+
+  /// In the signed-in person's favourites (the listing's own page tells it; lists do not).
+  final bool favorite;
 
   /// The same model from the same shop in each colour, this one first; only on the product page, and empty when
   /// there is no other colour.
@@ -1463,7 +1467,15 @@ class Api {
   /// Every favourite, the newest saved first (compare needs them all).
   Future<List<Listing>> favorites() => _allPages('/favorites', Listing.fromJson, (l) => l.id);
 
-  Future<void> setFavorite(int listingId, bool on) => _send(on ? 'POST' : 'DELETE', '/favorites/$listingId');
+  Future<void> setFavorite(int listingId, bool on) async {
+    await _send(on ? 'POST' : 'DELETE', '/favorites/$listingId');
+    _favoritesChanged.add(listingId);
+  }
+
+  final _favoritesChanged = StreamController<int>.broadcast();
+
+  /// A heart tapped anywhere: the Favourites tab, kept alive behind the others, loads its list again.
+  Stream<int> get favoritesChanged => _favoritesChanged.stream;
 
   // orders
   /// [idempotencyKey] must stay the same when the same tap is retried, so a lost response never creates two orders.

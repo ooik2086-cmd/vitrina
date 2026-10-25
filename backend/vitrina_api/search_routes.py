@@ -18,10 +18,10 @@ from . import delivery_eta, visual
 from .api_common import AUDIENCES
 from .deps import current_user, get_db, get_storage, now_utc
 from .errors import ApiError
-from .models import ListingEmbedding, Listing, ListingSize, User
+from .models import ListingEmbedding, Listing, User
 from .storage import MAX_UPLOAD_BYTES, Storage, normalize_image
-from .serializers import LIGHT, cm_to_mm, listing_out, with_light_media
-from .saved_search_routes import catalog_filter
+from .serializers import LIGHT, listing_out, with_light_media
+from .saved_search_routes import catalog_filter, fits_foot
 
 
 router = APIRouter(prefix="/api/v1")
@@ -169,9 +169,7 @@ def search_by_image(request: Request, file: UploadFile = File(...), category: st
     if category:
         stmt = stmt.where(Listing.category == category)
     if size_cm:
-        mm = cm_to_mm(size_cm)
-        stmt = stmt.where(Listing.id.in_(select(ListingSize.listing_id).where(
-            ListingSize.quantity > 0, ListingSize.insole_mm.between(mm - 5, mm + 5))))
+        stmt = stmt.where(fits_foot(size_cm))
     # Brute force is fine at MVP scale; move to pgvector once the catalogue passes ~50k listings.
     scored = sorted(((float(np.frombuffer(vec, np.float32) @ query), lid) for lid, vec in db.execute(stmt)),
                     key=lambda t: -t[0])[:max(1, min(limit, 50))]

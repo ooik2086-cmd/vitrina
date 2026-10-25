@@ -33,6 +33,12 @@ class _ShopScreenState extends State<ShopScreen> {
   Future<(Shop, List<Listing>)>? _data;
   (bool, int)? _follow; // what the last follow tap returned, ahead of a reload
   bool _busy = false;
+  // Pages after the first, read as the grid nears its end, the way the catalog does it.
+  static const _page = 50;
+  final _more = <Listing>[];
+  bool _hasMore = false, _loadingMore = false;
+  int _read = 0; // rows the server has sent, duplicates included: where the next page starts
+  Object? _moreError;
 
   @override
   void didChangeDependencies() {
@@ -42,7 +48,15 @@ class _ShopScreenState extends State<ShopScreen> {
 
   Future<(Shop, List<Listing>)> _load() async {
     final api = SessionScope.of(context).api;
-    final (shop, items) = await (api.shop(widget.sellerId), api.search(sellerId: widget.sellerId, limit: 50)).wait;
+    final (shop, items) = await (api.shop(widget.sellerId), api.search(sellerId: widget.sellerId, limit: _page)).wait;
+    if (mounted) {
+      setState(() {
+        _more.clear();
+        _read = items.length;
+        _hasMore = items.length == _page;
+        _moreError = null;
+      });
+    }
     return (shop, items);
   }
 
@@ -50,6 +64,29 @@ class _ShopScreenState extends State<ShopScreen> {
     setState(() {
       _data = shown(_load());
     });
+  }
+
+  Future<void> _loadMore(List<Listing> first) async {
+    if (_loadingMore || !_hasMore || _moreError != null) return;
+    final current = _data;
+    setState(() => _loadingMore = true);
+    try {
+      final page = await SessionScope.of(context).api.search(sellerId: widget.sellerId, offset: _read, limit: _page);
+      if (!mounted || current != _data) return;
+      // A listing that moved up while paging would come twice; it is shown once.
+      final seen = {
+        for (final l in [...first, ..._more]) l.id
+      };
+      setState(() {
+        _more.addAll(page.where((l) => seen.add(l.id)));
+        _read += page.length;
+        _hasMore = page.length == _page;
+      });
+    } catch (e) {
+      if (mounted && current == _data) setState(() => _moreError = e);
+    } finally {
+      if (mounted) setState(() => _loadingMore = false);
+    }
   }
 
   Future<void> _toggleFollow(Shop shop) async {
@@ -99,7 +136,8 @@ class _ShopScreenState extends State<ShopScreen> {
             return ErrorRetry(error: snap.error, onRetry: _retry);
           }
           if (!snap.hasData) return const Center(child: CircularProgressIndicator());
-          final (shop, items) = snap.data!;
+          final (shop, first) = snap.data!;
+          final items = [...first, ..._more];
           return CustomScrollView(slivers: [
             SliverToBoxAdapter(
               child: Padding(
@@ -252,7 +290,28 @@ class _ShopScreenState extends State<ShopScreen> {
                 sliver: SliverGrid.builder(
                   gridDelegate: ListingGridDelegate.of(context),
                   itemCount: items.length,
-                  itemBuilder: (_, i) => ListingTile(listing: items[i]),
+                  itemBuilder: (_, i) {
+                    if (i >= items.length - 6 && _hasMore) {
+                      WidgetsBinding.instance.addPostFrameCallback((_) => _loadMore(first));
+                    }
+                    return ListingTile(listing: items[i]);
+                  },
+                ),
+              ),
+            if (_loadingMore && _moreError == null)
+              const SliverToBoxAdapter(
+                child: Padding(padding: EdgeInsets.only(bottom: 32), child: Center(child: CircularProgressIndicator())),
+              ),
+            if (_moreError != null)
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 32),
+                  child: RetryLine(
+                      key: const Key('shop-more-retry'),
+                      what: tr('Тағы тауарлар'),
+                      error: _moreError,
+                      busy: _loadingMore,
+                      onRetry: () => setState(() => _moreError = null)),
                 ),
               ),
           ]);

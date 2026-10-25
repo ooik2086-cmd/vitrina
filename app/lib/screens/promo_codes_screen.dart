@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../api.dart';
 import '../i18n.dart';
@@ -169,6 +170,8 @@ class _PromoCodeSheetState extends State<PromoCodeSheet> {
   final _minPrice = TextEditingController(), _maxUses = TextEditingController();
   bool _percent = true, _busy = false;
   DateTime? _endsOn;
+  String? _error;
+  static final _digits = [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(9)];
 
   @override
   void dispose() {
@@ -178,7 +181,7 @@ class _PromoCodeSheetState extends State<PromoCodeSheet> {
     super.dispose();
   }
 
-  int? _int(TextEditingController c) => int.tryParse(c.text.replaceAll(RegExp(r'\s'), ''));
+  int? _int(TextEditingController c) => int.tryParse(c.text.trim());
 
   Future<void> _pickEnd() async {
     final now = DateTime.now();
@@ -195,7 +198,10 @@ class _PromoCodeSheetState extends State<PromoCodeSheet> {
 
   Future<void> _save() async {
     if (!_form.currentState!.validate()) return;
-    setState(() => _busy = true);
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
     final value = _int(_value)!, minPrice = _int(_minPrice), maxUses = _int(_maxUses);
     final end = _endsOn;
     try {
@@ -209,7 +215,8 @@ class _PromoCodeSheetState extends State<PromoCodeSheet> {
       });
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
-      if (mounted) showError(context, e);
+      // A snackbar would sit behind this sheet, so the reason is written above the button.
+      if (mounted) setState(() => _error = errorText(e));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -248,6 +255,7 @@ class _PromoCodeSheetState extends State<PromoCodeSheet> {
               key: const Key('promo-new-value'),
               controller: _value,
               keyboardType: TextInputType.number,
+              inputFormatters: _digits,
               decoration: InputDecoration(
                   labelText: _percent ? tr('Жеңілдік, %') : tr('Жеңілдік, ₸'), suffixText: _percent ? '%' : '₸'),
               validator: (_) {
@@ -260,17 +268,26 @@ class _PromoCodeSheetState extends State<PromoCodeSheet> {
             Row(children: [
               Expanded(
                 child: TextFormField(
+                  key: const Key('promo-new-min-price'),
                   controller: _minPrice,
                   keyboardType: TextInputType.number,
+                  inputFormatters: _digits,
                   decoration: InputDecoration(labelText: tr('Ең аз баға, ₸'), helperText: tr('Міндетті емес')),
                 ),
               ),
               const SizedBox(width: 10),
               Expanded(
                 child: TextFormField(
+                  key: const Key('promo-new-max-uses'),
                   controller: _maxUses,
                   keyboardType: TextInputType.number,
+                  inputFormatters: _digits,
                   decoration: InputDecoration(labelText: tr('Қанша рет'), helperText: tr('Міндетті емес')),
+                  validator: (_) {
+                    final v = _int(_maxUses);
+                    if (_maxUses.text.trim().isEmpty) return null;
+                    return v == null || v < 1 || v > 100000 ? tr('1-ден 100 000-ға дейін') : null;
+                  },
                 ),
               ),
             ]),
@@ -285,6 +302,16 @@ class _PromoCodeSheetState extends State<PromoCodeSheet> {
             ),
             Text(tr('Әр сатып алушы кодты бір рет қолданады. Жеңілдік тауар бағасының жартысынан аспайды.'),
                 style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+            if (_error != null) ...[
+              const SizedBox(height: 12),
+              // Read out as it appears, so a screen-reader user hears why nothing was made.
+              Semantics(
+                liveRegion: true,
+                child: Text(_error!,
+                    key: const Key('promo-error'),
+                    style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.error)),
+              ),
+            ],
             const SizedBox(height: 14),
             SizedBox(
               width: double.infinity,

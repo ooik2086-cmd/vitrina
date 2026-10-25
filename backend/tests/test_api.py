@@ -453,8 +453,10 @@ class ListingTests(ApiTestCase):
     def test_search_cyrillic_brand_and_size(self):
         self.publish()
         self.assertEqual(len(self.c.get("/api/v1/listings", params={"q": "кроссовка nike"}).json()["items"]), 1)
-        self.assertEqual(len(self.c.get("/api/v1/listings", params={"q": "найк", "size_cm": "26,7"}).json()["items"]), 1)
-        self.assertEqual(len(self.c.get("/api/v1/listings", params={"size_cm": "28"}).json()["items"]), 0)
+        self.assertEqual(len(self.c.get("/api/v1/listings", params={"q": "найк", "size_cm": "26"}).json()["items"]), 1)
+        # The size is the foot; the 26,5 cm insole fits a foot of 25,5 to 26,5 cm, as the app's size pick says.
+        found = lambda cm: len(self.c.get("/api/v1/listings", params={"size_cm": cm}).json()["items"])
+        self.assertEqual([found(cm) for cm in ("25,4", "25,5", "26,5", "26,6", "28")], [0, 1, 1, 0, 0])
 
     def test_the_same_tap_sent_again_gets_the_listing_it_made(self):
         # Weak mobile data: the listing was made, its answer lost, and the app sends the same tap again.
@@ -1402,6 +1404,11 @@ class ReportTests(ApiTestCase):
         for token, kind in ((self.seller, "listing_hidden"), (self.buyer, "report_closed"), (other, "report_closed")):
             items = self.c.get("/api/v1/notifications", headers=self.h(token)).json()["items"]
             self.assertIn(kind, [n["kind"] for n in items])
+        # The seller's note names the listing, so a tap opens it where the seller manages it.
+        hidden = next(n for n in self.c.get("/api/v1/notifications", headers=self.h(self.seller)).json()["items"]
+                      if n["kind"] == "listing_hidden")
+        self.assertEqual(hidden["listing_id"], lid)
+        self.assertEqual(self.c.get(f"/api/v1/listings/{lid}", headers=self.h(self.seller)).status_code, 200)
 
     def test_dismiss_keeps_listing_live(self):
         lid = self.publish()["id"]
@@ -3140,6 +3147,8 @@ class AwayTests(ApiTestCase):
         self.assertEqual(self.post(f"/favorites/{live}", self.buyer).status_code, 204)
         saved = lambda t: [i["id"] for i in self.c.get("/api/v1/favorites", headers=self.h(t)).json()["items"]]
         self.assertEqual(saved(self.buyer), [live])
+        page = lambda t: self.c.get(f"/api/v1/listings/{live}", headers=self.h(t) if t else {}).json()["favorite"]
+        self.assertEqual((page(self.buyer), page(self.seller), page(None)), (True, False, False))
         self.post(f"/listings/{live}/pause", self.seller)
         self.assertEqual(saved(self.buyer), [], "paused: its page does not open either")
         self.assertEqual(sorted(saved(self.seller)), [draft])

@@ -60,6 +60,7 @@ class _ListingScreenState extends State<ListingScreen> {
   int? _sizeId;
   bool _fitChecked = false;
   bool _favorite = false;
+  int _hearts = 0; // heart taps so far: a load begun before one does not undo it
   bool _ordering = false;
   _Pane _pane = _Pane.turn;
 
@@ -87,7 +88,7 @@ class _ListingScreenState extends State<ListingScreen> {
   // One key per order attempt: a retried tap after a lost response returns the same order.
   String _orderKey = newIdempotencyKey();
   String? _orderFor; // what [_orderKey] was last sent for
-  Checkout? _unanswered; // the last order sent whose answer never came
+  Checkout? _unanswered; // the last order sent that did not open, to fill the next try in with
   Set<int>? _alerts; // sold-out sizes the buyer waits for, once they tap one
   // Off until a payment partner is signed: the buy button then opens the chat with the seller and offers are hidden.
   bool _payments = true;
@@ -134,8 +135,12 @@ class _ListingScreenState extends State<ListingScreen> {
     final pending = _pending;
     _pending = null;
     _listing = shown(ready != null ? Future.value(ready) : pending ?? SessionScope.of(context).api.listing(_id));
+    final hearts = _hearts;
     _listing.then((l) {
       if (l.status == 'published') rememberViewed(l);
+      if (mounted && l.id == _id && hearts == _hearts && l.favorite != _favorite) {
+        setState(() => _favorite = l.favorite);
+      }
     }, onError: (_) {});
   }
 
@@ -176,7 +181,18 @@ class _ListingScreenState extends State<ListingScreen> {
   bool get _offerLive => const {'pending', 'countered', 'accepted'}.contains(_offer?.status);
 
   Future<void> _makeOffer(Listing listing, ShoeSize size) async {
+    final wasIn = SessionScope.of(context).signedIn;
     if (!await _ensureSignedIn() || !mounted) return;
+    if (!wasIn) {
+      // Signed in just now: an offer already made shows on the page, and a second is not sent over it.
+      await _loadOffer();
+      if (!mounted) return;
+      if (_offerLive) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(tr('Бұл тауарға ұсынысыңыз бұрыннан бар. Ол бетте көрсетілген.'))));
+        return;
+      }
+    }
     final offer = await showSheet<Offer>(
       context: context,
       isScrollControlled: true,
@@ -226,9 +242,14 @@ class _ListingScreenState extends State<ListingScreen> {
   Future<void> _toggleFavorite() => once((this, #favorite), () async {
         if (!await _ensureSignedIn() || !mounted) return;
         final on = !_favorite, id = _id;
+        _hearts++;
         try {
           await SessionScope.of(context).api.setFavorite(id, on);
-          if (mounted && id == _id) setState(() => _favorite = on);
+          if (!mounted || id != _id) return;
+          setState(() => _favorite = on);
+          ScaffoldMessenger.of(context)
+            ..hideCurrentSnackBar()
+            ..showSnackBar(SnackBar(content: Text(on ? tr('Таңдаулыға қосылды.') : tr('Таңдаулыдан алынды.'))));
         } catch (e) {
           if (mounted) showError(context, e);
         }
@@ -238,7 +259,20 @@ class _ListingScreenState extends State<ListingScreen> {
   Future<void> _order(Listing listing) => once((this, #order), () => _orderNow(listing));
 
   Future<void> _orderNow(Listing listing) async {
+    final wasIn = SessionScope.of(context).signedIn;
     if (!await _ensureSignedIn() || !mounted) return;
+    // Signed in just now: a price agreed earlier (on another phone, before the sign-in ran out) is looked up first.
+    // An offer for another size selects that size; the buyer sees it on the page and taps again, so nothing is
+    // ordered in a size she did not pick.
+    final picked = _sizeId;
+    if (!wasIn) await _loadOffer();
+    if (!mounted) return;
+    if (_sizeId != picked) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(trf('Сізде {0} өлшеміне ұсыныс бар, сондықтан сол өлшем таңдалды. Тексеріп, қайта басыңыз.',
+              [_offer!.sizeLabel]))));
+      return;
+    }
     // Whether the buyer has an agreed price is known first.
     if (_offerError != null) {
       await _loadOffer();
@@ -280,9 +314,9 @@ class _ListingScreenState extends State<ListingScreen> {
       // The order screen opens on its "now pay" banner: paying is the one step left.
       await Navigator.of(context).push(MaterialPageRoute(builder: (_) => OrderScreen(orderId: order.id)));
     } catch (e) {
-      // No answer (a weak line): the order may be made. The next try fills in the same and keeps the key, so it is
-      // the same order. A plain refusal made nothing, and anything may be changed.
-      _unanswered = e is! ApiException || e.passing ? checkout : null;
+      // The next try is filled in as this one, typed address and code included. With no answer (a weak line) the
+      // order may be made: sent the same, it keeps its key and is the same order. A refusal made nothing.
+      _unanswered = checkout;
       if (mounted) showError(context, e);
       // Online payment was switched off after this page asked: from now on the button writes to the seller.
       if (e is ApiException && e.code == 'payments_off' && mounted) {
@@ -370,7 +404,8 @@ class _ListingScreenState extends State<ListingScreen> {
                   child: _RoundButton(
                     dark: dark,
                     onTap: _toggleFavorite,
-                    tooltip: tr('Таңдаулыға'),
+                    // Said aloud too: a screen reader hears what a tap will do now.
+                    tooltip: _favorite ? tr('Таңдаулыдан алу') : tr('Таңдаулыға'),
                     child: Icon(_favorite ? Icons.favorite : Icons.favorite_border,
                         color: _favorite ? Brand.accent : null),
                   ),
@@ -429,7 +464,7 @@ class _ListingScreenState extends State<ListingScreen> {
       _offerError = null;
       _unanswered = null;
       _alerts = null;
-      _favorite = false;
+      _favorite = next.favorite;
       _noModel = false;
       _videoOpened = false; // another colour, another video (or none)
       _orderKey = newIdempotencyKey();

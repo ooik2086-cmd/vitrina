@@ -207,14 +207,15 @@ void main() {
     expect(m.photoUrl, 'http://x/media/2/a.jpg');
   });
 
-  test('saved size picks the closest available size within half a centimetre', () async {
+  test('the saved foot length picks an insole a little longer, never a shorter one', () async {
     SharedPreferences.setMockInitialValues({});
     final sizes = [
       for (final s in (listingJson()['sizes'] as List)) ShoeSize.fromJson(s as Map<String, dynamic>),
     ]; // 42 = 27,0 cm available; 43 = 27,5 cm sold out
-    expect(bestFit(sizes, '27')?.label, '42');
-    expect(bestFit(sizes, '27,5')?.label, '42'); // 43 fits better but is sold out
-    expect(bestFit(sizes, '28,5'), isNull);
+    expect(bestFit(sizes, '26,5')?.label, '42'); // half a centimetre of room for the toes
+    expect(bestFit(sizes, '27')?.label, '42'); // 43 has more room but is sold out
+    expect(bestFit(sizes, '27,5'), isNull, reason: 'a 27,0 insole would pinch a 27,5 foot');
+    expect(bestFit(sizes, '25,5'), isNull, reason: 'more than a centimetre too long');
     expect(bestFit(sizes, null), isNull);
     await setMySize('26,5');
     await restoreMySize();
@@ -3204,6 +3205,30 @@ void main() {
     return posts;
   }
 
+  testWidgets('a reason or a tracking number is asked for before «Жіберу» can be pressed', (tester) async {
+    final posts = await pumpOrder(tester, 'RETURN_REQUESTED', meId: 1);
+    await tester.tap(find.text('Қайтаруға келіспеу'));
+    await tester.pumpAndSettle();
+    FilledButton send() => tester.widget<FilledButton>(find.byKey(const Key('action-send')));
+    expect(send().onPressed, isNull);
+    await tester.enterText(find.byKey(const Key('action-reason')), '   ');
+    await tester.pump();
+    expect(send().onPressed, isNull); // spaces are not a reason
+    await tester.enterText(find.byKey(const Key('action-reason')), 'Киілген');
+    await tester.pump();
+    expect(send().onPressed, isNotNull);
+    await tester.tap(find.byKey(const Key('action-send')));
+    await tester.pumpAndSettle();
+    expect([for (final r in posts) r.url.path], ['/api/v1/orders/5/dispute']);
+
+    await tester.pumpWidget(const SizedBox());
+    await pumpOrder(tester, 'SELLER_ACCEPTED', meId: 1);
+    await tester.tap(find.text('Жібердім'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Сатып алушы сәлемдеменің қайда екенін'), findsOneWidget);
+    expect(send().onPressed, isNull);
+  });
+
   testWidgets('order page shows a retry when the first load fails, and the order after it', (tester) async {
     var calls = 0;
     final api = Api(
@@ -3294,6 +3319,7 @@ void main() {
     await tester.tap(find.text('Қайтаруға келіспеу'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byKey(const Key('action-reason')), 'Табаны киілген, сатқанда жаңа болды');
+    await tester.pump(); // «Жіберу» turns on once there is text
     await tester.tap(find.text('Жіберу'));
     await tester.pumpAndSettle();
     expect([for (final r in posts) r.url.path], ['/api/v1/orders/5/dispute']);

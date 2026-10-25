@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -502,6 +503,15 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
     }
   }
 
+  /// A defect photo picked by mistake: taken off after asking, before anything is put on sale.
+  Future<void> _removeDefect(_Upload d) async {
+    if (_saving) return;
+    if (!await confirmAction(context, title: tr('Бұл фотоны алып тастау керек пе?'), action: tr('Өшіру'))) return;
+    if (!mounted || _saving) return;
+    _cancel([d]);
+    setState(() => _defectPhotos.remove(d));
+  }
+
   /// A failed defect photo: sent again when the failure may pass, otherwise it goes and another is taken.
   void _retryDefect(_Upload d) {
     if (d.canResend) {
@@ -545,8 +555,10 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
         ]),
       ),
     );
-    if (source == null) return null;
-    return _picker.pickImage(source: source, maxWidth: side, maxHeight: side, imageQuality: 90);
+    if (source == null || !mounted) return null;
+    return takePhoto(
+        context, () => _picker.pickImage(source: source, maxWidth: side, maxHeight: side, imageQuality: 90),
+        camera: source == ImageSource.camera);
   }
 
   Future<void> _pickAngle(String angle) async {
@@ -623,9 +635,13 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
     }
     setState(() => _saving = true);
     try {
+      // Copies: the lists may change on screen while the uploads are awaited.
+      final angles = [..._photos.entries], defects = [..._defectPhotos];
       final photos = <Map<String, String>>[
-        for (final e in _photos.entries) {'url': await e.value.future, 'angle': e.key},
-        for (final d in _defectPhotos) {'url': await d.future, 'angle': 'defect'},
+        for (final e in angles) {'url': await e.value.future, 'angle': e.key},
+        // Defects only while the condition has them: a pair put back to "new" keeps no defect close-up.
+        if (_defectRequired.contains(_condition))
+          for (final d in defects) {'url': await d.future, 'angle': 'defect'},
       ];
       final body = {
         'title': _title.text.trim(),
@@ -636,7 +652,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
         if (_modelName != null) 'model_name': _modelName,
         'color': _color.text.trim(),
         'condition': _condition,
-        if (_defects.text.trim().isNotEmpty) 'defects': _defects.text.trim(),
+        if (_defectRequired.contains(_condition) && _defects.text.trim().isNotEmpty) 'defects': _defects.text.trim(),
         if (_description.text.trim().isNotEmpty) 'description': _description.text.trim(),
         'price_tiyn': _tiyn(_price.text),
         'delivery_price_tiyn': _tiyn(_delivery.text) ?? 0,
@@ -673,7 +689,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
       // An upload that failed after Next: back to the step that shows it, so it can be taken again.
       final failedStep = _photos.values.any((u) => u.error != null)
           ? 0
-          : _defectPhotos.any((d) => d.error != null)
+          : _defectRequired.contains(_condition) && _defectPhotos.any((d) => d.error != null)
               ? 1
               : null;
       if (failedStep != null) setState(() => _step = failedStep);
@@ -723,7 +739,7 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
   /// Next from the details: every field on the page is filled in, and a defective pair shows its defects.
   bool _detailsDone() {
     if (!_form.currentState!.validate()) return false;
-    if (_defectPhotos.any((d) => d.error != null)) {
+    if (_defectRequired.contains(_condition) && _defectPhotos.any((d) => d.error != null)) {
       _sayFailed(_defectPhotos, _resendPhotoText);
       return false;
     }
@@ -886,7 +902,12 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
           const SizedBox(height: 8),
           Wrap(spacing: 8, runSpacing: 8, children: [
             for (final d in _defectPhotos)
-              _PhotoSlot(label: tr('Ақау'), upload: d, onTap: d.error != null ? () => _retryDefect(d) : null),
+              _PhotoSlot(
+                  label: tr('Ақау'),
+                  upload: d,
+                  onTap: d.error != null ? () => _retryDefect(d) : null,
+                  removable: true,
+                  onRemove: _saving ? null : () => _removeDefect(d)),
             ActionChip(
                 avatar: const Icon(Icons.add_a_photo_outlined, size: 18),
                 label: Text(tr('Ақау фотосы')),
@@ -945,7 +966,11 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
               child: TextFormField(
                   controller: s.qty,
                   keyboardType: TextInputType.number,
-                  decoration: InputDecoration(labelText: tr('Саны'))),
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(3)],
+                  decoration: InputDecoration(labelText: tr('Саны'), errorMaxLines: 2),
+                  // A size with no pair cannot go on sale: said here, not as "this size is gone" after the tap.
+                  // Three digits: the server takes up to 999 pairs a size.
+                  validator: (v) => (int.tryParse(v ?? '') ?? 0) < 1 ? tr('Кемінде 1 жұп') : null),
             ),
             const Spacer(),
             if (_sizes.length > 1)
@@ -1020,11 +1045,20 @@ String? insoleCheck(String? v) {
 }
 
 class _PhotoSlot extends StatelessWidget {
-  const _PhotoSlot({required this.label, required this.upload, required this.onTap, this.required = false});
+  const _PhotoSlot(
+      {required this.label,
+      required this.upload,
+      required this.onTap,
+      this.required = false,
+      this.removable = false,
+      this.onRemove});
   final String label;
   final _Upload? upload;
   final VoidCallback? onTap;
   final bool required;
+  // A cross in the corner, as on the listing's own photos: the one way a photo is taken off (off while saving).
+  final bool removable;
+  final VoidCallback? onRemove;
 
   @override
   Widget build(BuildContext context) {
@@ -1046,7 +1080,7 @@ class _PhotoSlot extends StatelessWidget {
         height: 96,
       );
     }
-    return Semantics(
+    final slot = Semantics(
       container: true,
       button: onTap != null,
       label: u?.error != null ? trf('{0} фотосы жүктелмеді', [label]) : trf('{0} фотосы', [label]),
@@ -1078,6 +1112,25 @@ class _PhotoSlot extends StatelessWidget {
         ]),
       ),
     );
+    if (u == null || u.error != null || !removable) return slot;
+    return Stack(children: [
+      slot,
+      Positioned(
+        top: 0,
+        right: 0,
+        child: IconButton(
+          key: const Key('remove-photo'),
+          tooltip: trf('Өшіру: {0}', [label]),
+          constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+          icon: CircleAvatar(
+            radius: 12,
+            backgroundColor: scheme.inverseSurface,
+            child: Icon(Icons.close, size: 14, color: scheme.onInverseSurface),
+          ),
+          onPressed: onRemove,
+        ),
+      ),
+    ]);
   }
 }
 

@@ -2,6 +2,7 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../net_image.dart';
@@ -354,8 +355,32 @@ Future<XFile?> pickPhoto(BuildContext context, {String? title, String? subtitle}
       ])),
     ),
   );
-  if (source == null) return null;
-  return ImagePicker().pickImage(source: source, maxWidth: 1600, imageQuality: 90);
+  if (source == null || !context.mounted) return null;
+  return takePhoto(context, () => ImagePicker().pickImage(source: source, maxWidth: 1600, imageQuality: 90),
+      camera: source == ImageSource.camera);
+}
+
+/// The phone's camera or gallery. Refused (no permission, the picker failed): said in words, never a tap that does
+/// nothing.
+Future<XFile?> takePhoto(BuildContext context, Future<XFile?> Function() pick, {required bool camera}) async {
+  try {
+    return await pick();
+  } catch (e) {
+    // image_picker names a refused permission camera_access_denied / photo_access_denied; anything else is a file
+    // that did not open, and asking to change the settings would send the seller the wrong way.
+    final refused = e is PlatformException && e.code.contains('access_denied');
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        duration: const Duration(seconds: 8),
+        content: Text(!refused
+            ? tr('Фотоны ашу мүмкін болмады. Қайта көріңіз.')
+            : camera
+                ? tr('Камераға рұқсат берілмеді. Телефон баптауларынан рұқсат беріңіз.')
+                : tr('Фотоларға рұқсат берілмеді. Телефон баптауларынан рұқсат беріңіз.')),
+      ));
+    }
+    return null;
+  }
 }
 
 /// ҚАЗ / РУС / ENG, with the full name as a tooltip. Every screen is rebuilt in the chosen language.

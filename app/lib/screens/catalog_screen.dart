@@ -329,11 +329,15 @@ class _CatalogScreenState extends State<CatalogScreen> {
                     }),
                     ListenableBuilder(
                       listenable: Listenable.merge([_focus, recentSearches]),
-                      builder: (context, _) => _SearchHints(
-                        typing: _query.text.trim().isNotEmpty,
-                        focused: _focus.hasFocus,
-                        suggestions: _suggestions,
-                        onPick: _searchFor,
+                      // Part of the field for taps: with a mouse a press elsewhere takes the focus off the
+                      // field and the hints would vanish before the click on one of them lands.
+                      builder: (context, _) => TextFieldTapRegion(
+                        child: _SearchHints(
+                          typing: _query.text.trim().isNotEmpty,
+                          focused: _focus.hasFocus,
+                          suggestions: _suggestions,
+                          onPick: _searchFor,
+                        ),
                       ),
                     ),
                   ]),
@@ -548,7 +552,8 @@ class _SizeButton extends StatelessWidget {
   }
 }
 
-/// Size is chosen by insole length, the one measure that means the same across brands.
+/// Size is chosen by foot length; pairs are matched by their insole, the one measure that means the same across
+/// brands.
 class _SizeSheet extends StatelessWidget {
   const _SizeSheet();
 
@@ -562,10 +567,10 @@ class _SizeSheet extends StatelessWidget {
       child: SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(tr('Ұлтарақ ұзындығы'), style: theme.textTheme.titleLarge),
+          Text(tr('Табан ұзындығы'), style: theme.textTheme.titleLarge),
           const SizedBox(height: 4),
           Text(
-              tr('Өкшеден бас бармақтың ұшына дейін өлшеңіз. ±0,5 см аралығы көрсетіледі. Өлшеміңіз телефонда сақталады.'),
+              tr('Табаныңызды өкшеден ең ұзын саусаққа дейін өлшеңіз. Ішкі табаны одан 0,5–1 см ұзын жұптар көрсетіледі. Өлшеміңіз телефонда сақталады.'),
               style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
           const SizedBox(height: 16),
           Wrap(spacing: 8, runSpacing: 8, children: [

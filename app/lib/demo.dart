@@ -11,6 +11,7 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 
 import 'colors.dart';
+import 'my_size.dart' show fitsFoot;
 
 const demoMode = bool.fromEnvironment('DEMO');
 
@@ -221,7 +222,8 @@ class DemoClient extends http.BaseClient {
       if (cm != null &&
           !(l['sizes'] as List).any((s) =>
               (s as Map)['available'] == true &&
-              ((double.tryParse('${s['insole_cm']}'.replaceAll(',', '.')) ?? 0) - cm).abs() <= 0.5)) {
+              // Foot length in, as the server reads it: an insole 0 to 1 cm longer fits.
+              fitsFoot(double.tryParse('${s['insole_cm']}'.replaceAll(',', '.')) ?? 0, cm))) {
         return false;
       }
       return true;

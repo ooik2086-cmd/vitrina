@@ -24,6 +24,18 @@ from .serializers import LIGHT, cm_to_mm, listing_out, with_light_media
 router = APIRouter(prefix="/api/v1")
 
 
+# The size a buyer gives is her foot length; a pair fits when its insole is 0 to 1 cm longer (the app's
+# size pick, my_size.dart bestFit, aims at the middle of the same window).
+TOE_ROOM_MM = 10
+
+
+def fits_foot(size_cm: str):
+    """Listings with a pair on the shelf whose insole fits a foot of [size_cm]."""
+    mm = cm_to_mm(size_cm)
+    return Listing.id.in_(select(ListingSize.listing_id).where(
+        ListingSize.quantity > 0, ListingSize.insole_mm.between(mm, mm + TOE_ROOM_MM)))
+
+
 def catalog_filter(stmt, *, q: str | None = None, category: str | None = None, brand: str | None = None,
                    condition: str | None = None, min_price_tiyn: int | None = None,
                    max_price_tiyn: int | None = None, size_cm: str | None = None, color: str | None = None,
@@ -47,9 +59,7 @@ def catalog_filter(stmt, *, q: str | None = None, category: str | None = None, b
     if color and (names := color_list(color)):
         stmt = stmt.where(Listing.color.in_(matching_colors(names)))
     if size_cm:
-        mm = cm_to_mm(size_cm)
-        stmt = stmt.where(Listing.id.in_(select(ListingSize.listing_id).where(
-            ListingSize.quantity > 0, ListingSize.insole_mm.between(mm - 5, mm + 5))))
+        stmt = stmt.where(fits_foot(size_cm))
     return stmt
 
 

@@ -58,9 +58,9 @@ const en = <String, String>{
   'Ештеңе табылмады.': 'Nothing found.',
   '{0} см': '{0} cm',
   'Өлшем': 'Size',
-  'Ұлтарақ ұзындығы': 'Insole length',
-  'Өкшеден бас бармақтың ұшына дейін өлшеңіз. ±0,5 см аралығы көрсетіледі. Өлшеміңіз телефонда сақталады.':
-      'Measure from your heel to the tip of your big toe. Sizes within ±0.5 cm are shown. Your size is saved on your phone.',
+  'Табан ұзындығы': 'Foot length',
+  'Табаныңызды өкшеден ең ұзын саусаққа дейін өлшеңіз. Ішкі табаны одан 0,5–1 см ұзын жұптар көрсетіледі. Өлшеміңіз телефонда сақталады.':
+      'Measure your foot from the heel to the longest toe. Pairs with an insole 0.5–1 cm longer are shown. Your size is saved on your phone.',
   'Өлшемді алып тастау': 'Reset size',
   'Сатушымен хат алмасу үшін кіріңіз.': 'Sign in to message sellers.',
   'Хабарламалар': 'Messages',
@@ -1235,8 +1235,8 @@ const en = <String, String>{
   'Кіші': 'Runs small',
   'Үлкен': 'Runs large',
   '{0} сатып алушының пікірі бойынша.': 'Based on {0} buyers.',
-  'Табаныңызды өкшеден ең ұзын саусаққа дейін өлшеңіз. Ішкі табан ұзындығын сатушы өлшеген.':
-      'Measure your foot from the heel to the longest toe. The seller measured the insole length.',
+  'Табаныңызды өкшеден ең ұзын саусаққа дейін өлшеңіз. Ішкі табан одан 0,5–1 см ұзын болсын. Ішкі табан ұзындығын сатушы өлшеген.':
+      'Measure your foot from the heel to the longest toe. The insole should be 0.5–1 cm longer. The seller measured the insole length.',
   'Ішкі табан, мм': 'Insole, mm',
   'ішкі табан {0} мм': 'insole {0} mm',
   'Деректерді сатушы дайын нұсқалардан таңдаған.': 'The seller picked these details from ready options.',
@@ -1251,4 +1251,24 @@ const en = <String, String>{
   'Телефонға хабарландыру': 'Notifications on the phone',
   'Қосымша жабық тұрса да, жаңа хат пен тапсырыс туралы телефон айтады':
       'Your phone tells you of new messages and orders, even with the app closed',
+  // Whole-app review, group 2
+  'Таңдаулы тауар әлі жоқ. Ұнаған тауардың бетінде ♡ белгісін басыңыз, ол осында сақталады.':
+      'No favourites yet. Tap ♡ on a product page and it is kept here.',
+  'Таңдаулыға қосылды.': 'Added to favourites.',
+  'Таңдаулыдан алынды.': 'Removed from favourites.',
+  'Фотоларға рұқсат берілмеді. Телефон баптауларынан рұқсат беріңіз.':
+      'No access to photos. Allow it in the phone settings.',
+  'Кемінде 1 жұп': 'At least 1 pair',
+  'Бұл фотоны алып тастау керек пе?': 'Remove this photo?',
+  '1-ден 100 000-ға дейін': 'From 1 to 100,000',
+  'Пошта не курьер берген нөмір. Сатып алушы сәлемдеменің қайда екенін осы нөмір арқылы көреді.':
+      'The number from the post office or courier. The buyer uses it to see where the parcel is.',
+  'Шығару туралы мәлімет жүктелмеді. Төменнен қайта көріңіз.': 'Payout details did not load. Try again below.',
+  'Ақша шығару': 'Payouts',
+  'Таңдаулыдан алу': 'Remove from favorites',
+  'Фотоны ашу мүмкін болмады. Қайта көріңіз.': 'The photo did not open. Please try again.',
+  'Бұл тауарға ұсынысыңыз бұрыннан бар. Ол бетте көрсетілген.':
+      'You already made an offer on this item. It is shown on the page.',
+  'Сізде {0} өлшеміне ұсыныс бар, сондықтан сол өлшем таңдалды. Тексеріп, қайта басыңыз.':
+      'You have an offer for size {0}, so that size is now selected. Check it and tap again.',
 };

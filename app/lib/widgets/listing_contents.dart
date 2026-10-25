@@ -264,10 +264,12 @@ class _ListingContentsCardState extends State<ListingContentsCard> {
         ]),
       ),
     );
-    if (source == null) return;
+    if (source == null || !mounted) return;
     final side = detailAngles.contains(angle) ? 3000.0 : 2000.0;
-    final file = await _picker.pickImage(source: source, maxWidth: side, maxHeight: side, imageQuality: 90);
-    if (file == null) return;
+    final file = await takePhoto(
+        context, () => _picker.pickImage(source: source, maxWidth: side, maxHeight: side, imageQuality: 90),
+        camera: source == ImageSource.camera);
+    if (file == null || !mounted) return;
     await _run((api) async => api.editListing(_l.id, addPhotos: await _upload(api, [file], angle)), tr('Фото қосылды'));
   }
 

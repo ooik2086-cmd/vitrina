@@ -1093,8 +1093,10 @@ def get_listing(listing_id: int, user: User | None = Depends(optional_user), db:
         db.commit()
     alerts = [] if user is None else list(db.scalars(select(StockAlert.size_id).where(
         StockAlert.user_id == user.id, StockAlert.listing_id == listing.id)).all())
+    saved = user is not None and db.scalar(select(Favorite.id).where(
+        Favorite.user_id == user.id, Favorite.listing_id == listing.id)) is not None
     return {**listing_out(db, listing, owner=owner), "size_fit": size_fit(db, listing), "stock_alerts": alerts,
-            "popularity": popularity(db, listing), "colors": safe_colorways(db, listing)}
+            "popularity": popularity(db, listing), "colors": safe_colorways(db, listing), "favorite": saved}
 
 
 MAX_COLORWAYS = 12

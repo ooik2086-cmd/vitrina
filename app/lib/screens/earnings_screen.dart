@@ -55,12 +55,17 @@ class _EarningsScreenState extends State<EarningsScreen> {
     }
   }
 
-  Future<(Earnings, Payouts?)>? _data;
+  Future<(Earnings, Payouts?, Object?)>? _data;
 
-  Future<(Earnings, Payouts?)> _load() async {
+  /// The money view works without payouts. Only an older server that has none (404) means "not offered";
+  /// any other failure is said as one, with a way to try again.
+  Future<(Earnings, Payouts?, Object?)> _load() async {
     final api = SessionScope.of(context).api;
-    final payouts = api.payouts().then<Payouts?>((p) => p, onError: (_) => null); // the money view works without it
-    return (await api.earnings(), await payouts);
+    final payouts = api.payouts().then<(Payouts?, Object?)>((p) => (p, null),
+        onError: (Object e) => (null, e is ApiException && e.status == 404 ? null : e));
+    final earnings = await api.earnings();
+    final (p, failed) = await payouts;
+    return (earnings, p, failed);
   }
 
   @override
@@ -126,14 +131,14 @@ class _EarningsScreenState extends State<EarningsScreen> {
           onPressed: _export,
         ),
       ]),
-      body: FutureBuilder<(Earnings, Payouts?)>(
+      body: FutureBuilder<(Earnings, Payouts?, Object?)>(
         future: _data,
         builder: (context, snap) {
           if (snap.hasError && snap.connectionState == ConnectionState.done) {
             return ErrorRetry(error: snap.error, onRetry: _reload);
           }
           if (!snap.hasData) return const Center(child: CircularProgressIndicator());
-          final (e, p) = snap.data!;
+          final (e, p, payoutsError) = snap.data!;
           // The balance card is the primary colour: ink on the light canvas, white on the dark one.
           final scheme = theme.colorScheme;
           final muted = scheme.onPrimary.withValues(alpha: 0.7);
@@ -149,7 +154,10 @@ class _EarningsScreenState extends State<EarningsScreen> {
                   Text(formatTenge(e.payableTiyn),
                       style: weight(theme.textTheme.headlineMedium!, 750).copyWith(color: scheme.onPrimary)),
                   const SizedBox(height: 4),
-                  if (p == null)
+                  if (p == null && payoutsError != null)
+                    Text(tr('Шығару туралы мәлімет жүктелмеді. Төменнен қайта көріңіз.'),
+                        key: const Key('payouts-failed'), style: TextStyle(color: muted, fontSize: 13))
+                  else if (p == null)
                     Text(tr('Төлем серіктесі қосылғанда банк шотыңызға шығарып алуға болады.'),
                         style: TextStyle(color: muted, fontSize: 13))
                   else ...[
@@ -177,6 +185,13 @@ class _EarningsScreenState extends State<EarningsScreen> {
                   ],
                 ]),
               ),
+              if (p == null && payoutsError != null)
+                RetryLine(
+                    key: const Key('payouts-retry'),
+                    what: tr('Ақша шығару'),
+                    error: payoutsError,
+                    busy: snap.connectionState == ConnectionState.waiting,
+                    onRetry: _reload),
               if (p != null)
                 ListTile(
                   key: const Key('payout-account'),

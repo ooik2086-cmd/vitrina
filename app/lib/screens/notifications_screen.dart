@@ -4,6 +4,7 @@ import '../api.dart';
 import '../session.dart';
 import '../theme.dart';
 import 'chat_screen.dart';
+import 'earnings_screen.dart';
 import 'listing_screen.dart';
 import 'manage_listing_screen.dart';
 import 'notification_settings_screen.dart';
@@ -17,23 +18,28 @@ import '../i18n.dart';
 /// alert about nothing to open ([fromAlert]) opens the list, where its words are.
 void openNotice(BuildContext context, String kind,
     {int? orderId, int? conversationId, int? listingId, bool fromAlert = false}) {
-  if (const {'sold_out', 'listing_tip', 'photo_no_shoe'}.contains(kind) && listingId != null) {
+  // Notes about the seller's own listing open where it is managed: a review verdict, a hidden or checked listing
+  // is fixed there, and the shop page of a listing not on sale would not open at all.
+  const own = {'sold_out', 'listing_tip', 'photo_no_shoe', 'moderation', 'listing_hidden', 'authenticity'};
+  if (own.contains(kind) && listingId != null) {
     _openOwnListing(context, kind, listingId);
     return;
   }
   final route = kind == 'offer'
       ? MaterialPageRoute(builder: (_) => const OffersScreen())
-      : kind == 'question' && listingId != null
-          ? MaterialPageRoute(builder: (_) => QuestionsScreen(listingId: listingId, seller: true))
-          : conversationId != null
-              ? MaterialPageRoute(builder: (_) => ChatScreen(conversationId: conversationId))
-              : orderId != null
-                  ? MaterialPageRoute(builder: (_) => OrderScreen(orderId: orderId))
-                  : listingId != null
-                      ? MaterialPageRoute(builder: (_) => ListingScreen(listingId: listingId))
-                      : fromAlert
-                          ? MaterialPageRoute(builder: (_) => const NotificationsScreen())
-                          : null;
+      : kind == 'payout'
+          ? MaterialPageRoute(builder: (_) => const EarningsScreen())
+          : kind == 'question' && listingId != null
+              ? MaterialPageRoute(builder: (_) => QuestionsScreen(listingId: listingId, seller: true))
+              : conversationId != null
+                  ? MaterialPageRoute(builder: (_) => ChatScreen(conversationId: conversationId))
+                  : orderId != null
+                      ? MaterialPageRoute(builder: (_) => OrderScreen(orderId: orderId))
+                      : listingId != null
+                          ? MaterialPageRoute(builder: (_) => ListingScreen(listingId: listingId))
+                          : fromAlert
+                              ? MaterialPageRoute(builder: (_) => const NotificationsScreen())
+                              : null;
   if (route != null) Navigator.of(context).push(route);
 }
 
@@ -133,6 +139,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                 'listing_hidden' || 'report_closed' => Icons.flag_outlined,
                 'listing_tip' => Icons.tips_and_updates_outlined,
                 'photo_no_shoe' => Icons.hide_image_outlined,
+                'payout' => Icons.account_balance_wallet_outlined,
+                'authenticity' => Icons.verified_outlined,
                 _ => Icons.local_shipping_outlined,
               };
               return ListTile(
