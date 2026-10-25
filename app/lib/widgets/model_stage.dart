@@ -289,7 +289,7 @@ class ModelStageState extends State<ModelStage> {
     await _load(kept);
   }
 
-  /// The turn and zoom shown now, to open another colour of this model the same; null before the shoe is shown.
+  /// The turn, zoom and spot zoomed in on shown now, to open another colour of this model the same; null before the shoe is shown.
   Future<List<double>?> view() async {
     if (!_ready) return null;
     var value = await _view?.read('vitrina.view()');
@@ -297,7 +297,7 @@ class ModelStageState extends State<ModelStage> {
     if (value is String && value.startsWith('"')) value = jsonDecode(value);
     try {
       final list = value is String ? jsonDecode(value) : value;
-      if (list is List && list.length == 5) return [for (final x in list) (x as num).toDouble()];
+      if (list is List && (list.length == 5 || list.length == 7)) return [for (final x in list) (x as num).toDouble()];
     } catch (_) {}
     return null;
   }

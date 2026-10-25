@@ -35,22 +35,30 @@ scene.add(pivot);
 const X = new THREE.Vector3(1, 0, 0), Y = new THREE.Vector3(0, 1, 0), q = new THREE.Quaternion();
 const aniso = renderer.capabilities.getMaxAnisotropy();
 let dirty = true, vx = 0, vy = 0, zoom = 1, zoomT = 1, r = 1;
+// Where the camera has moved across, to bring the spot a double tap or two fingers chose nearer under them.
+let panX = 0, panY = 0, panTX = 0, panTY = 0;
 let parser = null, meshes = [], model = null, variant = null, tint = null;
 
 const FOV = THREE.MathUtils.degToRad(30); // what the stage's narrower side sees
 const dpr = () => Math.min(window.devicePixelRatio || 1, 3); // full sharpness while moving too
+let drawn = [0, 0, 0];
 function frame() {
   const w = st.clientWidth, h = st.clientHeight;
   if (!w || !h) return;
-  renderer.setPixelRatio(dpr());
-  renderer.setSize(w, h, false);
+  // Only when the size changed: setting it clears the drawing, and a zoom or pan calls this every frame.
+  const p = dpr();
+  if (w !== drawn[0] || h !== drawn[1] || p !== drawn[2]) {
+    drawn = [w, h, p];
+    renderer.setPixelRatio(p);
+    renderer.setSize(w, h, false);
+  }
   camera.aspect = w / h;
   // Far enough that the shoe's whole sphere fits the narrower side, so turned any way (toe or heel to the camera,
   // which brings it nearer and larger) it is never cut off (Aza, 2026-10-23); zoomed in, it may be. The narrower side
   // always sees 30°, from the same distance: a tall stage shows more above and below, the shoe itself exactly as on a
   // square one, so the app's first picture (made square) matches it to the pixel.
   camera.fov = w < h ? THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(FOV / 2) * h / w)) : 30;
-  camera.position.set(0, 0, r / Math.sin(FOV / 2) / zoom);
+  camera.position.set(panX, panY, r / Math.sin(FOV / 2) / zoom);
   camera.updateProjectionMatrix();
   dirty = true;
   kick();
@@ -75,9 +83,17 @@ function tick() {
   } else if (!pts.size) {
     vx = vy = 0;
   }
-  if (Math.abs(zoomT - zoom) > 1e-3) {
-    zoom += (zoomT - zoom) * (reduce ? 1 : 0.22);
-    if (Math.abs(zoomT - zoom) <= 1e-3) zoom = zoomT;
+  if (Math.abs(zoomT - zoom) > 1e-3 || Math.abs(panTX - panX) + Math.abs(panTY - panY) > 1e-4 * r) {
+    const k = reduce ? 1 : 0.22;
+    // Eased as 1/zoom, as the pan is, so the spot a double tap chose stays under the finger all the way in.
+    zoom = 1 / (1 / zoom + (1 / zoomT - 1 / zoom) * k);
+    panX += (panTX - panX) * k;
+    panY += (panTY - panY) * k;
+    if (Math.abs(zoomT - zoom) <= 1e-3 && Math.abs(panTX - panX) + Math.abs(panTY - panY) <= 1e-4 * r) {
+      zoom = zoomT;
+      panX = panTX;
+      panY = panTY;
+    }
     frame();
     busy = true;
   }
@@ -90,11 +106,23 @@ function tick() {
 
 function turn(dx, dy) {
   q.setFromAxisAngle(Y, dx);
+  q2.setFromAxisAngle(X, dy);
+  q.premultiply(q2);
   pivot.quaternion.premultiply(q);
-  q.setFromAxisAngle(X, dy);
-  pivot.quaternion.premultiply(q);
+  // Zoomed in on a spot, the spot turns with the shoe and the camera follows it, so it stays on the stage.
+  if (panTX || panTY || panX || panY) {
+    const room = r * (1 - 1 / zoomT);
+    const follow = (x, y) => {
+      spot.set(x, y, Math.sqrt(Math.max(0, r * r - x * x - y * y))).applyQuaternion(q);
+      return [Math.min(room, Math.max(-room, spot.x)), Math.min(room, Math.max(-room, spot.y))];
+    };
+    [panTX, panTY] = follow(panTX, panTY);
+    [panX, panY] = follow(panX, panY);
+    frame();
+  }
   dirty = true;
 }
+const q2 = new THREE.Quaternion(), spot = new THREE.Vector3();
 
 // ---- the model: a light copy first, the sharp one swapped in when it has come ----
 const loader = new GLTFLoader();
@@ -232,14 +260,19 @@ async function load({ url, hq = null, variant: name = null, tint: t = null, dark
   try {
     const gltf = await loader.loadAsync(url);
     if (mine !== loading || !(await bring(gltf, mine))) return;
-    if (view && view.length === 5) {
+    if (view && (view.length === 5 || view.length === 7)) {
       pivot.quaternion.set(view[0], view[1], view[2], view[3]).normalize();
       zoom = zoomT = Math.min(3, Math.max(1, view[4]));
+      // The spot zoomed in on, kept as a share of the shoe's size: another colour's model is the same shoe.
+      const room = r * (1 - 1 / zoomT), at = i => Math.min(room, Math.max(-room, (view[i] || 0) * r));
+      panX = panTX = view.length === 7 ? at(5) : 0;
+      panY = panTY = view.length === 7 ? at(6) : 0;
     } else {
       // As the first picture shows it, whatever a finger did on that picture before the shoe came.
       pivot.quaternion.setFromAxisAngle(X, 0.2);
       vx = vy = 0;
       zoom = zoomT = 1;
+      panX = panY = panTX = panTY = 0;
     }
     // A page opened ahead of time (the app keeps one ready) may get its model before it is on the screen: the first
     // picture is drawn, and said to be, only once the stage has its size.
@@ -280,16 +313,41 @@ function setBackground(dark) {
 }
 
 // ---- gestures: drag turns, two fingers or a double tap zoom ----
+// Zooms to [z], keeping the spot of the shoe under the screen point (x, y) where it is (Aza, 2026-10-25: "қай жерін
+// саусақпен екі рет түртесің сол жері жақындайтын болсын"). Back at 1× the shoe is centred again. Measured on the
+// plane through the shoe's middle, where the camera's turn is centred.
+function zoomAt(z, x, y) {
+  z = Math.min(3, Math.max(1, z));
+  const w = st.clientWidth, h = st.clientHeight;
+  if (!w || !h) return;
+  const tanV = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)), tanH = tanV * w / h;
+  const nx = x / w * 2 - 1, ny = 1 - y / h * 2, d = r / Math.sin(FOV / 2);
+  const spotX = panTX + nx * d / zoomT * tanH, spotY = panTY + ny * d / zoomT * tanV;
+  const room = r * (1 - 1 / z); // never so far across that the shoe leaves the stage
+  panTX = Math.min(room, Math.max(-room, spotX - nx * d / z * tanH));
+  panTY = Math.min(room, Math.max(-room, spotY - ny * d / z * tanV));
+  zoomT = z;
+}
+
 const pts = new Map();
-let last = null, pinch = 0, tap = 0, moved = 0;
+// A double tap as the phone counts one: two short still taps, the second down within 300 ms of the first's lift and
+// within 100 px of it.
+let last = null, pinch = 0, tap = null, moved = 0, downAt = 0, downXY = null;
 const dist = () => { const [a, b] = [...pts.values()]; return Math.hypot(a[0] - b[0], a[1] - b[1]); };
 st.addEventListener('pointerdown', e => {
   pts.set(e.pointerId, [e.clientX, e.clientY]);
   st.setPointerCapture(e.pointerId);
   vx = vy = 0;
-  moved = 0;
   last = [e.clientX, e.clientY, performance.now()];
-  if (pts.size === 2) pinch = dist();
+  if (pts.size === 1) {
+    moved = 0;
+    downAt = last[2];
+    downXY = [e.clientX, e.clientY];
+  }
+  if (pts.size === 2) {
+    pinch = dist();
+    moved = 99; // two fingers are never a tap
+  }
   kick();
 });
 st.addEventListener('pointermove', e => {
@@ -299,7 +357,8 @@ st.addEventListener('pointermove', e => {
     const d = dist(), f = d / (pinch || d);
     pinch = d;
     moved = 99;
-    zoomT = Math.min(3, Math.max(1, zoomT * f));
+    const [a, b] = [...pts.values()], box = st.getBoundingClientRect();
+    zoomAt(zoomT * f, (a[0] + b[0]) / 2 - box.left, (a[1] + b[1]) / 2 - box.top);
     kick();
     return;
   }
@@ -324,14 +383,17 @@ const up = e => {
   if (pts.size) return;
   const now = performance.now();
   if (now - last[2] > 80) vx = vy = 0; // held still before letting go: no glide
-  if (moved < 12) {
-    if (now - tap < 320) {
-      tap = 0;
-      zoomT = zoomT > 1.2 ? 1 : 2.5;
+  if (moved < 12 && now - downAt < 500) {
+    if (tap && downAt - tap[0] < 300 && Math.hypot(downXY[0] - tap[1], downXY[1] - tap[2]) < 100) {
+      tap = null;
+      const box = st.getBoundingClientRect();
+      zoomAt(zoomT > 1.2 ? 1 : 2.5, e.clientX - box.left, e.clientY - box.top);
       vx = vy = 0;
     } else {
-      tap = now;
+      tap = [now, e.clientX, e.clientY];
     }
+  } else {
+    tap = null;
   }
   kick();
 };
@@ -347,7 +409,7 @@ window.vitrina = {
   setBackground,
   // While the photos show, nothing is drawn; back on the 3D, the last picture is drawn again.
   setPaused(p) { paused = !!p; if (!paused) { dirty = true; kick(); } },
-  // The turn and zoom, to open another colour of this model showing the same.
-  view: () => JSON.stringify([...pivot.quaternion.toArray(), zoomT]),
+  // The turn, zoom and the spot zoomed in on, to open another colour of this model showing the same.
+  view: () => JSON.stringify([...pivot.quaternion.toArray(), zoomT, panTX / r, panTY / r]),
 };
 post('page');
