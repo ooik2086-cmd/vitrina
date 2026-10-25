@@ -104,7 +104,9 @@ fi
 step "HTTPS, and plain http sent to it"
 [ "$(https https://vitrina.test/api/v1/health)" = '{"ok":true}' ] || fail "health over https"
 https -o /dev/null -D - https://vitrina.test/api/v1/health | grep -qi '^strict-transport-security: max-age=31536000' || fail "no HSTS"
-[ "$(https https://vitrina.test/api/v1/app-config)" = '{"payments":false}' ] || fail "online payment is not off"
+# Payments off until a partner is signed; the support contact reaches the app's Help page.
+[ "$(https https://vitrina.test/api/v1/app-config)" = '{"payments":false,"support":"help@vitrina.test"}' ] ||
+	fail "online payment is not off, or the app is not told the support contact"
 https https://vitrina.test/privacy | grep -q 'ИП Smoke, ИИН 000000000000' || fail "the privacy page does not name who runs the site"
 https https://vitrina.test/delete-account | grep -q 'help@vitrina.test' || fail "the account-deletion page has no contact"
 redirect=$(curl -sS --noproxy "*" -o /dev/null -w '%{http_code} %{redirect_url}' --resolve vitrina.test:80:127.0.0.1 http://vitrina.test/admin/)
