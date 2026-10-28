@@ -314,7 +314,7 @@ function setBackground(dark) {
   st.classList.toggle('dark', !!dark);
 }
 
-// ---- gestures: drag turns, two fingers or a double tap zoom ----
+// ---- gestures: drag turns (zoomed in, it moves the shoe), two fingers or a double tap zoom ----
 // Zooms to [z], keeping the spot of the shoe under the screen point (x, y) where it is (Aza, 2026-10-25: "қай жерін
 // саусақпен екі рет түртесің сол жері жақындайтын болсын"). Back at 1× the shoe is centred again. Measured on the
 // plane through the shoe's middle, where the camera's turn is centred.
@@ -367,6 +367,18 @@ st.addEventListener('pointermove', e => {
   const now = performance.now(), dt = Math.max(8, now - last[2]), ddx = e.clientX - last[0], ddy = e.clientY - last[1];
   moved += Math.abs(ddx) + Math.abs(ddy);
   last = [e.clientX, e.clientY, now];
+  if (zoomT > 1.05) {
+    // Zoomed in, one finger moves the shoe the way it goes, as a zoomed photo does (Aza, 2026-10-28: turning here went
+    // the opposite way, the camera chasing a spot on the shoe's outer sphere, in front of its real surface). Never so
+    // far that the shoe leaves the stage; a double tap or two fingers bring it back to 1× to turn it again.
+    vx = vy = 0;
+    const h = st.clientHeight || 1, s = 2 * (r / Math.sin(FOV / 2)) / zoom * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) / h;
+    const room = r * (1 - 1 / zoomT), clamp = v => Math.min(room, Math.max(-room, v));
+    panX = panTX = clamp(panTX - ddx * s);
+    panY = panTY = clamp(panTY + ddy * s);
+    frame();
+    return;
+  }
   const k = Math.PI / Math.min(st.clientWidth, st.clientHeight) * 2.2;
   turn(ddx * k, ddy * k);
   vx = ddx * k * 16 / dt;
