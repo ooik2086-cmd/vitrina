@@ -15,6 +15,7 @@ import '../session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/facts_fields.dart';
+import 'side_capture_screen.dart';
 import '../color_guess.dart';
 import '../colors.dart';
 import '../i18n.dart';
@@ -577,33 +578,64 @@ class _ListingEditorScreenState extends State<ListingEditorScreen> with WidgetsB
   }
 
   Future<XFile?> _pick({double side = 2000}) async {
-    final source = await showSheet<ImageSource>(
-      context: context,
-      builder: (context) => SafeArea(
-        child: Wrap(children: [
-          ListTile(
-              leading: const Icon(Icons.photo_camera_outlined),
-              title: Text(tr('Камерамен түсіру')),
-              onTap: () => Navigator.pop(context, ImageSource.camera)),
-          ListTile(
-              leading: const Icon(Icons.photo_library_outlined),
-              title: Text(tr('Галереядан таңдау')),
-              onTap: () => Navigator.pop(context, ImageSource.gallery)),
-        ]),
-      ),
-    );
+    final source = await _source();
     if (source == null || !mounted) return null;
-    return takePhoto(
-        context, () => _picker.pickImage(source: source, maxWidth: side, maxHeight: side, imageQuality: 90),
-        camera: source == ImageSource.camera);
+    return _pickFrom(source, side: side);
   }
 
+  Future<ImageSource?> _source() => showSheet<ImageSource>(
+        context: context,
+        builder: (context) => SafeArea(
+          child: Wrap(children: [
+            ListTile(
+                leading: const Icon(Icons.photo_camera_outlined),
+                title: Text(tr('Камерамен түсіру')),
+                onTap: () => Navigator.pop(context, ImageSource.camera)),
+            ListTile(
+                leading: const Icon(Icons.photo_library_outlined),
+                title: Text(tr('Галереядан таңдау')),
+                onTap: () => Navigator.pop(context, ImageSource.gallery)),
+          ]),
+        ),
+      );
+
+  Future<XFile?> _pickFrom(ImageSource source, {double side = 2000}) =>
+      takePhoto(context, () => _picker.pickImage(source: source, maxWidth: side, maxHeight: side, imageQuality: 90),
+          camera: source == ImageSource.camera);
+
   Future<void> _pickAngle(String angle) async {
+    final source = await _source();
+    if (source == null || !mounted) return;
+    var from = source;
+    if (source == ImageSource.camera && guidedCamera) {
+      // The guided camera, one side after another: from this side on through the required sides still empty.
+      // Each side goes to the listing (its upload, the kept draft) as soon as it is confirmed.
+      final order = [
+        angle,
+        if (requiredAngles.containsKey(angle))
+          for (final a in requiredAngles.keys)
+            if (a != angle && _photos[a] == null) a
+      ];
+      final taken = <String>{};
+      final ended = await Navigator.of(context).push<SideCaptureResult>(MaterialPageRoute(
+          builder: (_) => SideCaptureScreen(
+              angles: order,
+              labels: {...requiredAngles, ...optionalAngles},
+              onTaken: (side, photo) {
+                taken.add(side);
+                if (mounted) _usePhoto(side, photo);
+              })));
+      final fallback = ended?.fallback;
+      if (fallback == null || !mounted) return;
+      // Its camera did not open: the first side not taken comes from the phone's own camera or the gallery.
+      angle = order.firstWhere((a) => !taken.contains(a), orElse: () => angle);
+      from = fallback;
+    }
     _taking = angle; // kept with the work: Android may close the app while the camera is open
     unawaited(_keep());
     final XFile? file;
     try {
-      file = await _pick(side: detailAngles.contains(angle) ? 3000 : 2000);
+      file = await _pickFrom(from, side: detailAngles.contains(angle) ? 3000 : 2000);
     } finally {
       _taking = null;
       unawaited(_keep()); // the side is no longer being taken: a later lost photo is not this side's

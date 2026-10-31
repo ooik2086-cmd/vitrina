@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:camera_platform_interface/camera_platform_interface.dart' show CameraPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -13,9 +14,11 @@ import 'package:image_picker_platform_interface/image_picker_platform_interface.
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:vitrina/api.dart';
 import 'package:vitrina/screens/listing_editor_screen.dart';
+import 'package:vitrina/screens/side_capture_screen.dart';
 import 'package:vitrina/session.dart';
 import 'package:vitrina/theme.dart';
 
+import 'side_capture_test.dart' show FakeCamera;
 import 'support/screens.dart' show loadFonts;
 
 /// What every pick hands back: a few bytes that are not a picture, unless a test gives a real photo; [pickQueue],
@@ -1063,5 +1066,33 @@ void main() {
     await tester.pump(const Duration(seconds: 2)); // kept again a moment after the change
     final draft = await kept();
     expect((draft?['title'], draft?['condition'], draft?['v']), ('Кроссовка', null, 2));
+  });
+
+  testWidgets('the guided camera takes the empty sides one after another and each goes up', (tester) async {
+    final oldCamera = CameraPlatform.instance;
+    CameraPlatform.instance = FakeCamera();
+    guidedCamera = true;
+    addTearDown(() {
+      CameraPlatform.instance = oldCamera;
+      guidedCamera = false;
+    });
+    final calls = await open(tester);
+    await tester.tap(find.text('${requiredAngles['outer']} *'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Камерамен түсіру'));
+    await tester.pumpAndSettle();
+    final sides = <String>[];
+    for (var i = 0; i < 4; i++) {
+      sides.add(tester.widget<Text>(find.byKey(const Key('capture-side'))).data!);
+      await tester.tap(find.byKey(const Key('capture-shutter')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('capture-keep')));
+      await tester.pumpAndSettle();
+    }
+    expect(sides, ['Сырт бүйірі', 'Алдынан', 'Ішкі бүйірі', 'Өкшесі'], reason: 'the side tapped, then the empty ones');
+    expect(find.byType(SideCaptureScreen), findsNothing);
+    expect(calls.where((c) => c.endsWith('/media')), hasLength(4));
+    await tester.pump(const Duration(seconds: 2)); // kept a moment later
+    expect(((await kept())!['photos'] as Map).keys.toSet(), requiredAngles.keys.toSet());
   });
 }
