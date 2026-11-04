@@ -14,6 +14,7 @@ import '../demo.dart' show carriedAsset;
 import '../i18n.dart';
 import '../net_image.dart';
 import '../viewer_host_web.dart' if (dart.library.io) '../viewer_host_io.dart';
+import 'frame_view_web.dart' if (dart.library.io) 'frame_view_io.dart';
 import 'scroll_showcase.dart' show ShowcaseScene;
 
 /// What the stage draws the shoe with: a WebView on a phone (the page in assets/viewer, three.js inside the app);
@@ -32,7 +33,7 @@ abstract class ModelView {
 }
 
 /// Makes the view, calling [onMessage] with each message the page posts (JSON: page, ready, error, lost); null where
-/// there is no 3D (the web, tests without a phone), and the listing then shows its photos.
+/// there is no 3D (tests without a phone), and the listing then shows its photos.
 typedef ModelViewMaker = Future<ModelView?> Function(Brightness scene, void Function(String message) onMessage);
 
 /// The listing page's 3D stage: the shoe turns every way under the finger and zooms, on the light or dark scene. No
@@ -107,7 +108,7 @@ class ModelStage extends StatefulWidget {
 
   /// Whether a 3D that gave up may open if asked again: it ran out of time on a weak line, say. Not on a phone with
   /// no WebGL or no web engine, where it would fail the same way.
-  static bool get mayRetry => !_noSpare && (maker != _webView || _real);
+  static bool get mayRetry => !_noSpare && (maker != _webView || _real || kIsWeb);
 
   static _WebModelView? _spare;
   static Future<_WebModelView?>? _making;
@@ -317,6 +318,8 @@ class ModelStageState extends State<ModelStage> {
   Widget build(BuildContext context) {
     final scene = widget.dark ? ShowcaseScene.dark : ShowcaseScene.light;
     final view = _view;
+    // A page or sheet over this one: in a browser the stage's frame stops taking clicks, so they reach what is on top.
+    if (view != null) setFrameTouchable(view, ModalRoute.of(context)?.isCurrent ?? true);
     final firstUrl = _broken || _settled ? null : widget.model.firstUrl;
     final first = firstUrl == null ? null : _first = firstImage(firstUrl, context);
     return Semantics(
@@ -330,7 +333,9 @@ class ModelStageState extends State<ModelStage> {
           if (first != null) IgnorePointer(child: FirstPicture(image: first, scene: scene, loading: _loading(scene))),
           if (view != null && !_broken)
             AnimatedOpacity(
-              opacity: _ready ? 1 : 0,
+              // A browser opens the page's frame only once it is drawn, and nothing fully clear is drawn: there
+              // it waits all but invisible.
+              opacity: _ready ? 1 : (kIsWeb ? 0.01 : 0),
               duration: _fade(context),
               child: ExcludeSemantics(child: view.widget),
             ),
@@ -427,8 +432,14 @@ const _guard = MethodChannel('vitrina/webview');
 final _gone = <int, VoidCallback>{};
 
 Future<ModelView?> _webView(Brightness scene, void Function(String message) onMessage) async {
-  // No WebView here (the web, widget tests): the listing shows its photos.
-  if (kIsWeb || WebViewPlatform.instance == null) return null;
+  // In a browser the page opens in a frame of the app's own site.
+  if (kIsWeb) {
+    final host = await ViewerHost.instance;
+    final ink = (scene == Brightness.dark ? ShowcaseScene.dark : ShowcaseScene.light).ink;
+    return host == null ? null : openFrameView(host.page, ink, onMessage);
+  }
+  // No WebView here (widget tests): the listing shows its photos.
+  if (WebViewPlatform.instance == null) return null;
   // The page kept ready (waited for while it is still opening), when it is still whole; else one opened now.
   var view = ModelStage._spare;
   ModelStage._spare = null;

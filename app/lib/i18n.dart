@@ -21,11 +21,12 @@ final appLanguage = ValueNotifier<String>('kk');
 
 const _prefsKey = 'vitrina_lang';
 
-/// Saved choice, else the device language when it is Russian or English, else Kazakh.
+/// Saved choice, else the device language when it is Russian or English, else Kazakh. In a browser (the demo shown on
+/// a computer) Kazakh first, whatever the computer's language: the switch is on the first page.
 Future<void> restoreLanguage(String deviceLanguage) async {
   final prefs = await SharedPreferences.getInstance();
   final saved = prefs.getString(_prefsKey);
-  appLanguage.value = saved ?? (languages.containsKey(deviceLanguage) ? deviceLanguage : 'kk');
+  appLanguage.value = saved ?? (!kIsWeb && languages.containsKey(deviceLanguage) ? deviceLanguage : 'kk');
 }
 
 Future<void> setLanguage(String code) async {

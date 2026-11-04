@@ -1,11 +1,23 @@
-/// On the web there is no 3D stage: a listing shows its photos.
+import 'demo.dart' show carriedAsset;
+
+/// In a browser the 3D stage's page and the models come from the app's own site: the page is a frame there, and a
+/// model carried inside the app is read from its asset address.
 class ViewerHost {
-  static Future<ViewerHost?> get instance async => null;
+  ViewerHost._();
 
-  Uri get page => throw UnsupportedError('no 3D stage on the web');
+  static final _one = ViewerHost._();
 
-  String modelAt(String url) => throw UnsupportedError('no 3D stage on the web');
+  static Future<ViewerHost?> get instance async => _one;
 
+  /// The stage's page made for a frame (it talks to the app by window messages).
+  Uri get page => Uri.base.resolve('assets/assets/viewer/web.html');
+
+  String modelAt(String url) {
+    final asset = carriedAsset(url);
+    return asset == null ? url : Uri.base.resolve('assets/$asset').toString();
+  }
+
+  /// The browser fetches and keeps the model itself.
   void warm(String url) {}
 
   bool arriving(String url) => false;

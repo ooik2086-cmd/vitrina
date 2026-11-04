@@ -7,6 +7,7 @@ library;
 
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 
@@ -18,7 +19,11 @@ const demoMode = bool.fromEnvironment('DEMO');
 const demoToken = 'demo';
 
 /// Where the demo's media lives on the internet (the repository's own files).
-const _demoFiles = 'https://raw.githubusercontent.com/ooik2086-cmd/vitrina/claude/initial-code/app/';
+const _repoFiles = 'https://raw.githubusercontent.com/ooik2086-cmd/vitrina/claude/initial-code/app/';
+
+/// Where the demo's media is read from: on a phone the repository; in a browser the demo's own site, which carries
+/// the same files beside the app (a page there may read nothing from another site).
+final _demoFiles = kIsWeb ? Uri.base.resolve('./').toString() : _repoFiles;
 
 /// The demo's files the app carries inside itself, by their address: the 3D model and each colour's first 3D picture,
 /// so a listing's shoe shows at once even on weak internet (Aza: "3d ашылғанда ортада кішкене күтіп загрузка бар").
@@ -45,7 +50,8 @@ class DemoClient extends http.BaseClient {
   DemoClient(this._answers);
 
   static Future<DemoClient> load() async =>
-      DemoClient(jsonDecode(await rootBundle.loadString('demo/api.json')) as Map<String, dynamic>);
+      DemoClient(jsonDecode((await rootBundle.loadString('demo/api.json')).replaceAll(_repoFiles, _demoFiles))
+          as Map<String, dynamic>);
 
   final Map<String, dynamic> _answers;
   int _nextMessageId = 100000;

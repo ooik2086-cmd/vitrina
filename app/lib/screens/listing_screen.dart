@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:pointer_interceptor/pointer_interceptor.dart';
 import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
 
@@ -1108,7 +1109,9 @@ class _RoundButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
+    // In a browser the 3D stage is a frame of its own under these buttons: the click comes to the button, not to it.
+    return PointerInterceptor(
+        child: Material(
       color: dark ? ShowcaseScene.dark.panel : Colors.white.withValues(alpha: 0.92),
       shape: CircleBorder(side: dark ? BorderSide(color: ShowcaseScene.dark.line) : BorderSide.none),
       child: IconButton(
@@ -1117,7 +1120,7 @@ class _RoundButton extends StatelessWidget {
         onPressed: back ? () => Navigator.maybePop(context) : onTap,
         icon: child,
       ),
-    );
+    ));
   }
 }
 
