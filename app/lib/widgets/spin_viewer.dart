@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -189,6 +190,29 @@ class _PhotoGalleryState extends State<PhotoGallery> {
     super.dispose();
   }
 
+  /// A round button at the stage's side that shows the photo before ([left]) or after.
+  Widget _turn({required bool left}) => Positioned(
+        left: left ? 12 : null,
+        right: left ? null : 12,
+        top: 0,
+        bottom: 0,
+        child: Center(
+          child: Material(
+            color: widget.dark ? ShowcaseScene.dark.panel : Colors.white.withValues(alpha: 0.92),
+            shape: const CircleBorder(),
+            child: IconButton(
+              key: Key(left ? 'photo-before' : 'photo-after'),
+              tooltip: tr(left ? 'Алдыңғы фото' : 'Келесі фото'),
+              color: widget.dark ? ShowcaseScene.dark.fg : Brand.ink,
+              icon: Icon(left ? Icons.chevron_left_rounded : Icons.chevron_right_rounded),
+              onPressed: () => _pages.animateToPage(_page + (left ? -1 : 1),
+                  duration: MediaQuery.disableAnimationsOf(context) ? Duration.zero : const Duration(milliseconds: 300),
+                  curve: Curves.easeOutCubic),
+            ),
+          ),
+        ),
+      );
+
   @override
   Widget build(BuildContext context) {
     if (widget.urls.isEmpty) {
@@ -222,6 +246,12 @@ class _PhotoGalleryState extends State<PhotoGallery> {
             ),
         ],
       ),
+      // On a computer (the demo on a laptop) a mouse turns a page with these as well as by dragging: a drag shorter
+      // than half the wide stage goes back (Aza, 2026-11-04: "фотоны ауыстыратын істемей тұрма?").
+      if (kIsWeb && widget.urls.length > 1 && !_zoomed) ...[
+        if (_page > 0) _turn(left: true),
+        if (_page < widget.urls.length - 1) _turn(left: false),
+      ],
       Positioned(
         left: 0,
         right: 0,
@@ -509,6 +539,12 @@ class _ZoomPhotoState extends State<_ZoomPhoto> with SingleTickerProviderStateMi
 class _PhotoZoomRecognizer extends ScaleGestureRecognizer {
   bool zoomed = false;
   final _fingers = <int>{};
+
+  /// A mouse (the demo on a laptop) drags the photos page by page as one finger does; it moves a photo only once a
+  /// double click has zoomed it in. Its long moves would otherwise reach the zoom's slop as soon as the page's.
+  @override
+  bool isPointerAllowed(PointerDownEvent event) =>
+      (event.kind != PointerDeviceKind.mouse || zoomed) && super.isPointerAllowed(event);
 
   @override
   void addAllowedPointer(PointerDownEvent event) {

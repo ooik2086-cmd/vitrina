@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 
 import 'api.dart';
@@ -75,6 +76,7 @@ class VitrinaApp extends StatelessWidget {
             themeMode: mode,
             title: 'VITRINA',
             debugShowCheckedModeBanner: false,
+            scrollBehavior: const _MouseDrags(),
             theme: buildTheme(Brightness.light),
             darkTheme: buildTheme(Brightness.dark),
             builder: canvasBehind,
@@ -339,4 +341,13 @@ NavigationBarThemeData navLabelsScaled(BuildContext context, double scale) {
     final style = theme.labelTextStyle?.resolve(states) ?? Theme.of(context).textTheme.labelMedium!;
     return style.copyWith(fontSize: (style.fontSize ?? 12) * scale);
   }));
+}
+
+/// On a computer the photos, colours and lists are dragged with the mouse as with a finger (the demo on a laptop:
+/// Aza, 2026-11-04, "фотоны ауыстыратын істемей тұрма?"). Nothing changes on a phone.
+class _MouseDrags extends MaterialScrollBehavior {
+  const _MouseDrags();
+
+  @override
+  Set<PointerDeviceKind> get dragDevices => {...super.dragDevices, PointerDeviceKind.mouse};
 }

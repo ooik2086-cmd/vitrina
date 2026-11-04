@@ -1351,4 +1351,6 @@ const en = <String, String>{
   'Сол аяқтың аяқкиімін алыңыз: сырт бүйірі көрінсін, тұмсығы солға қарасын.': 'Take the left shoe: outer side to the camera, toe to the left.',
   'Сол аяқтың аяқкиімін алыңыз: ішкі бүйірі көрінсін, тұмсығы оңға қарасын.': 'Take the left shoe: inner side to the camera, toe to the right.',
   'Фото анық па?': 'Is the photo sharp?',
+  'Алдыңғы фото': 'Previous photo',
+  'Келесі фото': 'Next photo',
 };
