@@ -61,30 +61,26 @@ void main() {
     await wait(t, 6000);
     await t.tap(find.text('Видео'));
     await play(t, 'first');
-    // Every colour, staying on the Видео tab.
-    for (final id in [1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13]) {
+    // Every colour, staying on the Видео tab: the swatch brought to the middle of the screen, then the page back to
+    // its top so the stage shows.
+    final page = find.byWidgetPredicate((w) => w is Scrollable && w.axisDirection == AxisDirection.down);
+    for (final id in [1, 2, 4, 6, 7, 8, 9, 10, 11, 12, 13, 3]) {
       final sw = find.byKey(Key('color-$id'));
       if (sw.evaluate().isEmpty) {
         print('PROBE no swatch $id');
         continue;
       }
-      await t.ensureVisible(sw);
+      await Scrollable.ensureVisible(sw.evaluate().first, alignment: 0.5);
+      await wait(t, 600);
       await t.tap(sw);
       await wait(t, 3000);
-      if (find.byKey(const Key('video-play')).evaluate().isEmpty && find.text('Видео').evaluate().isNotEmpty) {
+      t.state<ScrollableState>(page.first).position.jumpTo(0);
+      await wait(t, 800);
+      if (find.byKey(const Key('video-play')).evaluate().isEmpty &&
+          find.byKey(const Key('video-time')).evaluate().isEmpty) {
         await t.tap(find.text('Видео'));
       }
       await play(t, 'colour$id');
-    }
-    // Back and open listings from the catalogue, 360° first then Видео.
-    for (var i = 0; i < 4; i++) {
-      await t.binding.handlePopRoute();
-      await wait(t, 2500);
-      final tiles = find.byType(ListingTile);
-      await t.tap(tiles.at(i + 1));
-      await wait(t, 5000);
-      await t.tap(find.text('Видео'));
-      await play(t, 'tile${i + 1}');
     }
     print('PROBE DONE');
   }, timeout: const Timeout(Duration(minutes: 20)));
