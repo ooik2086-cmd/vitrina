@@ -7,7 +7,7 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - name: KVM
@@ -18,7 +18,7 @@ jobs:
         with: {distribution: temurin, java-version: "17"}
       - uses: subosito/flutter-action@v2
         with: {channel: stable, cache: true}
-      - run: cd app && flutter pub get && flutter build apk --debug --target-platform android-x64 --dart-define=DEMO=true -t integration_test/probe_test.dart
+      - run: cd app && flutter pub get && flutter build apk --profile --target-platform android-x64 --dart-define=DEMO=true -t integration_test/probe_test.dart
       - uses: reactivecircus/android-emulator-runner@v2
         env:
           GH_TOKEN: ${{ github.token }}

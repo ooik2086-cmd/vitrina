@@ -1,11 +1,17 @@
 #!/bin/bash
+# Runs the probe build (integration_test/probe_test.dart as the app) on its own and reads its prints from logcat.
 mkdir -p probe-out/s
+adb install -r build/app/outputs/flutter-apk/app-profile.apk
 adb logcat -c
 (adb logcat -v time > probe-out/logcat.txt) &
-(while true; do adb exec-out screencap -p > probe-out/s/$(date +%H%M%S_%N | cut -c1-9).png 2>/dev/null; sleep 0.4; done) &
-flutter test integration_test/probe_test.dart -d emulator-5554 --dart-define=DEMO=true 2>&1 | tee probe-out/test.txt
-sleep 2
+(while true; do adb exec-out screencap -p > probe-out/s/$(date +%H%M%S_%N | cut -c1-9).png 2>/dev/null; sleep 1; done) &
+adb shell monkey -p kz.vitrina.vitrina -c android.intent.category.LAUNCHER 1
+for i in $(seq 1 240); do
+  sleep 5
+  grep -q "PROBE DONE\|Test failed\|EXCEPTION CAUGHT" probe-out/logcat.txt && { sleep 5; break; }
+done
 kill %1 %2 2>/dev/null
-grep -iE "exoplayer|mediacodec|videoplayer|video_player|3D stage|AndroidRuntime|FATAL" probe-out/logcat.txt | tail -300 > probe-out/logcat-focus.txt
-for f in probe-out/s/*.png; do convert "$f" -resize 360x "${f%.png}.jpg" && rm "$f"; done
+grep -E "I/flutter|E/flutter" probe-out/logcat.txt > probe-out/test.txt
+grep -iE "exoplayer|mediacodec|videoplayer|video_player|AndroidRuntime|FATAL" probe-out/logcat.txt | tail -300 > probe-out/logcat-focus.txt
+cd probe-out/s && ls | awk 'NR%5!=0' | xargs rm -f
 true

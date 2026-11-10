@@ -86,5 +86,6 @@ void main() {
       await t.tap(find.text('Видео'));
       await play(t, 'tile${i + 1}');
     }
-  });
+    print('PROBE DONE');
+  }, timeout: const Timeout(Duration(minutes: 20)));
 }
