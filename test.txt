@@ -1,0 +1,8 @@
+11-10 19:36:41.815 I/flutter ( 2505): The Dart VM service is listening on http://127.0.0.1:46777/1QHvXFW5FmU=/
+11-10 19:36:42.020 I/flutter ( 2505): [IMPORTANT:flutter/shell/platform/android/android_context_gl_impeller.cc(104)] Using the Impeller rendering backend (OpenGLES).
+11-10 19:36:42.636 I/flutter ( 2505): 00:00 +0: probe
+11-10 19:36:49.059 I/flutter ( 2505): [IMPORTANT:flutter/shell/platform/android/android_context_gl_impeller.cc(104)] Using the Impeller rendering backend (OpenGLES).
+11-10 19:36:52.614 I/flutter ( 2505): 00:00 +0: probe
+11-10 19:37:06.985 I/flutter ( 2505): PROBE first play buttons=1
+11-10 19:37:16.508 I/flutter ( 2505): PROBE first after 6441ms failed=0 clock=0:02 / 0:09 :: a5b7d38f01d9e43e1fcc8fd4679cab98.mp4 init=true playing=true pos=3787 dur=9000 size=Instance of 'Size' err=null
+11-10 19:37:16.508 I/flutter ( 2505): PROBE 2026-11-10T19:37:16.508274 MARK first

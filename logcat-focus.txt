@@ -1,0 +1,12 @@
+11-10 19:36:36.287 D/AndroidRuntime( 2425): >>>>>> START com.android.internal.os.RuntimeInit uid 2000 <<<<<<
+11-10 19:36:36.293 I/AndroidRuntime( 2425): Using default boot image
+11-10 19:36:36.293 I/AndroidRuntime( 2425): Leaving lock profiling enabled
+11-10 19:36:36.526 D/AndroidRuntime( 2425): Calling main entry com.android.commands.monkey.Monkey
+11-10 19:36:37.152 I/AndroidRuntime( 2425): VM exiting with result code 0.
+11-10 19:36:43.479 I/ExoPlayerImpl( 1786): Init ad88471 [AndroidXMedia3/1.0.0-alpha03] [emu64xa, sdk_gphone64_x86_64, Google, 34]
+11-10 19:37:07.092 I/ExoPlayerImpl( 2505): Init df460ab [AndroidXMedia3/1.9.2] [emu64xa, sdk_gphone64_x86_64, Google, 34]
+11-10 19:37:10.688 I/DMCodecAdapterFactory( 2505): Creating an asynchronous MediaCodec adapter for track type video
+11-10 19:37:11.414 I/MediaCodec( 2505): MediaCodec will operate in async mode
+11-10 19:37:11.416 D/MediaCodec( 2505): flushMediametrics
+11-10 19:37:11.416 I/MediaCodec( 2505): [c2.goldfish.h264.decoder] setting surface generation to 2565121
+11-10 19:37:11.438 D/MediaCodec( 2505): keep callback message for reclaim
