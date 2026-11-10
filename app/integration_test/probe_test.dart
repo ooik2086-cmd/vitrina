@@ -1,4 +1,5 @@
 // ignore_for_file: avoid_print
+import 'dart:async';
 // Diagnostic only, on the video probe branch: does each colour's video play on a phone?
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -70,7 +71,7 @@ void main() {
         print('PROBE no swatch $id');
         continue;
       }
-      await Scrollable.ensureVisible(sw.evaluate().first, alignment: 0.5);
+      unawaited(Scrollable.ensureVisible(sw.evaluate().first, alignment: 0.5));
       await wait(t, 600);
       await t.tap(sw);
       await wait(t, 3000);
